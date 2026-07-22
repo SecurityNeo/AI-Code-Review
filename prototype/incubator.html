@@ -1370,6 +1370,13 @@ function renderPipeline(steps) {
     });
 
     container.innerHTML = html;
+
+    // Move SVG into container so it shares the same coordinate system as nodes
+    let svg = document.getElementById('pipelineSvg');
+    if (svg && svg.parentElement !== container) {
+        container.appendChild(svg);
+    }
+
     setTimeout(() => drawPipelineConnections(steps), 50);
 }
 
@@ -1420,11 +1427,6 @@ function drawPipelineConnections(steps) {
     const svg = document.getElementById('pipelineSvg');
     if (!svg) return;
     svg.innerHTML = '';
-
-    const container = document.getElementById('pipelineContainer');
-    const containerRect = container.getBoundingClientRect();
-    const scrollLeft = container.parentElement.scrollLeft;
-    const scrollTop = container.parentElement.scrollTop;
 
     const brandColors = {
         issue_pool: '#64748b', cluster: '#8b5cf6', candidate: '#3b82f6',
