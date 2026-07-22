@@ -566,8 +566,20 @@ async function showCandidate(id) {
                 </div>
                 <div>
                     <label class="text-xs text-gray-500">来源 Issue (${issues.length})</label>
-                    <div class="mt-1 space-y-1 max-h-40 overflow-y-auto text-xs border rounded-lg p-2 bg-gray-50">
-                        ${issues.length ? issues.map(i => `<div class="truncate" title="${escapeHtml(i.message)}">• ${i.file || '-'}: ${escapeHtml(i.message).substring(0,60)}</div>`).join('') : '<div class="text-gray-400">无来源 Issue</div>'}
+                    <div class="mt-1 space-y-1 max-h-64 overflow-y-auto text-xs border rounded-lg p-2 bg-gray-50">
+                        ${issues.length ? issues.map((i, idx) => `
+                            <div class="border-b last:border-0 pb-1 last:pb-0">
+                                <div class="truncate cursor-pointer hover:text-blue-600" onclick="toggleIssueSnippet(${idx})" title="${escapeHtml(i.message)}">
+                                    • ${i.file || '-'}: ${escapeHtml(i.message).substring(0,60)}
+                                    ${i.code_snippet ? '<i class="fas fa-code ml-1 text-blue-400" title="有代码片段"></i>' : ''}
+                                </div>
+                                ${i.code_snippet ? `
+                                <div id="issue-snippet-${idx}" class="hidden mt-1 ml-3">
+                                    <pre class="bg-gray-800 text-gray-100 rounded p-2 text-[10px] overflow-x-auto" style="max-height:120px;"><code>${escapeHtml(i.code_snippet)}</code></pre>
+                                </div>
+                                ` : ''}
+                            </div>
+                        `).join('') : '<div class="text-gray-400">无来源 Issue</div>'}
                     </div>
                 </div>
                 <div class="bg-gray-50 rounded-lg p-3 space-y-2">
@@ -1299,6 +1311,11 @@ function renderStepSpecificDetail(step) {
         return `<div class="mt-2 text-xs text-gray-600 bg-white rounded p-2 border">模拟测试通过LLM验证候选规则对正例的判定准确率</div>`;
     }
     return '';
+}
+
+function toggleIssueSnippet(idx) {
+    const el = document.getElementById('issue-snippet-' + idx);
+    if (el) el.classList.toggle('hidden');
 }
 
 function togglePipelineNode(stepId) {
