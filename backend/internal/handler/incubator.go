@@ -282,8 +282,14 @@ func (h *IncubatorHandler) SaveConfig(c *gin.Context) {
 
 // ValidateEmbedding tests embedding connectivity.
 // POST /api/v1/incubator/config/validate-embedding
+// Supports passing model_id to test a newly selected model before saving configuration.
 func (h *IncubatorHandler) ValidateEmbedding(c *gin.Context) {
-	data, err := h.svc.ValidateEmbedding()
+	var req struct {
+		ModelID uint `json:"model_id"`
+	}
+	c.ShouldBindJSON(&req)
+
+	data, err := h.svc.ValidateEmbedding(req.ModelID)
 	if err != nil {
 		c.JSON(200, gin.H{"code": 0, "data": map[string]any{"available": false, "error": err.Error()}})
 		return

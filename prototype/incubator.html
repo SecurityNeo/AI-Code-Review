@@ -715,9 +715,17 @@ async function saveConfig() {
 
 async function testEmbedding() {
     const result = document.getElementById('embeddingTestResult');
+    const modelId = parseInt(document.getElementById('cfgEmbeddingModel').value) || 0;
+    if (!modelId) {
+        result.innerHTML = '<span class="text-red-600">请先选择一个Embedding模型</span>';
+        return;
+    }
     result.innerHTML = '<span class="text-gray-500">测试中...</span>';
     try {
-        const res = await apiFetch(API_BASE + '/incubator/config/validate-embedding', { method: 'POST' });
+        const res = await apiFetch(API_BASE + '/incubator/config/validate-embedding', {
+            method: 'POST',
+            body: JSON.stringify({ model_id: modelId })
+        });
         const data = await res.json();
         const d = data.data || {};
         if (d.available) {

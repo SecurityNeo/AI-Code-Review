@@ -564,13 +564,23 @@ func (s *IncubatorService) SaveConfig(updates map[string]any) error {
 }
 
 // ValidateEmbedding checks whether the configured embedding model is reachable.
-func (s *IncubatorService) ValidateEmbedding() (map[string]any, error) {
-	cfg := s.getConfig()
-	if cfg.EmbeddingModelID == nil {
-		return nil, fmt.Errorf("embedding model not configured")
-	}
+// If modelID > 0, tests that specific model directly (useful before saving config).
+func (s *IncubatorService) ValidateEmbedding(modelID uint) (map[string]any, error) {
 	var m model.LLMModel
-	if err := model.DB.First(&m, *cfg.EmbeddingModelID).Error; err != nil {
+	var err error
+
+	if modelID > 0 {
+		// Test a specific model selected by user (before saving config)
+		err = model.DB.First(&m, modelID).Error
+	} else {
+		// Test the currently saved configuration
+		cfg := s.getConfig()
+		if cfg.EmbeddingModelID == nil {
+			return nil, fmt.Errorf("embedding model not configured")
+		}
+		err = model.DB.First(&m, *cfg.EmbeddingModelID).Error
+	}
+	if err != nil {
 		return nil, err
 	}
 	if m.ModelType != string(model.ModelTypeEmbedding) {
@@ -589,7 +599,6 @@ func (s *IncubatorService) ValidateEmbedding() (map[string]any, error) {
 		"model_id":    m.ID,
 		"model_name":  m.ModelID,
 		"latency_ms":  latency,
-		"dimension":   tokens, // wrong semantic, but we don't have dimension here; placeholder
 		"tokens_used": tokens,
 	}, nil
 }
