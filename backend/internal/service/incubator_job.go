@@ -216,10 +216,12 @@ func QueueJob(jobType string, params map[string]any) (*model.RuleIncubationJob, 
 		return nil, err
 	}
 	job := &model.RuleIncubationJob{
-		JobType:   jobType,
-		Status:    "pending",
-		Params:    string(paramsJSON),
-		CreatedAt: time.Now(),
+		JobType:       jobType,
+		Status:        "pending",
+		Params:        string(paramsJSON),
+		ResultSummary: "{}",
+		ErrorMsg:      "{}",
+		CreatedAt:     time.Now(),
 	}
 	if err := model.DB.Create(job).Error; err != nil {
 		return nil, err
