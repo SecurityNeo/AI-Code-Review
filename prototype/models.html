@@ -142,7 +142,7 @@
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1">模型类型 <span class="text-red-400">*</span></label>
-                                <select id="createModelType" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none focus:border-blue-500 transition-all">
+                                <select id="createModelType" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none focus:border-blue-500 transition-all" onchange="toggleCreateModelTypeSections()">
                                     <option value="llm">大语言模型 (LLM)</option>
                                     <option value="embedding">Embedding 模型</option>
                                 </select>
@@ -213,7 +213,7 @@
                         </div>
 
                         <!-- 温度参数 -->
-                        <div>
+                        <div id="createTemperatureSection">
                             <div class="flex items-center justify-between mb-2">
                                 <label class="text-xs font-medium text-gray-500">温度参数 (Temperature)</label>
                             </div>
@@ -228,7 +228,7 @@
                         </div>
 
                         <!-- 角色与链路配置 -->
-                        <div class="-ml-7">
+                        <div id="createRoleSection" class="-ml-7">
                             <div class="flex items-center gap-2 mb-2">
                                 <div class="w-5 h-5 rounded bg-purple-100 text-purple-600 flex items-center justify-center text-[10px]">
                                     <i class="fas fa-sitemap"></i>
@@ -311,7 +311,7 @@
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1">模型类型 <span class="text-red-400">*</span></label>
-                                <select id="editModelType" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none focus:border-blue-500 transition-all">
+                                <select id="editModelType" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none focus:border-blue-500 transition-all" onchange="toggleEditModelTypeSections()">
                                     <option value="llm">大语言模型 (LLM)</option>
                                     <option value="embedding">Embedding 模型</option>
                                 </select>
@@ -382,7 +382,7 @@
                         </div>
 
                         <!-- 温度参数 -->
-                            <div>
+                            <div id="editTemperatureSection">
                                 <div class="flex items-center justify-between mb-2">
                                     <label class="text-xs font-medium text-gray-500">温度参数 (Temperature)</label>
                                 </div>
@@ -397,7 +397,7 @@
                         </div>
 
                         <!-- 角色与链路配置 -->
-                        <div class="-ml-7">
+                        <div id="editRoleSection" class="-ml-7">
                             <div class="flex items-center gap-2 mb-1">
                                 <div class="w-5 h-5 rounded bg-purple-100 text-purple-600 flex items-center justify-center text-[10px]">
                                     <i class="fas fa-sitemap"></i>
@@ -799,6 +799,7 @@
         function openCreateModal() {
             document.getElementById('createProvider').value = 'openai';
             document.getElementById('createModelId').value = '';
+            document.getElementById('createModelType').value = 'llm';
             document.getElementById('createBaseUrl').value = 'https://api.openai.com/v1';
             document.getElementById('createApiKey').value = '';
             document.getElementById('createMaxTokens').value = '4096';
@@ -806,7 +807,24 @@
             document.getElementById('createCheckInterval').value = '5';
             document.getElementById('createTemperature').value = '0.1';
             document.getElementById('createIsDefault').checked = false;
+            toggleCreateModelTypeSections();
             showModal('createModal');
+        }
+
+        function toggleCreateModelTypeSections() {
+            const isEmbedding = document.getElementById('createModelType').value === 'embedding';
+            const tempEl = document.getElementById('createTemperatureSection');
+            const roleEl = document.getElementById('createRoleSection');
+            if (tempEl) tempEl.style.display = isEmbedding ? 'none' : '';
+            if (roleEl) roleEl.style.display = isEmbedding ? 'none' : '';
+        }
+
+        function toggleEditModelTypeSections() {
+            const isEmbedding = document.getElementById('editModelType').value === 'embedding';
+            const tempEl = document.getElementById('editTemperatureSection');
+            const roleEl = document.getElementById('editRoleSection');
+            if (tempEl) tempEl.style.display = isEmbedding ? 'none' : '';
+            if (roleEl) roleEl.style.display = isEmbedding ? 'none' : '';
         }
 
         async function createModel() {
@@ -889,6 +907,7 @@
                 }
                 document.getElementById('editBackupOrder').value = isBackup ? editData.backup_order : 1;
                 document.getElementById('editBackupOrder').disabled = !isBackup;
+                toggleEditModelTypeSections();
 
                 showModal('editModal');
             } catch (err) {
@@ -1174,6 +1193,7 @@
             }
             
             const data = {
+                model_type: document.getElementById('createModelType').value,
                 provider: document.getElementById('createProvider').value,
                 model_id: modelIdInput,
                 base_url: document.getElementById('createBaseUrl').value,

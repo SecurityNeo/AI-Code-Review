@@ -26,15 +26,15 @@ type Message struct {
 }
 
 type ChatRequest struct {
-	Model          string            `json:"model"`
-	Messages       []Message         `json:"messages"`
-	Temperature    float64           `json:"temperature,omitempty"`
-	MaxTokens      int               `json:"max_tokens,omitempty"`
-	ResponseFormat *ResponseFormat   `json:"response_format,omitempty"` // 新增：结构化输出格式
+	Model          string          `json:"model"`
+	Messages       []Message       `json:"messages"`
+	Temperature    float64         `json:"temperature,omitempty"`
+	MaxTokens      int             `json:"max_tokens,omitempty"`
+	ResponseFormat *ResponseFormat `json:"response_format,omitempty"` // 新增：结构化输出格式
 }
 
 type ResponseFormat struct {
-	Type       string      `json:"type,omitempty"`        // "json_schema" | "json_object"
+	Type       string      `json:"type,omitempty"` // "json_schema" | "json_object"
 	JSONSchema *JSONSchema `json:"json_schema,omitempty"`
 }
 
@@ -357,4 +357,35 @@ func CheckConnectivity(provider Provider, baseURL, apiKey string, timeout time.D
 
 	_, err = client.Chat(testReq)
 	return err
+}
+
+// CheckEmbeddingConnectivity tests embedding endpoint connectivity by sending
+// a minimal embedding request.
+func CheckEmbeddingConnectivity(baseURL, apiKey, modelID string, timeout time.Duration) error {
+	client := &http.Client{Timeout: timeout}
+
+	reqBody := map[string]any{
+		"model": modelID,
+		"input": "test",
+	}
+	body, _ := json.Marshal(reqBody)
+
+	req, err := http.NewRequest("POST", baseURL+"/embeddings", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("embedding API returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+	return nil
 }

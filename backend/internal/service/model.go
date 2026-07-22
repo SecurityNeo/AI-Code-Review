@@ -473,6 +473,14 @@ func (s *ModelService) CheckConnectivityByConfig(provider, baseURL, apiKey, mode
 	return true, nil
 }
 
+// CheckEmbeddingConnectivityByConfig tests embedding endpoint connectivity.
+func (s *ModelService) CheckEmbeddingConnectivityByConfig(baseURL, apiKey, modelID string, timeoutSec int) (bool, error) {
+	if err := llm.CheckEmbeddingConnectivity(baseURL, apiKey, modelID, time.Duration(timeoutSec)*time.Second); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // GetModelForJob returns the model configuration for creating K8s job
 func (s *ModelService) GetModelForJob(modelID uint) (string, string, error) {
 	var m model.LLMModel

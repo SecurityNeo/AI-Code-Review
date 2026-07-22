@@ -420,13 +420,14 @@ func (h *ModelHandler) GetDefault(c *gin.Context) {
 // POST /api/v1/models/test
 func (h *ModelHandler) CreateTest(c *gin.Context) {
 	var req struct {
+		ModelType   string  `json:"model_type"`
 		Provider    string  `json:"provider" binding:"required"`
 		ModelID     string  `json:"model_id" binding:"required"`
 		BaseURL     string  `json:"base_url" binding:"required"`
 		APIKey      string  `json:"api_key" binding:"required"`
 		Temperature float64 `json:"temperature"`
 		MaxTokens   int     `json:"max_tokens"`
-		Prompt      string  `json:"prompt" binding:"required"`
+		Prompt      string  `json:"prompt"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "参数错误: " + err.Error()})
@@ -436,15 +437,21 @@ func (h *ModelHandler) CreateTest(c *gin.Context) {
 	req.Provider = service.NormalizeProvider(req.Provider)
 
 	timeout := 120
-	if req.MaxTokens == 0 {
-		req.MaxTokens = 1024
-	}
-	if req.Temperature == 0 {
-		req.Temperature = 0.1
+
+	var success bool
+	var err error
+	if req.ModelType == "embedding" {
+		success, err = h.service.CheckEmbeddingConnectivityByConfig(req.BaseURL, req.APIKey, req.ModelID, timeout)
+	} else {
+		if req.MaxTokens == 0 {
+			req.MaxTokens = 1024
+		}
+		if req.Temperature == 0 {
+			req.Temperature = 0.1
+		}
+		success, err = h.service.CheckConnectivityByConfig(req.Provider, req.BaseURL, req.APIKey, req.ModelID, timeout)
 	}
 
-	// Use LLM client to test
-	success, err := h.service.CheckConnectivityByConfig(req.Provider, req.BaseURL, req.APIKey, req.ModelID, timeout)
 	if err != nil {
 		c.JSON(200, gin.H{
 			"success": false,
