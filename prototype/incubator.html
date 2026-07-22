@@ -27,6 +27,10 @@
         }
         .pulse-dot { animation: pulse-dot 1.5s infinite; }
         .pipeline-node .rounded-xl:hover { transform: translateY(-2px); }
+        .pipeline-node { position: absolute; cursor: grab; user-select: none; }
+        .pipeline-node:active { cursor: grabbing; }
+        .pipeline-node.dragging { z-index: 100; }
+        .pipeline-node.dragging .rounded-xl { box-shadow: 0 8px 30px rgba(0,0,0,0.15); }
     </style>
 </head>
 <body class="bg-gray-50 font-sans">
@@ -1258,6 +1262,9 @@ async function loadPipeline() {
     }
 }
 
+// Drag state
+let pipelineDrag = { active: false, node: null, offsetX: 0, offsetY: 0, positions: {} };
+
 function renderPipeline(steps) {
     const container = document.getElementById('pipelineContainer');
     if (!steps.length) {
@@ -1267,15 +1274,15 @@ function renderPipeline(steps) {
 
     // Node theme config: each step type gets its own color theme like Dify
     const nodeThemes = {
-        issue_pool:   { brand: '#64748b', bg: '#f8fafc', topBg: 'bg-slate-500',   topText: 'text-white', label: '输入节点' },
-        cluster:      { brand: '#8b5cf6', bg: '#faf5ff', topBg: 'bg-violet-500',  topText: 'text-white', label: '处理节点' },
-        candidate:    { brand: '#3b82f6', bg: '#eff6ff', topBg: 'bg-blue-500',    topText: 'text-white', label: '处理节点' },
-        refine:       { brand: '#6366f1', bg: '#eef2ff', topBg: 'bg-indigo-500',  topText: 'text-white', label: '处理节点' },
-        similar_check:{ brand: '#f97316', bg: '#fff7ed', topBg: 'bg-orange-500',  topText: 'text-white', label: '处理节点' },
-        sandbox_test: { brand: '#14b8a6', bg: '#f0fdfa', topBg: 'bg-teal-500',    topText: 'text-white', label: '处理节点' },
-        publish:      { brand: '#22c55e', bg: '#f0fdf4', topBg: 'bg-green-500',   topText: 'text-white', label: '处理节点' },
-        retro_match:  { brand: '#06b6d4', bg: '#ecfeff', topBg: 'bg-cyan-500',    topText: 'text-white', label: '处理节点' },
-        health_check: { brand: '#ef4444', bg: '#fef2f2', topBg: 'bg-red-500',     topText: 'text-white', label: '处理节点' },
+        issue_pool:   { brand: '#64748b', bg: '#f8fafc', topBg: 'bg-slate-500',   label: '输入节点' },
+        cluster:      { brand: '#8b5cf6', bg: '#faf5ff', topBg: 'bg-violet-500',  label: '处理节点' },
+        candidate:    { brand: '#3b82f6', bg: '#eff6ff', topBg: 'bg-blue-500',    label: '处理节点' },
+        refine:       { brand: '#6366f1', bg: '#eef2ff', topBg: 'bg-indigo-500',  label: '处理节点' },
+        similar_check:{ brand: '#f97316', bg: '#fff7ed', topBg: 'bg-orange-500',  label: '处理节点' },
+        sandbox_test: { brand: '#14b8a6', bg: '#f0fdfa', topBg: 'bg-teal-500',    label: '处理节点' },
+        publish:      { brand: '#22c55e', bg: '#f0fdf4', topBg: 'bg-green-500',   label: '处理节点' },
+        retro_match:  { brand: '#06b6d4', bg: '#ecfeff', topBg: 'bg-cyan-500',    label: '处理节点' },
+        health_check: { brand: '#ef4444', bg: '#fef2f2', topBg: 'bg-red-500',     label: '处理节点' },
     };
 
     const statusConfig = {
@@ -1297,14 +1304,29 @@ function renderPipeline(steps) {
 
     // Assign grid positions: 3 per row
     const COLS = 3;
+    const NODE_W = 220, NODE_H = 130, GAP_X = 80, GAP_Y = 60;
+    const START_X = 40, START_Y = 30;
+
     steps.forEach((step, idx) => {
         step._row = Math.floor(idx / COLS);
         step._col = idx % COLS;
-        // For even rows left-to-right, for odd rows right-to-left (snake layout)
-        if (step._row % 2 === 1) {
-            step._col = COLS - 1 - step._col;
+        if (step._row % 2 === 1) step._col = COLS - 1 - step._col; // snake
+        // init position
+        step._x = START_X + step._col * (NODE_W + GAP_X);
+        step._y = START_Y + step._row * (NODE_H + GAP_Y);
+        // restore saved position
+        if (pipelineDrag.positions[step.step_id]) {
+            step._x = pipelineDrag.positions[step.step_id].x;
+            step._y = pipelineDrag.positions[step.step_id].y;
         }
     });
+
+    // Expand canvas size to fit all nodes
+    const maxRow = Math.max(...steps.map(s => s._row));
+    const canvasW = START_X + COLS * (NODE_W + GAP_X) + 40;
+    const canvasH = START_Y + (maxRow + 1) * (NODE_H + GAP_Y) + 40;
+    container.style.width = Math.max(canvasW, 1200) + 'px';
+    container.style.height = Math.max(canvasH, 500) + 'px';
 
     let html = '';
     steps.forEach((step, idx) => {
@@ -1315,30 +1337,29 @@ function renderPipeline(steps) {
             const labels = { total: '总数', new_today: '新增', draft: '草稿', ready: '就绪', published: '已发布', rejected: '忽略', total_published: '已发布', total_retro_matched: '回溯', candidates_generated: '生成', total_runs: '测试' };
             return `<div class="text-center"><div class="text-lg font-bold text-gray-800">${v}</div><div class="text-[10px] text-gray-500">${labels[k] || k}</div></div>`;
         }).join('');
-
         const hasInput = step.input_summary && Object.keys(step.input_summary).length > 0;
         const hasOutput = step.output_summary && Object.keys(step.output_summary).length > 0;
 
         html += `
-        <div class="pipeline-node relative flex-shrink-0" data-step-id="${step.step_id}" data-row="${step._row}" data-col="${step._col}" data-idx="${idx}">
-            <!-- Node Card -->
-            <div class="w-[220px] bg-white rounded-xl border-2 ${st.border} overflow-hidden cursor-pointer hover:shadow-lg transition-all duration-200"
-                 onclick="openPipelinePanel('${step.step_id}')"
+        <div class="pipeline-node" data-step-id="${step.step_id}" data-idx="${idx}"
+             style="left:${step._x}px; top:${step._y}px;"
+             onmousedown="startNodeDrag(event, '${step.step_id}')">
+            <div class="w-[220px] bg-white rounded-xl border-2 ${st.border} overflow-hidden hover:shadow-lg transition-shadow duration-200"
                  style="background: ${theme.bg};">
-                <!-- Colored Header Bar -->
-                <div class="${theme.topBg} ${theme.topText} px-3 py-2 flex items-center gap-2">
+                <!-- Header Bar with drag hint -->
+                <div class="${theme.topBg} text-white px-3 py-2 flex items-center gap-2 select-none">
+                    <i class="fas fa-grip-vertical text-[10px] opacity-50 mr-1 cursor-grab"></i>
                     <i class="fas ${stepIcon} text-xs"></i>
                     <span class="text-xs font-medium flex-1 truncate">${step.label}</span>
                     <span class="w-1.5 h-1.5 rounded-full ${st.dot} ${st.pulse}"></span>
                 </div>
                 <!-- Body -->
-                <div class="p-3">
+                <div class="p-3" onclick="openPipelinePanel('${step.step_id}')">
                     <div class="flex items-center justify-between mb-2">
                         <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 border">${st.label}</span>
                         <span class="text-[10px] text-gray-400">${theme.label}</span>
                     </div>
                     <div class="grid grid-cols-2 gap-2">${stats}</div>
-                    <!-- Ports -->
                     <div class="flex justify-between mt-3">
                         ${hasInput ? `<div class="flex items-center gap-1"><div class="w-2 h-2 rounded-full bg-gray-300"></div><span class="text-[10px] text-gray-400">输入</span></div>` : '<div></div>'}
                         ${hasOutput ? `<div class="flex items-center gap-1"><span class="text-[10px] text-gray-400">输出</span><div class="w-2 h-2 rounded-full bg-gray-300"></div></div>` : '<div></div>'}
@@ -1349,9 +1370,50 @@ function renderPipeline(steps) {
     });
 
     container.innerHTML = html;
-
-    // Draw SVG connections after DOM is ready
     setTimeout(() => drawPipelineConnections(steps), 50);
+}
+
+function startNodeDrag(e, stepId) {
+    // Prevent opening panel when dragging from header
+    e.stopPropagation();
+    const node = document.querySelector(`.pipeline-node[data-step-id="${stepId}"]`);
+    if (!node) return;
+
+    pipelineDrag = {
+        active: true,
+        node: node,
+        stepId: stepId,
+        startX: e.clientX,
+        startY: e.clientY,
+        origLeft: parseFloat(node.style.left) || 0,
+        origTop: parseFloat(node.style.top) || 0,
+    };
+    node.classList.add('dragging');
+
+    document.addEventListener('mousemove', onNodeDrag);
+    document.addEventListener('mouseup', endNodeDrag);
+}
+
+function onNodeDrag(e) {
+    if (!pipelineDrag.active || !pipelineDrag.node) return;
+    const dx = e.clientX - pipelineDrag.startX;
+    const dy = e.clientY - pipelineDrag.startY;
+    const newLeft = pipelineDrag.origLeft + dx;
+    const newTop = pipelineDrag.origTop + dy;
+    pipelineDrag.node.style.left = newLeft + 'px';
+    pipelineDrag.node.style.top = newTop + 'px';
+    // Save position
+    pipelineDrag.positions[pipelineDrag.stepId] = { x: newLeft, y: newTop };
+    // Redraw lines in real-time
+    if (currentPipelineSteps.length) drawPipelineConnections(currentPipelineSteps);
+}
+
+function endNodeDrag(e) {
+    if (pipelineDrag.node) pipelineDrag.node.classList.remove('dragging');
+    pipelineDrag.active = false;
+    pipelineDrag.node = null;
+    document.removeEventListener('mousemove', onNodeDrag);
+    document.removeEventListener('mouseup', endNodeDrag);
 }
 
 function drawPipelineConnections(steps) {
@@ -1361,38 +1423,42 @@ function drawPipelineConnections(steps) {
 
     const container = document.getElementById('pipelineContainer');
     const containerRect = container.getBoundingClientRect();
+    const scrollLeft = container.parentElement.scrollLeft;
+    const scrollTop = container.parentElement.scrollTop;
+
+    const brandColors = {
+        issue_pool: '#64748b', cluster: '#8b5cf6', candidate: '#3b82f6',
+        refine: '#6366f1', similar_check: '#f97316', sandbox_test: '#14b8a6',
+        publish: '#22c55e', retro_match: '#06b6d4', health_check: '#ef4444',
+    };
 
     steps.forEach((step, idx) => {
         if (idx >= steps.length - 1) return;
         const next = steps[idx + 1];
-        const from = document.querySelector(`.pipeline-node[data-step-id="${step.step_id}"]`);
-        const to = document.querySelector(`.pipeline-node[data-step-id="${next.step_id}"]`);
-        if (!from || !to) return;
+        const fromNode = document.querySelector(`.pipeline-node[data-step-id="${step.step_id}"]`);
+        const toNode = document.querySelector(`.pipeline-node[data-step-id="${next.step_id}"]`);
+        if (!fromNode || !toNode) return;
 
-        const f = from.querySelector('.rounded-xl').getBoundingClientRect();
-        const t = to.querySelector('.rounded-xl').getBoundingClientRect();
+        // Get positions from style (accounting for drag)
+        const fLeft = parseFloat(fromNode.style.left) || 0;
+        const fTop = parseFloat(fromNode.style.top) || 0;
+        const tLeft = parseFloat(toNode.style.left) || 0;
+        const tTop = parseFloat(toNode.style.top) || 0;
 
-        // Compute coordinates relative to SVG
-        const x1 = f.left + f.width / 2 - containerRect.left;
-        const y1 = f.bottom - containerRect.top;
-        const x2 = t.left + t.width / 2 - containerRect.left;
-        const y2 = t.top - containerRect.top;
+        const NODE_W = 220, NODE_H = 130;
+        const x1 = fLeft + NODE_W / 2;
+        const y1 = fTop + NODE_H;
+        const x2 = tLeft + NODE_W / 2;
+        const y2 = tTop;
 
-        // Color based on next node theme
-        const brandColors = {
-            issue_pool: '#64748b', cluster: '#8b5cf6', candidate: '#3b82f6',
-            refine: '#6366f1', similar_check: '#f97316', sandbox_test: '#14b8a6',
-            publish: '#22c55e', retro_match: '#06b6d4', health_check: '#ef4444',
-        };
         const color = brandColors[next.step_id] || '#cbd5e1';
-
-        // Bezier curve
-        const c1y = y1 + Math.max(20, (y2 - y1) * 0.5);
-        const c2y = y2 - Math.max(20, (y2 - y1) * 0.5);
-        const path = `M ${x1} ${y1} C ${x1} ${c1y}, ${x2} ${c2y}, ${x2} ${y2}`;
+        const dist = Math.abs(y2 - y1);
+        const c1y = y1 + Math.max(20, dist * 0.5);
+        const c2y = y2 - Math.max(20, dist * 0.5);
+        const pathD = `M ${x1} ${y1} C ${x1} ${c1y}, ${x2} ${c2y}, ${x2} ${y2}`;
 
         const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        pathEl.setAttribute('d', path);
+        pathEl.setAttribute('d', pathD);
         pathEl.setAttribute('stroke', color);
         pathEl.setAttribute('stroke-width', '2');
         pathEl.setAttribute('fill', 'none');
@@ -1400,7 +1466,6 @@ function drawPipelineConnections(steps) {
         pathEl.setAttribute('opacity', '0.6');
         svg.appendChild(pathEl);
 
-        // Endpoint circle
         const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
         circle.setAttribute('cx', x2);
         circle.setAttribute('cy', y2);
