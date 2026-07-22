@@ -1330,11 +1330,48 @@ function togglePipelineNode(stepId) {
     }
 }
 
+async function loadDashboardStats() {
+    try {
+        const [pipelineRes, candidatesRes, healthRes] = await Promise.all([
+            apiFetch(API_BASE + '/incubator/pipeline'),
+            apiFetch(API_BASE + '/incubator/candidates?page=1&page_size=1'),
+            apiFetch(API_BASE + '/incubator/health/rules')
+        ]);
+        const pipelineData = await pipelineRes.json();
+        const candidatesData = await candidatesRes.json();
+        const healthData = await healthRes.json();
+        const steps = (pipelineData.data || {}).steps || [];
+
+        // Issue pool stats
+        const issueStep = steps.find(s => s.step_id === 'issue_pool');
+        if (issueStep) {
+            document.getElementById('statUnmatched').textContent = (issueStep.stats || {}).total || 0;
+        }
+
+        // Candidate stats
+        if (candidatesData.data) {
+            document.getElementById('statCandidates').textContent = candidatesData.total || 0;
+        }
+
+        // Retro match stats
+        const retroStep = steps.find(s => s.step_id === 'retro_match');
+        if (retroStep) {
+            document.getElementById('statRetro').textContent = (retroStep.stats || {}).total_retro_matched || 0;
+        }
+
+        // Health stats
+        const healthList = healthData.data || [];
+        const alertCount = healthList.filter(r => r.alert_level !== 'healthy').length;
+        document.getElementById('statHealth').textContent = alertCount;
+    } catch (e) { console.error('loadDashboardStats failed', e); }
+}
+
 // ====== Init ======
 document.addEventListener('DOMContentLoaded', () => {
     renderSidebar('incubator');
     loadStatus();
-    loadIssues();
+    loadDashboardStats();
+    switchTab('pipeline');
 });
 </script>
 <script defer src="/static/js/tailwindcss.min.js"></script>
