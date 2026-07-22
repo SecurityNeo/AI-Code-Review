@@ -117,10 +117,7 @@
                     <div class="relative overflow-auto" style="min-height: 500px;">
                         <!-- Grid Background -->
                         <div style="background-image: radial-gradient(circle, #e5e7eb 1px, transparent 1px); background-size: 20px 20px; position: absolute; inset: 0;"></div>
-                        
-                        <!-- SVG Lines Layer -->
-                        <svg id="pipelineSvg" class="absolute inset-0 w-full h-full pointer-events-none" style="z-index: 1;"></svg>
-                        
+
                         <!-- Nodes Layer -->
                         <div id="pipelineContainer" class="relative flex flex-wrap justify-center gap-x-16 gap-y-12 p-8" style="z-index: 2; min-width: 1200px;">
                         </div>
@@ -1369,13 +1366,26 @@ function renderPipeline(steps) {
         </div>`;
     });
 
-    container.innerHTML = html;
+    // Do NOT use innerHTML, because it would destroy any SVG we append later.
+    // Instead, clear only the nodes (keep the container itself intact).
+    // First, preserve the old SVG if it exists, then remove all children except SVG,
+    // rebuild nodes, then ensure SVG is the last child.
+    let oldSvg = container.querySelector('#pipelineSvg');
+    if (oldSvg) oldSvg.remove();
 
-    // Move SVG into container so it shares the same coordinate system as nodes
-    let svg = document.getElementById('pipelineSvg');
-    if (svg && svg.parentElement !== container) {
-        container.appendChild(svg);
+    // Create a temporary div to parse the HTML string
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    while (tmp.firstChild) {
+        container.appendChild(tmp.firstChild);
     }
+
+    // Create SVG inside container via DOM API so it can never be lost by innerHTML
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.id = 'pipelineSvg';
+    svg.setAttribute('class', 'absolute inset-0 w-full h-full pointer-events-none');
+    svg.style.zIndex = '1';
+    container.appendChild(svg);
 
     setTimeout(() => drawPipelineConnections(steps), 50);
 }
