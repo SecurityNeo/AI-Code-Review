@@ -357,6 +357,52 @@ func (h *IncubatorHandler) TriggerSandboxTest(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 0, "data": map[string]any{"job_id": job.ID, "status": "queued", "message": "模拟测试任务已加入队列"}})
 }
 
+// Pipeline returns the full incubation pipeline visualization data.
+// GET /api/v1/incubator/pipeline
+func (h *IncubatorHandler) Pipeline(c *gin.Context) {
+	status, err := h.svc.GetPipelineStatus()
+	if err != nil {
+		zap.L().Error("get pipeline status failed", zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "data": status})
+}
+
+// CandidateTrace returns the full bloodline trace of a candidate rule.
+// GET /api/v1/incubator/candidates/:id/trace
+func (h *IncubatorHandler) CandidateTrace(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
+	trace, err := h.svc.GetCandidateTrace(uint(id))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(404, gin.H{"error": "candidate not found"})
+			return
+		}
+		zap.L().Error("get candidate trace failed", zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "data": trace})
+}
+
+// IssueTrace returns the full lifecycle trace of a review issue.
+// GET /api/v1/incubator/issues/:id/trace
+func (h *IncubatorHandler) IssueTrace(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
+	trace, err := h.svc.GetIssueTrace(uint(id))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(404, gin.H{"error": "issue not found"})
+			return
+		}
+		zap.L().Error("get issue trace failed", zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "data": trace})
+}
+
 // RetroMatch queues a retroactive matching job for a published rule.
 // POST /api/v1/incubator/retro-match
 func (h *IncubatorHandler) RetroMatch(c *gin.Context) {
