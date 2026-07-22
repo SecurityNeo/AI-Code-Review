@@ -1383,7 +1383,7 @@ function renderPipeline(steps) {
     // Create SVG inside container via DOM API so it can never be lost by innerHTML
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.id = 'pipelineSvg';
-    svg.setAttribute('class', 'absolute inset-0 w-full h-full pointer-events-none');
+    svg.setAttribute('class', 'absolute top-0 left-0 pointer-events-none');
     svg.style.zIndex = '1';
     container.appendChild(svg);
 
@@ -1433,9 +1433,41 @@ function endNodeDrag(e) {
     document.removeEventListener('mouseup', endNodeDrag);
 }
 
+function ensureCanvasSize() {
+    const container = document.getElementById('pipelineContainer');
+    const svg = document.getElementById('pipelineSvg');
+    if (!container) return;
+    const nodes = container.querySelectorAll('.pipeline-node');
+    const NODE_W = 220, NODE_H = 130;
+    let maxX = 0, maxY = 0;
+    nodes.forEach(n => {
+        const l = (parseFloat(n.style.left) || 0) + NODE_W;
+        const t = (parseFloat(n.style.top) || 0) + NODE_H;
+        if (l > maxX) maxX = l;
+        if (t > maxY) maxY = t;
+    });
+    // Add 80px padding on right/bottom for connections
+    const needW = Math.max(maxX + 80, 1200);
+    const needH = Math.max(maxY + 80, 500);
+    const curW = parseFloat(container.style.width) || 0;
+    const curH = parseFloat(container.style.height) || 0;
+    const finalW = Math.max(needW, curW);
+    const finalH = Math.max(needH, curH);
+    container.style.width = finalW + 'px';
+    container.style.height = finalH + 'px';
+    if (svg) {
+        svg.setAttribute('width', finalW);
+        svg.setAttribute('height', finalH);
+    }
+}
+
 function drawPipelineConnections(steps) {
     const svg = document.getElementById('pipelineSvg');
     if (!svg) return;
+
+    // Dynamic canvas expansion so dragged nodes never clip
+    ensureCanvasSize();
+
     svg.innerHTML = '';
 
     const brandColors = {
