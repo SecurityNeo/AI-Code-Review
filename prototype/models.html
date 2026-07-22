@@ -760,9 +760,11 @@
                         ${m.status === 'inactive'
                             ? `<button onclick="enableModel(${m.id})" class="text-green-600 hover:text-green-800 text-xs">启用</button>`
                             : `<button onclick="openDisableModal(${m.id}, '${m.provider}-${m.model_id}')" class="text-gray-600 hover:text-gray-800 text-xs">禁用</button>`}
-                        ${m.is_default ? `<button onclick="unsetDefault(${m.id})" class="text-blue-600 hover:text-blue-800 text-xs">取消默认</button>` : `<button onclick="setDefault(${m.id})" class="text-blue-600 hover:text-blue-800 text-xs">设为默认</button>`}
-                        ${!m.is_primary ? `<button onclick="setPrimary(${m.id})" class="text-purple-600 hover:text-purple-800 text-xs">设为主</button>` : ''}
-                        ${m.backup_order === 0 ? `<button onclick="setBackup(${m.id}, 1)" class="text-orange-600 hover:text-orange-800 text-xs">设为备用</button>` : `<button onclick="unsetBackup(${m.id})" class="text-orange-600 hover:text-orange-800 text-xs">取消备用</button>`}
+                        ${m.model_type !== 'embedding' ? `
+                            ${m.is_default ? `<button onclick="unsetDefault(${m.id})" class="text-blue-600 hover:text-blue-800 text-xs">取消默认</button>` : `<button onclick="setDefault(${m.id})" class="text-blue-600 hover:text-blue-800 text-xs">设为默认</button>`}
+                            ${!m.is_primary ? `<button onclick="setPrimary(${m.id})" class="text-purple-600 hover:text-purple-800 text-xs">设为主</button>` : ''}
+                            ${m.backup_order === 0 ? `<button onclick="setBackup(${m.id}, 1)" class="text-orange-600 hover:text-orange-800 text-xs">设为备用</button>` : `<button onclick="unsetBackup(${m.id})" class="text-orange-600 hover:text-orange-800 text-xs">取消备用</button>`}
+                        ` : ''}
                         <button onclick="openEditModal(${m.id})" class="text-blue-600 hover:text-blue-800 text-xs">编辑</button>
                         ${!m.is_default ? `<button onclick="openDeleteModal(${m.id}, '${m.provider}-${m.model_id}')" class="text-blue-600 hover:text-blue-800 text-xs">删除</button>` : ''}
                     </td>
