@@ -909,6 +909,32 @@ func (s *IncubatorService) runSandboxTest(incubationID uint) error {
 		return fmt.Errorf("no code snippets for positive test cases")
 	}
 
+	// Negative: find issues with same language/category but NOT in source_issue_ids
+	var negativeIssues []model.ReviewIssue
+	var sourceIDs []uint
+	json.Unmarshal([]byte(cand.SourceIssueIDs), &sourceIDs)
+	negDB := model.DB.Where("code_snippet != ''").Limit(3)
+	if cand.Language != "" && cand.Language != "common" {
+		negDB = negDB.Where("file LIKE ?", "%"+cand.Language+"%") // rough language match by file extension
+	}
+	if cand.Category != "" {
+		negDB = negDB.Where("category = ?", cand.Category)
+	}
+	if len(sourceIDs) > 0 {
+		negDB = negDB.Where("id NOT IN ?", sourceIDs)
+	}
+	negDB.Find(&negativeIssues)
+
+	for _, iss := range negativeIssues {
+		cases = append(cases, testCase{
+			No:       len(cases) + 1,
+			Type:     "negative",
+			Code:     iss.CodeSnippet,
+			File:     iss.File,
+			Expected: false,
+		})
+	}
+
 	llmSvc := NewLLMService()
 	passed := 0
 	for i := range cases {
