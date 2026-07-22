@@ -116,6 +116,18 @@
                         </button>
                     </div>
 
+                    <!-- 聚类任务进度 -->
+                    <div id="clusterJobPanel" class="hidden mb-4 bg-white border rounded-lg p-4">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-3" id="clusterJobStatus">
+                                <i class="fas fa-spinner fa-spin text-purple-600"></i>
+                                <span class="text-sm text-gray-700">聚类分析进行中...</span>
+                            </div>
+                            <span class="text-xs text-gray-400" id="clusterJobId"></span>
+                        </div>
+                        <div class="mt-2 text-xs text-gray-500" id="clusterJobDetail"></div>
+                    </div>
+
                     <div class="flex items-center gap-2 mb-2">
                         <input type="checkbox" id="issueSelectAll" onchange="toggleSelectAllIssues()">
                         <label for="issueSelectAll" class="text-sm text-gray-600">全选</label>
@@ -660,6 +672,8 @@ async function triggerSandboxTest(id) {
 function openClusterModal() { document.getElementById('clusterModal').classList.remove('hidden'); document.getElementById('clusterModal').classList.add('active'); }
 function closeClusterModal() { document.getElementById('clusterModal').classList.add('hidden'); document.getElementById('clusterModal').classList.remove('active'); }
 
+let clusterPollTimer = null;
+
 async function runCluster() {
     const days = parseInt(document.getElementById('clusterDays').value) || 30;
     const minSize = parseInt(document.getElementById('clusterMinSize').value) || 3;
@@ -669,11 +683,69 @@ async function runCluster() {
         });
         const data = await res.json();
         if (data.code === 0) {
-            showToast('聚类分析已启动，请稍后查看候选规则');
+            showToast('聚类分析已启动');
             closeClusterModal();
-            setTimeout(() => { loadCandidates(); switchTab('candidates'); }, 2000);
+            startClusterPolling(data.data.job_id);
         } else { showToast(data.error || '启动失败', 'error'); }
     } catch (e) { showToast(e.message, 'error'); }
+}
+
+function startClusterPolling(jobId) {
+    // Show progress panel
+    const panel = document.getElementById('clusterJobPanel');
+    panel.classList.remove('hidden');
+    document.getElementById('clusterJobId').textContent = 'Job #' + jobId;
+    updateClusterStatus('running');
+
+    if (clusterPollTimer) clearInterval(clusterPollTimer);
+    clusterPollTimer = setInterval(() => pollClusterJob(jobId), 2000);
+}
+
+function stopClusterPolling() {
+    if (clusterPollTimer) {
+        clearInterval(clusterPollTimer);
+        clusterPollTimer = null;
+    }
+}
+
+function updateClusterStatus(status, detail) {
+    const el = document.getElementById('clusterJobStatus');
+    const detailEl = document.getElementById('clusterJobDetail');
+    if (status === 'running') {
+        el.innerHTML = '<i class="fas fa-spinner fa-spin text-purple-600 mr-2"></i><span class="text-sm text-gray-700">聚类分析进行中...</span>';
+    } else if (status === 'success') {
+        el.innerHTML = '<i class="fas fa-check-circle text-green-600 mr-2"></i><span class="text-sm text-green-700 font-medium">聚类分析完成</span>';
+    } else if (status === 'failed') {
+        el.innerHTML = '<i class="fas fa-times-circle text-red-600 mr-2"></i><span class="text-sm text-red-700 font-medium">聚类分析失败</span>';
+    }
+    if (detail) detailEl.innerHTML = detail;
+}
+
+async function pollClusterJob(jobId) {
+    try {
+        const res = await apiFetch(API_BASE + '/incubator/cluster/jobs/' + jobId);
+        const data = await res.json();
+        const job = data.data || {};
+        const summary = job.result_summary || {};
+
+        if (job.status === 'running') {
+            const scanned = summary.total_issues_scanned || '...';
+            updateClusterStatus('running', `已扫描 ${scanned} 条 Issue，正在聚类...`);
+        } else if (job.status === 'success') {
+            stopClusterPolling();
+            const clusters = summary.clusters_found || 0;
+            const generated = summary.candidates_generated || 0;
+            updateClusterStatus('success',
+                `发现 <strong>${clusters}</strong> 个簇，已生成 <strong>${generated}</strong> 条候选规则
+                <button onclick="loadCandidates();switchTab('candidates');" class="ml-3 px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">查看候选规则</button>`);
+            loadCandidates();
+        } else if (job.status === 'failed') {
+            stopClusterPolling();
+            updateClusterStatus('failed', job.error_msg || '未知错误');
+        }
+    } catch (e) {
+        // Silently ignore poll errors, will retry next interval
+    }
 }
 
 // ====== Config ======

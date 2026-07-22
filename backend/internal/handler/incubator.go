@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -110,7 +111,7 @@ func (h *IncubatorHandler) Cluster(c *gin.Context) {
 	})
 }
 
-// GetClusterJob returns a cluster job status.
+// GetClusterJob returns a cluster job status with parsed summary.
 // GET /api/v1/incubator/cluster/jobs/:id
 func (h *IncubatorHandler) GetClusterJob(c *gin.Context) {
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
@@ -124,7 +125,27 @@ func (h *IncubatorHandler) GetClusterJob(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(200, gin.H{"code": 0, "data": job})
+
+	// Parse result_summary for richer frontend display
+	var summary map[string]any
+	if job.ResultSummary != "" && job.ResultSummary != "{}" {
+		_ = json.Unmarshal([]byte(job.ResultSummary), &summary)
+	}
+
+	c.JSON(200, gin.H{
+		"code": 0,
+		"data": map[string]any{
+			"id":             job.ID,
+			"job_type":       job.JobType,
+			"status":         job.Status,
+			"params":         job.Params,
+			"result_summary": summary,
+			"error_msg":      job.ErrorMsg,
+			"created_at":     job.CreatedAt,
+			"started_at":     job.StartedAt,
+			"completed_at":   job.CompletedAt,
+		},
+	})
 }
 
 // CreateCandidate creates a candidate rule from selected issues.
