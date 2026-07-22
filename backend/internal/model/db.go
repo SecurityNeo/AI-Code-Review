@@ -730,7 +730,7 @@ func migrateLLMModelColumns() {
 func initIncubatorConfig() {
 	var cfg IncubatorConfig
 	if err := SilentFirst(DB.Where("id = ?", 1), &cfg); err != nil {
-		cfg = IncubatorConfig{ID: 1}
+		cfg = IncubatorConfig{ID: 1, VectorStoreConfig: "{}"}
 		if err := DB.Create(&cfg).Error; err != nil {
 			zap.L().Error("init incubator config failed", zap.Error(err))
 		} else {
