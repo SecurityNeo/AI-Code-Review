@@ -156,6 +156,7 @@
                                     <th class="px-3 py-2 text-center">级别</th>
                                     <th class="px-3 py-2">状态</th>
                                     <th class="px-3 py-2">时间</th>
+                                    <th class="px-3 py-2 text-center">操作</th>
                                 </tr>
                             </thead>
                             <tbody id="issueTableBody"></tbody>
@@ -286,6 +287,32 @@
     </div>
 </div>
 
+<!-- Issue溯源 Modal -->
+<div id="issueTraceModal" class="modal fixed inset-0 z-50 items-center justify-center bg-black/50 hidden">
+    <div class="bg-white rounded-xl w-[640px] max-h-[80vh] overflow-y-auto p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="font-bold text-lg">Issue 全链路溯源</h3>
+            <button onclick="closeIssueTraceModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+        </div>
+        <div id="issueTraceContent" class="space-y-4">
+            <!-- 动态填充 -->
+        </div>
+    </div>
+</div>
+
+<!-- 候选规则血缘 Modal -->
+<div id="candidateBloodlineModal" class="modal fixed inset-0 z-50 items-center justify-center bg-black/50 hidden">
+    <div class="bg-white rounded-xl w-[700px] max-h-[85vh] overflow-y-auto p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="font-bold text-lg">候选规则血缘图谱</h3>
+            <button onclick="closeCandidateBloodlineModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+        </div>
+        <div id="candidateBloodlineContent" class="space-y-4">
+            <!-- 动态填充 -->
+        </div>
+    </div>
+</div>
+
 <script>
 const API_BASE = '/api/v1';
 let issuePage = 1, issuePageSize = 20, candPage = 1, candPageSize = 20;
@@ -357,7 +384,7 @@ async function loadIssues(page = 1) {
     if (sev) params.append('severity', sev);
 
     const tbody = document.getElementById('issueTableBody');
-    tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-gray-500">加载中...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-gray-500">加载中...</td></tr>';
 
     try {
         const res = await apiFetch(API_BASE + '/incubator/issues?' + params.toString());
@@ -368,7 +395,7 @@ async function loadIssues(page = 1) {
         document.getElementById('statUnmatched').textContent = total;
 
         if (list.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-gray-400">暂无数据</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-gray-400">暂无数据</td></tr>';
         } else {
             tbody.innerHTML = list.map(iss => `
                 <tr class="issue-row border-b">
@@ -381,12 +408,15 @@ async function loadIssues(page = 1) {
                     <td class="px-3 py-2 text-center"><span class="text-xs px-2 py-0.5 rounded ${severityClass(iss.severity)}">${severityName(iss.severity)}</span></td>
                     <td class="px-3 py-2 text-center">${statusBadge(iss.status)}</td>
                     <td class="px-3 py-2 text-gray-400 text-xs">${formatTime(iss.created_at)}</td>
+                    <td class="px-3 py-2 text-center">
+                        <button onclick="event.stopPropagation(); showIssueTrace(${iss.id})" class="text-blue-500 hover:text-blue-700 text-xs" title="查看完整生命周期"><i class="fas fa-project-diagram"></i>溯源</button>
+                    </td>
                 </tr>
             `).join('');
         }
         renderPagination('issuePagination', issuePage, Math.ceil(total / issuePageSize) || 1, loadIssues);
     } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-red-500">加载失败: ${err.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-red-500">加载失败: ${err.message}</td></tr>`;
     }
 }
 
@@ -550,18 +580,26 @@ async function showCandidate(id) {
                     <div id="candidateToolResult" class="text-xs text-gray-600 hidden"></div>
                 </div>
 
-                ${c.similar_rules && c.similar_rules.length ? `
-                <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                    <div class="text-xs font-medium text-yellow-700 mb-1"><i class="fas fa-exclamation-triangle mr-1"></i>相似现有规则</div>
-                    ${c.similar_rules.map(sr => `<div class="text-xs text-yellow-800">• ${escapeHtml(sr.name)} (相似度 ${(sr.similarity * 100).toFixed(0)}%) <a href="review-rules.html" target="_blank" class="underline">去查看</a></div>`).join('')}
-                </div>
-                ` : ''}
+                ${(() => {
+                    let srList = c.similar_rules;
+                    if (typeof srList === 'string') {
+                        try { srList = JSON.parse(srList); } catch(e) { srList = null; }
+                    }
+                    if (!Array.isArray(srList) || !srList.length) return '';
+                    return `
+                    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                        <div class="text-xs font-medium text-yellow-700 mb-1"><i class="fas fa-exclamation-triangle mr-1"></i>相似现有规则</div>
+                        ${srList.map(sr => `<div class="text-xs text-yellow-800">• ${escapeHtml(sr.name)} (相似度 ${(sr.similarity * 100).toFixed(0)}%) <a href="review-rules.html" target="_blank" class="underline">去查看</a></div>`).join('')}
+                    </div>
+                    `;
+                })()}
 
                 ${c.test_results ? renderTestResults(c.test_results) : ''}
 
                 <div class="flex gap-2 pt-2 border-t">
                     <button onclick="saveCandidate(${c.id})" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">保存</button>
                     ${c.status !== 'published' ? `<button onclick="publishCandidate(${c.id})" class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">发布规则</button>` : ''}
+                    <button onclick="showCandidateBloodline(${c.id})" class="px-4 py-2 border border-purple-300 rounded-lg text-sm hover:bg-purple-50 text-purple-600" title="查看完整上下游血缘关系"><i class="fas fa-project-diagram mr-1"></i>血缘</button>
                     <button onclick="deleteCandidate(${c.id})" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 text-red-600">忽略</button>
                 </div>
             </div>
@@ -634,6 +672,226 @@ async function deleteCandidate(id) {
         if (res.ok) { showToast('已忽略'); closeCandidateDrawer(); loadCandidates(); }
         else { const d = await res.json(); showToast(d.error || '操作失败', 'error'); }
     } catch (e) { showToast(e.message, 'error'); }
+}
+
+// ====== Issue Trace ======
+async function showIssueTrace(issueId) {
+    const modal = document.getElementById('issueTraceModal');
+    const content = document.getElementById('issueTraceContent');
+    modal.classList.remove('hidden');
+    modal.classList.add('active');
+    content.innerHTML = '<div class="text-center py-8"><i class="fas fa-spinner fa-spin mr-2"></i>加载溯源数据...</div>';
+    try {
+        const res = await apiFetch(API_BASE + '/incubator/issues/' + issueId + '/trace');
+        const data = await res.json();
+        const t = data.data || {};
+        const issue = t.issue || {};
+        const hitRule = t.hit_rule;
+        const candidates = t.candidates || [];
+        const retroMatches = t.retro_matches || [];
+
+        let html = `
+        <div class="bg-gray-50 rounded-lg p-4 border">
+            <div class="text-xs text-gray-500 mb-1">Issue 信息</div>
+            <div class="text-sm font-medium">${escapeHtml(issue.file || '-')}</div>
+            <div class="text-sm text-gray-700 mt-1">${escapeHtml((issue.message || '').substring(0, 200))}</div>
+            <div class="flex gap-2 mt-2">
+                <span class="text-xs px-2 py-0.5 rounded bg-gray-200">${categoryName(issue.category)}</span>
+                <span class="text-xs px-2 py-0.5 rounded ${severityClass(issue.severity)}">${severityName(issue.severity)}</span>
+            </div>
+        </div>
+        `;
+
+        if (hitRule) {
+            html += `
+            <div class="flex items-center gap-2 py-2">
+                <div class="flex-1 h-0.5 bg-green-200"></div>
+                <i class="fas fa-arrow-down text-green-500 text-xs"></i>
+                <span class="text-xs text-green-600 font-medium">命中规则</span>
+            </div>
+            <div class="bg-green-50 rounded-lg p-3 border border-green-200">
+                <div class="text-sm font-medium text-green-800">${escapeHtml(hitRule.name)}</div>
+                <div class="text-xs text-green-600 font-mono">${hitRule.code}</div>
+            </div>`;
+        }
+
+        if (candidates.length > 0) {
+            html += `
+            <div class="flex items-center gap-2 py-2">
+                <div class="flex-1 h-0.5 bg-blue-200"></div>
+                <i class="fas fa-arrow-down text-blue-500 text-xs"></i>
+                <span class="text-xs text-blue-600 font-medium">被聚类到候选规则</span>
+            </div>
+            <div class="space-y-2">
+                ${candidates.map(c => `
+                    <div class="bg-blue-50 rounded-lg p-3 border border-blue-200 cursor-pointer hover:bg-blue-100" onclick="closeIssueTraceModal(); showCandidate(${c.id})">
+                        <div class="text-sm font-medium text-blue-800">${escapeHtml(c.name || '未命名候选规则')}</div>
+                        <div class="text-xs text-blue-600">状态: ${statusLabel(c.status)}</div>
+                    </div>
+                `).join('')}
+            </div>`;
+        }
+
+        if (retroMatches.length > 0) {
+            html += `
+            <div class="flex items-center gap-2 py-2">
+                <div class="flex-1 h-0.5 bg-purple-200"></div>
+                <i class="fas fa-arrow-down text-purple-500 text-xs"></i>
+                <span class="text-xs text-purple-600 font-medium">回溯匹配到规则</span>
+            </div>
+            <div class="space-y-2">
+                ${retroMatches.map(m => `
+                    <div class="bg-purple-50 rounded-lg p-3 border border-purple-200">
+                        <div class="text-sm font-medium text-purple-800">${escapeHtml(m.rule_name)}</div>
+                        <div class="text-xs text-purple-600">置信度: ${(m.confidence * 100).toFixed(0)}%</div>
+                    </div>
+                `).join('')}
+            </div>`;
+        }
+
+        if (!hitRule && candidates.length === 0 && retroMatches.length === 0) {
+            html += `<div class="text-center py-8 text-gray-400">该Issue尚未被任何规则命中或回溯匹配</div>`;
+        }
+
+        content.innerHTML = html;
+    } catch (e) {
+        content.innerHTML = `<div class="text-center py-8 text-red-500">加载失败: ${e.message}</div>`;
+    }
+}
+
+function closeIssueTraceModal() {
+    const modal = document.getElementById('issueTraceModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('active');
+}
+
+// ====== Candidate Bloodline ======
+async function showCandidateBloodline(candidateId) {
+    const modal = document.getElementById('candidateBloodlineModal');
+    const content = document.getElementById('candidateBloodlineContent');
+    modal.classList.remove('hidden');
+    modal.classList.add('active');
+    content.innerHTML = '<div class="text-center py-8"><i class="fas fa-spinner fa-spin mr-2"></i>加载血缘数据...</div>';
+    try {
+        const res = await apiFetch(API_BASE + '/incubator/candidates/' + candidateId + '/trace');
+        const data = await res.json();
+        const t = data.data || {};
+        const cand = t.candidate || {};
+        const upstream = t.upstream || {};
+        const downstream = t.downstream || {};
+        const similar = t.similar_rules || [];
+        const tests = t.test_results || {};
+
+        let html = '';
+
+        // Candidate info
+        html += `
+        <div class="bg-gray-50 rounded-lg p-4 border text-center">
+            <div class="text-lg font-bold text-gray-800">${escapeHtml(cand.name || '未命名')}</div>
+            <div class="text-xs text-gray-500 font-mono mt-1">${cand.code}</div>
+            <div class="flex justify-center gap-2 mt-2">
+                <span class="text-xs px-2 py-0.5 rounded ${statusClass(cand.status)}">${statusLabel(cand.status)}</span>
+                <span class="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700">置信度: ${(cand.confidence || 0).toFixed(2)}</span>
+            </div>
+        </div>
+        `;
+
+        // Upstream
+        const issues = upstream.source_issues || [];
+        html += `
+        <div class="flex items-center gap-2 py-2">
+            <div class="flex-1 h-0.5 bg-blue-200"></div>
+            <i class="fas fa-arrow-up text-blue-500 text-xs"></i>
+            <span class="text-xs text-blue-600 font-medium">上游来源 (${issues.length} 条Issue)</span>
+        </div>
+        <div class="max-h-48 overflow-y-auto space-y-1 border rounded-lg p-2 bg-gray-50">
+            ${issues.length ? issues.map(i => `
+                <div class="text-xs p-2 bg-white rounded border hover:bg-blue-50 cursor-pointer" onclick="closeCandidateBloodlineModal(); showIssueTrace(${i.id})">
+                    <div class="font-medium truncate">${escapeHtml(i.file || '-')}<span class="text-gray-400">: </span>${escapeHtml((i.message || '').substring(0, 60))}</div>
+                    <div class="flex gap-1 mt-1">
+                        <span class="px-1 py-0.5 rounded bg-gray-100 text-[10px]">${categoryName(i.category)}</span>
+                        <span class="px-1 py-0.5 rounded ${severityClass(i.severity)} text-[10px]">${severityName(i.severity)}</span>
+                    </div>
+                </div>
+            `).join('') : '<div class="text-xs text-gray-400 text-center py-4">无上游Issue数据</div>'}
+        </div>`;
+
+        // Downstream
+        html += `
+        <div class="flex items-center gap-2 py-2">
+            <div class="flex-1 h-0.5 bg-green-200"></div>
+            <i class="fas fa-arrow-down text-green-500 text-xs"></i>
+            <span class="text-xs text-green-600 font-medium">下游流向</span>
+        </div>`;
+
+        if (downstream.published_rule) {
+            const r = downstream.published_rule;
+            html += `
+            <div class="bg-green-50 rounded-lg p-3 border border-green-200">
+                <div class="text-xs text-green-600 mb-1">已发布为正式规则</div>
+                <div class="text-sm font-medium text-green-800">${escapeHtml(r.name)}</div>
+                <div class="text-xs text-green-600 font-mono">${r.code}</div>
+                <div class="text-xs text-gray-500 mt-1">${r.is_enabled ? '✅ 已启用' : '⏸️ 未启用'}</div>
+            </div>`;
+            if (downstream.retro_matches > 0) {
+                html += `<div class="mt-2 text-xs text-purple-600 bg-purple-50 rounded p-2 border border-purple-200">
+                    <i class="fas fa-history mr-1"></i>回溯匹配了 <strong>${downstream.retro_matches}</strong> 条历史Issue
+                </div>`;
+            }
+        } else {
+            html += `<div class="text-center py-4 text-gray-400 text-sm">尚未发布为正式规则</div>`;
+        }
+
+        // Similar rules
+        if (similar && similar.length > 0) {
+            let simData = similar;
+            if (typeof similar === 'string') {
+                try { simData = JSON.parse(similar); } catch(e) { simData = []; }
+            }
+            if (simData.length > 0) {
+                html += `
+                <div class="flex items-center gap-2 py-2">
+                    <div class="flex-1 h-0.5 bg-yellow-200"></div>
+                    <i class="fas fa-exclamation-triangle text-yellow-500 text-xs"></i>
+                    <span class="text-xs text-yellow-600 font-medium">相似现有规则</span>
+                </div>
+                <div class="space-y-1">
+                    ${simData.map(sr => `
+                        <div class="bg-yellow-50 rounded-lg p-2 border border-yellow-200 text-xs">
+                            <span class="font-medium">${escapeHtml(sr.name || '未知规则')}</span>
+                            <span class="text-yellow-700 ml-2">相似度: ${((sr.similarity || 0) * 100).toFixed(0)}%</span>
+                        </div>
+                    `).join('')}
+                </div>`;
+            }
+        }
+
+        // Test results
+        if (tests && tests.total_cases) {
+            const acc = (tests.accuracy * 100).toFixed(1);
+            const color = tests.accuracy >= 0.9 ? 'text-green-600' : tests.accuracy >= 0.7 ? 'text-yellow-600' : 'text-red-600';
+            html += `
+            <div class="flex items-center gap-2 py-2">
+                <div class="flex-1 h-0.5 bg-teal-200"></div>
+                <i class="fas fa-vial text-teal-500 text-xs"></i>
+                <span class="text-xs text-teal-600 font-medium">模拟测试</span>
+            </div>
+            <div class="bg-teal-50 rounded-lg p-3 border border-teal-200 text-center">
+                <div class="text-2xl font-bold ${color}">${acc}%</div>
+                <div class="text-xs text-gray-500">${tests.passed}/${tests.total_cases} 通过</div>
+            </div>`;
+        }
+
+        content.innerHTML = html;
+    } catch (e) {
+        content.innerHTML = `<div class="text-center py-8 text-red-500">加载失败: ${e.message}</div>`;
+    }
+}
+
+function closeCandidateBloodlineModal() {
+    const modal = document.getElementById('candidateBloodlineModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('active');
 }
 
 // ====== Smart Tools ======
