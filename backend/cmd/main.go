@@ -431,22 +431,22 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 		}
 
 		// 大模型管理
-		model := adminOnly.Group("/models")
+		modelGroup := adminOnly.Group("/models")
 		{
 			h := handler.NewModelHandler()
-			model.GET("", h.List)
-			model.GET("/default", h.GetDefault)
-			model.GET("/:id/edit", h.GetForUpdate)
-			model.GET("/:id", h.Get)
-			model.POST("", h.Create)
-			model.POST("/test", h.CreateTest)
-			model.PUT("/:id", h.Update)
-			model.DELETE("/:id", h.Delete)
-			model.PUT("/:id/default", h.SetDefault)
-			model.DELETE("/:id/default", h.UnsetDefault)
-			model.POST("/:id/check", h.CheckAPI)
-			model.PUT("/:id/disable", h.Disable)
-			model.PUT("/:id/enable", h.Enable)
+			modelGroup.GET("", h.List)
+			modelGroup.GET("/default", h.GetDefault)
+			modelGroup.GET("/:id/edit", h.GetForUpdate)
+			modelGroup.GET("/:id", h.Get)
+			modelGroup.POST("", h.Create)
+			modelGroup.POST("/test", h.CreateTest)
+			modelGroup.PUT("/:id", h.Update)
+			modelGroup.DELETE("/:id", h.Delete)
+			modelGroup.PUT("/:id/default", h.SetDefault)
+			modelGroup.DELETE("/:id/default", h.UnsetDefault)
+			modelGroup.POST("/:id/check", h.CheckAPI)
+			modelGroup.PUT("/:id/disable", h.Disable)
+			modelGroup.PUT("/:id/enable", h.Enable)
 		}
 
 		// 企业微信通知
