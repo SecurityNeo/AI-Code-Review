@@ -53,7 +53,7 @@
                     <div class="flex-1">
                         <p class="font-medium">当前运行在「关键词降级模式」</p>
                         <p class="text-sm mt-1">未配置 Embedding 模型，语义聚类、语义去重、智能回溯等高级功能不可用。</p>
-                        <p class="text-sm mt-1">受影响功能：<span id="degradedFeatures"></span></p>
+                        
                     </div>
                     <a href="/models.html" class="text-sm font-medium underline whitespace-nowrap">前往配置模型 →</a>
                 </div>
@@ -314,7 +314,7 @@ async function loadStatus() {
         const banner = document.getElementById('degradeBanner');
         if (incubatorStatus.fallback_mode === 'keyword') {
             banner.classList.remove('hidden');
-            document.getElementById('degradedFeatures').textContent = (incubatorStatus.degraded_features || []).join('、');
+            
         } else {
             banner.classList.add('hidden');
         }
