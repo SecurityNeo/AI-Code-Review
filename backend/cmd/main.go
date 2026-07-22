@@ -14,6 +14,7 @@ import (
 	"github.com/ai-optimizer/backend/internal/middleware"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
+	"github.com/ai-optimizer/backend/internal/vectorstore"
 	"github.com/ai-optimizer/backend/pkg/encrypt"
 	"github.com/ai-optimizer/backend/pkg/llmcall"
 	"github.com/gin-gonic/gin"
@@ -228,6 +229,9 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 	r.GET("/rule-stats.html", func(c *gin.Context) {
 		c.File(frontendPath + "/rule-stats.html")
 	})
+	r.GET("/incubator.html", func(c *gin.Context) {
+		c.File(frontendPath + "/incubator.html")
+	})
 
 	// 健康检查
 	r.GET("/health", func(c *gin.Context) {
@@ -303,7 +307,7 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 			task.GET("/:id/messages", h.Messages)
 			task.POST("/:id/messages", h.SendMessage)
 			task.GET("/:id/events", h.SubscribeEvents)
-			task.GET("/:id/diff", h.GetDiff)           // 获取任务 diff 文件内容
+			task.GET("/:id/diff", h.GetDiff)              // 获取任务 diff 文件内容
 			task.GET("/:id/rules", h.ListTaskReviewRules) // 获取任务实际使用的评审规则
 			task.GET("/:id/review-comments", h.ListReviewComments)
 			task.POST("/:id/retry", h.Retry)
@@ -467,6 +471,25 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 			users.PUT("/:id", userHandler.UpdateUser)
 			users.DELETE("/:id", userHandler.DeleteUser)
 			users.POST("/:id/reset-password", userHandler.ResetPassword)
+		}
+
+		// 规则孵化台
+		incubator := adminOnly.Group("/incubator")
+		{
+			h := handler.NewIncubatorHandler(vectorstore.NewMySQLStore(model.DB))
+			incubator.GET("/status", h.Status)
+			incubator.GET("/issues", h.ListIssues)
+			incubator.POST("/cluster", h.Cluster)
+			incubator.GET("/cluster/jobs/:id", h.GetClusterJob)
+			incubator.GET("/candidates", h.ListCandidates)
+			incubator.POST("/candidates", h.CreateCandidate)
+			incubator.GET("/candidates/:id", h.GetCandidate)
+			incubator.PUT("/candidates/:id", h.UpdateCandidate)
+			incubator.DELETE("/candidates/:id", h.DeleteCandidate)
+			incubator.POST("/candidates/:id/publish", h.PublishCandidate)
+			incubator.GET("/config", h.GetConfig)
+			incubator.PUT("/config", h.SaveConfig)
+			incubator.POST("/config/validate-embedding", h.ValidateEmbedding)
 		}
 
 		// 系统管理

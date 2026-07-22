@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script src="js/theme.js?v=1"></script>
+    <style>html{background-color:#1e293b;}</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>规则孵化台 - CodeGuard</title>
+    <script src="js/auth.js?v=5"></script>
+    <script src="js/menu-config.js?v=3"></script>
+    <script src="js/sidebar.js?v=2"></script>
+    <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="css/theme.css?v=1">
+    <style>
+        .modal { display: none; }
+        .modal.active { display: flex; }
+        .toast { position: fixed; top: 20px; right: 20px; z-index: 9999; animation: slideIn 0.3s ease; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .tab-btn.active { border-bottom: 2px solid #3b82f6; color: #1d4ed8; }
+        .degrade-banner { background: #fffbeb; border: 1px solid #fcd34d; color: #92400e; }
+        .issue-row:hover { background-color: #f8fafc; }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans">
+
+<div id="page-transition" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#1e293b;z-index:99999;transition:opacity .25s ease;"></div>
+<script>
+(function(){
+  function hide(){var el=document.getElementById('page-transition');if(el){el.style.opacity='0';setTimeout(function(){el.remove();},250);}}
+  if(document.readyState==='complete'){hide();}else{window.addEventListener('load',hide);}
+})();
+</script>
+<div id="toastContainer"></div>
+
+<div class="flex h-screen">
+    <aside id="sidebar" class="w-64 bg-slate-900 text-white flex-shrink-0 flex flex-col">
+        <nav style="padding: 20px; text-align: center; color: var(--cg-text-tertiary); font-size: 13px;">加载中...</nav>
+    </aside>
+
+    <main class="flex-1 overflow-y-auto">
+        <header class="bg-white border-b px-8 py-4 flex items-center justify-between sticky top-0 z-10">
+            <div>
+                <h2 class="text-xl font-bold text-gray-800">规则孵化台</h2>
+                <p class="text-sm text-gray-500 mt-1">从未命中规则的AI发现中挖掘新评审规则</p>
+            </div>
+        </header>
+
+        <div class="p-8 space-y-6" id="app">
+            <!-- 降级提示 -->
+            <div id="degradeBanner" class="degrade-banner rounded-lg p-4 hidden">
+                <div class="flex items-start gap-3">
+                    <i class="fas fa-exclamation-triangle mt-1"></i>
+                    <div class="flex-1">
+                        <p class="font-medium">当前运行在「关键词降级模式」</p>
+                        <p class="text-sm mt-1">未配置 Embedding 模型，语义聚类、语义去重、智能回溯等高级功能不可用。</p>
+                        <p class="text-sm mt-1">受影响功能：<span id="degradedFeatures"></span></p>
+                    </div>
+                    <a href="/models.html" class="text-sm font-medium underline whitespace-nowrap">前往配置模型 →</a>
+                </div>
+            </div>
+
+            <!-- 指标卡片 -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="statCards">
+                <div class="bg-white border rounded-lg p-4">
+                    <div class="text-sm text-gray-500">未命中Issue</div>
+                    <div class="text-2xl font-bold text-gray-800 mt-1" id="statUnmatched">-</div>
+                </div>
+                <div class="bg-white border rounded-lg p-4">
+                    <div class="text-sm text-gray-500">候选规则</div>
+                    <div class="text-2xl font-bold text-blue-600 mt-1" id="statCandidates">-</div>
+                </div>
+                <div class="bg-white border rounded-lg p-4">
+                    <div class="text-sm text-gray-500">待审回溯</div>
+                    <div class="text-2xl font-bold text-purple-600 mt-1" id="statRetro">-</div>
+                </div>
+                <div class="bg-white border rounded-lg p-4">
+                    <div class="text-sm text-gray-500">健康告警</div>
+                    <div class="text-2xl font-bold text-red-600 mt-1" id="statHealth">-</div>
+                </div>
+            </div>
+
+            <!-- Tab 导航 -->
+            <div class="bg-white border rounded-lg">
+                <div class="flex border-b px-4">
+                    <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800 active" data-tab="issues" onclick="switchTab('issues')">原始Issue池</button>
+                    <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800" data-tab="candidates" onclick="switchTab('candidates')">候选规则</button>
+                    <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800" data-tab="config" onclick="switchTab('config')">孵化配置</button>
+                </div>
+
+                <!-- Issue池 Tab -->
+                <div id="tab-issues" class="tab-content p-4">
+                    <div class="flex items-center gap-3 flex-wrap mb-4">
+                        <input type="text" id="issueKeyword" placeholder="搜索 Message / 文件..." class="px-3 py-2 border rounded-lg text-sm w-64">
+                        <select id="issueCategory" class="px-3 py-2 border rounded-lg text-sm">
+                            <option value="">全部维度</option>
+                            <option value="security">安全性</option>
+                            <option value="performance">性能</option>
+                            <option value="readability">可读性</option>
+                            <option value="maintainability">可维护性</option>
+                            <option value="test_coverage">测试覆盖</option>
+                        </select>
+                        <select id="issueSeverity" class="px-3 py-2 border rounded-lg text-sm">
+                            <option value="">全部级别</option>
+                            <option value="critical">严重</option>
+                            <option value="high">高危</option>
+                            <option value="medium">中危</option>
+                            <option value="low">低危</option>
+                            <option value="info">提示</option>
+                        </select>
+                        <button onclick="loadIssues()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
+                            <i class="fas fa-search mr-1"></i>查询
+                        </button>
+                        <button onclick="openClusterModal()" class="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 ml-auto">
+                            <i class="fas fa-project-diagram mr-1"></i>聚类分析
+                        </button>
+                    </div>
+
+                    <div class="flex items-center gap-2 mb-2">
+                        <input type="checkbox" id="issueSelectAll" onchange="toggleSelectAllIssues()">
+                        <label for="issueSelectAll" class="text-sm text-gray-600">全选</label>
+                        <span id="issueSelectedCount" class="text-sm text-gray-500 ml-2"></span>
+                        <button onclick="batchCreateCandidate()" id="batchCreateBtn" class="ml-2 px-3 py-1.5 bg-green-600 text-white rounded text-sm hidden hover:bg-green-700">生成候选规则</button>
+                    </div>
+
+                    <div class="overflow-x-auto border rounded-lg">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-50 text-gray-600">
+                                <tr>
+                                    <th class="px-3 py-2 w-8"></th>
+                                    <th class="px-3 py-2 text-left">Message</th>
+                                    <th class="px-3 py-2 text-left">文件</th>
+                                    <th class="px-3 py-2">维度</th>
+                                    <th class="px-3 py-2">级别</th>
+                                    <th class="px-3 py-2">状态</th>
+                                    <th class="px-3 py-2">时间</th>
+                                </tr>
+                            </thead>
+                            <tbody id="issueTableBody"></tbody>
+                        </table>
+                    </div>
+                    <div class="flex items-center justify-between mt-4">
+                        <span class="text-sm text-gray-500">共 <b id="issueTotal">0</b> 条</span>
+                        <div class="flex gap-2" id="issuePagination"></div>
+                    </div>
+                </div>
+
+                <!-- 候选规则 Tab -->
+                <div id="tab-candidates" class="tab-content p-4 hidden">
+                    <div class="flex items-center gap-3 mb-4">
+                        <input type="text" id="candKeyword" placeholder="搜索名称或编码..." class="px-3 py-2 border rounded-lg text-sm w-64">
+                        <select id="candStatus" class="px-3 py-2 border rounded-lg text-sm">
+                            <option value="">全部状态</option>
+                            <option value="draft">草稿</option>
+                            <option value="ready">可发布</option>
+                            <option value="published">已发布</option>
+                            <option value="rejected">已忽略</option>
+                        </select>
+                        <button onclick="loadCandidates()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
+                            <i class="fas fa-search mr-1"></i>查询
+                        </button>
+                    </div>
+                    <div id="candidatesGrid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+                    <div class="flex items-center justify-between mt-4">
+                        <span class="text-sm text-gray-500">共 <b id="candTotal">0</b> 条</span>
+                        <div class="flex gap-2" id="candPagination"></div>
+                    </div>
+                </div>
+
+                <!-- 配置 Tab -->
+                <div id="tab-config" class="tab-content p-4 hidden">
+                    <div class="max-w-2xl space-y-4">
+                        <div class="bg-white border rounded-lg p-4">
+                            <h3 class="font-semibold text-gray-800 mb-3">Embedding 引擎</h3>
+                            <div class="flex items-center gap-4">
+                                <select id="cfgEmbeddingModel" class="px-3 py-2 border rounded-lg text-sm flex-1">
+                                    <option value="">不配置（关键词降级模式）</option>
+                                </select>
+                                <button onclick="testEmbedding()" class="px-3 py-2 border rounded-lg text-sm hover:bg-gray-50">
+                                    <i class="fas fa-bolt text-yellow-500 mr-1"></i>测试连接
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-2">配置 Embedding 模型后可启用语义聚类、语义去重、智能回溯等功能。</p>
+                            <div id="embeddingTestResult" class="mt-2 text-sm"></div>
+                        </div>
+
+                        <div class="bg-white border rounded-lg p-4">
+                            <h3 class="font-semibold text-gray-800 mb-3">聚类参数</h3>
+                            <div class="grid grid-cols-3 gap-4">
+                                <div>
+                                    <label class="block text-xs text-gray-500 mb-1">时间窗口（天）</label>
+                                    <input type="number" id="cfgTimeWindow" class="w-full px-3 py-2 border rounded-lg text-sm" value="30">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-500 mb-1">最小簇大小</label>
+                                    <input type="number" id="cfgMinGroupSize" class="w-full px-3 py-2 border rounded-lg text-sm" value="3">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-500 mb-1">单次最多候选</label>
+                                    <input type="number" id="cfgMaxGroups" class="w-full px-3 py-2 border rounded-lg text-sm" value="20">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-white border rounded-lg p-4">
+                            <h3 class="font-semibold text-gray-800 mb-3">回溯匹配</h3>
+                            <div class="flex items-center gap-4">
+                                <label class="flex items-center gap-2 text-sm">
+                                    <input type="checkbox" id="cfgRetroEnabled" checked>
+                                    发布后自动回溯历史 Issue
+                                </label>
+                                <div>
+                                    <label class="text-xs text-gray-500">回溯天数</label>
+                                    <input type="number" id="cfgRetroDays" class="px-3 py-2 border rounded-lg text-sm w-20" value="30">
+                                </div>
+                            </div>
+                        </div>
+
+                        <button onclick="saveConfig()" class="px-5 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
+                            <i class="fas fa-save mr-1"></i>保存配置
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- 聚类参数 Modal -->
+<div id="clusterModal" class="modal fixed inset-0 z-50 items-center justify-center bg-black/50 hidden">
+    <div class="bg-white rounded-xl w-[480px] p-6">
+        <h3 class="font-bold text-lg mb-4">执行聚类分析</h3>
+        <div class="space-y-3">
+            <div>
+                <label class="block text-sm text-gray-600 mb-1">时间范围（天）</label>
+                <input type="number" id="clusterDays" class="w-full px-3 py-2 border rounded-lg text-sm" value="30">
+            </div>
+            <div>
+                <label class="block text-sm text-gray-600 mb-1">最小簇大小</label>
+                <input type="number" id="clusterMinSize" class="w-full px-3 py-2 border rounded-lg text-sm" value="3">
+            </div>
+        </div>
+        <div class="flex justify-end gap-2 mt-6">
+            <button onclick="closeClusterModal()" class="px-4 py-2 border rounded-lg text-sm">取消</button>
+            <button onclick="runCluster()" class="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700">开始分析</button>
+        </div>
+    </div>
+</div>
+
+<!-- 候选规则详情 Drawer -->
+<div id="candidateDrawer" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/30" onclick="closeCandidateDrawer()"></div>
+    <div class="absolute right-0 top-0 bottom-0 w-[560px] bg-white shadow-2xl overflow-y-auto p-6" id="candidateDrawerContent">
+        <!-- 动态填充 -->
+    </div>
+</div>
+
+<script>
+const API_BASE = '/api/v1';
+let issuePage = 1, issuePageSize = 20, candPage = 1, candPageSize = 20;
+let selectedIssueIds = new Set();
+let incubatorStatus = {};
+
+async function apiFetch(url, options = {}) {
+    const token = localStorage.getItem('auth_token');
+    const headers = Object.assign({}, options.headers || {});
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    if (!headers['Content-Type'] && options.body) headers['Content-Type'] = 'application/json';
+    const resp = await fetch(url, Object.assign({}, options, { headers }));
+    if (resp.status === 401) {
+        localStorage.removeItem('auth_token'); localStorage.removeItem('user_info');
+        window.location.href = '/login.html'; throw new Error('未登录');
+    }
+    return resp;
+}
+
+function showToast(message, type = 'success') {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    toast.className = 'toast bg-white border rounded-lg shadow-lg px-4 py-3 mb-2 flex items-center gap-2';
+    toast.innerHTML = type === 'success'
+        ? `<i class="fas fa-check-circle text-green-500"></i><span class="text-sm">${message}</span>`
+        : `<i class="fas fa-exclamation-circle text-red-500"></i><span class="text-sm">${message}</span>`;
+    container.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+}
+
+function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+    document.querySelector(`.tab-btn[data-tab="${tab}"]`).classList.add('active');
+    document.getElementById(`tab-${tab}`).classList.remove('hidden');
+    if (tab === 'issues') loadIssues();
+    if (tab === 'candidates') loadCandidates();
+    if (tab === 'config') loadConfig();
+}
+
+// ====== Status & Banner ======
+async function loadStatus() {
+    try {
+        const res = await apiFetch(API_BASE + '/incubator/status');
+        const data = await res.json();
+        incubatorStatus = data.data || {};
+        const banner = document.getElementById('degradeBanner');
+        if (incubatorStatus.fallback_mode === 'keyword') {
+            banner.classList.remove('hidden');
+            document.getElementById('degradedFeatures').textContent = (incubatorStatus.degraded_features || []).join('、');
+        } else {
+            banner.classList.add('hidden');
+        }
+    } catch (e) { console.error(e); }
+}
+
+// ====== Issue Pool ======
+async function loadIssues(page = 1) {
+    issuePage = page;
+    const params = new URLSearchParams();
+    params.append('page', issuePage); params.append('page_size', issuePageSize);
+    const kw = document.getElementById('issueKeyword').value;
+    const cat = document.getElementById('issueCategory').value;
+    const sev = document.getElementById('issueSeverity').value;
+    if (kw) params.append('keyword', kw);
+    if (cat) params.append('category', cat);
+    if (sev) params.append('severity', sev);
+
+    const tbody = document.getElementById('issueTableBody');
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-gray-500">加载中...</td></tr>';
+
+    try {
+        const res = await apiFetch(API_BASE + '/incubator/issues?' + params.toString());
+        const data = await res.json();
+        const list = data.data || [];
+        const total = data.total || 0;
+        document.getElementById('issueTotal').textContent = total;
+        document.getElementById('statUnmatched').textContent = total;
+
+        if (list.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-gray-400">暂无数据</td></tr>';
+        } else {
+            tbody.innerHTML = list.map(iss => `
+                <tr class="issue-row border-b">
+                    <td class="px-3 py-2"><input type="checkbox" value="${iss.id}" class="issue-checkbox" onchange="toggleIssueSelect(this)"></td>
+                    <td class="px-3 py-2" title="${escapeHtml(iss.message)}">
+                        <div class="max-w-md truncate">${escapeHtml(iss.message)}</div>
+                    </td>
+                    <td class="px-3 py-2 text-gray-500">${escapeHtml(iss.file || '-')}:${iss.line_start || 0}</td>
+                    <td class="px-3 py-2"><span class="text-xs px-2 py-0.5 rounded bg-gray-100">${iss.category}</span></td>
+                    <td class="px-3 py-2"><span class="text-xs px-2 py-0.5 rounded ${severityClass(iss.severity)}">${iss.severity}</span></td>
+                    <td class="px-3 py-2 text-center">${statusBadge(iss.status)}</td>
+                    <td class="px-3 py-2 text-gray-400 text-xs">${formatTime(iss.created_at)}</td>
+                </tr>
+            `).join('');
+        }
+        renderPagination('issuePagination', issuePage, Math.ceil(total / issuePageSize) || 1, loadIssues);
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-red-500">加载失败: ${err.message}</td></tr>`;
+    }
+}
+
+function toggleIssueSelect(cb) {
+    if (cb.checked) selectedIssueIds.add(parseInt(cb.value));
+    else selectedIssueIds.delete(parseInt(cb.value));
+    updateSelectionUI();
+}
+
+function toggleSelectAllIssues() {
+    const all = document.getElementById('issueSelectAll').checked;
+    document.querySelectorAll('.issue-checkbox').forEach(cb => {
+        cb.checked = all;
+        if (all) selectedIssueIds.add(parseInt(cb.value));
+        else selectedIssueIds.delete(parseInt(cb.value));
+    });
+    updateSelectionUI();
+}
+
+function updateSelectionUI() {
+    const btn = document.getElementById('batchCreateBtn');
+    const label = document.getElementById('issueSelectedCount');
+    if (selectedIssueIds.size > 0) {
+        btn.classList.remove('hidden');
+        label.textContent = `已选 ${selectedIssueIds.size} 条`;
+    } else {
+        btn.classList.add('hidden');
+        label.textContent = '';
+    }
+}
+
+async function batchCreateCandidate() {
+    if (selectedIssueIds.size === 0) return;
+    try {
+        const res = await apiFetch(API_BASE + '/incubator/candidates', {
+            method: 'POST',
+            body: JSON.stringify({ source_issue_ids: Array.from(selectedIssueIds) })
+        });
+        const data = await res.json();
+        if (data.code === 0) {
+            showToast('候选规则已创建');
+            selectedIssueIds.clear(); document.getElementById('issueSelectAll').checked = false; updateSelectionUI();
+            loadCandidates();
+            switchTab('candidates');
+        } else {
+            showToast(data.error || '创建失败', 'error');
+        }
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+// ====== Candidates ======
+async function loadCandidates(page = 1) {
+    candPage = page;
+    const params = new URLSearchParams();
+    params.append('page', candPage); params.append('page_size', candPageSize);
+    const kw = document.getElementById('candKeyword').value;
+    const status = document.getElementById('candStatus').value;
+    if (kw) params.append('keyword', kw);
+    if (status) params.append('status', status);
+
+    const grid = document.getElementById('candidatesGrid');
+    grid.innerHTML = '<div class="col-span-full text-center py-8 text-gray-500">加载中...</div>';
+
+    try {
+        const res = await apiFetch(API_BASE + '/incubator/candidates?' + params.toString());
+        const data = await res.json();
+        const list = data.data || [];
+        const total = data.total || 0;
+        document.getElementById('candTotal').textContent = total;
+        document.getElementById('statCandidates').textContent = total;
+
+        if (list.length === 0) {
+            grid.innerHTML = '<div class="col-span-full text-center py-8 text-gray-400">暂无候选规则</div>';
+        } else {
+            grid.innerHTML = list.map(c => `
+                <div class="border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer" onclick="showCandidate(${c.id})">
+                    <div class="flex items-start justify-between">
+                        <div>
+                            <span class="text-xs px-2 py-0.5 rounded ${statusClass(c.status)}">${statusLabel(c.status)}</span>
+                            <h4 class="font-semibold text-gray-800 text-sm mt-1">${escapeHtml(c.name)}</h4>
+                            <p class="text-xs text-gray-500 font-mono">${c.code}</p>
+                        </div>
+                        <span class="text-xs text-gray-400">#${c.id}</span>
+                    </div>
+                    <p class="text-xs text-gray-600 mt-2 line-clamp-2">${escapeHtml(c.description || '暂无说明')}</p>
+                    <div class="flex items-center gap-3 mt-3 text-xs text-gray-500">
+                        <span><i class="fas fa-file-alt mr-1"></i>${c.source_count || 0} Issue</span>
+                        <span><i class="fas fa-chart-line mr-1"></i>置信 ${(c.confidence_score || 0).toFixed(2)}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+        renderPagination('candPagination', candPage, Math.ceil(total / candPageSize) || 1, loadCandidates);
+    } catch (err) {
+        grid.innerHTML = `<div class="col-span-full text-center py-8 text-red-500">加载失败: ${err.message}</div>`;
+    }
+}
+
+async function showCandidate(id) {
+    try {
+        const res = await apiFetch(API_BASE + '/incubator/candidates/' + id);
+        const data = await res.json();
+        const c = data.data.candidate;
+        const issues = data.data.issues || [];
+        const content = document.getElementById('candidateDrawerContent');
+        content.innerHTML = `
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="font-bold text-lg">候选规则 #${c.id}</h3>
+                <button onclick="closeCandidateDrawer()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <label class="text-xs text-gray-500">名称</label>
+                    <input type="text" id="editCandName" class="w-full px-3 py-2 border rounded-lg text-sm mt-1" value="${escapeHtml(c.name)}">
+                </div>
+                <div>
+                    <label class="text-xs text-gray-500">编码</label>
+                    <input type="text" id="editCandCode" class="w-full px-3 py-2 border rounded-lg text-sm mt-1 bg-gray-50" value="${escapeHtml(c.code)}" disabled>
+                </div>
+                <div class="grid grid-cols-3 gap-3">
+                    <div>
+                        <label class="text-xs text-gray-500">维度</label>
+                        <input type="text" id="editCandCategory" class="w-full px-3 py-2 border rounded-lg text-sm mt-1" value="${escapeHtml(c.category)}">
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500">级别</label>
+                        <select id="editCandSeverity" class="w-full px-3 py-2 border rounded-lg text-sm mt-1 bg-white">
+                            <option value="critical" ${c.severity==='critical'?'selected':''}>严重</option>
+                            <option value="high" ${c.severity==='high'?'selected':''}>高危</option>
+                            <option value="medium" ${c.severity==='medium'?'selected':''}>中危</option>
+                            <option value="low" ${c.severity==='low'?'selected':''}>低危</option>
+                            <option value="info" ${c.severity==='info'?'selected':''}>提示</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500">语言</label>
+                        <input type="text" id="editCandLanguage" class="w-full px-3 py-2 border rounded-lg text-sm mt-1" value="${escapeHtml(c.language)}">
+                    </div>
+                </div>
+                <div>
+                    <label class="text-xs text-gray-500">规则说明</label>
+                    <textarea id="editCandDesc" rows="3" class="w-full px-3 py-2 border rounded-lg text-sm mt-1">${escapeHtml(c.description || '')}</textarea>
+                </div>
+                <div>
+                    <label class="text-xs text-gray-500">Prompt 片段</label>
+                    <textarea id="editCandPrompt" rows="4" class="w-full px-3 py-2 border rounded-lg text-sm mt-1 font-mono bg-gray-50">${escapeHtml(c.prompt || '')}</textarea>
+                </div>
+                <div>
+                    <label class="text-xs text-gray-500">来源 Issue (${issues.length})</label>
+                    <div class="mt-1 space-y-1 max-h-40 overflow-y-auto text-xs border rounded-lg p-2 bg-gray-50">
+                        ${issues.length ? issues.map(i => `<div class="truncate" title="${escapeHtml(i.message)}">• ${i.file || '-'}: ${escapeHtml(i.message).substring(0,60)}</div>`).join('') : '<div class="text-gray-400">无来源 Issue</div>'}
+                    </div>
+                </div>
+                <div class="flex gap-2 pt-2">
+                    <button onclick="saveCandidate(${c.id})" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">保存</button>
+                    ${c.status !== 'published' ? `<button onclick="publishCandidate(${c.id})" class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">发布规则</button>` : ''}
+                    <button onclick="deleteCandidate(${c.id})" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 text-red-600">忽略</button>
+                </div>
+            </div>
+        `;
+        document.getElementById('candidateDrawer').classList.remove('hidden');
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+function closeCandidateDrawer() { document.getElementById('candidateDrawer').classList.add('hidden'); }
+
+async function saveCandidate(id) {
+    const payload = {
+        name: document.getElementById('editCandName').value,
+        category: document.getElementById('editCandCategory').value,
+        severity: document.getElementById('editCandSeverity').value,
+        language: document.getElementById('editCandLanguage').value,
+        description: document.getElementById('editCandDesc').value,
+        prompt: document.getElementById('editCandPrompt').value,
+    };
+    try {
+        const res = await apiFetch(API_BASE + '/incubator/candidates/' + id, { method: 'PUT', body: JSON.stringify(payload) });
+        if (res.ok) { showToast('已保存'); closeCandidateDrawer(); loadCandidates(); }
+        else { const d = await res.json(); showToast(d.error || '保存失败', 'error'); }
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function publishCandidate(id) {
+    if (!confirm('确认发布此规则到评审规则库？发布后将可在项目中启用。')) return;
+    try {
+        const res = await apiFetch(API_BASE + '/incubator/candidates/' + id + '/publish', {
+            method: 'POST', body: JSON.stringify({ is_enabled: false })
+        });
+        const data = await res.json();
+        if (data.code === 0) { showToast('规则已发布'); closeCandidateDrawer(); loadCandidates(); }
+        else { showToast(data.error || '发布失败', 'error'); }
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function deleteCandidate(id) {
+    if (!confirm('确认忽略此候选规则？')) return;
+    try {
+        const res = await apiFetch(API_BASE + '/incubator/candidates/' + id, { method: 'DELETE' });
+        if (res.ok) { showToast('已忽略'); closeCandidateDrawer(); loadCandidates(); }
+        else { const d = await res.json(); showToast(d.error || '操作失败', 'error'); }
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+// ====== Clustering ======
+function openClusterModal() { document.getElementById('clusterModal').classList.remove('hidden'); document.getElementById('clusterModal').classList.add('active'); }
+function closeClusterModal() { document.getElementById('clusterModal').classList.add('hidden'); document.getElementById('clusterModal').classList.remove('active'); }
+
+async function runCluster() {
+    const days = parseInt(document.getElementById('clusterDays').value) || 30;
+    const minSize = parseInt(document.getElementById('clusterMinSize').value) || 3;
+    try {
+        const res = await apiFetch(API_BASE + '/incubator/cluster', {
+            method: 'POST', body: JSON.stringify({ time_range_days: days, min_group_size: minSize })
+        });
+        const data = await res.json();
+        if (data.code === 0) {
+            showToast('聚类分析已启动，请稍后查看候选规则');
+            closeClusterModal();
+            setTimeout(() => { loadCandidates(); switchTab('candidates'); }, 2000);
+        } else { showToast(data.error || '启动失败', 'error'); }
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+// ====== Config ======
+async function loadConfig() {
+    try {
+        // Load embedding model options
+        const modelRes = await apiFetch(API_BASE + '/models?type=embedding&page_size=100');
+        const modelData = await modelRes.json();
+        const sel = document.getElementById('cfgEmbeddingModel');
+        sel.innerHTML = '<option value="">不配置（关键词降级模式）</option>' +
+            (modelData.data || []).map(m => `<option value="${m.id}">${m.model_id} (${m.provider})</option>`).join('');
+
+        const res = await apiFetch(API_BASE + '/incubator/config');
+        const cfg = (await res.json()).data || {};
+        if (cfg.embedding_model_id) sel.value = cfg.embedding_model_id;
+        document.getElementById('cfgTimeWindow').value = cfg.cluster_time_window_days || 30;
+        document.getElementById('cfgMinGroupSize').value = cfg.cluster_min_group_size || 3;
+        document.getElementById('cfgMaxGroups').value = cfg.cluster_max_groups_per_run || 20;
+        document.getElementById('cfgRetroEnabled').checked = cfg.retro_match_enabled !== false;
+        document.getElementById('cfgRetroDays').value = cfg.retro_match_max_days_lookback || 30;
+    } catch (e) { console.error(e); }
+}
+
+async function saveConfig() {
+    const payload = {
+        embedding_model_id: document.getElementById('cfgEmbeddingModel').value ? parseInt(document.getElementById('cfgEmbeddingModel').value) : null,
+        cluster_time_window_days: parseInt(document.getElementById('cfgTimeWindow').value),
+        cluster_min_group_size: parseInt(document.getElementById('cfgMinGroupSize').value),
+        cluster_max_groups_per_run: parseInt(document.getElementById('cfgMaxGroups').value),
+        retro_match_enabled: document.getElementById('cfgRetroEnabled').checked,
+        retro_match_max_days_lookback: parseInt(document.getElementById('cfgRetroDays').value),
+    };
+    try {
+        const res = await apiFetch(API_BASE + '/incubator/config', { method: 'PUT', body: JSON.stringify(payload) });
+        if (res.ok) { showToast('配置已保存'); loadStatus(); }
+        else { const d = await res.json(); showToast(d.error || '保存失败', 'error'); }
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function testEmbedding() {
+    const result = document.getElementById('embeddingTestResult');
+    result.innerHTML = '<span class="text-gray-500">测试中...</span>';
+    try {
+        const res = await apiFetch(API_BASE + '/incubator/config/validate-embedding', { method: 'POST' });
+        const data = await res.json();
+        const d = data.data || {};
+        if (d.available) {
+            result.innerHTML = `<span class="text-green-600"><i class="fas fa-check-circle mr-1"></i>连接成功 (${d.latency_ms}ms, ${d.tokens_used} tokens)</span>`;
+        } else {
+            result.innerHTML = `<span class="text-red-600"><i class="fas fa-times-circle mr-1"></i>${d.error || '连接失败'}</span>`;
+        }
+    } catch (e) { result.innerHTML = `<span class="text-red-600">测试异常: ${e.message}</span>`; }
+}
+
+// ====== Utilities ======
+function renderPagination(containerId, page, pages, callback) {
+    const el = document.getElementById(containerId);
+    if (!el || pages <= 1) { if (el) el.innerHTML = ''; return; }
+    let html = '';
+    html += `<button onclick="${callback.name}(${page - 1})" class="px-3 py-1 border rounded text-sm ${page <= 1 ? 'text-gray-300' : 'text-gray-500 hover:bg-gray-50'}" ${page <= 1 ? 'disabled' : ''}>上一页</button>`;
+    for (let i = 1; i <= pages; i++) {
+        if (i === 1 || i === pages || Math.abs(i - page) <= 2) {
+            html += `<button onclick="${callback.name}(${i})" class="px-3 py-1 border rounded text-sm ${i === page ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}">${i}</button>`;
+        } else if (Math.abs(i - page) === 3) {
+            html += `<span class="px-2 text-gray-400">...</span>`;
+        }
+    }
+    html += `<button onclick="${callback.name}(${page + 1})" class="px-3 py-1 border rounded text-sm ${page >= pages ? 'text-gray-300' : 'text-gray-500 hover:bg-gray-50'}" ${page >= pages ? 'disabled' : ''}>下一页</button>`;
+    el.innerHTML = html;
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div'); div.textContent = text; return div.innerHTML;
+}
+
+function severityClass(s) {
+    const map = { critical: 'bg-red-100 text-red-700', high: 'bg-orange-100 text-orange-700', medium: 'bg-yellow-100 text-yellow-700', low: 'bg-blue-100 text-blue-700', info: 'bg-gray-100 text-gray-600' };
+    return map[s] || map.info;
+}
+
+function statusBadge(s) {
+    const map = { accepted: '<span class="text-green-600 text-xs"><i class="fas fa-check mr-1"></i>已接纳</span>', rejected: '<span class="text-red-500 text-xs"><i class="fas fa-times mr-1"></i>已拒绝</span>', pending: '<span class="text-gray-400 text-xs">待处理</span>', dismissed: '<span class="text-gray-400 text-xs line-through">已忽略</span>' };
+    return map[s] || map.pending;
+}
+
+function statusClass(s) {
+    const map = { draft: 'bg-gray-100 text-gray-600', ready: 'bg-blue-100 text-blue-700', published: 'bg-green-100 text-green-700', rejected: 'bg-red-100 text-red-600', merged: 'bg-purple-100 text-purple-700' };
+    return map[s] || map.draft;
+}
+function statusLabel(s) {
+    const map = { draft: '草稿', ready: '可发布', published: '已发布', rejected: '已忽略', merged: '已合并' };
+    return map[s] || s;
+}
+
+function formatTime(t) {
+    if (!t) return '-';
+    const d = new Date(t); return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+// ====== Init ======
+document.addEventListener('DOMContentLoaded', () => {
+    renderSidebar('incubator');
+    loadStatus();
+    loadIssues();
+});
+</script>
+<script defer src="/static/js/tailwindcss.min.js"></script>
+
+</body>
+</html>

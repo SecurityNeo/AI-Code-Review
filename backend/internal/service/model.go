@@ -16,12 +16,12 @@ import (
 type ModelService struct{}
 
 var (
-	ErrModelNotFound       = errors.New("模型不存在")
-	ErrCannotDeleteDefault = errors.New("不能删除默认模型")
-	ErrModelExists         = errors.New("模型已存在")
+	ErrModelNotFound        = errors.New("模型不存在")
+	ErrCannotDeleteDefault  = errors.New("不能删除默认模型")
+	ErrModelExists          = errors.New("模型已存在")
 	ErrCannotDisablePrimary = errors.New("不能禁用主模型，请先取消主模型后再禁用")
 	ErrCannotDisableDefault = errors.New("不能禁用默认模型，请先取消默认后再禁用")
-	ErrBackupOrderConflict = errors.New("备用顺序冲突，该顺序已被其他模型占用")
+	ErrBackupOrderConflict  = errors.New("备用顺序冲突，该顺序已被其他模型占用")
 )
 
 func NewModelService() *ModelService {
@@ -29,12 +29,19 @@ func NewModelService() *ModelService {
 }
 
 func (s *ModelService) List(page, pageSize int, keyword string) ([]model.LLMModel, int64, error) {
+	return s.ListByType(page, pageSize, keyword, "")
+}
+
+func (s *ModelService) ListByType(page, pageSize int, keyword, modelType string) ([]model.LLMModel, int64, error) {
 	var models []model.LLMModel
 	var total int64
 
 	db := model.DB.Model(&model.LLMModel{})
 	if keyword != "" {
 		db = db.Where("model_id LIKE ?", "%"+keyword+"%")
+	}
+	if modelType != "" {
+		db = db.Where("model_type = ?", modelType)
 	}
 
 	if err := db.Count(&total).Error; err != nil {
@@ -100,12 +107,18 @@ func (s *ModelService) Create(req *CreateModelRequest) (*model.LLMModel, error) 
 		return nil, ErrModelExists
 	}
 
-	// If setting as primary, unset other primaries first
-	if req.IsPrimary {
+	modelType := req.ModelType
+	if modelType == "" {
+		modelType = "llm"
+	}
+
+	// If setting as primary, unset other primaries first (only for LLM type)
+	if req.IsPrimary && modelType == "llm" {
 		model.DB.Model(&model.LLMModel{}).Where("is_primary = ?", true).Update("is_primary", false)
 	}
 
 	m := &model.LLMModel{
+		ModelType:        modelType,
 		Provider:         req.Provider,
 		ModelID:          req.ModelID,
 		BaseURL:          req.BaseURL,
@@ -115,7 +128,7 @@ func (s *ModelService) Create(req *CreateModelRequest) (*model.LLMModel, error) 
 		CheckIntervalSec: req.CheckIntervalSec,
 		Temperature:      req.Temperature,
 		IsDefault:        req.IsDefault,
-		IsPrimary:        req.IsPrimary,
+		IsPrimary:        req.IsPrimary && modelType == "llm",
 		BackupOrder:      req.BackupOrder,
 	}
 
@@ -149,6 +162,9 @@ func (s *ModelService) Update(id uint, req *UpdateModelRequest) error {
 
 	updates := map[string]interface{}{}
 
+	if req.ModelType != nil && *req.ModelType != "" {
+		updates["model_type"] = *req.ModelType
+	}
 	if req.BaseURL != nil && *req.BaseURL != "" {
 		updates["base_url"] = *req.BaseURL
 	}
@@ -182,7 +198,7 @@ func (s *ModelService) Update(id uint, req *UpdateModelRequest) error {
 		updates["api_key"] = *req.APIKey
 	}
 
-	// Handle primary / backup update
+	// Handle primary / backup update (only for LLM type)
 	if req.IsPrimary != nil && *req.IsPrimary != m.IsPrimary {
 		if *req.IsPrimary {
 			model.DB.Model(&model.LLMModel{}).Where("is_primary = ?", true).Update("is_primary", false)
@@ -484,6 +500,7 @@ func maskAPIKey(key string) string {
 // --- Request DTOs ---
 
 type CreateModelRequest struct {
+	ModelType        string  `json:"model_type"`
 	Provider         string  `json:"provider" binding:"required"`
 	ModelID          string  `json:"model_id" binding:"required"`
 	BaseURL          string  `json:"base_url" binding:"required"`
@@ -498,6 +515,7 @@ type CreateModelRequest struct {
 }
 
 type UpdateModelRequest struct {
+	ModelType        *string  `json:"model_type,omitempty"`
 	ModelID          *string  `json:"model_id,omitempty"`
 	BaseURL          *string  `json:"base_url,omitempty"`
 	APIKey           *string  `json:"api_key,omitempty"`

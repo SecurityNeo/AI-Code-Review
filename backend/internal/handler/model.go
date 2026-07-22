@@ -21,13 +21,21 @@ func NewModelHandler() *ModelHandler {
 }
 
 // List 获取模型列表
-// GET /api/v1/models?page=1&page_size=20&keyword=gpt
+// GET /api/v1/models?page=1&page_size=20&keyword=gpt&type=llm
 func (h *ModelHandler) List(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	keyword := c.Query("keyword")
+	modelType := c.Query("type")
 
-	models, total, err := h.service.List(page, pageSize, keyword)
+	var models []model.LLMModel
+	var total int64
+	var err error
+	if modelType != "" {
+		models, total, err = h.service.ListByType(page, pageSize, keyword, modelType)
+	} else {
+		models, total, err = h.service.List(page, pageSize, keyword)
+	}
 	if err != nil {
 		zap.L().Error("list models failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -109,6 +117,9 @@ func (h *ModelHandler) Create(c *gin.Context) {
 	}
 	if req.Temperature == 0 {
 		req.Temperature = 0.1
+	}
+	if req.ModelType == "" {
+		req.ModelType = "llm"
 	}
 
 	llmModel, err := h.service.Create(&req)

@@ -214,6 +214,25 @@ func autoMigrate() error {
 		return err
 	}
 
+	// 兼容已有表：为 llm_models 添加 model_type 列和索引
+	migrateLLMModelColumns()
+
+	// Rule Incubator 相关表
+	if err := DB.AutoMigrate(
+		&IncubatorConfig{},
+		&RuleIncubation{},
+		&RuleIncubationJob{},
+		&ReviewIssueRuleMatch{},
+		&ReviewIssueVector{},
+		&ReviewRuleVector{},
+		&RuleIncubationVector{},
+	); err != nil {
+		return err
+	}
+
+	// 初始化 IncubatorConfig 单例（确保 id=1 存在）
+	initIncubatorConfig()
+
 	return nil
 }
 
@@ -611,8 +630,8 @@ func initBuiltInReviewCategories() {
 		} else {
 			// 已存在则更新排序和名称（允许运行时微调显示名称）
 			DB.Model(&existing).Updates(map[string]interface{}{
-				"name":       cat.Name,
-				"sort_order": cat.SortOrder,
+				"name":        cat.Name,
+				"sort_order":  cat.SortOrder,
 				"is_built_in": true,
 			})
 		}
@@ -625,27 +644,27 @@ func initSystemConfig() {
 	var cfg SystemConfig
 	if err := SilentFirst(DB, &cfg); err != nil {
 		cfg = SystemConfig{
-			TaskTimeoutMin:          120,
-			MaxParallelTask:         20,
-			LogRetentionDay:         90,
-			DiffTruncationThreshold: 5000,
-			MaxDiffFiles:            50,
-			MaxTokensPerBatch:       100000,
-			LLMRetryMaxAttempts:     3,
-			LLMRetryInitialDelayMs:  1000,
-			LLMRetryBackoffMultiplier: 2.0,
-			LLMRetryMaxDelayMs:      30000,
-			AlertDurationSec:        300,
-			AlertCooldownSec:        3600,
-			AlertNotifierID:         0,
-			AlertMentionUserIDs:     "",
-			JSONRetryMaxAttempts:    3,
+			TaskTimeoutMin:             120,
+			MaxParallelTask:            20,
+			LogRetentionDay:            90,
+			DiffTruncationThreshold:    5000,
+			MaxDiffFiles:               50,
+			MaxTokensPerBatch:          100000,
+			LLMRetryMaxAttempts:        3,
+			LLMRetryInitialDelayMs:     1000,
+			LLMRetryBackoffMultiplier:  2.0,
+			LLMRetryMaxDelayMs:         30000,
+			AlertDurationSec:           300,
+			AlertCooldownSec:           3600,
+			AlertNotifierID:            0,
+			AlertMentionUserIDs:        "",
+			JSONRetryMaxAttempts:       3,
 			JSONRetryInitialDelaySec:   2,
 			JSONRetryBackoffMultiplier: 2.0,
 			JSONRetryMaxDelaySec:       30,
 			JSONRetryFallbackStrategy:  "regex",
-			DefaultDimensionWeights: `{"security":30,"code_quality":25,"readability":20,"maintainability":15,"test_coverage":10}`,
-			AILogTemplate: "请先执行以下命令拉取代码：\ngit clone {{CLONE_URL}}\n\n变更摘要：\n{{MR_DIFF}}\n\n{{USER_INPUT}}\n\n请审查以上代码变更，给出审查意见。",
+			DefaultDimensionWeights:    `{"security":30,"code_quality":25,"readability":20,"maintainability":15,"test_coverage":10}`,
+			AILogTemplate:              "请先执行以下命令拉取代码：\ngit clone {{CLONE_URL}}\n\n变更摘要：\n{{MR_DIFF}}\n\n{{USER_INPUT}}\n\n请审查以上代码变更，给出审查意见。",
 		}
 		if err := DB.Create(&cfg).Error; err != nil {
 			zap.L().Error("init system config failed", zap.Error(err))
@@ -688,5 +707,36 @@ func initSystemConfig() {
 			zap.Int("max_diff_files", cfg.MaxDiffFiles),
 			zap.Int("max_tokens_per_batch", cfg.MaxTokensPerBatch),
 			zap.Int("llm_retry_max_attempts", cfg.LLMRetryMaxAttempts))
+	}
+}
+
+func migrateLLMModelColumns() {
+	if !DB.Migrator().HasColumn(&LLMModel{}, "model_type") {
+		if err := DB.Exec("ALTER TABLE llm_models ADD COLUMN model_type VARCHAR(20) NOT NULL DEFAULT 'llm'").Error; err != nil {
+			zap.L().Warn("add column model_type failed", zap.Error(err))
+		} else {
+			zap.L().Info("added column model_type to llm_models")
+		}
+	}
+	if !DB.Migrator().HasIndex(&LLMModel{}, "idx_type_status") {
+		if err := DB.Exec("CREATE INDEX idx_type_status ON llm_models(model_type, status)").Error; err != nil {
+			zap.L().Warn("create index idx_type_status failed", zap.Error(err))
+		} else {
+			zap.L().Info("created index idx_type_status on llm_models")
+		}
+	}
+}
+
+func initIncubatorConfig() {
+	var cfg IncubatorConfig
+	if err := SilentFirst(DB.Where("id = ?", 1), &cfg); err != nil {
+		cfg = IncubatorConfig{ID: 1}
+		if err := DB.Create(&cfg).Error; err != nil {
+			zap.L().Error("init incubator config failed", zap.Error(err))
+		} else {
+			zap.L().Info("incubator config initialized with defaults")
+		}
+	} else {
+		zap.L().Info("incubator config already exists", zap.Uint("id", cfg.ID))
 	}
 }

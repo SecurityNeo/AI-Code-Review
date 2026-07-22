@@ -41,6 +41,7 @@ const MENU_CONFIG = [
         children: [
             { id: 'projects',     name: '项目管理',   href: 'projects.html',     icon: 'fa-folder-open' },
             { id: 'review-rules', name: '评审规则库', href: 'review-rules.html', icon: 'fa-shield-halved' },
+            { id: 'incubator',    name: '规则孵化台', href: 'incubator.html',    icon: 'fa-flask' },
             { id: 'pools',        name: '任务资源池', href: 'pools.html',        icon: 'fa-server' },
             { id: 'models',       name: '大模型管理', href: 'models.html',       icon: 'fa-microchip' },
         ]
