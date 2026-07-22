@@ -276,12 +276,17 @@ func (s *ModelService) CheckConnectivity(id uint) (bool, error) {
 		return false, err
 	}
 
-	provider := llm.Provider(m.Provider)
-	err = llm.CheckConnectivity(provider, m.BaseURL, m.APIKey, time.Duration(m.TimeoutSec)*time.Second, m.ModelID)
+	if m.ModelType == string(model.ModelTypeEmbedding) {
+		err = llm.CheckEmbeddingConnectivity(m.BaseURL, m.APIKey, m.ModelID, time.Duration(m.TimeoutSec)*time.Second)
+	} else {
+		provider := llm.Provider(m.Provider)
+		err = llm.CheckConnectivity(provider, m.BaseURL, m.APIKey, time.Duration(m.TimeoutSec)*time.Second, m.ModelID)
+	}
 	if err != nil {
 		zap.L().Debug("model connectivity check failed",
 			zap.String("provider", m.Provider),
 			zap.String("model_id", m.ModelID),
+			zap.String("model_type", m.ModelType),
 			zap.Error(err))
 		return false, err
 	}
