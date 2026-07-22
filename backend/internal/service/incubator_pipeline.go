@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/ai-optimizer/backend/internal/model"
-	"go.uber.org/zap"
 )
 
 // PipelineStatus represents the full incubation pipeline state with every step's input/output.
@@ -277,12 +276,8 @@ func (s *IncubatorService) GetPipelineStatus() (*PipelineStatus, error) {
 	}
 
 	// --- Step 9: Health Check ---
-	var alertCount int64
-	var healthQuery = model.DB.Model(&model.ReviewIssue{}).
-		Select("review_rules.id").
-		Joins("JOIN review_rules ON review_rules.id = review_issues.rule_id").
-		Where("review_rules.is_enabled = ? AND review_issues.created_at >= ?", true, now.AddDate(0, 0, -7))
-	model.DB.Model(&model.ReviewRule{}).Where("is_enabled = ?", true).Count(&alertCount) // simplified
+	var enabledRulesCount int64
+	model.DB.Model(&model.ReviewRule{}).Where("is_enabled = ?", true).Count(&enabledRulesCount)
 
 	stepHealth := PipelineStep{
 		StepID: "health_check",
@@ -297,6 +292,7 @@ func (s *IncubatorService) GetPipelineStatus() (*PipelineStatus, error) {
 		Color: "red",
 		Stats: map[string]any{
 			"check_interval_days": cfg.HealthCheckIntervalDays,
+			"enabled_rules":       enabledRulesCount,
 		},
 		InputSummary: map[string]any{
 			"source": "所有已启用规则的命中/拒绝统计数据",
