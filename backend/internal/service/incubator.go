@@ -334,27 +334,10 @@ type PublishRequest struct {
 	IsEnabled bool `json:"is_enabled"`
 }
 
-// ClusterIssues performs keyword-based clustering on unmatched issues.
+// ClusterIssues performs keyword-based clustering on unmatched issues and manages its own job record.
+// Designed for synchronous API calls. For asynchronous job execution, use doClusterIssues + caller-managed job record.
 func (s *IncubatorService) ClusterIssues(timeRangeDays int, languages []string, minGroupSize int) (*model.RuleIncubationJob, error) {
-	cfg := s.getConfig()
-	if timeRangeDays <= 0 {
-		timeRangeDays = cfg.ClusterTimeWindowDays
-	}
-	if minGroupSize <= 0 {
-		minGroupSize = cfg.ClusterMinGroupSize
-	}
-
 	since := time.Now().AddDate(0, 0, -timeRangeDays)
-	var issues []model.ReviewIssue
-	db := model.DB.Where("rule_id IS NULL AND created_at >= ?", since)
-	if len(languages) > 0 {
-		// placeholder: review_issues lacks language column; file-extension inference is a future enhancement
-		_ = languages
-	}
-	if err := db.Find(&issues).Error; err != nil {
-		return nil, err
-	}
-
 	job := &model.RuleIncubationJob{
 		JobType:       "cluster",
 		Status:        "running",
@@ -368,10 +351,43 @@ func (s *IncubatorService) ClusterIssues(timeRangeDays int, languages []string, 
 		return nil, fmt.Errorf("create cluster job failed: %w", err)
 	}
 
-	// Keyword clustering (level 1 + 2, no embedding)
+	summary, err := s.doClusterIssues(timeRangeDays, languages, minGroupSize)
+	now := time.Now()
+	updates := map[string]any{"completed_at": &now}
+	if err != nil {
+		updates["status"] = "failed"
+		updates["error_msg"] = err.Error()
+	} else {
+		updates["status"] = "success"
+		updates["result_summary"] = summary
+	}
+	model.DB.Model(job).Updates(updates)
+	return job, err
+}
+
+// doClusterIssues is the core clustering logic without job lifecycle management.
+// Returns the JSON summary string.
+func (s *IncubatorService) doClusterIssues(timeRangeDays int, languages []string, minGroupSize int) (string, error) {
+	cfg := s.getConfig()
+	if timeRangeDays <= 0 {
+		timeRangeDays = cfg.ClusterTimeWindowDays
+	}
+	if minGroupSize <= 0 {
+		minGroupSize = cfg.ClusterMinGroupSize
+	}
+
+	since := time.Now().AddDate(0, 0, -timeRangeDays)
+	var issues []model.ReviewIssue
+	db := model.DB.Where("rule_id IS NULL AND created_at >= ?", since)
+	if len(languages) > 0 {
+		_ = languages
+	}
+	if err := db.Find(&issues).Error; err != nil {
+		return "", err
+	}
+
 	clusters := s.keywordCluster(issues, minGroupSize)
 
-	// Generate candidates from top clusters
 	generated := 0
 	for _, cl := range clusters {
 		if generated >= cfg.ClusterMaxGroupsPerRun {
@@ -396,19 +412,9 @@ func (s *IncubatorService) ClusterIssues(timeRangeDays int, languages []string, 
 	}
 	summaryJSON, err := json.Marshal(summary)
 	if err != nil {
-		summaryJSON = []byte("{}")
+		return "{}", nil
 	}
-
-	now := time.Now()
-	if err := model.DB.Model(job).Updates(map[string]any{
-		"status":         "success",
-		"result_summary": string(summaryJSON),
-		"completed_at":   &now,
-	}).Error; err != nil {
-		zap.L().Warn("update cluster job failed", zap.Uint("job_id", job.ID), zap.Error(err))
-	}
-
-	return job, nil
+	return string(summaryJSON), nil
 }
 
 // clusterResult holds a keyword cluster.
@@ -699,6 +705,46 @@ func min(a, b int) int {
 	return b
 }
 
+// extractJSON extracts the outermost JSON object from a text, handling markdown code blocks.
+func extractJSON(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "```") {
+		lines := strings.Split(s, "\n")
+		if len(lines) > 2 {
+			s = strings.Join(lines[1:len(lines)-1], "\n")
+		}
+	}
+	s = strings.TrimSpace(s)
+	start := strings.Index(s, "{")
+	if start < 0 {
+		return s
+	}
+	depth := 0
+	end := -1
+	for i := start; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				end = i
+				break
+			}
+		}
+		if end >= 0 {
+			break
+		}
+	}
+	if end < 0 {
+		end = strings.LastIndex(s, "}")
+		if end <= start {
+			return s
+		}
+	}
+	return s[start : end+1]
+}
+
 // runRefine uses LLM to generate rule name, description and prompt from source issues.
 func (s *IncubatorService) runRefine(incubationID uint) error {
 	cand, issues, err := s.GetCandidate(incubationID)
@@ -746,13 +792,7 @@ Please output in the following JSON format (do not include markdown code block):
 		Description string `json:"description"`
 		Prompt      string `json:"prompt"`
 	}
-	content := strings.TrimSpace(resp.Content)
-	// Try to extract JSON if wrapped in markdown
-	if idx := strings.Index(content, "{"); idx >= 0 {
-		if end := strings.LastIndex(content, "}"); end > idx {
-			content = content[idx : end+1]
-		}
-	}
+	content := extractJSON(resp.Content)
 	if err := json.Unmarshal([]byte(content), &refineResult); err != nil {
 		return fmt.Errorf("parse refine result failed: %w, raw: %s", err, resp.Content)
 	}
@@ -879,7 +919,26 @@ func (s *IncubatorService) runSandboxTest(incubationID uint) error {
 		}
 
 		answer := strings.ToUpper(strings.TrimSpace(resp.Content))
-		cases[i].Actual = strings.Contains(answer, "YES")
+		// Strictly determine YES vs NO based on the first occurrence of a decisive word.
+		actual := "unknown"
+		if idxYes := strings.Index(answer, "YES"); idxYes >= 0 {
+			actual = "yes"
+			if idxNo := strings.Index(answer, "NO"); idxNo >= 0 && idxNo < idxYes {
+				actual = "no"
+			}
+		} else if idxNo := strings.Index(answer, "NO"); idxNo >= 0 {
+			actual = "no"
+		}
+		switch actual {
+		case "yes":
+			cases[i].Actual = true
+		case "no":
+			cases[i].Actual = false
+		default:
+			cases[i].Actual = !cases[i].Expected // unknown -> mark as fail
+			cases[i].Reason = "LLM answer unclear"
+			continue
+		}
 		cases[i].Pass = cases[i].Actual == cases[i].Expected
 		if cases[i].Pass {
 			passed++

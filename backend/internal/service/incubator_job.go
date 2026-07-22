@@ -68,15 +68,37 @@ func (r *IncubatorJobRunner) executeJob(job model.RuleIncubationJob) {
 		r.mu.Unlock()
 	}()
 
-	err := r.dispatch(job)
+	// Mark as running immediately so it won't be picked up by the next poll.
+	start := time.Now()
+	if dbErr := model.DB.Model(&model.RuleIncubationJob{}).Where("id = ?", job.ID).Updates(map[string]any{
+		"status":     "running",
+		"started_at": &start,
+	}).Error; dbErr != nil {
+		zap.L().Warn("mark job as running failed", zap.Uint("job_id", job.ID), zap.Error(dbErr))
+	}
+
+	var jobErr error
+	func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				jobErr = fmt.Errorf("panic: %v", rec)
+				zap.L().Error("incubator job panic recovered",
+					zap.Uint("job_id", job.ID),
+					zap.String("job_type", job.JobType),
+					zap.Any("panic", rec))
+			}
+		}()
+		jobErr = r.dispatch(job)
+	}()
+
 	now := time.Now()
 	updates := map[string]any{
 		"completed_at": &now,
 	}
-	if err != nil {
+	if jobErr != nil {
 		updates["status"] = "failed"
-		updates["error_msg"] = err.Error()
-		zap.L().Error("incubator job failed", zap.Uint("job_id", job.ID), zap.String("job_type", job.JobType), zap.Error(err))
+		updates["error_msg"] = jobErr.Error()
+		zap.L().Error("incubator job failed", zap.Uint("job_id", job.ID), zap.String("job_type", job.JobType), zap.Error(jobErr))
 	} else {
 		updates["status"] = "success"
 		zap.L().Info("incubator job completed", zap.Uint("job_id", job.ID), zap.String("job_type", job.JobType))
@@ -117,7 +139,23 @@ func (r *IncubatorJobRunner) handleCluster(job model.RuleIncubationJob) error {
 		params.TimeRangeDays = r.incubSvc.getConfig().ClusterTimeWindowDays
 		params.MinGroupSize = r.incubSvc.getConfig().ClusterMinGroupSize
 	}
-	_, err := r.incubSvc.ClusterIssues(params.TimeRangeDays, params.Languages, params.MinGroupSize)
+
+	now := time.Now()
+	model.DB.Model(&model.RuleIncubationJob{}).Where("id = ?", job.ID).Updates(map[string]any{
+		"started_at": &now,
+	})
+
+	summary, err := r.incubSvc.doClusterIssues(params.TimeRangeDays, params.Languages, params.MinGroupSize)
+	completedAt := time.Now()
+	updates := map[string]any{"completed_at": &completedAt}
+	if err != nil {
+		updates["status"] = "failed"
+		updates["error_msg"] = err.Error()
+	} else {
+		updates["status"] = "success"
+		updates["result_summary"] = summary
+	}
+	model.DB.Model(&model.RuleIncubationJob{}).Where("id = ?", job.ID).Updates(updates)
 	return err
 }
 

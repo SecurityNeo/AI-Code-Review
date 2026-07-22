@@ -170,7 +170,7 @@ func (s *MySQLStore) Delete(ctx context.Context, key Key) error {
 	}
 	return s.db.WithContext(ctx).Table(tbl).
 		Where("entity_id = ? AND model_id = ?", key.EntityID, key.ModelID).
-		Delete(nil).Error
+		Delete(map[string]interface{}{}).Error
 }
 
 // DeleteByEntityType drops all vectors of a given type.
@@ -179,13 +179,13 @@ func (s *MySQLStore) DeleteByEntityType(ctx context.Context, entityType string) 
 	if tbl == "" {
 		return fmt.Errorf("unknown entity_type: %s", entityType)
 	}
-	return s.db.WithContext(ctx).Table(tbl).Where("1=1").Delete(nil).Error
+	return s.db.WithContext(ctx).Table(tbl).Where("1=1").Delete(map[string]interface{}{}).Error
 }
 
 // DeleteByModel drops all vectors produced by a given embedding model.
 func (s *MySQLStore) DeleteByModel(ctx context.Context, modelID uint) error {
 	for _, tbl := range []string{"review_issue_vectors", "review_rule_vectors", "rule_incubation_vectors"} {
-		if err := s.db.WithContext(ctx).Table(tbl).Where("model_id = ?", modelID).Delete(nil).Error; err != nil {
+		if err := s.db.WithContext(ctx).Table(tbl).Where("model_id = ?", modelID).Delete(map[string]interface{}{}).Error; err != nil {
 			return err
 		}
 	}
