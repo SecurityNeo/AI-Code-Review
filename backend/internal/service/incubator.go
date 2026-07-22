@@ -436,7 +436,7 @@ func (s *IncubatorService) keywordCluster(issues []model.ReviewIssue, minSize in
 	}
 	groups := make(map[groupKey][]model.ReviewIssue)
 	for _, iss := range issues {
-		k := groupKey{Category: iss.Category, Language: iss.Language, Severity: iss.Severity}
+		k := groupKey{Category: iss.Category, Language: inferLanguage(iss.File), Severity: iss.Severity}
 		groups[k] = append(groups[k], iss)
 	}
 
@@ -698,13 +698,6 @@ func jaccard(a, b []string) float64 {
 	return float64(inter) / float64(union)
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // extractJSON extracts the outermost JSON object from a text, handling markdown code blocks.
 func extractJSON(s string) string {
 	s = strings.TrimSpace(s)
@@ -747,7 +740,7 @@ func extractJSON(s string) string {
 
 // runRefine uses LLM to generate rule name, description and prompt from source issues.
 func (s *IncubatorService) runRefine(incubationID uint) error {
-	cand, issues, err := s.GetCandidate(incubationID)
+	_, issues, err := s.GetCandidate(incubationID)
 	if err != nil {
 		return err
 	}
