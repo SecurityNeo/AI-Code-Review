@@ -1366,21 +1366,10 @@ function renderPipeline(steps) {
         </div>`;
     });
 
-    // Do NOT use innerHTML, because it would destroy any SVG we append later.
-    // Instead, clear only the nodes (keep the container itself intact).
-    // First, preserve the old SVG if it exists, then remove all children except SVG,
-    // rebuild nodes, then ensure SVG is the last child.
-    let oldSvg = container.querySelector('#pipelineSvg');
-    if (oldSvg) oldSvg.remove();
+    // Reset container content completely
+    container.innerHTML = html;
 
-    // Create a temporary div to parse the HTML string
-    const tmp = document.createElement('div');
-    tmp.innerHTML = html;
-    while (tmp.firstChild) {
-        container.appendChild(tmp.firstChild);
-    }
-
-    // Create SVG inside container via DOM API so it can never be lost by innerHTML
+    // Create SVG inside container via DOM API (after innerHTML so it won't be lost)
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.id = 'pipelineSvg';
     svg.setAttribute('class', 'absolute top-0 left-0 pointer-events-none');
