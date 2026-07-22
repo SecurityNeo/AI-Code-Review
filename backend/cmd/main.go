@@ -71,7 +71,20 @@ func main() {
 	service.RefreshSysCfgCache()
 	_, _ = cronRunner.AddFunc("@every 1m", service.RefreshSysCfgCache)
 
-	// 5.3. 启动 LLM 调用日志后台 worker（依赖 model.DB，必须在 InitDB 之后调用）
+	// 5.3. 启动规则孵化台异步 Job 运行器
+	vectorStore := vectorstore.NewMySQLStore(model.DB)
+	embedSvc := service.NewEmbeddingService(vectorStore)
+	incubSvc := service.NewIncubatorService(embedSvc, vectorStore)
+	service.NewIncubatorJobRunner(incubSvc, embedSvc).Start()
+
+	// 5.3.5. 启动规则健康检查定时 Job（每周一次）
+	_, _ = cronRunner.AddFunc("0 2 * * 1", func() {
+		if _, err := service.QueueJob("health_check", map[string]any{}); err != nil {
+			zap.L().Warn("queue health check job failed", zap.Error(err))
+		}
+	})
+
+	// 5.4. 启动 LLM 调用日志后台 worker（依赖 model.DB，必须在 InitDB 之后调用）
 	llmcall.Start()
 
 	// 6. 初始化 HTTP Router
@@ -487,6 +500,11 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 			incubator.PUT("/candidates/:id", h.UpdateCandidate)
 			incubator.DELETE("/candidates/:id", h.DeleteCandidate)
 			incubator.POST("/candidates/:id/publish", h.PublishCandidate)
+			incubator.POST("/candidates/:id/refine", h.TriggerRefine)
+			incubator.POST("/candidates/:id/similar-check", h.TriggerSimilarCheck)
+			incubator.POST("/candidates/:id/test", h.TriggerSandboxTest)
+			incubator.POST("/retro-match", h.RetroMatch)
+			incubator.GET("/health/rules", h.RuleHealth)
 			incubator.GET("/config", h.GetConfig)
 			incubator.PUT("/config", h.SaveConfig)
 			incubator.POST("/config/validate-embedding", h.ValidateEmbedding)

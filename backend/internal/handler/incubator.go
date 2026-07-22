@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
@@ -288,4 +289,131 @@ func (h *IncubatorHandler) ValidateEmbedding(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"code": 0, "data": data})
+}
+
+// TriggerRefine queues a refine job for a candidate.
+// POST /api/v1/incubator/candidates/:id/refine
+func (h *IncubatorHandler) TriggerRefine(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
+	job, err := service.QueueJob("refine", map[string]any{"incubation_id": uint(id)})
+	if err != nil {
+		zap.L().Error("queue refine job failed", zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "data": map[string]any{"job_id": job.ID, "status": "queued", "message": "Prompt提炼任务已加入队列"}})
+}
+
+// TriggerSimilarCheck queues a similar-rule check job.
+// POST /api/v1/incubator/candidates/:id/similar-check
+func (h *IncubatorHandler) TriggerSimilarCheck(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
+	job, err := service.QueueJob("similar_check", map[string]any{"incubation_id": uint(id)})
+	if err != nil {
+		zap.L().Error("queue similar_check job failed", zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "data": map[string]any{"job_id": job.ID, "status": "queued", "message": "相似规则检测任务已加入队列"}})
+}
+
+// TriggerSandboxTest queues a sandbox test job.
+// POST /api/v1/incubator/candidates/:id/test
+func (h *IncubatorHandler) TriggerSandboxTest(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
+	job, err := service.QueueJob("sandbox_test", map[string]any{"incubation_id": uint(id)})
+	if err != nil {
+		zap.L().Error("queue sandbox_test job failed", zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "data": map[string]any{"job_id": job.ID, "status": "queued", "message": "模拟测试任务已加入队列"}})
+}
+
+// RetroMatch queues a retroactive matching job for a published rule.
+// POST /api/v1/incubator/retro-match
+func (h *IncubatorHandler) RetroMatch(c *gin.Context) {
+	var req struct {
+		RuleID       uint    `json:"rule_id" binding:"required"`
+		LookbackDays int     `json:"lookback_days"`
+		Threshold    float64 `json:"threshold"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "参数错误: " + err.Error()})
+		return
+	}
+	job, err := service.QueueJob("retro_match", map[string]any{
+		"rule_id":       req.RuleID,
+		"lookback_days": req.LookbackDays,
+		"threshold":     req.Threshold,
+	})
+	if err != nil {
+		zap.L().Error("queue retro_match job failed", zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "data": map[string]any{"job_id": job.ID, "status": "queued", "message": "回溯匹配任务已加入队列"}})
+}
+
+// RuleHealth returns the health overview of published rules.
+// GET /api/v1/incubator/health/rules
+func (h *IncubatorHandler) RuleHealth(c *gin.Context) {
+	var rules []model.ReviewRule
+	if err := model.DB.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
+		zap.L().Error("load rules for health failed", zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	sevenDaysAgo := time.Now().AddDate(0, 0, -7)
+	var result []gin.H
+	for _, rule := range rules {
+		var hitCount int64
+		model.DB.Model(&model.ReviewIssue{}).Where("rule_id = ? AND created_at >= ?", rule.ID, sevenDaysAgo).Count(&hitCount)
+
+		var missedCount int64
+		model.DB.Model(&model.ReviewIssue{}).
+			Where("rule_id IS NULL AND created_at >= ? AND category = ?", sevenDaysAgo, rule.Category).
+			Count(&missedCount)
+
+		var totalIssues, rejectedIssues int64
+		model.DB.Model(&model.ReviewIssue{}).Where("rule_id = ?", rule.ID).Count(&totalIssues)
+		model.DB.Model(&model.ReviewIssue{}).Where("rule_id = ? AND status = ?", rule.ID, "rejected").Count(&rejectedIssues)
+
+		rejectRate := float64(0)
+		if totalIssues > 0 {
+			rejectRate = float64(rejectedIssues) / float64(totalIssues)
+		}
+
+		alertLevel := "healthy"
+		if rejectRate > 0.15 || missedCount > 20 {
+			alertLevel = "warning"
+		}
+		if rejectRate > 0.25 || missedCount > 50 {
+			alertLevel = "critical"
+		}
+
+		var suggestion string
+		switch alertLevel {
+		case "critical":
+			suggestion = "该规则命中率高但拒绝率也很高，或同类未命中问题严重。建议立即审查Prompt，收紧检查条件，防止误报。"
+		case "warning":
+			suggestion = "该规则健康度下降，存在较多同类未命中问题。建议审查Prompt，补充边界情况说明。"
+		default:
+			suggestion = ""
+		}
+
+		result = append(result, gin.H{
+			"rule_id":         rule.ID,
+			"rule_name":       rule.Name,
+			"rule_code":       rule.Code,
+			"hit_count_7d":    hitCount,
+			"missed_count_7d": missedCount,
+			"reject_rate":     rejectRate,
+			"alert_level":     alertLevel,
+			"suggestion":      suggestion,
+		})
+	}
+
+	c.JSON(200, gin.H{"code": 0, "data": result})
 }

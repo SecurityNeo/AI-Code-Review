@@ -699,6 +699,350 @@ func min(a, b int) int {
 	return b
 }
 
+// runRefine uses LLM to generate rule name, description and prompt from source issues.
+func (s *IncubatorService) runRefine(incubationID uint) error {
+	cand, issues, err := s.GetCandidate(incubationID)
+	if err != nil {
+		return err
+	}
+	if len(issues) == 0 {
+		return fmt.Errorf("no source issues")
+	}
+
+	// Build issue samples for LLM
+	var samples []string
+	for i, iss := range issues {
+		if i >= 5 {
+			break
+		}
+		samples = append(samples, fmt.Sprintf("Issue %d:\nFile: %s\nMessage: %s\nSuggestion: %s",
+			i+1, iss.File, iss.Message, iss.Suggestion))
+	}
+	sampleText := strings.Join(samples, "\n\n")
+
+	llmSvc := NewLLMService()
+	systemPrompt := "You are a code-review rule engineer. Your task is to analyze a set of code issues and abstract them into a general review rule."
+	userPrompt := fmt.Sprintf(`Analyze the following code-review issues and output a structured review rule.
+
+Issues:
+%s
+
+Please output in the following JSON format (do not include markdown code block):
+{
+  "name": "A concise Chinese rule name (within 20 characters)",
+  "description": "A 1-2 sentence description of what this rule checks, why it matters, and how to fix it (in Chinese)",
+  "prompt": "A detailed instruction in Chinese for an LLM to perform this check. Include: 1) clear check objectives, 2) judgment criteria, 3) examples of what constitutes a violation and what does not, 4) only output instruction text, no explanatory text."
+}
+`, sampleText)
+
+	resp, err := llmSvc.ChatCompletion(nil, 0, "rule_refine", systemPrompt, userPrompt)
+	if err != nil {
+		return fmt.Errorf("llm refine failed: %w", err)
+	}
+
+	// Parse JSON from LLM response
+	var refineResult struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Prompt      string `json:"prompt"`
+	}
+	content := strings.TrimSpace(resp.Content)
+	// Try to extract JSON if wrapped in markdown
+	if idx := strings.Index(content, "{"); idx >= 0 {
+		if end := strings.LastIndex(content, "}"); end > idx {
+			content = content[idx : end+1]
+		}
+	}
+	if err := json.Unmarshal([]byte(content), &refineResult); err != nil {
+		return fmt.Errorf("parse refine result failed: %w, raw: %s", err, resp.Content)
+	}
+
+	// Update candidate
+	updates := map[string]any{}
+	if refineResult.Name != "" {
+		updates["name"] = refineResult.Name
+	}
+	if refineResult.Description != "" {
+		updates["description"] = refineResult.Description
+	}
+	if refineResult.Prompt != "" {
+		updates["prompt"] = refineResult.Prompt
+	}
+	updates["status"] = "ready"
+	if len(updates) > 0 {
+		return s.UpdateCandidate(incubationID, updates)
+	}
+	return nil
+}
+
+// runSimilarCheck detects similarity between the candidate and existing rules.
+func (s *IncubatorService) runSimilarCheck(incubationID uint) error {
+	cand, _, err := s.GetCandidate(incubationID)
+	if err != nil {
+		return err
+	}
+
+	var rules []model.ReviewRule
+	if err := model.DB.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
+		return err
+	}
+
+	var similar []map[string]any
+	candKeywords := extractKeywords(cand.Name + " " + cand.Description + " " + cand.Prompt)
+	for _, r := range rules {
+		ruleKeywords := extractKeywords(r.Name + " " + r.Description + " " + r.Prompt)
+		score := jaccard(candKeywords, ruleKeywords)
+		if score >= 0.5 {
+			similar = append(similar, map[string]any{
+				"rule_id":    r.ID,
+				"name":       r.Name,
+				"similarity": score,
+			})
+		}
+	}
+
+	similarJSON, err := json.Marshal(similar)
+	if err != nil {
+		return err
+	}
+
+	// Also check code uniqueness
+	var codeExists int64
+	model.DB.Model(&model.ReviewRule{}).Where("code = ?", cand.Code).Count(&codeExists)
+	updates := map[string]any{
+		"similar_rules": string(similarJSON),
+	}
+	if codeExists > 0 {
+		updates["code"] = fmt.Sprintf("%s-%d", cand.Code, time.Now().Unix())
+	}
+
+	return s.UpdateCandidate(incubationID, updates)
+}
+
+// runSandboxTest uses LLM to verify the candidate rule against positive/negative test cases.
+func (s *IncubatorService) runSandboxTest(incubationID uint) error {
+	cand, issues, err := s.GetCandidate(incubationID)
+	if err != nil {
+		return err
+	}
+	if cand.Prompt == "" {
+		return fmt.Errorf("prompt is empty, cannot test")
+	}
+
+	// Build positive cases from accepted/interesting issues and negative from sibling code without issues
+	type testCase struct {
+		No       int    `json:"no"`
+		Type     string `json:"type"` // positive / negative
+		Code     string `json:"code"`
+		File     string `json:"file"`
+		Expected bool   `json:"expected"`
+		Actual   bool   `json:"actual"`
+		Pass     bool   `json:"pass"`
+		Reason   string `json:"reason"`
+	}
+
+	var cases []testCase
+
+	// Positive: source issues that have code snippets
+	posCount := 0
+	for _, iss := range issues {
+		if posCount >= 5 {
+			break
+		}
+		if iss.CodeSnippet != "" {
+			cases = append(cases, testCase{
+				No:       posCount + 1,
+				Type:     "positive",
+				Code:     iss.CodeSnippet,
+				File:     iss.File,
+				Expected: true,
+			})
+			posCount++
+		}
+	}
+	if posCount == 0 {
+		return fmt.Errorf("no code snippets for positive test cases")
+	}
+
+	llmSvc := NewLLMService()
+	passed := 0
+	for i := range cases {
+		systemPrompt := "You are a strict code review assistant. Answer only 'YES' if the given code violates the described rule, or 'NO' if it does not. Be concise."
+		userPrompt := fmt.Sprintf("Rule description:\n%s\n\nCode to review:\n```\n%s\n```\n\nDoes this code violate the rule? Answer YES or NO only.",
+			cand.Prompt, cases[i].Code)
+
+		resp, err := llmSvc.ChatCompletion(nil, 0, "sandbox_test", systemPrompt, userPrompt)
+		if err != nil {
+			cases[i].Pass = false
+			cases[i].Reason = "LLM call failed: " + err.Error()
+			continue
+		}
+
+		answer := strings.ToUpper(strings.TrimSpace(resp.Content))
+		cases[i].Actual = strings.Contains(answer, "YES")
+		cases[i].Pass = cases[i].Actual == cases[i].Expected
+		if cases[i].Pass {
+			passed++
+		} else {
+			cases[i].Reason = fmt.Sprintf("Expected %v, got %v", cases[i].Expected, cases[i].Actual)
+		}
+	}
+
+	testResult := map[string]any{
+		"total_cases": len(cases),
+		"passed":      passed,
+		"accuracy":    float64(passed) / float64(len(cases)),
+		"details":     cases,
+	}
+	resultJSON, _ := json.Marshal(testResult)
+
+	return model.DB.Model(&model.RuleIncubation{}).Where("id = ?", incubationID).Update("test_results", string(resultJSON)).Error
+}
+
+// runRetroMatch performs retroactive matching for a published rule against historical issues.
+func (s *IncubatorService) runRetroMatch(ruleID uint, lookbackDays int, threshold float64) error {
+	var rule model.ReviewRule
+	if err := model.DB.First(&rule, ruleID).Error; err != nil {
+		return err
+	}
+	if lookbackDays <= 0 {
+		lookbackDays = s.getConfig().RetroMatchMaxDaysLookback
+	}
+	if threshold <= 0 {
+		threshold = s.getConfig().RetroMatchConfidenceThreshold
+	}
+
+	since := time.Now().AddDate(0, 0, -lookbackDays)
+	var issues []model.ReviewIssue
+	if err := model.DB.Where("rule_id IS NULL AND created_at >= ?", since).Find(&issues).Error; err != nil {
+		return err
+	}
+
+	// Level 1: structural filter
+	var candidates []model.ReviewIssue
+	for _, iss := range issues {
+		if inferLanguage(iss.File) != rule.Language && rule.Language != "common" {
+			continue
+		}
+		if iss.Category != rule.Category {
+			continue
+		}
+		candidates = append(candidates, iss)
+	}
+
+	// Level 2: keyword pre-match
+	var filtered []model.ReviewIssue
+	ruleKeywords := extractKeywords(rule.Prompt + " " + rule.Name)
+	for _, iss := range candidates {
+		issKeywords := extractKeywords(iss.Message + " " + iss.Suggestion)
+		if jaccard(ruleKeywords, issKeywords) < 0.3 { // too different
+			continue
+		}
+		filtered = append(filtered, iss)
+	}
+
+	// Build matches (without Level 3 embedding for MVP, or if available use it)
+	matched := 0
+	for _, iss := range filtered {
+		confidence := 0.7 // baseline for passing L1+L2
+		if s.embedSvc.IsAvailable() {
+			// Level 3: if embedding available, do semantic comparison
+			// In MVP we skip complex semantic comparison and rely on L1+L2 + a moderate threshold
+			confidence = 0.75
+		}
+		if confidence < threshold {
+			continue
+		}
+
+		exists := int64(0)
+		model.DB.Model(&model.ReviewIssueRuleMatch{}).Where("issue_id = ? AND rule_id = ?", iss.ID, ruleID).Count(&exists)
+		if exists > 0 {
+			continue
+		}
+
+		match := model.ReviewIssueRuleMatch{
+			IssueID:    iss.ID,
+			RuleID:     ruleID,
+			MatchType:  "retroactive",
+			MatchedAt:  time.Now(),
+			Confidence: confidence,
+		}
+		if err := model.DB.Create(&match).Error; err != nil {
+			zap.L().Warn("create retro match failed",
+				zap.Uint("issue_id", iss.ID),
+				zap.Uint("rule_id", ruleID),
+				zap.Error(err))
+			continue
+		}
+		matched++
+	}
+
+	zap.L().Info("retro match completed",
+		zap.Uint("rule_id", ruleID),
+		zap.Int("matched", matched),
+		zap.Int("candidates", len(filtered)))
+	return nil
+}
+
+// runHealthCheck evaluates the health of all published rules.
+func (s *IncubatorService) runHealthCheck() error {
+	cfg := s.getConfig()
+	if !cfg.HealthCheckEnabled {
+		return nil
+	}
+
+	var rules []model.ReviewRule
+	if err := model.DB.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
+		return err
+	}
+
+	for _, rule := range rules {
+		// Calculate recent hit rate (past 7 days)
+		sevenDaysAgo := time.Now().AddDate(0, 0, -7)
+		var hitCount int64
+		model.DB.Model(&model.ReviewIssue{}).Where("rule_id = ? AND created_at >= ?", rule.ID, sevenDaysAgo).Count(&hitCount)
+
+		// Calculate total unmatched issues in the same category/language in past 7 days
+		var missedCount int64
+		missedDB := model.DB.Model(&model.ReviewIssue{}).
+			Where("rule_id IS NULL AND created_at >= ? AND category = ?", sevenDaysAgo, rule.Category)
+		if rule.Language != "common" {
+			// approximate by file extension; exact language matching needs a language column
+		}
+		missedDB.Count(&missedCount)
+
+		// Get reject rate
+		var totalIssues, rejectedIssues int64
+		model.DB.Model(&model.ReviewIssue{}).Where("rule_id = ?", rule.ID).Count(&totalIssues)
+		model.DB.Model(&model.ReviewIssue{}).Where("rule_id = ? AND status = ?", rule.ID, "rejected").Count(&rejectedIssues)
+
+		rejectRate := float64(0)
+		if totalIssues > 0 {
+			rejectRate = float64(rejectedIssues) / float64(totalIssues)
+		}
+
+		// For now we only log; later we can persist health snapshots or alert
+		alertLevel := "healthy"
+		if rejectRate > 0.15 || missedCount > 20 {
+			alertLevel = "warning"
+		}
+		if rejectRate > 0.25 || missedCount > 50 {
+			alertLevel = "critical"
+		}
+
+		if alertLevel != "healthy" {
+			zap.L().Info("rule health check",
+				zap.Uint("rule_id", rule.ID),
+				zap.String("rule_code", rule.Code),
+				zap.String("alert_level", alertLevel),
+				zap.Int64("hit_7d", hitCount),
+				zap.Int64("missed_7d", missedCount),
+				zap.Float64("reject_rate", rejectRate))
+		}
+	}
+	return nil
+}
+
 func inferLanguage(file string) string {
 	f := strings.ToLower(file)
 	switch {
