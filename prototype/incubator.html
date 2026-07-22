@@ -1404,6 +1404,7 @@ function startNodeDrag(e, stepId) {
         startY: e.clientY,
         origLeft: parseFloat(node.style.left) || 0,
         origTop: parseFloat(node.style.top) || 0,
+        positions: pipelineDrag.positions || {},
     };
     node.classList.add('dragging');
 
