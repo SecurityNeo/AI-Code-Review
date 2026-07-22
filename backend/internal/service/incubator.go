@@ -364,7 +364,9 @@ func (s *IncubatorService) ClusterIssues(timeRangeDays int, languages []string, 
 		CreatedAt:     time.Now(),
 		StartedAt:     func() *time.Time { t := time.Now(); return &t }(),
 	}
-	model.DB.Create(job)
+	if err := model.DB.Create(job).Error; err != nil {
+		return nil, fmt.Errorf("create cluster job failed: %w", err)
+	}
 
 	// Keyword clustering (level 1 + 2, no embedding)
 	clusters := s.keywordCluster(issues, minGroupSize)
@@ -382,6 +384,8 @@ func (s *IncubatorService) ClusterIssues(timeRangeDays int, languages []string, 
 		}, 0)
 		if err == nil {
 			generated++
+		} else {
+			zap.L().Warn("create candidate from cluster failed", zap.String("cluster_id", cl.ID), zap.Error(err))
 		}
 	}
 
@@ -390,14 +394,19 @@ func (s *IncubatorService) ClusterIssues(timeRangeDays int, languages []string, 
 		"clusters_found":       len(clusters),
 		"candidates_generated": generated,
 	}
-	summaryJSON, _ := json.Marshal(summary)
+	summaryJSON, err := json.Marshal(summary)
+	if err != nil {
+		summaryJSON = []byte("{}")
+	}
 
 	now := time.Now()
-	model.DB.Model(job).Updates(map[string]any{
+	if err := model.DB.Model(job).Updates(map[string]any{
 		"status":         "success",
 		"result_summary": string(summaryJSON),
-		"completed_at":   now,
-	})
+		"completed_at":   &now,
+	}).Error; err != nil {
+		zap.L().Warn("update cluster job failed", zap.Uint("job_id", job.ID), zap.Error(err))
+	}
 
 	return job, nil
 }
@@ -484,12 +493,68 @@ func (s *IncubatorService) GetConfig() model.IncubatorConfig {
 }
 
 // SaveConfig updates the incubator configuration.
+// It sanitizes and type-converts known fields to avoid GORM map-update type mismatches.
 func (s *IncubatorService) SaveConfig(updates map[string]any) error {
 	var cfg model.IncubatorConfig
 	if err := model.DB.First(&cfg, 1).Error; err != nil {
 		return err
 	}
-	return model.DB.Model(&cfg).Updates(updates).Error
+
+	clean := map[string]any{}
+	if v, ok := updates["embedding_model_id"]; ok {
+		switch val := v.(type) {
+		case nil:
+			clean["embedding_model_id"] = nil
+		case float64:
+			if val > 0 {
+				uid := uint(val)
+				clean["embedding_model_id"] = &uid
+			} else {
+				clean["embedding_model_id"] = nil
+			}
+		default:
+			clean["embedding_model_id"] = v
+		}
+	}
+	for _, key := range []string{"cluster_min_group_size", "cluster_max_groups_per_run", "cluster_time_window_days", "retro_match_max_days_lookback"} {
+		if v, ok := updates[key]; ok {
+			switch val := v.(type) {
+			case float64:
+				clean[key] = int(val)
+			case int:
+				clean[key] = val
+			default:
+				clean[key] = v
+			}
+		}
+	}
+	if v, ok := updates["retro_match_enabled"]; ok {
+		clean["retro_match_enabled"] = v
+	}
+	if v, ok := updates["retro_match_confidence_threshold"]; ok {
+		clean["retro_match_confidence_threshold"] = v
+	}
+	if v, ok := updates["health_check_enabled"]; ok {
+		clean["health_check_enabled"] = v
+	}
+	if v, ok := updates["health_check_interval_days"]; ok {
+		switch val := v.(type) {
+		case float64:
+			clean["health_check_interval_days"] = int(val)
+		case int:
+			clean["health_check_interval_days"] = val
+		default:
+			clean["health_check_interval_days"] = v
+		}
+	}
+	if v, ok := updates["vector_store_type"]; ok {
+		clean["vector_store_type"] = v
+	}
+
+	if len(clean) == 0 {
+		return nil
+	}
+	return model.DB.Model(&cfg).Updates(clean).Error
 }
 
 // ValidateEmbedding checks whether the configured embedding model is reachable.

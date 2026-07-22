@@ -115,7 +115,12 @@ func (h *IncubatorHandler) GetClusterJob(c *gin.Context) {
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
 	var job model.RuleIncubationJob
 	if err := model.DB.First(&job, uint(id)).Error; err != nil {
-		c.JSON(404, gin.H{"error": "job not found"})
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(404, gin.H{"error": "job not found"})
+			return
+		}
+		zap.L().Error("get cluster job failed", zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(200, gin.H{"code": 0, "data": job})
