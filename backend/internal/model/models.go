@@ -542,7 +542,6 @@ type LLMCallLog struct {
 type IncubatorConfig struct {
 	ID                            uint      `gorm:"primaryKey" json:"id"`
 	EmbeddingModelID              *uint     `gorm:"index" json:"embedding_model_id"`
-	EmbeddingEnabled              bool      `gorm:"default:false" json:"embedding_enabled"`
 	ClusterMinGroupSize           int       `gorm:"default:3" json:"cluster_min_group_size"`
 	ClusterMaxGroupsPerRun        int       `gorm:"default:20" json:"cluster_max_groups_per_run"`
 	ClusterTimeWindowDays         int       `gorm:"default:30" json:"cluster_time_window_days"`
