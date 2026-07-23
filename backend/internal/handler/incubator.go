@@ -431,6 +431,18 @@ func (h *IncubatorHandler) RetroMatch(c *gin.Context) {
 // RuleHealth returns the health overview of published rules.
 // GET /api/v1/incubator/health/rules
 func (h *IncubatorHandler) RuleHealth(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "12"))
+	if pageSize < 1 {
+		pageSize = 12
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
 	var rules []model.ReviewRule
 	if err := model.DB.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
 		zap.L().Error("load rules for health failed", zap.Error(err))
@@ -488,5 +500,33 @@ func (h *IncubatorHandler) RuleHealth(c *gin.Context) {
 		})
 	}
 
-	c.JSON(200, gin.H{"code": 0, "data": result})
+	// Sort: critical > warning > healthy
+	order := map[string]int{"critical": 0, "warning": 1, "healthy": 2}
+	for i := 0; i < len(result)-1; i++ {
+		for j := i + 1; j < len(result); j++ {
+			ai := result[i]["alert_level"].(string)
+			aj := result[j]["alert_level"].(string)
+			if order[ai] > order[aj] {
+				result[i], result[j] = result[j], result[i]
+			}
+		}
+	}
+
+	total := len(result)
+	start := (page - 1) * pageSize
+	end := start + pageSize
+	if start > total {
+		start = total
+	}
+	if end > total {
+		end = total
+	}
+	paged := result[start:end]
+
+	c.JSON(200, gin.H{"code": 0, "data": gin.H{
+		"list":      paged,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+	}})
 }

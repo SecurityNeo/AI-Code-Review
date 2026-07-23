@@ -97,7 +97,7 @@
                     <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800 active" data-tab="pipeline" onclick="switchTab('pipeline')">流水线</button>
                     <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800" data-tab="issues" onclick="switchTab('issues')">原始Issue池</button>
                     <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800" data-tab="candidates" onclick="switchTab('candidates')">候选规则</button>
-                    <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800" data-tab="health" onclick="switchTab('health')">规则健康</button>
+                    <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800" data-tab="health" onclick="switchTab('health')">规则健康度</button>
                     <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800" data-tab="config" onclick="switchTab('config')">孵化配置</button>
                 </div>
 
@@ -235,13 +235,15 @@
                     </div>
                 </div>
 
-                <!-- 规则健康 Tab -->
+                <!-- 规则健康度 Tab -->
                 <div id="tab-health" class="tab-content p-4 hidden">
                     <div class="flex items-center justify-between mb-4">
                         <h3 class="font-semibold text-gray-800">规则健康度看板</h3>
                         <button onclick="loadRuleHealth()" class="px-3 py-1.5 border rounded-lg text-sm hover:bg-gray-50"><i class="fas fa-redo mr-1"></i>刷新</button>
                     </div>
                     <div id="healthGrid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+                    <!-- Pagination -->
+                    <div id="healthPagination" class="flex items-center justify-center gap-3 mt-6"></div>
                 </div>
 
                 <!-- 配置 Tab -->
@@ -1191,23 +1193,29 @@ function formatTime(t) {
 }
 
 // ====== Rule Health ======
-async function loadRuleHealth() {
+// Health pagination state
+let healthPage = 1;
+const healthPageSize = 12;
+
+async function loadRuleHealth(page) {
+    if (page) healthPage = page;
     const grid = document.getElementById('healthGrid');
+    const pagEl = document.getElementById('healthPagination');
     grid.innerHTML = '<div class="col-span-full text-center py-8 text-gray-500">加载中...</div>';
+    pagEl.innerHTML = '';
     try {
-        const res = await apiFetch(API_BASE + '/incubator/health/rules');
+        const res = await apiFetch(API_BASE + '/incubator/health/rules?page=' + healthPage + '&page_size=' + healthPageSize);
         const data = await res.json();
-        const list = data.data || [];
-        document.getElementById('statHealth').textContent = list.filter(r => r.alert_level !== 'healthy').length;
+        const payload = data.data || {};
+        const list = payload.list || [];
+        const total = payload.total || 0;
+
+        document.getElementById('statHealth').textContent = total; // show total count
 
         if (list.length === 0) {
-            grid.innerHTML = '<div class="col-span-full text-center py-8 text-gray-400">暂无规则健康数据</div>';
+            grid.innerHTML = '<div class="col-span-full text-center py-8 text-gray-400">暂无规则健康度数据</div>';
             return;
         }
-
-        // Sort: critical > warning > healthy
-        const order = { critical: 0, warning: 1, healthy: 2 };
-        list.sort((a, b) => order[a.alert_level] - order[b.alert_level]);
 
         grid.innerHTML = list.map(r => {
             const border = r.alert_level === 'critical' ? 'border-l-4 border-red-500' : r.alert_level === 'warning' ? 'border-l-4 border-yellow-500' : 'border-l-4 border-green-500';
@@ -1239,9 +1247,25 @@ async function loadRuleHealth() {
                 </div>
             `;
         }).join('');
+
+        renderHealthPagination(total, payload.page || healthPage, payload.page_size || healthPageSize);
     } catch (err) {
         grid.innerHTML = `<div class="col-span-full text-center py-8 text-red-500">加载失败: ${err.message}</div>`;
     }
+}
+
+function renderHealthPagination(total, page, pageSize) {
+    const el = document.getElementById('healthPagination');
+    const totalPages = Math.ceil(total / pageSize) || 1;
+    if (totalPages <= 1) {
+        el.innerHTML = '';
+        return;
+    }
+    let html = '';
+    html += `<button onclick="loadRuleHealth(${page - 1})" ${page <= 1 ? 'disabled' : ''} class="px-3 py-1 border rounded text-sm ${page <= 1 ? 'text-gray-300 cursor-not-allowed' : 'hover:bg-gray-50'}">上一页</button>`;
+    html += `<span class="text-sm text-gray-600">第 ${page} / ${totalPages} 页（共 ${total} 条）</span>`;
+    html += `<button onclick="loadRuleHealth(${page + 1})" ${page >= totalPages ? 'disabled' : ''} class="px-3 py-1 border rounded text-sm ${page >= totalPages ? 'text-gray-300 cursor-not-allowed' : 'hover:bg-gray-50'}">下一页</button>`;
+    el.innerHTML = html;
 }
 
 // ====== Pipeline ======
