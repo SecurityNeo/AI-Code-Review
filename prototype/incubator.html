@@ -673,23 +673,45 @@ function renderTestResults(results) {
     if (!data || !data.total_cases) return '';
     const accuracy = (data.accuracy * 100).toFixed(1);
     const color = data.accuracy >= 0.9 ? 'text-green-600' : data.accuracy >= 0.7 ? 'text-yellow-600' : 'text-red-600';
-    const details = (data.details || []).map(d => `
-        <tr class="${d.pass ? 'text-green-700' : 'text-red-600'}">
-            <td class="px-2 py-1 border-b">#${d.no}</td>
-            <td class="px-2 py-1 border-b">${d.type === 'positive' ? '🔴正例' : '🔵反例'}</td>
-            <td class="px-2 py-1 border-b">${d.pass ? '✅通过' : '❌失败'}</td>
-            <td class="px-2 py-1 border-b text-xs">${escapeHtml(d.reason || '')}</td>
-        </tr>
-    `).join('');
+
+    const detailCards = (data.details || []).map(d => {
+        const isPos = d.type === 'positive';
+        const typeLabel = isPos ? '🔴 正例（应命中）' : '🔵 反例（应忽略）';
+        const passLabel = d.pass ? '✅ 判定正确' : '❌ 判定错误';
+        const cardBorder = d.pass ? 'border-green-200' : 'border-red-200';
+        const codeStr = escapeHtml(d.code || '');
+        return `
+        <div class="border rounded-lg overflow-hidden ${cardBorder} mb-3">
+            <div class="bg-white px-3 py-2 flex items-center justify-between border-b">
+                <div class="flex items-center gap-2">
+                    <span class="font-semibold text-sm text-gray-800">#${d.no}</span>
+                    <span class="text-xs px-1.5 py-0.5 rounded ${isPos ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}">${typeLabel}</span>
+                    <span class="text-xs font-medium ${d.pass ? 'text-green-600' : 'text-red-600'}">${passLabel}</span>
+                </div>
+                <span class="text-[10px] text-gray-400 font-mono">${escapeHtml(d.file || '')}</span>
+            </div>
+            <div class="p-0">
+                <div class="bg-gray-900 text-gray-100 p-3 overflow-x-auto">
+                    <pre class="text-xs font-mono leading-relaxed m-0"><code>${codeStr}</code></pre>
+                </div>
+                <div class="px-3 py-2 bg-gray-50 border-t">
+                    <div class="grid grid-cols-2 gap-4 text-xs">
+                        <div><span class="text-gray-400">期望判定：</span><span class="font-medium ${d.expected ? 'text-red-600' : 'text-blue-600'}">${d.expected ? '命中（违规）' : '忽略（合规）'}</span></div>
+                        <div><span class="text-gray-400">实际判定：</span><span class="font-medium ${d.actual ? 'text-red-600' : 'text-blue-600'}">${d.actual ? '命中（违规）' : '忽略（合规）'}</span></div>
+                    </div>
+                    ${d.reason ? `<div class="mt-1 text-xs ${d.pass ? 'text-green-600' : 'text-red-500'}"><i class="fas ${d.pass ? 'fa-check' : 'fa-times'} mr-1"></i>${escapeHtml(d.reason)}</div>` : ''}
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+
     return `
         <div class="bg-gray-50 rounded-lg p-3">
-            <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center justify-between mb-3">
                 <span class="text-xs font-medium text-gray-500">模拟测试结果</span>
-                <span class="text-sm font-bold ${color}">${accuracy}% (${data.passed}/${data.total_cases})</span>
+                <span class="text-sm font-bold ${color}">${accuracy}% 通过率（${data.passed}/${data.total_cases}）</span>
             </div>
-            <div class="overflow-x-auto">
-                <table class="w-full text-xs">${details}</table>
-            </div>
+            ${detailCards}
         </div>
     `;
 }
