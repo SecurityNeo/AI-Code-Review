@@ -254,7 +254,7 @@ func (s *IncubatorService) UpdateCandidate(id uint, updates map[string]any) erro
 	return model.DB.Model(&cand).Updates(updates).Error
 }
 
-// DeleteCandidate soft-deletes by marking rejected.
+// DeleteCandidate hard-deletes a candidate rule (protects published ones).
 func (s *IncubatorService) DeleteCandidate(id uint) error {
 	var cand model.RuleIncubation
 	if err := model.DB.First(&cand, id).Error; err != nil {
@@ -263,7 +263,7 @@ func (s *IncubatorService) DeleteCandidate(id uint) error {
 	if cand.Status == "published" {
 		return fmt.Errorf("cannot delete published candidate")
 	}
-	return model.DB.Model(&cand).Update("status", "rejected").Error
+	return model.DB.Delete(&cand).Error
 }
 
 // ListCandidates returns incubation candidates with optional status filter.

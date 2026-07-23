@@ -502,6 +502,25 @@
     </div>
 </div>
 
+<!-- 删除规则确认 Modal -->
+<div id="deleteModal" class="modal fixed inset-0 z-50 items-center justify-center bg-black/50 hidden">
+    <div class="bg-white rounded-xl w-[480px] max-h-[85vh] overflow-y-auto p-6 shadow-2xl">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="font-bold text-lg text-gray-800"><i class="fas fa-trash-alt text-red-600 mr-2"></i>删除候选规则</h3>
+            <button onclick="closeDeleteModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+        </div>
+        <div id="deleteModalBody" class="space-y-4">
+            <!-- 动态填充 -->
+        </div>
+        <div class="flex items-center justify-end gap-3 mt-6 pt-4 border-t">
+            <button onclick="closeDeleteModal()" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 text-gray-600">取消</button>
+            <button id="deleteConfirmBtn" class="px-5 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 font-medium">
+                <i class="fas fa-trash-alt mr-1"></i>确认删除
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- 发布规则确认 Modal -->
 <div id="publishModal" class="modal fixed inset-0 z-50 items-center justify-center bg-black/50 hidden">
     <div class="bg-white rounded-xl w-[520px] max-h-[85vh] overflow-y-auto p-6 shadow-2xl">
@@ -988,12 +1007,73 @@ async function doPublishCandidate(id) {
 }
 
 async function deleteCandidate(id) {
-    if (!confirm('确认忽略此候选规则？')) return;
+    try {
+        const res = await apiFetch(API_BASE + '/incubator/candidates/' + id);
+        const data = await res.json();
+        const c = data.data.candidate || {};
+        const sevLabel = { critical: '严重', high: '高危', medium: '中危', low: '低危', info: '提示' };
+        const catLabel = { security: '安全', performance: '性能', readability: '可读性', maintainability: '可维护性', test_coverage: '测试覆盖', api_design: 'API设计', logging: '日志', error_handling: '错误处理', documentation: '文档' };
+        const body = document.getElementById('deleteModalBody');
+        body.innerHTML = `
+            <div class="bg-red-50 border border-red-100 rounded-lg p-4">
+                <div class="flex items-start gap-3">
+                    <i class="fas fa-exclamation-triangle text-red-500 mt-0.5"></i>
+                    <div>
+                        <div class="font-semibold text-sm text-red-700">确认永久删除此候选规则？</div>
+                        <div class="text-xs text-red-600 mt-1">删除后不可恢复，相关数据（相似检测结果、模拟测试记录等）将一并清除。</div>
+                    </div>
+                </div>
+            </div>
+            <div class="border rounded-lg p-4 bg-gray-50">
+                <div class="flex items-start justify-between mb-2">
+                    <div>
+                        <div class="font-bold text-gray-800">${escapeHtml(c.name)}</div>
+                        <div class="text-xs text-gray-500 font-mono mt-0.5">${c.code}</div>
+                    </div>
+                    <span class="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600">${c.status === 'published' ? '已发布' : c.status}</span>
+                </div>
+                <div class="grid grid-cols-3 gap-2 text-xs text-gray-500">
+                    <div>维度：${catLabel[c.category] || c.category}</div>
+                    <div>级别：${sevLabel[c.severity] || c.severity}</div>
+                    <div>语言：${c.language}</div>
+                </div>
+            </div>
+        `;
+        const confirmBtn = document.getElementById('deleteConfirmBtn');
+        confirmBtn.onclick = () => doDeleteCandidate(id);
+        document.getElementById('deleteModal').classList.remove('hidden');
+        document.getElementById('deleteModal').classList.add('active');
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+function closeDeleteModal() {
+    const modal = document.getElementById('deleteModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('active');
+}
+
+async function doDeleteCandidate(id) {
+    const btn = document.getElementById('deleteConfirmBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>删除中...';
     try {
         const res = await apiFetch(API_BASE + '/incubator/candidates/' + id, { method: 'DELETE' });
-        if (res.ok) { showToast('已忽略'); closeCandidateDrawer(); loadCandidates(); }
-        else { const d = await res.json(); showToast(d.error || '操作失败', 'error'); }
-    } catch (e) { showToast(e.message, 'error'); }
+        if (res.ok) {
+            showToast('候选规则已删除');
+            closeDeleteModal();
+            closeCandidateDrawer();
+            loadCandidates();
+        } else {
+            const d = await res.json();
+            showToast(d.error || '删除失败', 'error');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-trash-alt mr-1"></i>确认删除';
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-trash-alt mr-1"></i>确认删除';
+    }
 }
 
 // ====== Issue Trace ======
