@@ -94,12 +94,12 @@
             <!-- Tab 导航 -->
             <div class="bg-white border rounded-lg">
                 <div class="flex border-b px-4">
-                    <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800 active" data-tab="pipeline" onclick="switchTab('pipeline')">流水线</button>
+                    <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800 active" data-tab="guide" onclick="switchTab('guide')"><i class="fas fa-book-reader mr-1"></i>使用指南</button>
+                    <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800" data-tab="pipeline" onclick="switchTab('pipeline')">流水线</button>
                     <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800" data-tab="issues" onclick="switchTab('issues')">原始Issue池</button>
                     <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800" data-tab="candidates" onclick="switchTab('candidates')">候选规则</button>
                     <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800" data-tab="health" onclick="switchTab('health')">规则健康度</button>
                     <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800" data-tab="config" onclick="switchTab('config')">孵化配置</button>
-                    <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800" data-tab="guide" onclick="switchTab('guide')"><i class="fas fa-book-reader mr-1"></i>使用指南</button>
                 </div>
 
                 <!-- 流水线 Tab -->
@@ -2052,7 +2052,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderSidebar('incubator');
     loadStatus();
     loadDashboardStats();
-    switchTab('pipeline');
+    switchTab('guide');
 });
 </script>
 <script defer src="/static/js/tailwindcss.min.js"></script>
