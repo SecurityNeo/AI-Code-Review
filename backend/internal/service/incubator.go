@@ -1419,21 +1419,26 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 		}
 	}()
 
-	broadcast := func(stepID, status, overall string) {
+	broadcast := func(stepID, status, overall string, current, total int) {
 		if s.SSEHub == nil {
 			return
 		}
-		b, _ := json.Marshal(map[string]any{
+		payload := map[string]any{
 			"job_id":          jobID,
 			"step_id":         stepID,
 			"status":          status,
 			"pipeline_status": overall,
 			"updated_at":      time.Now().Format(time.RFC3339),
-		})
+		}
+		if total > 0 {
+			payload["current"] = current
+			payload["total"] = total
+		}
+		b, _ := json.Marshal(payload)
 		s.SSEHub.Broadcast(int64(jobID), string(b))
 	}
 
-	updateStep := func(stepID, status string) {
+	updateStep := func(stepID, status string, current, total int) {
 		var job model.RuleIncubationJob
 		if err := model.DB.First(&job, jobID).Error; err != nil {
 			return
@@ -1447,14 +1452,19 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 		if steps == nil {
 			steps = map[string]any{}
 		}
-		steps[stepID] = map[string]any{
+		stepInfo := map[string]any{
 			"status":     status,
 			"updated_at": time.Now().Format(time.RFC3339),
 		}
+		if total > 0 {
+			stepInfo["current"] = current
+			stepInfo["total"] = total
+		}
+		steps[stepID] = stepInfo
 		summary["pipeline_steps"] = steps
 		b, _ := json.Marshal(summary)
 		model.DB.Model(&job).Update("result_summary", string(b))
-		broadcast(stepID, status, job.Status)
+		broadcast(stepID, status, job.Status, current, total)
 	}
 
 	failJob := func(err error) {
@@ -1464,7 +1474,7 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 			"error_msg":    err.Error(),
 			"completed_at": &now,
 		})
-		broadcast("", "", "failed")
+		broadcast("", "", "failed", 0, 0)
 	}
 
 	completeJob := func() {
@@ -1473,7 +1483,7 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 			"status":       "success",
 			"completed_at": &now,
 		})
-		broadcast("", "", "success")
+		broadcast("", "", "success", 0, 0)
 	}
 
 	// -------- Step 1: Cluster --------
@@ -1483,7 +1493,7 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 		failJob(fmt.Errorf("cluster failed: %w", err))
 		return
 	}
-	updateStep("cluster", "completed")
+	updateStep("cluster", "completed", 0, 0)
 
 	// Parse cluster result
 	var clusterSummary map[string]any
@@ -1506,29 +1516,32 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 	// -------- Step 2: Refine --------
 	var pipeCands []model.RuleIncubation
 	model.DB.Where("pipeline_job_id = ?", jobID).Find(&pipeCands)
-	updateStep("refine", "running")
-	for _, cand := range pipeCands {
+	updateStep("refine", "running", 0, len(pipeCands))
+	for i, cand := range pipeCands {
 		if cand.Status == "draft" {
 			_ = s.runRefine(cand.ID)
 		}
+		updateStep("refine", "running", i+1, len(pipeCands))
 	}
-	updateStep("refine", "completed")
+	updateStep("refine", "completed", len(pipeCands), len(pipeCands))
 
 	// -------- Step 3: Similar Check --------
-	updateStep("similar_check", "running")
-	for _, cand := range pipeCands {
+	updateStep("similar_check", "running", 0, len(pipeCands))
+	for i, cand := range pipeCands {
 		_ = s.runSimilarCheck(cand.ID)
+		updateStep("similar_check", "running", i+1, len(pipeCands))
 	}
-	updateStep("similar_check", "completed")
+	updateStep("similar_check", "completed", len(pipeCands), len(pipeCands))
 
 	// -------- Step 4: Sandbox Test --------
-	updateStep("sandbox_test", "running")
-	for _, cand := range pipeCands {
+	updateStep("sandbox_test", "running", 0, len(pipeCands))
+	for i, cand := range pipeCands {
 		if cand.Status == "ready" {
 			_ = s.runSandboxTest(cand.ID)
 		}
+		updateStep("sandbox_test", "running", i+1, len(pipeCands))
 	}
-	updateStep("sandbox_test", "completed")
+	updateStep("sandbox_test", "completed", len(pipeCands), len(pipeCands))
 
 	completeJob()
 	zap.L().Info("pipeline_run completed", zap.Uint("job_id", jobID))

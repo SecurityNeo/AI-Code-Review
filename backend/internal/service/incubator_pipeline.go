@@ -40,6 +40,25 @@ func getJobStepStatus(job model.RuleIncubationJob, stepID string) string {
 	return "idle"
 }
 
+// getJobStepProgress returns current/total progress for a specific step.
+func getJobStepProgress(job model.RuleIncubationJob, stepID string) (int, int) {
+	var jr map[string]any
+	_ = json.Unmarshal([]byte(job.ResultSummary), &jr)
+	if stepsMap, ok := jr["pipeline_steps"].(map[string]any); ok {
+		if s, ok := stepsMap[stepID].(map[string]any); ok {
+			var current, total int
+			if v, ok := s["current"].(float64); ok {
+				current = int(v)
+			}
+			if v, ok := s["total"].(float64); ok {
+				total = int(v)
+			}
+			return current, total
+		}
+	}
+	return 0, 0
+}
+
 // GetPipelineStatus aggregates the entire incubation pipeline data.
 // When jobID is provided, returns data scoped to that specific pipeline run.
 // When jobID is nil, returns data for the latest pipeline_run if any, otherwise global fallback.
@@ -96,16 +115,16 @@ func (s *IncubatorService) getPipelineStatusGlobal() (*PipelineStatus, error) {
 			clusterStatus = "error"
 		}
 		clusterOut = map[string]any{
-			"任务ID":   latestCluster.ID,
+			"任务ID": latestCluster.ID,
 			"上次执行": latestCluster.CreatedAt,
-			"状态":     latestCluster.Status,
-			"结果":     latestCluster.ResultSummary,
+			"状态":   latestCluster.Status,
+			"结果":   latestCluster.ResultSummary,
 		}
 	}
 	// Parse actual params from latest job if available
 	clusterInput := map[string]any{
 		"回溯时间窗口(天)": cfg.ClusterTimeWindowDays,
-		"最小组大小":       cfg.ClusterMinGroupSize,
+		"最小组大小":     cfg.ClusterMinGroupSize,
 	}
 	if latestCluster.ID > 0 && latestCluster.Params != "" && latestCluster.Params != "{}" {
 		var p map[string]any
@@ -158,9 +177,9 @@ func (s *IncubatorService) getPipelineStatusGlobal() (*PipelineStatus, error) {
 			"来源": "聚类分析生成的候选规则",
 		},
 		OutputSummary: map[string]any{
-			"候选总数":   candTotal,
-			"待审核":     candDraft + candReady,
-			"可发布":     candReady,
+			"候选总数": candTotal,
+			"待审核":  candDraft + candReady,
+			"可发布":  candReady,
 		},
 		NextSteps: []string{"refine", "similar_check", "sandbox_test"},
 	}
@@ -275,7 +294,7 @@ func (s *IncubatorService) getPipelineStatusGlobal() (*PipelineStatus, error) {
 		},
 		OutputSummary: map[string]any{
 			"已发布规则数": totalPublishedRules,
-			"说明":          "正式发布到评审规则库",
+			"说明":     "正式发布到评审规则库",
 		},
 		NextSteps: []string{"retro_match"},
 	}
@@ -306,13 +325,13 @@ func (s *IncubatorService) getPipelineStatusGlobal() (*PipelineStatus, error) {
 			"latest_job_id":       latestRetro.ID,
 		},
 		InputSummary: map[string]any{
-			"来源":          "已发布的新规则",
-			"回溯天数":      cfg.RetroMatchMaxDaysLookback,
-			"置信度阈值":    cfg.RetroMatchConfidenceThreshold,
+			"来源":    "已发布的新规则",
+			"回溯天数":  cfg.RetroMatchMaxDaysLookback,
+			"置信度阈值": cfg.RetroMatchConfidenceThreshold,
 		},
 		OutputSummary: map[string]any{
 			"匹配总数": retroTotal,
-			"说明":     "在历史Issue中寻找可被新规则命中的记录",
+			"说明":   "在历史Issue中寻找可被新规则命中的记录",
 		},
 		NextSteps: []string{"health_check"},
 	}
@@ -408,11 +427,15 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 		minGroupSize = int(v)
 	}
 
-	// Parse per-step status from the job's result_summary
+	// Parse per-step status & progress from the job's result_summary
 	clusterStatus := getJobStepStatus(job, "cluster")
 	refineStatus := getJobStepStatus(job, "refine")
 	similarStatus := getJobStepStatus(job, "similar_check")
 	sandboxStatus := getJobStepStatus(job, "sandbox_test")
+
+	refineCur, refineTot := getJobStepProgress(job, "refine")
+	similarCur, similarTot := getJobStepProgress(job, "similar_check")
+	sandboxCur, sandboxTot := getJobStepProgress(job, "sandbox_test")
 
 	// Aggregate candidates produced by this pipeline run
 	var cands []model.RuleIncubation
@@ -474,7 +497,7 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 				"candidates_generated": totalCandidates,
 			},
 			InputSummary: map[string]any{
-				"时间窗口":   fmt.Sprintf("%d 天", timeRangeDays),
+				"时间窗口":  fmt.Sprintf("%d 天", timeRangeDays),
 				"最小簇大小": fmt.Sprintf("%d 条", minGroupSize),
 			},
 			OutputSummary: func() map[string]any {
@@ -500,8 +523,8 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 			Icon:  "fa-lightbulb",
 			Color: "yellow",
 			Stats: map[string]any{
-				"draft":  totalCandidates - refinedCount,
-				"ready":  refinedCount - publishedCount,
+				"draft":     totalCandidates - refinedCount,
+				"ready":     refinedCount - publishedCount,
 				"published": publishedCount,
 			},
 			InputSummary: map[string]any{
@@ -518,9 +541,16 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 			Status: refineStatus,
 			Icon:   "fa-magic",
 			Color:  "indigo",
-			Stats: map[string]any{
-				"total_runs": refinedCount,
-			},
+			Stats: func() map[string]any {
+				st := map[string]any{
+					"total_runs": refinedCount,
+				}
+				if refineStatus == "running" && refineTot > 0 {
+					st["current"] = refineCur
+					st["total"] = refineTot
+				}
+				return st
+			}(),
 			InputSummary: map[string]any{
 				"规则数量": fmt.Sprintf("%d 个", totalCandidates),
 			},
@@ -535,9 +565,16 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 			Status: similarStatus,
 			Icon:   "fa-search",
 			Color:  "orange",
-			Stats: map[string]any{
-				"total_runs": similarChecked,
-			},
+			Stats: func() map[string]any {
+				st := map[string]any{
+					"total_runs": similarChecked,
+				}
+				if similarStatus == "running" && similarTot > 0 {
+					st["current"] = similarCur
+					st["total"] = similarTot
+				}
+				return st
+			}(),
 			InputSummary: map[string]any{
 				"规则数量": fmt.Sprintf("%d 个", similarChecked),
 			},
@@ -552,9 +589,16 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 			Status: sandboxStatus,
 			Icon:   "fa-vial",
 			Color:  "teal",
-			Stats: map[string]any{
-				"total_runs": sandboxTested,
-			},
+			Stats: func() map[string]any {
+				st := map[string]any{
+					"total_runs": sandboxTested,
+				}
+				if sandboxStatus == "running" && sandboxTot > 0 {
+					st["current"] = sandboxCur
+					st["total"] = sandboxTot
+				}
+				return st
+			}(),
 			InputSummary: map[string]any{
 				"规则数量": fmt.Sprintf("%d 个", sandboxTested),
 			},
