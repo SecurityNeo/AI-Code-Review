@@ -1628,8 +1628,6 @@ async function loadRuleHealth(page) {
         const list = payload.list || [];
         const total = payload.total || 0;
 
-        document.getElementById('statHealth').textContent = total; // show total count
-
         if (list.length === 0) {
             grid.innerHTML = '<div class="col-span-full text-center py-8 text-gray-400">暂无规则健康度数据</div>';
             return;
