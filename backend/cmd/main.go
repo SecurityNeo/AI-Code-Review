@@ -77,6 +77,9 @@ func main() {
 	incubSvc := service.NewIncubatorService(embedSvc, vectorStore)
 	service.NewIncubatorJobRunner(incubSvc, embedSvc).Start()
 
+	// 5.3.1. 启动时自动补齐已有规则缺失的 embedding 向量（首次运行可能耗时较长）
+	go incubSvc.EnsureRuleEmbeddings()
+
 	// 5.3.5. 启动规则健康检查定时 Job（每周一次）
 	_, _ = cronRunner.AddFunc("0 2 * * 1", func() {
 		if _, err := service.QueueJob("health_check", map[string]any{}); err != nil {

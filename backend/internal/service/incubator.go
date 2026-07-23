@@ -32,6 +32,67 @@ func NewIncubatorService(embedSvc *EmbeddingService, store vectorstore.Store) *I
 	}
 }
 
+// EnsureRuleEmbeddings scans all enabled rules and backfills missing embeddings
+// into the vector store. Safe to call multiple times; existing vectors are skipped.
+func (s *IncubatorService) EnsureRuleEmbeddings() {
+	if s.embedSvc == nil || !s.embedSvc.IsAvailable() || s.store == nil {
+		zap.L().Info("EnsureRuleEmbeddings: embedding not available, skipping")
+		return
+	}
+	cfg := s.getConfig()
+	if cfg.EmbeddingModelID == nil {
+		zap.L().Info("EnsureRuleEmbeddings: no embedding model configured, skipping")
+		return
+	}
+	modelID := *cfg.EmbeddingModelID
+
+	var rules []model.ReviewRule
+	if err := model.DB.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
+		zap.L().Warn("EnsureRuleEmbeddings: query rules failed", zap.Error(err))
+		return
+	}
+
+	ctx := context.Background()
+	missing := 0
+	stored := 0
+	for _, r := range rules {
+		_, err := s.store.Get(ctx, vectorstore.Key{
+			EntityType: "rule",
+			EntityID:   r.ID,
+			ModelID:    modelID,
+		})
+		if err == nil {
+			continue // already exists
+		}
+		missing++
+		text := r.Name + " " + r.Description + " " + r.Prompt
+		vec, _, err := s.embedSvc.Embed(ctx, text)
+		if err != nil {
+			zap.L().Warn("EnsureRuleEmbeddings: embed failed",
+				zap.Uint("rule_id", r.ID), zap.String("code", r.Code), zap.Error(err))
+			continue
+		}
+		if err := s.store.Save(ctx, vectorstore.Item{
+			Key: vectorstore.Key{
+				EntityType: "rule",
+				EntityID:   r.ID,
+				ModelID:    modelID,
+			},
+			Vector:    vec,
+			Dimension: len(vec),
+		}); err != nil {
+			zap.L().Warn("EnsureRuleEmbeddings: save failed",
+				zap.Uint("rule_id", r.ID), zap.Error(err))
+			continue
+		}
+		stored++
+	}
+	zap.L().Info("EnsureRuleEmbeddings: completed",
+		zap.Int("total_rules", len(rules)),
+		zap.Int("missing", missing),
+		zap.Int("stored", stored))
+}
+
 // Status returns the current incubator status including embedding availability.
 func (s *IncubatorService) Status() (map[string]any, error) {
 	cfg := s.getConfig()
