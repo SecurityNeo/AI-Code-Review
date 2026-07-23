@@ -31,6 +31,14 @@
         .pipeline-node:active { cursor: grabbing; }
         .pipeline-node.dragging { z-index: 100; }
         .pipeline-node.dragging .rounded-xl { box-shadow: 0 8px 30px rgba(0,0,0,0.15); }
+        @keyframes node-running-pulse {
+            0% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.3); }
+            70% { box-shadow: 0 0 0 8px rgba(139, 92, 246, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0); }
+        }
+        .pipeline-node.node-running .rounded-xl {
+            animation: node-running-pulse 2s infinite;
+        }
     </style>
 </head>
 <body class="bg-gray-50 font-sans">
@@ -111,6 +119,9 @@
                             <span class="text-xs text-gray-400">点击节点查看输入输出与配置</span>
                         </div>
                         <div class="flex items-center gap-2">
+                            <button onclick="runPipeline()" id="pipelineRunBtn" class="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs hover:bg-purple-700">
+                                <i class="fas fa-play mr-1"></i>一键运行流水线
+                            </button>
                             <button onclick="loadPipeline()" class="px-3 py-1.5 border rounded-lg text-xs hover:bg-gray-50"><i class="fas fa-sync-alt mr-1"></i>刷新状态</button>
                         </div>
                     </div>
@@ -1685,6 +1696,64 @@ function renderHealthPagination(total, page, pageSize) {
 }
 
 // ====== Pipeline ======
+// Pipeline auto-refresh state
+let pipelinePollTimer = null;
+let pipelineJobId = null;
+
+async function runPipeline() {
+    const btn = document.getElementById('pipelineRunBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>启动中...';
+    try {
+        const res = await apiFetch(API_BASE + '/incubator/pipeline/run', {
+            method: 'POST',
+            body: JSON.stringify({ time_range_days: parseInt(document.getElementById('clusterDays')?.value) || 30, min_group_size: parseInt(document.getElementById('clusterMinSize')?.value) || 2 })
+        });
+        const data = await res.json();
+        if (data.code === 0) {
+            pipelineJobId = data.data.job_id;
+            showToast('流水线已启动 (Job #' + pipelineJobId + ')，自动刷新中...');
+            startPipelinePolling();
+        } else {
+            showToast(data.error || '启动失败', 'error');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-play mr-1"></i>一键运行流水线';
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-play mr-1"></i>一键运行流水线';
+    }
+}
+
+function startPipelinePolling() {
+    if (pipelinePollTimer) clearInterval(pipelinePollTimer);
+    pipelinePollTimer = setInterval(() => {
+        loadPipeline();
+        // Check if pipeline job finished
+        if (pipelineJobId) {
+            apiFetch(API_BASE + '/incubator/cluster/jobs/' + pipelineJobId).then(r => r.json()).then(d => {
+                const job = d.data || {};
+                if (job.status === 'success' || job.status === 'failed') {
+                    stopPipelinePolling();
+                    const btn = document.getElementById('pipelineRunBtn');
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-play mr-1"></i>一键运行流水线';
+                    if (job.status === 'success') showToast('流水线执行完成');
+                    else showToast('流水线执行失败: ' + (job.error_msg || ''), 'error');
+                }
+            }).catch(() => {});
+        }
+    }, 3000);
+}
+
+function stopPipelinePolling() {
+    if (pipelinePollTimer) {
+        clearInterval(pipelinePollTimer);
+        pipelinePollTimer = null;
+    }
+}
+
 async function loadPipeline() {
     const container = document.getElementById('pipelineContainer');
     container.innerHTML = '<div class="text-center py-12 text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i>加载流水线状态...</div>';
@@ -1777,8 +1846,12 @@ function renderPipeline(steps) {
         const hasInput = step.input_summary && Object.keys(step.input_summary).length > 0;
         const hasOutput = step.output_summary && Object.keys(step.output_summary).length > 0;
 
+        const isRunning = step.status === 'running';
+        const headerIcon = isRunning ? `<i class="fas fa-spinner fa-spin text-xs"></i>` : `<i class="fas ${stepIcon} text-xs"></i>`;
+        const statusLabel = isRunning ? '执行中...' : st.label;
+
         html += `
-        <div class="pipeline-node" data-step-id="${step.step_id}" data-idx="${idx}"
+        <div class="pipeline-node ${isRunning ? 'node-running' : ''}" data-step-id="${step.step_id}" data-idx="${idx}"
              style="left:${step._x}px; top:${step._y}px;"
              onmousedown="startNodeDrag(event, '${step.step_id}')">
             <div class="w-[220px] bg-white rounded-xl border-2 ${st.border} overflow-hidden hover:shadow-lg transition-shadow duration-200"
@@ -1786,7 +1859,7 @@ function renderPipeline(steps) {
                 <!-- Header Bar with drag hint -->
                 <div class="${theme.topBg} text-white px-3 py-2 flex items-center gap-2 select-none">
                     <i class="fas fa-grip-vertical text-[10px] opacity-50 mr-1 cursor-grab"></i>
-                    <i class="fas ${stepIcon} text-xs"></i>
+                    ${headerIcon}
                     <span class="text-xs font-medium flex-1 truncate">${step.label}</span>
                     <span class="w-1.5 h-1.5 rounded-full ${st.dot} ${st.pulse}"></span>
                 </div>

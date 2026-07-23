@@ -543,3 +543,30 @@ func (h *IncubatorHandler) RuleHealth(c *gin.Context) {
 		"page_size": pageSize,
 	}})
 }
+
+// RunPipeline triggers a full automated pipeline run (cluster → refine → similar → test).
+// POST /api/v1/incubator/pipeline/run
+func (h *IncubatorHandler) RunPipeline(c *gin.Context) {
+	var req struct {
+		TimeRangeDays int `json:"time_range_days"`
+		MinGroupSize  int `json:"min_group_size"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "参数错误: " + err.Error()})
+		return
+	}
+	job, err := h.svc.RunPipeline(req.TimeRangeDays, req.MinGroupSize)
+	if err != nil {
+		zap.L().Error("run pipeline failed", zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{
+		"code": 0,
+		"data": map[string]any{
+			"job_id": job.ID,
+			"status": job.Status,
+			"message": "流水线已启动",
+		},
+	})
+}

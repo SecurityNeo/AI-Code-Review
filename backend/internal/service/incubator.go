@@ -1194,3 +1194,135 @@ func autoCreateProjectReviewConfigs(ruleID uint) {
 		}
 	}
 }
+
+// ---------- Pipeline Orchestration ----------
+
+// RunPipeline kicks off a full pipeline: cluster → refine → similar_check → sandbox_test.
+// It creates a pipeline_run job and executes steps asynchronously in a goroutine.
+func (s *IncubatorService) RunPipeline(timeRangeDays, minGroupSize int) (*model.RuleIncubationJob, error) {
+	paramsJSON, _ := json.Marshal(map[string]any{
+		"time_range_days": timeRangeDays,
+		"min_group_size":  minGroupSize,
+	})
+	job := &model.RuleIncubationJob{
+		JobType:       "pipeline_run",
+		Status:        "running",
+		Params:        string(paramsJSON),
+		ResultSummary: `{"pipeline_steps":{"cluster":{"status":"idle"},"refine":{"status":"idle"},"similar_check":{"status":"idle"},"sandbox_test":{"status":"idle"}}}`,
+		ErrorMsg:      "{}",
+		CreatedAt:     time.Now(),
+		StartedAt:     func() *time.Time { t := time.Now(); return &t }(),
+	}
+	if err := model.DB.Create(job).Error; err != nil {
+		return nil, fmt.Errorf("create pipeline job failed: %w", err)
+	}
+	go s.runPipelineSteps(job.ID, timeRangeDays, minGroupSize)
+	return job, nil
+}
+
+func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupSize int) {
+	updateStep := func(stepID, status string) {
+		var job model.RuleIncubationJob
+		if err := model.DB.First(&job, jobID).Error; err != nil {
+			return
+		}
+		var summary map[string]any
+		_ = json.Unmarshal([]byte(job.ResultSummary), &summary)
+		if summary == nil {
+			summary = map[string]any{}
+		}
+		steps, _ := summary["pipeline_steps"].(map[string]any)
+		if steps == nil {
+			steps = map[string]any{}
+		}
+		steps[stepID] = map[string]any{
+			"status":     status,
+			"updated_at": time.Now().Format(time.RFC3339),
+		}
+		summary["pipeline_steps"] = steps
+		b, _ := json.Marshal(summary)
+		model.DB.Model(&job).Update("result_summary", string(b))
+	}
+
+	failJob := func(err error) {
+		now := time.Now()
+		model.DB.Model(&model.RuleIncubationJob{}).Where("id = ?", jobID).Updates(map[string]any{
+			"status":       "failed",
+			"error_msg":    err.Error(),
+			"completed_at": &now,
+		})
+	}
+
+	completeJob := func() {
+		now := time.Now()
+		model.DB.Model(&model.RuleIncubationJob{}).Where("id = ?", jobID).Updates(map[string]any{
+			"status":       "success",
+			"completed_at": &now,
+		})
+	}
+
+	// -------- Step 1: Cluster --------
+	updateStep("cluster", "running")
+	summaryJSON, err := s.doClusterIssues(timeRangeDays, nil, minGroupSize)
+	if err != nil {
+		failJob(fmt.Errorf("cluster failed: %w", err))
+		return
+	}
+	updateStep("cluster", "completed")
+
+	// Parse cluster result
+	var clusterSummary map[string]any
+	_ = json.Unmarshal([]byte(summaryJSON), &clusterSummary)
+	generated := 0
+	if v, ok := clusterSummary["生成候选规则数"]; ok {
+		switch val := v.(type) {
+		case float64:
+			generated = int(val)
+		case int:
+			generated = val
+		}
+	}
+	if generated == 0 {
+		zap.L().Info("pipeline_run: no candidates generated, finishing after cluster", zap.Uint("job_id", jobID))
+		completeJob()
+		return
+	}
+
+	// Find freshly created draft candidates
+	since := time.Now().Add(-5 * time.Minute)
+	var draftCands []model.RuleIncubation
+	model.DB.Where("status = ? AND created_at >= ?", "draft", since).Find(&draftCands)
+	if len(draftCands) == 0 {
+		model.DB.Where("status = ? AND created_at >= ?", "ready", since).Find(&draftCands)
+	}
+
+	// -------- Step 2: Refine --------
+	updateStep("refine", "running")
+	for _, cand := range draftCands {
+		if cand.Status == "draft" {
+			_ = s.runRefine(cand.ID)
+		}
+	}
+	updateStep("refine", "completed")
+
+	// -------- Step 3: Similar Check --------
+	updateStep("similar_check", "running")
+	var refinedCands []model.RuleIncubation
+	model.DB.Where("created_at >= ?", since).Find(&refinedCands)
+	for _, cand := range refinedCands {
+		_ = s.runSimilarCheck(cand.ID)
+	}
+	updateStep("similar_check", "completed")
+
+	// -------- Step 4: Sandbox Test --------
+	updateStep("sandbox_test", "running")
+	var readyCands []model.RuleIncubation
+	model.DB.Where("status = ? AND created_at >= ?", "ready", since).Find(&readyCands)
+	for _, cand := range readyCands {
+		_ = s.runSandboxTest(cand.ID)
+	}
+	updateStep("sandbox_test", "completed")
+
+	completeJob()
+	zap.L().Info("pipeline_run completed", zap.Uint("job_id", jobID))
+}

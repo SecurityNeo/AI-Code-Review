@@ -492,6 +492,7 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 			h := handler.NewIncubatorHandler(vectorstore.NewMySQLStore(model.DB))
 			incubator.GET("/status", h.Status)
 			incubator.GET("/pipeline", h.Pipeline)
+			incubator.POST("/pipeline/run", h.RunPipeline)
 			incubator.GET("/issues", h.ListIssues)
 			incubator.GET("/issues/:id/trace", h.IssueTrace)
 			incubator.POST("/cluster", h.Cluster)

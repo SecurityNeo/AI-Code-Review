@@ -325,19 +325,39 @@ func (s *IncubatorService) GetPipelineStatus() (*PipelineStatus, error) {
 		}
 	}
 
-	return &PipelineStatus{
-		Steps: []PipelineStep{
-			stepIssuePool,
-			stepCluster,
-			stepCandidate,
-			stepRefine,
-			stepSimilar,
-			stepSandbox,
-			stepPublish,
-			stepRetro,
-			stepHealth,
-		},
-	}, nil
+	steps := []PipelineStep{
+		stepIssuePool,
+		stepCluster,
+		stepCandidate,
+		stepRefine,
+		stepSimilar,
+		stepSandbox,
+		stepPublish,
+		stepRetro,
+		stepHealth,
+	}
+
+	// Merge active pipeline_run execution state into steps
+	var pipeJob model.RuleIncubationJob
+	if err := model.DB.Where("job_type = ?", "pipeline_run").Order("created_at DESC").First(&pipeJob).Error; err == nil {
+		if pipeJob.Status == "running" || pipeJob.Status == "success" || pipeJob.Status == "failed" {
+			var jr map[string]any
+			_ = json.Unmarshal([]byte(pipeJob.ResultSummary), &jr)
+			if stepsMap, ok := jr["pipeline_steps"].(map[string]any); ok {
+				for i := range steps {
+					if s, ok := stepsMap[steps[i].StepID]; ok {
+						if m, ok := s.(map[string]any); ok {
+							if st, ok := m["status"].(string); ok {
+								steps[i].Status = st
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return &PipelineStatus{Steps: steps}, nil
 }
 
 // GetCandidateTrace returns the full bloodline (upstream + downstream) of a candidate rule.
