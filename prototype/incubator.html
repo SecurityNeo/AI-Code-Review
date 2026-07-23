@@ -327,21 +327,58 @@
 
                         <!-- 概述 -->
                         <div class="bg-gradient-to-r from-blue-50/70 via-indigo-50/50 to-purple-50/70 border border-blue-100 rounded-xl p-6">
-                            <h3 class="font-bold text-gray-800 text-lg mb-3"><i class="fas fa-lightbulb text-yellow-500 mr-2"></i>什么是规则孵化台？</h3>
-                            <div class="max-w-3xl">
-                                <p class="text-sm text-gray-600 leading-relaxed mb-4">
-                                    规则孵化台是智能评审规则的<strong>"制造工厂"</strong>。它从海量的历史评审 Issue 中自动发现规律、聚类分析、提炼生成候选规则，经过多轮 LLM 验证后发布到规则库，并持续监控规则质量，形成完整的<strong>规则全生命周期管理</strong>闭环。
-                                </p>
-                                <div class="flex flex-wrap gap-2 mb-4">
-                                    <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-blue-200 text-xs text-blue-700"><i class="fas fa-robot mr-1.5"></i>LLM 驱动</span>
-                                    <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-purple-200 text-xs text-purple-700"><i class="fas fa-project-diagram mr-1.5"></i>自动聚类</span>
-                                    <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-teal-200 text-xs text-teal-700"><i class="fas fa-vial mr-1.5"></i>模拟测试</span>
-                                    <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-orange-200 text-xs text-orange-700"><i class="fas fa-chart-line mr-1.5"></i>质量监控</span>
+                            <div class="flex flex-col lg:flex-row gap-6 items-start">
+                                <!-- 左侧：文字介绍 -->
+                                <div class="flex-1 min-w-0">
+                                    <h3 class="font-bold text-gray-800 text-lg mb-3"><i class="fas fa-lightbulb text-yellow-500 mr-2"></i>什么是规则孵化台？</h3>
+                                    <p class="text-sm text-gray-600 leading-relaxed mb-4">
+                                        规则孵化台是智能评审规则的<strong>"制造工厂"</strong>。它从海量的历史评审 Issue 中自动发现规律、聚类分析、提炼生成候选规则，经过多轮 LLM 验证后发布到规则库，并持续监控规则质量，形成完整的<strong>规则全生命周期管理</strong>闭环。
+                                    </p>
+                                    <div class="flex flex-wrap gap-2 mb-4">
+                                        <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-blue-200 text-xs text-blue-700"><i class="fas fa-robot mr-1.5"></i>LLM 驱动</span>
+                                        <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-purple-200 text-xs text-purple-700"><i class="fas fa-project-diagram mr-1.5"></i>自动聚类</span>
+                                        <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-teal-200 text-xs text-teal-700"><i class="fas fa-vial mr-1.5"></i>模拟测试</span>
+                                        <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-orange-200 text-xs text-orange-700"><i class="fas fa-chart-line mr-1.5"></i>质量监控</span>
+                                    </div>
+                                    <p class="text-xs text-gray-400 leading-relaxed">
+                                        <i class="fas fa-info-circle text-gray-300 mr-1"></i>
+                                        系统运行依赖：LLM 对话模型（必须）用于智能提炼和模拟测试；Embedding 模型（可选，未配置时降级为关键词匹配）；历史 Issue 数据（必须）作为规则孵化的原材料。
+                                    </p>
                                 </div>
-                                <p class="text-xs text-gray-400 leading-relaxed">
-                                    <i class="fas fa-info-circle text-gray-300 mr-1"></i>
-                                    系统运行依赖：LLM 对话模型（必须）用于智能提炼和模拟测试；Embedding 模型（可选，未配置时降级为关键词匹配）；历史 Issue 数据（必须）作为规则孵化的原材料。
-                                </p>
+                                <!-- 右侧：全生命周期概览 -->
+                                <div class="w-full lg:w-64 shrink-0 bg-white/60 border border-white rounded-lg p-4 backdrop-blur-sm">
+                                    <h4 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">全生命周期</h4>
+                                    <div class="space-y-2.5">
+                                        <div class="flex items-center gap-2 text-xs">
+                                            <div class="w-5 h-5 rounded bg-slate-100 flex items-center justify-center text-slate-500 shrink-0"><i class="fas fa-database text-[10px]"></i></div>
+                                            <span class="text-gray-600">Issue 发现与向量化</span>
+                                        </div>
+                                        <div class="flex items-center gap-2 text-xs">
+                                            <div class="w-5 h-5 rounded bg-violet-100 flex items-center justify-center text-violet-600 shrink-0"><i class="fas fa-object-group text-[10px]"></i></div>
+                                            <span class="text-gray-600">语义聚类生成簇</span>
+                                        </div>
+                                        <div class="flex items-center gap-2 text-xs">
+                                            <div class="w-5 h-5 rounded bg-blue-100 flex items-center justify-center text-blue-600 shrink-0"><i class="fas fa-lightbulb text-[10px]"></i></div>
+                                            <span class="text-gray-600">LLM 提炼候选规则</span>
+                                        </div>
+                                        <div class="flex items-center gap-2 text-xs">
+                                            <div class="w-5 h-5 rounded bg-indigo-100 flex items-center justify-center text-indigo-600 shrink-0"><i class="fas fa-wand-magic-sparkles text-[10px]"></i></div>
+                                            <span class="text-gray-600">候选规则自动精化</span>
+                                        </div>
+                                        <div class="flex items-center gap-2 text-xs">
+                                            <div class="w-5 h-5 rounded bg-orange-100 flex items-center justify-center text-orange-600 shrink-0"><i class="fas fa-shield-alt text-[10px]"></i></div>
+                                            <span class="text-gray-600">相似度与去重校验</span>
+                                        </div>
+                                        <div class="flex items-center gap-2 text-xs">
+                                            <div class="w-5 h-5 rounded bg-teal-100 flex items-center justify-center text-teal-600 shrink-0"><i class="fas fa-vial text-[10px]"></i></div>
+                                            <span class="text-gray-600">沙盒模拟测试</span>
+                                        </div>
+                                        <div class="flex items-center gap-2 text-xs pt-1 border-t border-gray-100">
+                                            <div class="w-5 h-5 rounded bg-green-100 flex items-center justify-center text-green-600 shrink-0"><i class="fas fa-check-circle text-[10px]"></i></div>
+                                            <span class="text-gray-600 font-medium">发布上线 + 健康巡检</span>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
