@@ -563,6 +563,7 @@ type RuleIncubation struct {
 	Name             string     `gorm:"size:100" json:"name"`
 	Code             string     `gorm:"size:128;uniqueIndex" json:"code"`
 	Category         string     `gorm:"size:32" json:"category"`
+	PipelineJobID    *uint      `gorm:"index" json:"pipeline_job_id"`
 	Severity         string     `gorm:"size:16" json:"severity"`
 	Language         string     `gorm:"size:32" json:"language"`
 	Description      string     `gorm:"type:text" json:"description"`

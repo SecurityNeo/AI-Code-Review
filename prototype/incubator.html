@@ -735,7 +735,10 @@ async function loadCandidates(page = 1) {
                 <div class="border rounded-lg p-4 hover:shadow-md transition-shadow">
                     <div class="flex items-start justify-between cursor-pointer" onclick="showCandidate(${c.id})">
                         <div>
-                            <span class="text-xs px-2 py-0.5 rounded ${statusClass(c.status)}">${statusLabel(c.status)}</span>
+                            <div class="flex items-center gap-2">
+                                <span class="text-xs px-2 py-0.5 rounded ${statusClass(c.status)}">${statusLabel(c.status)}</span>
+                                ${c.pipeline_job_id ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-100" title="流水线任务 #${c.pipeline_job_id}"><i class="fas fa-project-diagram mr-0.5"></i>流水线 #${c.pipeline_job_id}</span>` : `<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200"><i class="fas fa-hand-pointer mr-0.5"></i>手动</span>`}
+                            </div>
                             <h4 class="font-semibold text-gray-800 text-sm mt-1">${escapeHtml(c.name)}</h4>
                             <p class="text-xs text-gray-500 font-mono">${c.code}</p>
                         </div>
@@ -774,7 +777,10 @@ async function showCandidate(id) {
         const content = document.getElementById('candidateDrawerContent');
         content.innerHTML = `
             <div class="flex items-center justify-between mb-4">
-                <h3 class="font-bold text-lg">候选规则 #${c.id}</h3>
+                <div class="flex items-center gap-3">
+                    <h3 class="font-bold text-lg">候选规则 #${c.id}</h3>
+                    ${c.pipeline_job_id ? `<span class="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-100"><i class="fas fa-project-diagram mr-1"></i>流水线 #${c.pipeline_job_id}</span>` : `<span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200"><i class="fas fa-hand-pointer mr-1"></i>手动创建</span>`}
+                </div>
                 <button onclick="closeCandidateDrawer()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
             </div>
             <div class="space-y-4">

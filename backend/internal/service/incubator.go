@@ -202,6 +202,7 @@ func (s *IncubatorService) CreateCandidate(req CreateCandidateRequest, userID ui
 		ConfidenceScore: 0.5, // baseline
 		UserAcceptRate:  float64(accepted) / float64(len(issues)),
 		CreatedBy:       userID,
+		PipelineJobID:   req.PipelineJobID,
 		SimilarRules:    "{}",
 		TestResults:     "{}",
 	}
@@ -222,6 +223,7 @@ type CreateCandidateRequest struct {
 	SourceIssueIDs []uint `json:"source_issue_ids" binding:"required,min=1"`
 	ClusterID      string `json:"cluster_id"`
 	AutoRefine     bool   `json:"auto_refine"`
+	PipelineJobID  *uint  `json:"pipeline_job_id"`
 }
 
 // GetCandidate returns a candidate by ID with source issues hydrated.
@@ -372,7 +374,7 @@ func (s *IncubatorService) ClusterIssues(timeRangeDays int, languages []string, 
 		return nil, fmt.Errorf("create cluster job failed: %w", err)
 	}
 
-	summary, err := s.doClusterIssues(timeRangeDays, languages, minGroupSize)
+	summary, err := s.doClusterIssues(timeRangeDays, languages, minGroupSize, nil)
 	now := time.Now()
 	updates := map[string]any{"completed_at": &now}
 	if err != nil {
@@ -388,7 +390,7 @@ func (s *IncubatorService) ClusterIssues(timeRangeDays int, languages []string, 
 
 // doClusterIssues is the core clustering logic without job lifecycle management.
 // Returns the JSON summary string.
-func (s *IncubatorService) doClusterIssues(timeRangeDays int, languages []string, minGroupSize int) (string, error) {
+func (s *IncubatorService) doClusterIssues(timeRangeDays int, languages []string, minGroupSize int, pipelineJobID *uint) (string, error) {
 	cfg := s.getConfig()
 	if timeRangeDays <= 0 {
 		timeRangeDays = cfg.ClusterTimeWindowDays
@@ -418,6 +420,7 @@ func (s *IncubatorService) doClusterIssues(timeRangeDays int, languages []string
 			SourceIssueIDs: cl.IssueIDs,
 			ClusterID:      cl.ID,
 			AutoRefine:     true,
+			PipelineJobID:  pipelineJobID,
 		}, 0)
 		if err == nil {
 			generated++
@@ -1266,7 +1269,7 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 
 	// -------- Step 1: Cluster --------
 	updateStep("cluster", "running")
-	summaryJSON, err := s.doClusterIssues(timeRangeDays, nil, minGroupSize)
+	summaryJSON, err := s.doClusterIssues(timeRangeDays, nil, minGroupSize, &jobID)
 	if err != nil {
 		failJob(fmt.Errorf("cluster failed: %w", err))
 		return

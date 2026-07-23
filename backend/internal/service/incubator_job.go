@@ -144,7 +144,7 @@ func (r *IncubatorJobRunner) handleCluster(job model.RuleIncubationJob) error {
 		"started_at": &now,
 	})
 
-	summary, err := r.incubSvc.doClusterIssues(params.TimeRangeDays, params.Languages, params.MinGroupSize)
+	summary, err := r.incubSvc.doClusterIssues(params.TimeRangeDays, params.Languages, params.MinGroupSize, nil)
 	completedAt := time.Now()
 	updates := map[string]any{"completed_at": &completedAt}
 	if err != nil {
