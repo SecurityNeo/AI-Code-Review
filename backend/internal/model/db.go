@@ -2,6 +2,8 @@ package model
 
 import (
 	"fmt"
+	"log"
+	"os"
 	"strings"
 
 	"github.com/ai-optimizer/backend/config"
@@ -34,8 +36,18 @@ func InitDB(cfg *config.Config) error {
 		dialector = mysql.Open(dsn)
 	}
 
+	newLogger := logger.New(
+		log.New(os.Stdout, "\r\n", log.LstdFlags),
+		logger.Config{
+			SlowThreshold:             0, // 不打印慢查询（避免原型阶段噪音）
+			LogLevel:                  logger.Warn,
+			IgnoreRecordNotFoundError: true, // 关闭 record not found 日志
+			Colorful:                  false,
+		},
+	)
+
 	db, err := gorm.Open(dialector, &gorm.Config{
-		Logger:                                   logger.Default.LogMode(logger.Warn),
+		Logger:                                   newLogger,
 		DisableForeignKeyConstraintWhenMigrating: true,
 	})
 	if err != nil {
