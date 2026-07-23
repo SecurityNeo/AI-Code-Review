@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"regexp"
 	"sort"
 	"strings"
@@ -683,16 +682,6 @@ func extractSemanticSlug(msg string) string {
 		return "rule"
 	}
 	return result
-}
-
-// generateRandomString produces a lowercase alphanumeric string of length n.
-func generateRandomString(n int) string {
-	const letters = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = letters[rand.Intn(len(letters))]
-	}
-	return string(b)
 }
 
 // ValidateEmbedding checks whether the configured embedding model is reachable.
