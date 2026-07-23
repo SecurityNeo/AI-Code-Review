@@ -49,7 +49,7 @@ func (s *IncubatorService) GetPipelineStatus() (*PipelineStatus, error) {
 			"new_today": newToday,
 		},
 		OutputSummary: map[string]any{
-			"description": fmt.Sprintf("%d 条未命中规则的历史Issue", totalUnmatched),
+			"未命中规则Issue": fmt.Sprintf("%d 条", totalUnmatched),
 		},
 		NextSteps: []string{"cluster"},
 	}
@@ -67,10 +67,10 @@ func (s *IncubatorService) GetPipelineStatus() (*PipelineStatus, error) {
 			clusterStatus = "error"
 		}
 		clusterOut = map[string]any{
-			"job_id":   latestCluster.ID,
-			"last_run": latestCluster.CreatedAt,
-			"status":   latestCluster.Status,
-			"result":   latestCluster.ResultSummary,
+			"任务ID":   latestCluster.ID,
+			"上次执行": latestCluster.CreatedAt,
+			"状态":     latestCluster.Status,
+			"结果":     latestCluster.ResultSummary,
 		}
 	}
 	stepCluster := PipelineStep{
@@ -83,8 +83,8 @@ func (s *IncubatorService) GetPipelineStatus() (*PipelineStatus, error) {
 			"latest_job_id": latestCluster.ID,
 		},
 		InputSummary: map[string]any{
-			"time_window_days": cfg.ClusterTimeWindowDays,
-			"min_group_size":   cfg.ClusterMinGroupSize,
+			"回溯时间窗口(天)": cfg.ClusterTimeWindowDays,
+			"最小组大小":       cfg.ClusterMinGroupSize,
 		},
 		OutputSummary: clusterOut,
 		NextSteps:     []string{"candidate"},
@@ -113,12 +113,12 @@ func (s *IncubatorService) GetPipelineStatus() (*PipelineStatus, error) {
 			"rejected":  candRejected,
 		},
 		InputSummary: map[string]any{
-			"source": "聚类分析生成的候选规则",
+			"来源": "聚类分析生成的候选规则",
 		},
 		OutputSummary: map[string]any{
-			"total_candidates": candTotal,
-			"awaiting_review":  candDraft + candReady,
-			"ready_to_publish": candReady,
+			"候选总数":   candTotal,
+			"待审核":     candDraft + candReady,
+			"可发布":     candReady,
 		},
 		NextSteps: []string{"refine", "similar_check", "sandbox_test"},
 	}
@@ -145,10 +145,10 @@ func (s *IncubatorService) GetPipelineStatus() (*PipelineStatus, error) {
 			"latest_job_id": latestRefine.ID,
 		},
 		InputSummary: map[string]any{
-			"source": "候选规则 + 源Issue样本",
+			"来源": "候选规则 + 源Issue样本",
 		},
 		OutputSummary: map[string]any{
-			"description": "由LLM自动生成规则名称、描述和Prompt",
+			"说明": "由LLM自动生成规则名称、描述和Prompt",
 		},
 		NextSteps: []string{"similar_check", "sandbox_test"},
 	}
@@ -175,10 +175,10 @@ func (s *IncubatorService) GetPipelineStatus() (*PipelineStatus, error) {
 			"latest_job_id": latestSimilar.ID,
 		},
 		InputSummary: map[string]any{
-			"source": "候选规则与现有规则库对比",
+			"来源": "候选规则与现有规则库对比",
 		},
 		OutputSummary: map[string]any{
-			"description": "检测候选规则与现有规则的重复/相似性",
+			"说明": "检测候选规则与现有规则的重复/相似性",
 		},
 		NextSteps: []string{"sandbox_test", "publish"},
 	}
@@ -208,10 +208,10 @@ func (s *IncubatorService) GetPipelineStatus() (*PipelineStatus, error) {
 			"total_runs":    totalTestRuns,
 		},
 		InputSummary: map[string]any{
-			"source": "候选规则 + 正例/反例代码片段",
+			"来源": "候选规则 + 正例/反例代码片段",
 		},
 		OutputSummary: map[string]any{
-			"description": "使用LLM验证规则对正例/反例的判定准确率",
+			"说明": "使用LLM验证规则对正例/反例的判定准确率",
 		},
 		NextSteps: []string{"publish"},
 	}
@@ -229,11 +229,11 @@ func (s *IncubatorService) GetPipelineStatus() (*PipelineStatus, error) {
 			"total_published": totalPublishedRules,
 		},
 		InputSummary: map[string]any{
-			"source": "审核通过且测试达标的候选规则",
+			"来源": "审核通过且测试达标的候选规则",
 		},
 		OutputSummary: map[string]any{
-			"total_published_rules": totalPublishedRules,
-			"description":           "正式发布到评审规则库",
+			"已发布规则数": totalPublishedRules,
+			"说明":          "正式发布到评审规则库",
 		},
 		NextSteps: []string{"retro_match"},
 	}
@@ -264,13 +264,13 @@ func (s *IncubatorService) GetPipelineStatus() (*PipelineStatus, error) {
 			"latest_job_id":       latestRetro.ID,
 		},
 		InputSummary: map[string]any{
-			"source":               "已发布的新规则",
-			"lookback_days":        cfg.RetroMatchMaxDaysLookback,
-			"confidence_threshold": cfg.RetroMatchConfidenceThreshold,
+			"来源":          "已发布的新规则",
+			"回溯天数":      cfg.RetroMatchMaxDaysLookback,
+			"置信度阈值":    cfg.RetroMatchConfidenceThreshold,
 		},
 		OutputSummary: map[string]any{
-			"total_matches": retroTotal,
-			"description":   "在历史Issue中寻找可被新规则命中的记录",
+			"匹配总数": retroTotal,
+			"说明":     "在历史Issue中寻找可被新规则命中的记录",
 		},
 		NextSteps: []string{"health_check"},
 	}
@@ -295,10 +295,10 @@ func (s *IncubatorService) GetPipelineStatus() (*PipelineStatus, error) {
 			"enabled_rules":       enabledRulesCount,
 		},
 		InputSummary: map[string]any{
-			"source": "所有已启用规则的命中/拒绝统计数据",
+			"来源": "所有已启用规则的命中/拒绝统计数据",
 		},
 		OutputSummary: map[string]any{
-			"description": "定期评估规则质量，发现退化或误报过高的规则",
+			"说明": "定期评估规则质量，发现退化或误报过高的规则",
 		},
 		NextSteps: []string{},
 	}
