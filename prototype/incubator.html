@@ -1505,11 +1505,13 @@ function ensureCanvasSize() {
     const svg = document.getElementById('pipelineSvg');
     if (!container) return;
     const nodes = container.querySelectorAll('.pipeline-node');
-    const NODE_W = 220, NODE_H = 130;
     let maxX = 0, maxY = 0;
     nodes.forEach(n => {
-        const l = (parseFloat(n.style.left) || 0) + NODE_W;
-        const t = (parseFloat(n.style.top) || 0) + NODE_H;
+        const card = n.querySelector('.rounded-xl');
+        const w = card ? card.offsetWidth : 220;
+        const h = card ? card.offsetHeight : 130;
+        const l = (parseFloat(n.style.left) || 0) + w;
+        const t = (parseFloat(n.style.top) || 0) + h;
         if (l > maxX) maxX = l;
         if (t > maxY) maxY = t;
     });
@@ -1556,10 +1558,16 @@ function drawPipelineConnections(steps) {
         const tLeft = parseFloat(toNode.style.left) || 0;
         const tTop = parseFloat(toNode.style.top) || 0;
 
-        const NODE_W = 220, NODE_H = 130;
-        const x1 = fLeft + NODE_W / 2;
-        const y1 = fTop + NODE_H;
-        const x2 = tLeft + NODE_W / 2;
+        const fromCard = fromNode.querySelector('.rounded-xl');
+        const toCard   = toNode.querySelector('.rounded-xl');
+        const fW = fromCard ? fromCard.offsetWidth  : 220;
+        const fH = fromCard ? fromCard.offsetHeight : 130;
+        const tW = toCard   ? toCard.offsetWidth    : 220;
+        const tH = toCard   ? toCard.offsetHeight   : 130;
+
+        const x1 = fLeft + fW / 2;
+        const y1 = fTop  + fH;
+        const x2 = tLeft + tW / 2;
         const y2 = tTop;
 
         const color = brandColors[next.step_id] || '#cbd5e1';
