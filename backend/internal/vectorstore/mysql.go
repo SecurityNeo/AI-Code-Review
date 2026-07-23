@@ -40,6 +40,11 @@ func (s *MySQLStore) Save(ctx context.Context, item Item) error {
 		return fmt.Errorf("unknown entity_type: %s", item.Key.EntityType)
 	}
 
+	idCol := s.idColumn(item.Key.EntityType)
+	if idCol == "" {
+		return fmt.Errorf("unknown entity_type: %s", item.Key.EntityType)
+	}
+
 	vecJSON, err := json.Marshal(item.Vector)
 	if err != nil {
 		return err
@@ -47,11 +52,11 @@ func (s *MySQLStore) Save(ctx context.Context, item Item) error {
 
 	// Upsert: delete old then insert new (simpler than raw ON DUPLICATE for GORM generic)
 	_ = s.db.WithContext(ctx).Table(tbl).
-		Where("entity_id = ? AND model_id = ?", item.Key.EntityID, item.Key.ModelID).
+		Where(idCol+" = ? AND model_id = ?", item.Key.EntityID, item.Key.ModelID).
 		Delete(nil)
 
 	return s.db.WithContext(ctx).Table(tbl).Create(map[string]any{
-		"entity_id": item.Key.EntityID,
+		idCol:       item.Key.EntityID,
 		"model_id":  item.Key.ModelID,
 		"vector":    string(vecJSON),
 		"dimension": item.Dimension,
@@ -74,13 +79,17 @@ func (s *MySQLStore) Get(ctx context.Context, key Key) (Vector, error) {
 	if tbl == "" {
 		return nil, fmt.Errorf("unknown entity_type: %s", key.EntityType)
 	}
+	idCol := s.idColumn(key.EntityType)
+	if idCol == "" {
+		return nil, fmt.Errorf("unknown entity_type: %s", key.EntityType)
+	}
 
 	var row struct {
 		Vector string
 	}
 	if err := s.db.WithContext(ctx).Table(tbl).
 		Select("vector").
-		Where("entity_id = ? AND model_id = ?", key.EntityID, key.ModelID).
+		Where(idCol+" = ? AND model_id = ?", key.EntityID, key.ModelID).
 		Scan(&row).Error; err != nil {
 		return nil, err
 	}
@@ -118,7 +127,12 @@ func (s *MySQLStore) Search(ctx context.Context, query Vector, opts SearchOpts) 
 
 	var allRows []rawRow
 	for _, tbl := range tables {
-		db := s.db.WithContext(ctx).Table(tbl).Select("entity_id, model_id, vector")
+		et := entityTypeFromTable(tbl)
+		idCol := s.idColumn(et)
+		if idCol == "" {
+			continue
+		}
+		db := s.db.WithContext(ctx).Table(tbl).Select(idCol + " as entity_id, model_id, vector")
 		if modelID > 0 {
 			db = db.Where("model_id = ?", modelID)
 		}
@@ -127,7 +141,7 @@ func (s *MySQLStore) Search(ctx context.Context, query Vector, opts SearchOpts) 
 			return nil, err
 		}
 		for i := range rows {
-			rows[i].EntityType = entityTypeFromTable(tbl)
+			rows[i].EntityType = et
 		}
 		allRows = append(allRows, rows...)
 	}
@@ -168,8 +182,12 @@ func (s *MySQLStore) Delete(ctx context.Context, key Key) error {
 	if tbl == "" {
 		return fmt.Errorf("unknown entity_type: %s", key.EntityType)
 	}
+	idCol := s.idColumn(key.EntityType)
+	if idCol == "" {
+		return fmt.Errorf("unknown entity_type: %s", key.EntityType)
+	}
 	return s.db.WithContext(ctx).Table(tbl).
-		Where("entity_id = ? AND model_id = ?", key.EntityID, key.ModelID).
+		Where(idCol+" = ? AND model_id = ?", key.EntityID, key.ModelID).
 		Delete(map[string]interface{}{}).Error
 }
 
@@ -229,6 +247,18 @@ func cosineSimilarity(a, b Vector) float64 {
 	return dot / (math.Sqrt(na) * math.Sqrt(nb))
 }
 
+func (s *MySQLStore) idColumn(entityType string) string {
+	switch entityType {
+	case "issue":
+		return "issue_id"
+	case "rule":
+		return "rule_id"
+	case "incubation":
+		return "incubation_id"
+	default:
+		return ""
+	}
+}
 func entityTypeFromTable(tbl string) string {
 	switch tbl {
 	case "review_issue_vectors":
