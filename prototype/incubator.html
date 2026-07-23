@@ -1511,9 +1511,10 @@ function drawPipelineConnections(steps) {
 
 function renderStepSpecificDetail(step) {
     const s = step.output_summary || {};
-    if (step.step_id === 'cluster' && s.result) {
+    const resultRaw = s['结果'] || s.result;
+    if (step.step_id === 'cluster' && resultRaw) {
         let r = {};
-        try { r = typeof s.result === 'string' ? JSON.parse(s.result) : s.result; } catch(e) {}
+        try { r = typeof resultRaw === 'string' ? JSON.parse(resultRaw) : resultRaw; } catch(e) {}
         return `<div class="mt-2 text-xs text-gray-600 bg-white rounded p-2 border">上次聚类：扫描 ${r.total_issues_scanned || '-'} 条 Issue，发现 ${r.clusters_found || '-'} 个簇，生成 ${r.candidates_generated || '-'} 条候选规则</div>`;
     }
     if (step.step_id === 'candidate' && s.total_candidates) {
@@ -1572,16 +1573,20 @@ function openPipelinePanel(stepId) {
         html += `<div class="bg-green-50 px-3 py-2 text-xs font-medium text-green-700 border-b"><i class="fas fa-sign-out-alt mr-1"></i>输出结果</div>`;
         html += `<div class="p-3 space-y-2">`;
         const out = step.output_summary;
-        if (out.description) html += `<div class="text-sm text-gray-700">${out.description}</div>`;
-        if (out.result) {
-            let r = {};
-            try { r = typeof out.result === 'string' ? JSON.parse(out.result) : out.result; } catch(e) {}
-            Object.entries(r).forEach(([k, v]) => {
-                if (typeof v !== 'object') {
-                    html += `<div class="flex justify-between text-sm"><span class="text-gray-500">${k}</span><span class="font-mono text-gray-800">${v}</span></div>`;
-                }
-            });
-        }
+        Object.entries(out).forEach(([k, v]) => {
+            if (k === '结果' || k === 'result') {
+                // JSON result string — expand into sub-items
+                let r = {};
+                try { r = typeof v === 'string' ? JSON.parse(v) : v; } catch(e) {}
+                Object.entries(r).forEach(([rk, rv]) => {
+                    if (typeof rv !== 'object') {
+                        html += `<div class="flex justify-between text-sm"><span class="text-gray-500">${rk}</span><span class="font-mono text-gray-800">${rv}</span></div>`;
+                    }
+                });
+            } else if (typeof v !== 'object') {
+                html += `<div class="flex justify-between text-sm"><span class="text-gray-500">${k}</span><span class="font-mono text-gray-800">${v}</span></div>`;
+            }
+        });
         html += `</div></div>`;
     }
 
