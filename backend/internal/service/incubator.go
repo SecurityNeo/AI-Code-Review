@@ -814,6 +814,47 @@ func extractSemanticSlug(msg string) string {
 	return slug
 }
 
+// sanitizeSlug normalizes an LLM-generated slug: lowercase ASCII letters, digits,
+// and hyphens only; must start with a letter; trimmed to 40 chars; minimum 2 chars.
+func sanitizeSlug(s string) string {
+	if s == "" {
+		return ""
+	}
+	s = strings.ToLower(strings.TrimSpace(s))
+	// Normalize unicode hyphens/underscores to simple hyphens
+	s = strings.NewReplacer(
+		"_", "-",
+		"–", "-",
+		"—", "-",
+	).Replace(s)
+	var clean strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			clean.WriteRune(r)
+		} else if r == '-' {
+			clean.WriteRune(r)
+		}
+	}
+	slug := clean.String()
+	// Collapse consecutive hyphens
+	re := regexp.MustCompile(`-+`)
+	slug = re.ReplaceAllString(slug, "-")
+	slug = strings.Trim(slug, "-")
+	// Must start with a letter
+	if slug == "" || !(slug[0] >= 'a' && slug[0] <= 'z') {
+		return ""
+	}
+	// Length clamp
+	if len(slug) > 40 {
+		slug = slug[:40]
+		slug = strings.TrimRight(slug, "-")
+	}
+	if len(slug) < 2 {
+		return ""
+	}
+	return slug
+}
+
 // ValidateEmbedding checks whether the configured embedding model is reachable.
 // If modelID > 0, tests that specific model directly (useful before saving config).
 func (s *IncubatorService) ValidateEmbedding(modelID uint) (map[string]any, error) {
@@ -1104,6 +1145,7 @@ Issues:
 Please output in the following JSON format (do not include markdown code block):
 {
   "name": "A concise Chinese rule name (within 20 characters)",
+  "slug": "A kebab-case English slug that accurately describes the rule issue. Use 3-5 lowercase English words or common abbreviations (e.g., 'nil-pointer-deref', 'unused-import', 'sql-injection'). Only lowercase letters, digits, and hyphens are allowed. Must start with a letter. Length: 10-40 characters.",
   "description": "A 1-2 sentence description of what this rule checks, why it matters, and how to fix it (in Chinese)",
   "prompt": "In Chinese. ONLY describe: 1) what to check (check objectives), 2) judgment criteria, 3) examples of violation vs non-violation. DO NOT include role-setting sentences like 'you are a code review assistant...' or output constraints like 'do not output extra explanation...'. IMPORTANT: when providing code examples inside the prompt field, use single quotes for inner strings to avoid JSON escaping issues, e.g. use {'user_id': 1} instead of {\"user_id\": 1}. Keep it concise and focused on the review logic itself."
 }
@@ -1117,6 +1159,7 @@ Please output in the following JSON format (do not include markdown code block):
 	// Parse JSON from LLM response
 	var refineResult struct {
 		Name        string `json:"name"`
+		Slug        string `json:"slug"`
 		Description string `json:"description"`
 		Prompt      string `json:"prompt"`
 	}
@@ -1148,12 +1191,35 @@ Please output in the following JSON format (do not include markdown code block):
 	if refineResult.Prompt != "" {
 		updates["prompt"] = refineResult.Prompt
 	}
+	// Use LLM-generated slug for the rule code; fallback to heuristic if slug is missing/invalid.
+	slug := sanitizeSlug(refineResult.Slug)
+	if slug == "" {
+		cand, _, _ := s.GetCandidate(incubationID)
+		if cand != nil && cand.Prompt != "" {
+			slug = extractSemanticSlug(cand.Prompt)
+		} else if len(issues) > 0 {
+			slug = extractSemanticSlug(issues[0].Message)
+		} else {
+			slug = "rule"
+		}
+	}
+	randStr := generateRandomString(4)
+	newCode := fmt.Sprintf("incubated-%s-%s", slug, randStr)
+	if len(newCode) > 64 {
+		newCode = newCode[:64]
+		newCode = strings.TrimRight(newCode, "-")
+	}
+	updates["code"] = newCode
 	updates["status"] = "ready"
 	if len(updates) > 0 {
 		if err := s.UpdateCandidate(incubationID, updates); err != nil {
 			return err
 		}
 	}
+	zap.L().Info("refine: candidate updated",
+		zap.Uint("incubation_id", incubationID),
+		zap.String("code", newCode),
+		zap.String("slug", slug))
 
 	// Asynchronously vectorize the refined candidate
 	if s.embedSvc != nil && s.embedSvc.IsAvailable() {
