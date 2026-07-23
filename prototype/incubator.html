@@ -2212,7 +2212,8 @@ function renderPipeline(steps) {
                     <div class="flex items-center justify-around gap-1 min-h-[44px] ${hasProgress ? 'items-center' : ''}">${stats}</div>
                     ${progressHTML}
                 </div>
-            </div>`;
+            </div>
+        </div>`;
     });
 
     // Log layout for debugging
@@ -2349,9 +2350,6 @@ function drawPipelineConnections(steps) {
         const dx = (tLeft + tW/2) - (fLeft + fW/2);
         const dy = (tTop + tH/2) - (fTop + fH/2);
         const isHorizontal = Math.abs(dx) > Math.abs(dy) * 1.2;
-
-        console.log(`[Pipeline] connect ${step.step_id} → ${next.step_id}: ` +
-            `fL=${fLeft} fT=${fTop} tL=${tLeft} tT=${tTop} dx=${dx.toFixed(0)} dy=${dy.toFixed(0)} horizontal=${isHorizontal}`);
 
         let x1, y1, x2, y2, pathD;
 
