@@ -182,8 +182,9 @@ func (h *IncubatorHandler) ListCandidates(c *gin.Context) {
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	status := c.Query("status")
 	keyword := c.Query("keyword")
+	severity := c.Query("severity")
 
-	list, total, err := h.svc.ListCandidates(status, keyword, page, pageSize)
+	list, total, err := h.svc.ListCandidates(status, keyword, severity, page, pageSize)
 	if err != nil {
 		zap.L().Error("list candidates failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})

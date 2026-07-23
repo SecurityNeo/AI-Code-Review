@@ -263,13 +263,16 @@ func (s *IncubatorService) DeleteCandidate(id uint) error {
 }
 
 // ListCandidates returns incubation candidates with optional status filter.
-func (s *IncubatorService) ListCandidates(status, keyword string, page, pageSize int) ([]model.RuleIncubation, int64, error) {
+func (s *IncubatorService) ListCandidates(status, keyword, severity string, page, pageSize int) ([]model.RuleIncubation, int64, error) {
 	db := model.DB.Model(&model.RuleIncubation{})
 	if status != "" {
 		db = db.Where("status = ?", status)
 	}
 	if keyword != "" {
 		db = db.Where("name LIKE ? OR code LIKE ?", "%"+keyword+"%", "%"+keyword+"%")
+	}
+	if severity != "" {
+		db = db.Where("severity = ?", severity)
 	}
 
 	var total int64
