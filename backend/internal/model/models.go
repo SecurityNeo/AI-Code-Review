@@ -561,7 +561,7 @@ type RuleIncubation struct {
 	ID               uint       `gorm:"primaryKey" json:"id"`
 	Status           string     `gorm:"size:20;default:'draft';index" json:"status"`
 	Name             string     `gorm:"size:100" json:"name"`
-	Code             string     `gorm:"size:64;uniqueIndex" json:"code"`
+	Code             string     `gorm:"size:128;uniqueIndex" json:"code"`
 	Category         string     `gorm:"size:32" json:"category"`
 	Severity         string     `gorm:"size:16" json:"severity"`
 	Language         string     `gorm:"size:32" json:"language"`
