@@ -1256,17 +1256,18 @@ Please output in the following JSON format (do not include markdown code block):
 }
 
 // runSimilarCheck detects similarity between the candidate and existing rules.
-func (s *IncubatorService) runSimilarCheck(incubationID uint) error {
+// Returns true if the candidate passes originality check (no similar rules found).
+func (s *IncubatorService) runSimilarCheck(incubationID uint) (bool, error) {
 	cand, _, err := s.GetCandidate(incubationID)
 	if err != nil {
 		zap.L().Warn("similarCheck: get candidate failed", zap.Uint("incubation_id", incubationID), zap.Error(err))
-		return err
+		return false, err
 	}
 
 	var rules []model.ReviewRule
 	if err := model.DB.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
 		zap.L().Warn("similarCheck: query rules failed", zap.Uint("incubation_id", incubationID), zap.Error(err))
-		return err
+		return false, err
 	}
 
 	var similar []map[string]any
@@ -1285,7 +1286,7 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) error {
 
 	similarJSON, err := json.Marshal(similar)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Also check code uniqueness
@@ -1303,13 +1304,15 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) error {
 	if err := s.UpdateCandidate(incubationID, updates); err != nil {
 		zap.L().Warn("similarCheck: update candidate failed",
 			zap.Uint("incubation_id", incubationID), zap.Error(err))
-		return err
+		return false, err
 	}
 
+	passed := len(similar) == 0
 	zap.L().Info("similarCheck: completed",
 		zap.Uint("incubation_id", incubationID),
 		zap.Int("rules_checked", len(rules)),
-		zap.Int("similar_found", len(similar)))
+		zap.Int("similar_found", len(similar)),
+		zap.Bool("passed", passed))
 
 	// Recalculate confidence after similar-check
 	if updatedCand, _, err := s.GetCandidate(incubationID); err == nil {
@@ -1323,18 +1326,19 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) error {
 		}
 	}
 
-	return nil
+	return passed, nil
 }
 
 // runSandboxTest uses LLM to verify the candidate rule by generating test code and validating it.
-func (s *IncubatorService) runSandboxTest(incubationID uint) error {
+// Returns true if the candidate passes the test (accuracy >= 0.5).
+func (s *IncubatorService) runSandboxTest(incubationID uint) (bool, error) {
 	cand, _, err := s.GetCandidate(incubationID)
 	if err != nil {
 		zap.L().Warn("sandboxTest: get candidate failed", zap.Uint("incubation_id", incubationID), zap.Error(err))
-		return err
+		return false, err
 	}
 	if cand.Prompt == "" {
-		return fmt.Errorf("prompt is empty, cannot test")
+		return false, fmt.Errorf("prompt is empty, cannot test")
 	}
 
 	// Step 1: Ask LLM to generate positive and negative test code
@@ -1342,10 +1346,10 @@ func (s *IncubatorService) runSandboxTest(incubationID uint) error {
 	if err != nil {
 		zap.L().Warn("sandboxTest: generate test cases failed",
 			zap.Uint("incubation_id", incubationID), zap.Error(err))
-		return err
+		return false, err
 	}
 	if len(cases) == 0 {
-		return fmt.Errorf("no test cases generated")
+		return false, fmt.Errorf("no test cases generated")
 	}
 
 	zap.L().Info("sandboxTest: test cases generated",
@@ -1410,14 +1414,16 @@ func (s *IncubatorService) runSandboxTest(incubationID uint) error {
 	if err := model.DB.Model(&model.RuleIncubation{}).Where("id = ?", incubationID).Update("test_results", string(resultJSON)).Error; err != nil {
 		zap.L().Warn("sandboxTest: save results failed",
 			zap.Uint("incubation_id", incubationID), zap.Error(err))
-		return err
+		return false, err
 	}
 
+	passedOverall := accuracy >= 0.5
 	zap.L().Info("sandboxTest: completed",
 		zap.Uint("incubation_id", incubationID),
 		zap.Int("total_cases", len(cases)),
 		zap.Int("passed", passed),
-		zap.Float64("accuracy", accuracy))
+		zap.Float64("accuracy", accuracy),
+		zap.Bool("passed_overall", passedOverall))
 
 	// Recalculate confidence after sandbox test
 	if updatedCand, _, err := s.GetCandidate(incubationID); err == nil {
@@ -1431,7 +1437,7 @@ func (s *IncubatorService) runSandboxTest(incubationID uint) error {
 		}
 	}
 
-	return nil
+	return passedOverall, nil
 }
 
 // generateLLMTestCases asks the LLM to generate positive (violating) and negative (compliant) code snippets.
@@ -1923,21 +1929,27 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 
 	// -------- Step 3: Similar Check --------
 	updateStep("similar_check", "running", 0, len(pipeCands))
+	similarPassed := 0
 	for i, cand := range pipeCands {
-		_ = s.runSimilarCheck(cand.ID)
+		if ok, _ := s.runSimilarCheck(cand.ID); ok {
+			similarPassed++
+		}
 		updateStep("similar_check", "running", i+1, len(pipeCands))
 	}
-	updateStep("similar_check", "completed", len(pipeCands), len(pipeCands))
+	updateStep("similar_check", "completed", similarPassed, len(pipeCands))
 
 	// -------- Step 4: Sandbox Test --------
 	updateStep("sandbox_test", "running", 0, len(pipeCands))
+	sandboxPassed := 0
 	for i, cand := range pipeCands {
 		if cand.Status == "ready" {
-			_ = s.runSandboxTest(cand.ID)
+			if ok, _ := s.runSandboxTest(cand.ID); ok {
+				sandboxPassed++
+			}
 		}
 		updateStep("sandbox_test", "running", i+1, len(pipeCands))
 	}
-	updateStep("sandbox_test", "completed", len(pipeCands), len(pipeCands))
+	updateStep("sandbox_test", "completed", sandboxPassed, len(pipeCands))
 
 	completeJob()
 	zap.L().Info("pipeline_run completed", zap.Uint("job_id", jobID))

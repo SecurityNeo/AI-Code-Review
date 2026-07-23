@@ -195,7 +195,8 @@ func (r *IncubatorJobRunner) handleSimilarCheck(job model.RuleIncubationJob) err
 	if err := json.Unmarshal([]byte(job.Params), &params); err != nil {
 		return fmt.Errorf("invalid params: %w", err)
 	}
-	return r.incubSvc.runSimilarCheck(params.IncubationID)
+	_, err := r.incubSvc.runSimilarCheck(params.IncubationID)
+	return err
 }
 
 // --- Sandbox Test Job ---
@@ -206,7 +207,8 @@ func (r *IncubatorJobRunner) handleSandboxTest(job model.RuleIncubationJob) erro
 	if err := json.Unmarshal([]byte(job.Params), &params); err != nil {
 		return fmt.Errorf("invalid params: %w", err)
 	}
-	return r.incubSvc.runSandboxTest(params.IncubationID)
+	_, err := r.incubSvc.runSandboxTest(params.IncubationID)
+	return err
 }
 
 // QueueJob inserts a new pending job into the database.
