@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -258,6 +259,67 @@ func (s *IncubatorService) UpdateCandidate(id uint, updates map[string]any) erro
 	delete(updates, "created_by")
 	delete(updates, "published_rule_id")
 	return model.DB.Model(&cand).Updates(updates).Error
+}
+
+// calculateConfidenceScore computes a dynamic confidence score (0.40–1.00) for a candidate rule.
+// It aggregates scores from:
+//   1) Refine quality – based on prompt/description/name completeness
+//   2) Sandbox test accuracy – proportion of passed LLM-generated test cases
+//   3) Similar-check originality – penalized if similar existing rules are found
+//   4) Source-issue accept rate – historical positive signal from users
+func (s *IncubatorService) calculateConfidenceScore(cand *model.RuleIncubation) float64 {
+	var score float64 = 0.50 // baseline from rule creation
+
+	// 1. Refine quality: max +0.10
+	if len(cand.Prompt) >= 100 {
+		score += 0.06
+	} else if len(cand.Prompt) > 0 {
+		score += 0.03
+	}
+	if len(cand.Name) >= 5 && len(cand.Description) >= 20 {
+		score += 0.04
+	} else if len(cand.Name) > 0 && len(cand.Description) > 0 {
+		score += 0.02
+	}
+
+	// 2. Sandbox test accuracy: max +0.25
+	var testResult map[string]any
+	if cand.TestResults != "" && cand.TestResults != "{}" {
+		_ = json.Unmarshal([]byte(cand.TestResults), &testResult)
+	}
+	if acc, ok := testResult["accuracy"].(float64); ok {
+		score += acc * 0.25
+	}
+
+	// 3. Similar-check originality: max +0.10
+	similarFound := false
+	if cand.SimilarRules != "" && cand.SimilarRules != "{}" {
+		var similar []map[string]any
+		if _ = json.Unmarshal([]byte(cand.SimilarRules), &similar); len(similar) == 0 {
+			score += 0.10
+		} else if len(similar) == 1 {
+			score += 0.05
+			similarFound = true
+		} else {
+			// 2+ similar rules -> no originality bonus
+			similarFound = true
+		}
+	} else {
+		score += 0.10
+	}
+
+	// 4. Source-issue quality (user accept rate): max +0.05
+	score += cand.UserAcceptRate * 0.05
+
+	// Clamp to [0.40, 1.00]
+	if score > 1.0 {
+		score = 1.0
+	}
+	if score < 0.4 {
+		score = 0.4
+	}
+
+	return math.Round(score*100) / 100
 }
 
 // DeleteCandidate hard-deletes a candidate rule (protects published ones).
@@ -1048,6 +1110,18 @@ Please output in the following JSON format (do not include markdown code block):
 			}
 		}(incubationID)
 	}
+
+	// Recalculate confidence score after refine succeeded
+	if cd, _, err := s.GetCandidate(incubationID); err == nil {
+		conf := s.calculateConfidenceScore(cd)
+		_ = s.UpdateCandidate(incubationID, map[string]any{
+			"confidence_score": conf,
+		})
+		zap.L().Info("confidence updated after refine",
+			zap.Uint("incubation_id", incubationID),
+			zap.Float64("confidence", conf))
+	}
+
 	return nil
 }
 
@@ -1106,6 +1180,19 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) error {
 		zap.Uint("incubation_id", incubationID),
 		zap.Int("rules_checked", len(rules)),
 		zap.Int("similar_found", len(similar)))
+
+	// Recalculate confidence after similar-check
+	if updatedCand, _, err := s.GetCandidate(incubationID); err == nil {
+		conf := s.calculateConfidenceScore(updatedCand)
+		if err := s.UpdateCandidate(incubationID, map[string]any{
+			"confidence_score": conf,
+		}); err == nil {
+			zap.L().Info("confidence updated after similar-check",
+				zap.Uint("incubation_id", incubationID),
+				zap.Float64("confidence", conf))
+		}
+	}
+
 	return nil
 }
 
@@ -1201,6 +1288,19 @@ func (s *IncubatorService) runSandboxTest(incubationID uint) error {
 		zap.Int("total_cases", len(cases)),
 		zap.Int("passed", passed),
 		zap.Float64("accuracy", accuracy))
+
+	// Recalculate confidence after sandbox test
+	if updatedCand, _, err := s.GetCandidate(incubationID); err == nil {
+		conf := s.calculateConfidenceScore(updatedCand)
+		if err := s.UpdateCandidate(incubationID, map[string]any{
+			"confidence_score": conf,
+		}); err == nil {
+			zap.L().Info("confidence updated after sandbox-test",
+				zap.Uint("incubation_id", incubationID),
+				zap.Float64("confidence", conf))
+		}
+	}
+
 	return nil
 }
 
