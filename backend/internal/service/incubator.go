@@ -182,7 +182,7 @@ func (s *IncubatorService) CreateCandidate(req CreateCandidateRequest, userID ui
 	}
 	sourceProjectsJSON, _ := json.Marshal(sourceProjects)
 
-	code := fmt.Sprintf("incubated-%s-%s-%d", modeKey(catCount), modeKey(langCount), time.Now().Unix())
+	code := fmt.Sprintf("incubated-%s-%s-%s-%d", modeKey(catCount), modeKey(langCount), req.ClusterID, time.Now().UnixNano())
 
 	cand := &model.RuleIncubation{
 		Status:          "draft",
