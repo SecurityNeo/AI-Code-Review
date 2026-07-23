@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/ai-optimizer/backend/internal/model"
@@ -292,17 +291,14 @@ func (s *IncubatorService) calculateConfidenceScore(cand *model.RuleIncubation) 
 	}
 
 	// 3. Similar-check originality: max +0.10
-	similarFound := false
 	if cand.SimilarRules != "" && cand.SimilarRules != "{}" {
 		var similar []map[string]any
 		if _ = json.Unmarshal([]byte(cand.SimilarRules), &similar); len(similar) == 0 {
 			score += 0.10
 		} else if len(similar) == 1 {
 			score += 0.05
-			similarFound = true
 		} else {
 			// 2+ similar rules -> no originality bonus
-			similarFound = true
 		}
 	} else {
 		score += 0.10
