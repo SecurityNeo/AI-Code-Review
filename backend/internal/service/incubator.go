@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/vectorstore"
@@ -198,6 +199,8 @@ func (s *IncubatorService) CreateCandidate(req CreateCandidateRequest, userID ui
 		ConfidenceScore: 0.5, // baseline
 		UserAcceptRate:  float64(accepted) / float64(len(issues)),
 		CreatedBy:       userID,
+		SimilarRules:    "{}",
+		TestResults:     "{}",
 	}
 
 	if err := model.DB.Create(cand).Error; err != nil {
@@ -638,8 +641,9 @@ func (s *IncubatorService) suggestName(issues []model.ReviewIssue) string {
 		return "未命名规则"
 	}
 	msg := issues[0].Message
-	if len(msg) > 30 {
-		msg = msg[:30]
+	if utf8.RuneCountInString(msg) > 30 {
+		rs := []rune(msg)
+		msg = string(rs[:30])
 	}
 	return msg
 }
@@ -655,8 +659,9 @@ func (s *IncubatorService) suggestDescription(issues []model.ReviewIssue) string
 			break
 		}
 		m := iss.Message
-		if len(m) > 100 {
-			m = m[:100] + "..."
+		if utf8.RuneCountInString(m) > 100 {
+			rs := []rune(m)
+			m = string(rs[:100]) + "..."
 		}
 		msgs = append(msgs, m)
 	}
