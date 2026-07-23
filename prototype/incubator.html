@@ -12,6 +12,8 @@
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <script src="https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts-gl@2.0.9/dist/echarts-gl.min.js"></script>
     <style>
         .modal { display: none; }
         .modal.active { display: flex; }
@@ -883,7 +885,8 @@
         </div>
         <div class="flex-1 relative overflow-hidden">
             <div id="cyGraphContainer" class="absolute inset-0"></div>
-            <canvas id="projectionCanvas" class="absolute inset-0 hidden bg-white"></canvas>
+            <div id="projectionEchart" class="absolute inset-0 hidden"></div>
+            <div id="graphTooltip" class="fixed hidden z-20 bg-white/95 backdrop-blur border border-gray-200 rounded-xl shadow-2xl p-4 pointer-events-none transition-opacity duration-150" style="max-width: 340px; left:0; top:0;"></div>
             <div id="graphLoading" class="absolute inset-0 flex items-center justify-center bg-white z-10">
                 <div class="text-center">
                     <i class="fas fa-spinner fa-spin text-purple-500 text-2xl mb-2"></i>
@@ -2668,27 +2671,44 @@ function closeSimilarGraphModal() {
     modal.classList.add('hidden');
     modal.classList.remove('active');
     if (currentCy) { currentCy.destroy(); currentCy = null; }
+    if (window._chart3d) { window._chart3d.dispose(); window._chart3d = null; }
+    hideGraphTooltip();
+}
+
+function showGraphTooltip(x, y, html) {
+    const tip = document.getElementById('graphTooltip');
+    tip.innerHTML = html;
+    tip.style.left = x + 'px';
+    tip.style.top = y + 'px';
+    tip.classList.remove('hidden');
+}
+
+function hideGraphTooltip() {
+    document.getElementById('graphTooltip').classList.add('hidden');
 }
 
 function switchGraphTab(tab) {
     const btnCyto = document.getElementById('tab-graph-cyto');
     const btnProj = document.getElementById('tab-graph-proj');
     const cyContainer = document.getElementById('cyGraphContainer');
-    const projCanvas = document.getElementById('projectionCanvas');
+    const projDiv = document.getElementById('projectionEchart');
     const legend = document.getElementById('graphLegend');
 
     if (tab === 'cyto') {
         btnCyto.className = 'px-3 py-1 text-xs rounded-md bg-purple-100 text-purple-700 font-medium';
         btnProj.className = 'px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-50';
         cyContainer.classList.remove('hidden');
-        projCanvas.classList.add('hidden');
+        projDiv.classList.add('hidden');
         legend.textContent = '中心节点 = 当前候选规则 · 连线粗细 = 相似度';
     } else {
         btnCyto.className = 'px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-50';
         btnProj.className = 'px-3 py-1 text-xs rounded-md bg-purple-100 text-purple-700 font-medium';
         cyContainer.classList.add('hidden');
-        projCanvas.classList.remove('hidden');
-        legend.textContent = '二维 PCA 投影 · 距离越近语义越相似';
+        projDiv.classList.remove('hidden');
+        legend.textContent = '3D 空间投影 · 距离越近语义越相似';
+        if (window._similarGraphData) renderProjection(window._similarGraphData);
+    }
+}
         if (window._similarGraphData) renderProjection(window._similarGraphData);
     }
 }
@@ -2697,6 +2717,12 @@ function renderCyGraph(data) {
     const container = document.getElementById('cyGraphContainer');
     if (currentCy) { currentCy.destroy(); currentCy = null; }
     container.innerHTML = '';
+
+    // build a map for rule details lookup (for tooltip)
+    const ruleMap = {};
+    (data.context || []).forEach(n => {
+        ruleMap[n.id] = n;
+    });
 
     const top5IDs = new Set();
     (data.top5 || []).forEach(item => top5IDs.add(item.rule_id));
@@ -2732,7 +2758,8 @@ function renderCyGraph(data) {
                 label: node.name || node.code || ('规则' + node.id),
                 category: node.category,
                 type: isTop5 ? 'rule' : 'dim_rule',
-                isTop5
+                isTop5,
+                rawId: node.id
             }
         });
         if (isTop5) {
@@ -2756,36 +2783,42 @@ function renderCyGraph(data) {
                 selector: 'node[type="center"]',
                 style: {
                     'background-color': '#7c3aed',
-                    'width': 64, 'height': 64,
+                    'width': 110, 'height': 110,
                     'label': 'data(label)',
                     'color': '#fff',
-                    'font-size': '11px',
+                    'font-size': '14px',
                     'text-valign': 'center', 'text-halign': 'center',
-                    'text-wrap': 'wrap', 'text-max-width': '70px',
+                    'text-wrap': 'wrap', 'text-max-width': '120px',
                     'font-weight': 'bold',
-                    'border-width': 3, 'border-color': '#a78bfa'
+                    'border-width': 4, 'border-color': '#a78bfa',
+                    'text-shadow-color': '#000',
+                    'text-shadow-blur': 4,
+                    'text-shadow-offset-x': 0,
+                    'text-shadow-offset-y': 1
                 }
             },
             {
                 selector: 'node[type="rule"]',
                 style: {
                     'background-color': (ele) => catColors[ele.data('category')] || '#94a3b8',
-                    'width': 42, 'height': 42,
+                    'width': 70, 'height': 70,
                     'label': 'data(label)',
-                    'color': '#334155',
-                    'font-size': '10px',
-                    'text-valign': 'bottom', 'text-halign': 'center',
-                    'text-wrap': 'wrap', 'text-max-width': '60px',
-                    'text-margin-y': 4,
-                    'border-width': 2, 'border-color': (ele) => catColors[ele.data('category')] || '#e2e8f0',
-                    'font-weight': 'bold'
+                    'color': '#fff',
+                    'font-size': '12px',
+                    'text-valign': 'center', 'text-halign': 'center',
+                    'text-wrap': 'wrap', 'text-max-width': '90px',
+                    'font-weight': 'bold',
+                    'border-width': 3, 'border-color': '#fff',
+                    'shadow-blur': 10,
+                    'shadow-color': 'rgba(0,0,0,0.15)',
+                    'shadow-offset-y': 3
                 }
             },
             {
                 selector: 'node[type="dim_rule"]',
                 style: {
                     'background-color': '#e2e8f0',
-                    'width': 18, 'height': 18,
+                    'width': 20, 'height': 20,
                     'color': '#cbd5e1',
                     'font-size': '0px',
                     'border-width': 1, 'border-color': '#f1f5f9'
@@ -2794,149 +2827,88 @@ function renderCyGraph(data) {
             {
                 selector: 'edge',
                 style: {
-                    'width': (ele) => Math.max(1, ele.data('weight') * 4),
+                    'width': (ele) => Math.max(2, ele.data('weight') * 6),
                     'line-color': '#c4b5fd',
                     'target-arrow-color': '#c4b5fd',
                     'target-arrow-shape': 'triangle',
-                    'arrow-scale': 0.8,
+                    'arrow-scale': 1.2,
                     'curve-style': 'bezier',
-                    'opacity': 0.8
+                    'opacity': 0.85
                 }
             }
         ],
         layout: {
             name: 'cose',
-            padding: 30,
-            componentSpacing: 60,
-            nodeRepulsion: (node) => node.data('type') === 'dim_rule' ? 80000 : 400000,
+            padding: 40,
+            componentSpacing: 80,
+            nodeRepulsion: (node) => node.data('type') === 'dim_rule' ? 60000 : 500000,
             edgeElasticity: 100,
-            idealEdgeLength: 120,
+            idealEdgeLength: 160,
             animate: true,
             animationDuration: 500
         }
     });
 
-    currentCy.on('tap', 'node', (evt) => {
-        const nd = evt.target.data();
-        if (nd.isTop5) {
-            const item = (data.top5 || []).find(t => t.rule_id === nd.id);
-            const sim = item ? (item.similarity * 100).toFixed(1) + '%' : '';
-            showToast(`${nd.label} · 相似度 ${sim} · ${item?.method || ''}`);
-        } else if (nd.type === 'dim_rule') {
-            showToast(`现有规则: ${nd.label}`);
+    // Hover tooltip (mouse tracking)
+    currentCy.on('mouseover', 'node', (evt) => {
+        const nd = evt.target;
+        const pos = nd.renderedPosition();
+        const containerRect = container.getBoundingClientRect();
+        const tipX = containerRect.left + pos.x + 20;
+        const tipY = containerRect.top + pos.y - 20;
+
+        let html = '';
+        if (nd.data('type') === 'center') {
+            html = `<div class="font-bold text-purple-700 mb-1">候选规则</div>
+                    <div class="text-xs text-gray-600">ID: ${center.id}</div>
+                    <div class="text-sm font-semibold text-gray-800 mt-1">${escapeHtml(center.name || '')}</div>
+                    <div class="text-xs text-gray-500 font-mono">${center.code || ''}</div>
+                    <div class="mt-2 text-xs text-gray-600 leading-relaxed">${escapeHtml(center.prompt ? center.prompt.substring(0,200) : (center.description || '暂无描述'))}${center.prompt && center.prompt.length > 200 ? '...' : ''}</div>`;
+        } else if (nd.data('isTop5')) {
+            const item = (data.top5 || []).find(t => t.rule_id === nd.data('rawId'));
+            const meta = ruleMap[nd.data('rawId')];
+            html = `<div class="font-bold text-blue-600 mb-1">相似规则 (Top 5)</div>
+                    <div class="text-xs text-gray-600">ID: ${nd.data('rawId')}</div>
+                    <div class="text-sm font-semibold text-gray-800 mt-1">${escapeHtml(meta?.name || nd.data('label'))}</div>
+                    <div class="text-xs text-gray-500 font-mono">${meta?.code || ''}</div>
+                    <div class="mt-2 flex items-center gap-2">
+                        <span class="text-xs px-2 py-0.5 rounded bg-purple-50 text-purple-700 font-bold">相似度 ${(item?.similarity * 100).toFixed(1)}%</span>
+                        <span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-600">${item?.method || ''}</span>
+                    </div>
+                    <div class="mt-2 text-xs text-gray-600 leading-relaxed">${escapeHtml(meta?.prompt ? meta.prompt.substring(0,180) : (meta?.description || ''))}${meta?.prompt && meta.prompt.length > 180 ? '...' : ''}</div>`;
+        } else {
+            const meta = ruleMap[nd.data('rawId')];
+            html = `<div class="font-bold text-gray-500 mb-1">现有规则</div>
+                    <div class="text-xs text-gray-600">ID: ${nd.data('rawId')}</div>
+                    <div class="text-sm font-semibold text-gray-800 mt-1">${escapeHtml(meta?.name || nd.data('label'))}</div>
+                    <div class="text-xs text-gray-500 font-mono">${meta?.code || ''}</div>`;
         }
+        showGraphTooltip(tipX, tipY, html);
     });
+
+    currentCy.on('mouseout', 'node', () => {
+        hideGraphTooltip();
+    });
+
+    currentCy.on('dragpan', () => hideGraphTooltip());
+    currentCy.on('zoom', () => hideGraphTooltip());
 }
 
-// PCA2D: simple power-iteration PCA returning 2D coordinates
-function pca2d(vectors) {
-    const n = vectors.length;
-    const dim = vectors[0].length;
-
-    // Mean center
-    const mean = new Float64Array(dim);
-    for (let v of vectors) for (let i = 0; i < dim; i++) mean[i] += v[i];
-    for (let i = 0; i < dim; i++) mean[i] /= n;
-
-    const centered = vectors.map(v => {
-        const c = new Float64Array(dim);
-        for (let i = 0; i < dim; i++) c[i] = v[i] - mean[i];
-        return c;
-    });
-
-    function powerIter(mat, steps = 25) {
-        let vec = new Float64Array(dim);
-        vec.fill(1);
-        for (let s = 0; s < steps; s++) {
-            const next = new Float64Array(dim).fill(0);
-            for (let row of mat) {
-                let dot = 0;
-                for (let i = 0; i < dim; i++) dot += row[i] * vec[i];
-                for (let i = 0; i < dim; i++) next[i] += row[i] * dot;
-            }
-            let norm = 0;
-            for (let i = 0; i < dim; i++) norm += next[i] * next[i];
-            norm = Math.sqrt(norm);
-            if (norm < 1e-10) break;
-            for (let i = 0; i < dim; i++) vec[i] = next[i] / norm;
-        }
-        return vec;
-    }
-
-    const pc1 = powerIter(centered);
-
-    // Deflate for PC2
-    const proj1 = centered.map(v => {
-        let dot = 0;
-        for (let i = 0; i < dim; i++) dot += v[i] * pc1[i];
-        return dot;
-    });
-
-    const deflated = centered.map((v, idx) => {
-        const d = new Float64Array(dim);
-        for (let i = 0; i < dim; i++) d[i] = v[i] - proj1[idx] * pc1[i];
-        return d;
-    });
-
-    const pc2 = powerIter(deflated);
-
-    return centered.map(v => {
-        let x = 0, y = 0;
-        for (let i = 0; i < dim; i++) {
-            x += v[i] * pc1[i];
-            y += v[i] * pc2[i];
-        }
-        return [x, y];
-    });
-}
-
+// 3D scatter using ECharts GL — only center + top5
 function renderProjection(data) {
-    const canvas = document.getElementById('projectionCanvas');
-    const ctx = canvas.getContext('2d');
-    const nodes = data.context || [];
-    const validNodes = nodes.filter(n => n.embedding && n.embedding.length > 0);
+    const container = document.getElementById('projectionEchart');
+    if (window._chart3d) { window._chart3d.dispose(); window._chart3d = null; }
+    container.innerHTML = '';
 
-    canvas.width = canvas.offsetWidth || 800;
-    canvas.height = canvas.offsetHeight || 600;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    if (validNodes.length === 0) {
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '14px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('暂无向量数据，请确保 Embedding 模型已配置并运行相似检测', canvas.width / 2, canvas.height / 2);
+    if (!data.top5 || data.top5.length === 0) {
+        container.innerHTML = `<div class="flex items-center justify-center h-full text-gray-500">暂无相似规则数据</div>`;
         return;
     }
 
-    if (validNodes.length === 1) {
-        // Single point: draw it in center with a label
-        const n = validNodes[0];
-        ctx.fillStyle = '#7c3aed';
-        ctx.beginPath();
-        ctx.arc(canvas.width / 2, canvas.height / 2, 10, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#334155';
-        ctx.font = '12px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(n.name || n.code || '规则', canvas.width / 2, canvas.height / 2 + 24);
-        return;
-    }
-
-    const vectors = validNodes.map(n => n.embedding);
-    const coords = pca2d(vectors);
-
-    // Normalize to [margin, width-margin], [margin, height-margin]
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const [x, y] of coords) {
-        if (x < minX) minX = x; if (x > maxX) maxX = x;
-        if (y < minY) minY = y; if (y > maxY) maxY = y;
-    }
-    const margin = 60;
-    const scaleX = (canvas.width - margin * 2) / (maxX - minX || 1);
-    const scaleY = (canvas.height - margin * 2) / (maxY - minY || 1);
-    const scale = Math.min(scaleX, scaleY) * 0.9;
-    const cx = (minX + maxX) / 2;
-    const cy = (minY + maxY) / 2;
+    const center = data.center || {};
+    const top5 = data.top5 || [];
+    const contextMap = {};
+    (data.context || []).forEach(n => contextMap[n.id] = n);
 
     const catColors = {
         security: '#ef4444', performance: '#f97316', readability: '#3b82f6',
@@ -2944,49 +2916,104 @@ function renderProjection(data) {
         logging: '#6366f1', error_handling: '#f59e0b', documentation: '#84cc16',
     };
 
-    // Draw points
-    validNodes.forEach((node, idx) => {
-        const [x, y] = coords[idx];
-        const px = canvas.width / 2 + (x - cx) * scale;
-        const py = canvas.height / 2 + (y - cy) * scale;
-        const isCenter = node.is_center;
-        const isTop5 = node.is_top5;
-        const baseR = isCenter ? 12 : isTop5 ? 7 : 3.5;
-        const z = isCenter ? 2 : isTop5 ? 1 : 0;
-        const color = isCenter ? '#7c3aed' : (catColors[node.category] || '#94a3b8');
-
-        // Glow for center / top5
-        if (z > 0) {
-            ctx.beginPath();
-            ctx.arc(px, py, baseR + 6, 0, Math.PI * 2);
-            ctx.fillStyle = (z === 2 ? 'rgba(124,58,237,0.12)' : 'rgba(0,0,0,0.06)');
-            ctx.fill();
-        }
-
-        ctx.beginPath();
-        ctx.arc(px, py, baseR, 0, Math.PI * 2);
-        ctx.fillStyle = color;
-        ctx.fill();
-
-        if (isCenter || isTop5) {
-            ctx.strokeStyle = isCenter ? '#fff' : 'rgba(255,255,255,0.8)';
-            ctx.lineWidth = isCenter ? 3 : 2;
-            ctx.stroke();
-        }
-
-        if (isCenter || isTop5) {
-            ctx.fillStyle = '#334155';
-            ctx.font = isCenter ? 'bold 12px sans-serif' : '11px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText(node.name || node.code || '', px, py - baseR - 6);
-        }
+    // Build 3D coordinates:
+    // Center at (0,0,0). Top5 placed around it based on similarity.
+    // Higher similarity -> closer to center.
+    const items = [];
+    items.push({
+        name: center.name || center.code || '候选规则',
+        value: [0, 0, 0, center.id, 'center'],
+        itemStyle: { color: '#7c3aed' },
+        symbolSize: 36,
+        label: { show: true, fontSize: 14, fontWeight: 'bold', formatter: '{b}', distance: 10 }
     });
 
-    // Legend
-    ctx.fillStyle = '#94a3b8';
-    ctx.font = '11px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(`有效节点: ${validNodes.length}/${nodes.length} · 中心 = 当前候选规则 · 大圆 = Top5 相似规则`, 12, canvas.height - 10);
+    // Distribute top5 on a unit sphere (Fibonacci lattice for even spacing)
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+    top5.forEach((item, idx) => {
+        const dist = Math.max(0.3, 1 - (item.similarity || 0)); // 0.9 -> 0.1, 0.5 -> 0.5
+        const theta = goldenAngle * idx;
+        const phi = Math.acos(1 - 2 * (idx + 0.5) / top5.length);
+        const x = dist * Math.sin(phi) * Math.cos(theta);
+        const y = dist * Math.sin(phi) * Math.sin(theta);
+        const z = dist * Math.cos(phi);
+        const color = catColors[item.category] || '#94a3b8';
+        items.push({
+            name: item.name || item.code || ('规则' + item.rule_id),
+            value: [x, y, z, item.rule_id, 'top5', item.similarity, item.method],
+            itemStyle: { color: color },
+            symbolSize: 24,
+            label: { show: true, fontSize: 12, fontWeight: 'bold', formatter: '{b}', distance: 8 }
+        });
+    });
+
+    const chart = echarts.init(container);
+    window._chart3d = chart;
+
+    chart.setOption({
+        tooltip: {
+            trigger: 'item',
+            backgroundColor: 'rgba(255,255,255,0.95)',
+            borderColor: '#e2e8f0',
+            borderWidth: 1,
+            padding: [12, 16],
+            textStyle: { color: '#334155', fontSize: 12 },
+            extraCssText: 'box-shadow: 0 8px 30px rgba(0,0,0,0.12); border-radius: 12px; max-width: 300px;',
+            formatter: (params) => {
+                const v = params.data.value || params.value;
+                const d = params.data;
+                if (v[4] === 'center') {
+                    return `<div class="font-bold text-purple-700 mb-1">候选规则</div>
+                            <div class="text-xs text-gray-600">ID: ${v[3]}</div>
+                            <div class="text-sm font-semibold text-gray-800 mt-1">${escapeHtml(center.name || '')}</div>
+                            <div class="text-xs text-gray-500 font-mono">${center.code || ''}</div>`;
+                } else {
+                    const similarity = v[5] || 0;
+                    const method = v[6] || '';
+                    return `<div class="font-bold text-blue-600 mb-1">Top5 相似规则</div>
+                            <div class="text-xs text-gray-600">ID: ${v[3]}</div>
+                            <div class="text-sm font-semibold text-gray-800 mt-1">${escapeHtml(d.name || '')}</div>
+                            <div class="mt-2 flex items-center gap-2">
+                                <span class="text-xs px-2 py-0.5 rounded bg-purple-50 text-purple-700 font-bold">相似度 ${(similarity * 100).toFixed(1)}%</span>
+                                <span class="text-xs text-gray-500">${method}</span>
+                            </div>`;
+                }
+            }
+        },
+        xAxis3D: { name: '', type: 'value', show: false },
+        yAxis3D: { name: '', type: 'value', show: false },
+        zAxis3D: { name: '', type: 'value', show: false },
+        grid3D: {
+            boxWidth: 200,
+            boxHeight: 200,
+            boxDepth: 200,
+            axisPointer: { show: false },
+            light: {
+                main: { intensity: 1.2, shadow: true },
+                ambient: { intensity: 0.3 }
+            },
+            viewControl: {
+                projection: 'perspective',
+                autoRotate: true,
+                autoRotateSpeed: 4,
+                distance: 280,
+                alpha: 25,
+                beta: 40
+            }
+        },
+        series: [{
+            type: 'scatter3D',
+            data: items,
+            itemStyle: { opacity: 0.9 },
+            emphasis: {
+                itemStyle: { opacity: 1, borderWidth: 2, borderColor: '#fff' },
+                label: { fontSize: 14, fontWeight: 'bold' }
+            },
+            shading: 'lambert'
+        }]
+    });
+
+    window.addEventListener('resize', () => chart.resize());
 }
 
 // ====== Init ======
