@@ -409,9 +409,9 @@ func (s *IncubatorService) doClusterIssues(timeRangeDays int, languages []string
 	}
 
 	summary := map[string]any{
-		"total_issues_scanned": len(issues),
-		"clusters_found":       len(clusters),
-		"candidates_generated": generated,
+		"扫描Issue数":   len(issues),
+		"发现簇数":     len(clusters),
+		"生成候选规则数": generated,
 	}
 	summaryJSON, err := json.Marshal(summary)
 	if err != nil {

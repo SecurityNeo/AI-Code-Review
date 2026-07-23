@@ -1539,7 +1539,7 @@ function renderStepSpecificDetail(step) {
     if (step.step_id === 'cluster' && resultRaw) {
         let r = {};
         try { r = typeof resultRaw === 'string' ? JSON.parse(resultRaw) : resultRaw; } catch(e) {}
-        return `<div class="mt-2 text-xs text-gray-600 bg-white rounded p-2 border">上次聚类：扫描 ${r.total_issues_scanned || '-'} 条 Issue，发现 ${r.clusters_found || '-'} 个簇，生成 ${r.candidates_generated || '-'} 条候选规则</div>`;
+        return `<div class="mt-2 text-xs text-gray-600 bg-white rounded p-2 border">上次聚类：扫描 ${r['扫描Issue数'] || '-'} 条 Issue，发现 ${r['发现簇数'] || '-'} 个簇，生成 ${r['生成候选规则数'] || '-'} 条候选规则</div>`;
     }
     if (step.step_id === 'candidate' && s.total_candidates) {
         return `<div class="mt-2 flex gap-2"><span class="text-xs px-2 py-1 rounded bg-gray-100">草稿: ${step.stats.draft || 0}</span><span class="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700">可发布: ${step.stats.ready || 0}</span><span class="text-xs px-2 py-1 rounded bg-green-100 text-green-700">已发布: ${step.stats.published || 0}</span></div>`;
