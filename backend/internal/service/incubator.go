@@ -693,57 +693,125 @@ func (s *IncubatorService) SaveConfig(updates map[string]any) error {
 }
 
 // generateIncubationCode creates a semantic, readable code for a candidate rule.
-// Format: incubated_{semantic_slug}_{8-char-random}
+// Format: incubated-{semantic-slug}-{4-char-random}
+// generateIncubationCode creates a semantic, readable code for a candidate rule.
+// Format: incubated-{semantic-slug}-{4-char-random}
+// Requirements:
+//   1. Only lowercase letters, digits, and hyphens allowed.
+//   2. Compact: semantic-slug max 30 chars, total ~45 chars.
+//   3. Accurate: semantic-slug describes the issueconcisely.
 func generateIncubationCode(issues []model.ReviewIssue) string {
-	randStr := generateRandomString(8)
+	randStr := generateRandomString(4)
 	if len(issues) == 0 {
-		return fmt.Sprintf("incubated_rule_%s", randStr)
+		return fmt.Sprintf("incubated-rule-%s", randStr)
 	}
 	msg := issues[0].Message
 	if msg == "" {
-		return fmt.Sprintf("incubated_rule_%s", randStr)
+		return fmt.Sprintf("incubated-rule-%s", randStr)
 	}
-	keyword := extractSemanticSlug(msg)
-	code := fmt.Sprintf("incubated_%s_%s", keyword, randStr)
-	if len(code) > 128 {
-		code = code[:128]
+	slug := extractSemanticSlug(msg)
+	code := fmt.Sprintf("incubated-%s-%s", slug, randStr)
+	if len(code) > 64 {
+		code = code[:64]
 	}
 	return code
 }
 
-// extractSemanticSlug turns a message into a short, URL-safe slug.
+// extractSemanticSlug extracts the core semantic keywords from a message,
+// filters stop-words, and joins them with hyphens.
+// Result contains only a-z, 0-9, and hyphens.
 func extractSemanticSlug(msg string) string {
 	if msg == "" {
 		return "rule"
 	}
-	// Normalize: lowercase, collapse whitespace
 	msg = strings.ToLower(strings.TrimSpace(msg))
-	// Take first 25 runes to keep it concise
-	runes := []rune(msg)
-	if len(runes) > 25 {
-		runes = runes[:25]
+
+	// Comprehensive stop-words set (Chinese + English)
+	stopwords := map[string]struct{}{
+		// English
+		"the": {}, "a": {}, "an": {}, "is": {}, "are": {}, "was": {}, "were": {},
+		"to": {}, "of": {}, "in": {}, "on": {}, "at": {}, "for": {}, "with": {},
+		"and": {}, "or": {}, "not": {}, "it": {}, "this": {}, "that": {}, "be": {},
+		"by": {}, "from": {}, "as": {}, "has": {}, "have": {}, "had": {}, "do": {},
+		"does": {}, "did": {}, "will": {}, "would": {}, "should": {}, "could": {},
+		"can": {}, "may": {}, "might": {}, "must": {}, "shall": {},
+		"i": {}, "you": {}, "he": {}, "she": {}, "we": {}, "they": {},
+		"my": {}, "your": {}, "his": {}, "her": {}, "our": {}, "their": {},
+		"me": {}, "him": {}, "them": {}, "us": {},
+		// Chinese
+		"建议": {}, "检查": {}, "需要": {}, "应该": {}, "可能": {}, "存在": {},
+		"一个": {}, "进行": {}, "使用": {}, "没有": {}, "确保": {}, "避免": {},
+		"注意": {}, "推荐": {}, "请": {}, "将": {}, "为": {}, "在": {},
+		"了": {}, "和": {}, "与": {}, "或": {}, "对": {}, "从": {},
+		"中": {}, "上": {}, "下": {}, "里": {}, "外": {}, "内": {},
 	}
-	text := string(runes)
-	// Replace non-word chars with underscore
-	var sb strings.Builder
-	prevUnderscore := false
-	for _, r := range text {
-		if unicode.IsLetter(r) || unicode.IsNumber(r) {
-			sb.WriteRune(r)
-			prevUnderscore = false
-		} else if !prevUnderscore {
-			sb.WriteRune('_')
-			prevUnderscore = true
+
+	// Split by whitespace and punctuation
+	words := strings.FieldsFunc(msg, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '\n' || r == '\r' ||
+			r == ',' || r == '.' || r == '，' || r == '。' ||
+			r == ':' || r == ';' || r == '：' || r == '；' ||
+			r == '(' || r == ')' || r == '（' || r == '）' ||
+			r == '[' || r == ']' || r == '【' || r == '】' ||
+			r == '!' || r == '！' || r == '?' || r == '？' ||
+			r == '"' || r == '"' || r == '"' || r == '"' ||
+			r == '<' || r == '>' || r == '《' || r == '》' ||
+			r == '/' || r == '\\' || r == '|' || r == '_' ||
+			r == '+' || r == '=' || r == '-' || r == '@' || r == '#' ||
+			r == '$' || r == '%' || r == '^' || r == '&' || r == '*' ||
+			r == '`' || r == '~'
+	})
+
+	// Filter valid keywords (>1 char, not stopword, only a-z0-9)
+	var keywords []string
+	for _, w := range words {
+		w = strings.TrimSpace(w)
+		if len(w) <= 1 {
+			continue
+		}
+		if _, ok := stopwords[w]; ok {
+			continue
+		}
+		// Only retain words made of a-z and 0-9
+		clean := make([]rune, 0, len(w))
+		valid := true
+		for _, r := range w {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+				clean = append(clean, r)
+			} else {
+				valid = false
+				break
+			}
+		}
+		if valid && len(clean) > 1 {
+			keywords = append(keywords, string(clean))
 		}
 	}
-	result := strings.Trim(sb.String(), "_")
-	// Collapse consecutive underscores
-	re := regexp.MustCompile(`_+`)
-	result = re.ReplaceAllString(result, "_")
-	if result == "" {
+
+	if len(keywords) == 0 {
 		return "rule"
 	}
-	return result
+
+	// Take up to 5 keywords to keep it concise
+	if len(keywords) > 5 {
+		keywords = keywords[:5]
+	}
+
+	slug := strings.Join(keywords, "-")
+	// Collapse consecutive hyphens
+	re := regexp.MustCompile(`-+`)
+	slug = re.ReplaceAllString(slug, "-")
+	slug = strings.Trim(slug, "-")
+
+	if len(slug) > 30 {
+		slug = slug[:30]
+		slug = strings.TrimRight(slug, "-")
+	}
+
+	if slug == "" {
+		return "rule"
+	}
+	return slug
 }
 
 // ValidateEmbedding checks whether the configured embedding model is reachable.
