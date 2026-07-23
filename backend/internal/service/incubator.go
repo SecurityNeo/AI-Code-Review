@@ -430,6 +430,8 @@ type PublishRequest struct {
 
 // GetSimilarGraph returns the center candidate plus top-5 similar rules
 // and optional embedding vectors for frontend projection.
+// If data is missing (similar_rules empty or embeddings absent), it performs
+// real-time computation and backfills silently.
 func (s *IncubatorService) GetSimilarGraph(incubationID uint) (map[string]any, error) {
 	cand, _, err := s.GetCandidate(incubationID)
 	if err != nil {
@@ -446,40 +448,28 @@ func (s *IncubatorService) GetSimilarGraph(incubationID uint) (map[string]any, e
 		"confidence": cand.ConfidenceScore,
 	}
 
-	// Parse stored top5
-	var top5 []map[string]any
-	if cand.SimilarRules != "" && cand.SimilarRules != "{}" {
-		_ = json.Unmarshal([]byte(cand.SimilarRules), &top5)
-	}
-
 	// Build context: all enabled rules + current candidate for vector projection
 	var rules []model.ReviewRule
-	model.DB.Where("is_enabled = ?", true).Find(&rules)
+	if err := model.DB.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
+		return nil, err
+	}
 
 	type contextNode struct {
-		ID       uint    `json:"id"`
-		Code     string  `json:"code"`
-		Name     string  `json:"name"`
-		Category string  `json:"category"`
-		Severity string  `json:"severity"`
-		IsCenter bool    `json:"is_center"`
-		IsTop5   bool    `json:"is_top5"`
+		ID        uint      `json:"id"`
+		Code      string    `json:"code"`
+		Name      string    `json:"name"`
+		Category  string    `json:"category"`
+		Severity  string    `json:"severity"`
+		IsCenter  bool      `json:"is_center"`
+		IsTop5    bool      `json:"is_top5"`
 		Embedding []float32 `json:"embedding,omitempty"`
 	}
 
-	top5IDs := make(map[uint]struct{})
-	for _, n := range top5 {
-		if id, ok := n["rule_id"].(float64); ok {
-			top5IDs[uint(id)] = struct{}{}
-		}
-	}
-
-	var contextNodes []contextNode
 	cfg := s.getConfig()
 
-	// Helper to fetch embedding for a rule
-	fetchVec := func(entityType string, entityID uint) []float32 {
-		if s.store == nil || cfg.EmbeddingModelID == nil {
+	// ---- fetchVec with real-time fallback ----
+	fetchVec := func(entityType string, entityID uint, text string) []float32 {
+		if s.store == nil || s.embedSvc == nil || cfg.EmbeddingModelID == nil {
 			return nil
 		}
 		ctx := context.Background()
@@ -488,26 +478,137 @@ func (s *IncubatorService) GetSimilarGraph(incubationID uint) (map[string]any, e
 			EntityID:   entityID,
 			ModelID:    *cfg.EmbeddingModelID,
 		})
-		if err != nil {
+		if err == nil && len(vec) > 0 {
+			return vec
+		}
+		// Miss cache — embed in real time and persist
+		vec, _, err = s.embedSvc.Embed(ctx, text)
+		if err != nil || len(vec) == 0 {
 			return nil
 		}
+		_ = s.store.Save(ctx, vectorstore.Item{
+			Key: vectorstore.Key{
+				EntityType: entityType,
+				EntityID:   entityID,
+				ModelID:    *cfg.EmbeddingModelID,
+			},
+			Vector:    vec,
+			Dimension: len(vec),
+		})
 		return vec
 	}
 
-	// Candidate as a context node
-	candNode := contextNode{
-		ID:       cand.ID,
-		Code:     cand.Code,
-		Name:     cand.Name,
-		Category: cand.Category,
-		Severity: cand.Severity,
-		IsCenter: true,
-		Embedding: fetchVec("incubation", cand.ID),
+	// ---- Ensure candidate vector ----
+	candVec := fetchVec("incubation", cand.ID, cand.Name+" "+cand.Description+" "+cand.Prompt)
+
+	// ---- Compute top5 (if SimilarRules is empty, do real-time) ----
+	var top5 []map[string]any
+	similarMap := make(map[uint]map[string]any)
+
+	if cand.SimilarRules != "" && cand.SimilarRules != "{}" {
+		_ = json.Unmarshal([]byte(cand.SimilarRules), &top5)
+		for _, item := range top5 {
+			if id, ok := item["rule_id"].(float64); ok {
+				similarMap[uint(id)] = item
+			}
+		}
 	}
-	contextNodes = append(contextNodes, candNode)
+
+	// If top5 is empty (no stored data) or we want richer graph, compute now
+	top5Empty := len(top5) == 0
+	if top5Empty {
+		// L1: Jaccard
+		candKeywords := extractKeywords(cand.Name + " " + cand.Description + " " + cand.Prompt)
+		for _, r := range rules {
+			ruleKeywords := extractKeywords(r.Name + " " + r.Description + " " + r.Prompt)
+			score := jaccard(candKeywords, ruleKeywords)
+			if score >= 0.5 {
+				similarMap[r.ID] = map[string]any{
+					"rule_id":    r.ID,
+					"name":       r.Name,
+					"code":       r.Code,
+					"similarity": math.Round(score*1000) / 1000,
+					"method":     "jaccard",
+					"category":   r.Category,
+					"severity":   r.Severity,
+				}
+			}
+		}
+
+		// L2: Embedding cosine
+		if len(candVec) > 0 {
+			ctx := context.Background()
+			res, err := s.store.Search(ctx, candVec, vectorstore.SearchOpts{
+				TopK:     10,
+				MinScore: 0.3,
+				Filters:  map[string]any{"entity_type": "rule", "model_id": *cfg.EmbeddingModelID},
+			})
+			if err == nil {
+				for _, r := range res {
+					if r.Score >= 0.5 {
+						if existing, ok := similarMap[r.Key.EntityID]; ok {
+							if r.Score > existing["similarity"].(float64) {
+								existing["similarity"] = math.Round(r.Score*1000) / 1000
+								existing["method"] = "embedding"
+							}
+						} else {
+							var rule model.ReviewRule
+							if _ = model.DB.First(&rule, r.Key.EntityID).Error; rule.ID > 0 {
+								similarMap[rule.ID] = map[string]any{
+									"rule_id":    rule.ID,
+									"name":       rule.Name,
+									"code":       rule.Code,
+									"similarity": math.Round(r.Score*1000) / 1000,
+									"method":     "embedding",
+									"category":   rule.Category,
+									"severity":   rule.Severity,
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Sort and pick top 5
+		for _, v := range similarMap {
+			top5 = append(top5, v)
+		}
+		sort.Slice(top5, func(i, j int) bool {
+			return top5[i]["similarity"].(float64) > top5[j]["similarity"].(float64)
+		})
+		if len(top5) > 5 {
+			top5 = top5[:5]
+		}
+
+		// Persist so future calls are fast
+		if b, err := json.Marshal(top5); err == nil && len(top5) > 0 {
+			_ = s.UpdateCandidate(incubationID, map[string]any{"similar_rules": string(b)})
+		}
+	}
+
+	// Build context nodes
+	top5IDs := make(map[uint]struct{})
+	for _, item := range top5 {
+		if id, ok := item["rule_id"].(float64); ok {
+			top5IDs[uint(id)] = struct{}{}
+		}
+	}
+
+	var contextNodes []contextNode
+	contextNodes = append(contextNodes, contextNode{
+		ID:        cand.ID,
+		Code:      cand.Code,
+		Name:      cand.Name,
+		Category:  cand.Category,
+		Severity:  cand.Severity,
+		IsCenter:  true,
+		Embedding: candVec,
+	})
 
 	for _, r := range rules {
 		_, isTop5 := top5IDs[r.ID]
+		ruleText := r.Name + " " + r.Description + " " + r.Prompt
 		contextNodes = append(contextNodes, contextNode{
 			ID:        r.ID,
 			Code:      r.Code,
@@ -516,17 +617,19 @@ func (s *IncubatorService) GetSimilarGraph(incubationID uint) (map[string]any, e
 			Severity:  r.Severity,
 			IsCenter:  false,
 			IsTop5:    isTop5,
-			Embedding: fetchVec("rule", r.ID),
+			Embedding: fetchVec("rule", r.ID, ruleText),
 		})
 	}
 
 	return map[string]any{
-		"center":  center,
-		"top5":    top5,
-		"context": contextNodes,
+		"center":   center,
+		"top5":     top5,
+		"context":  contextNodes,
+		"computed": top5Empty, // true if real-time computed in this call
 	}, nil
 }
-// Designed for synchronous API calls. For asynchronous job execution, use doClusterIssues + caller-managed job record.
+
+// ClusterIssues performs keyword-based clustering on unmatched issues and manages its own job record.
 func (s *IncubatorService) ClusterIssues(timeRangeDays int, languages []string, minGroupSize int) (*model.RuleIncubationJob, error) {
 	since := time.Now().AddDate(0, 0, -timeRangeDays)
 	paramsJSON, _ := json.Marshal(map[string]any{

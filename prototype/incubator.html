@@ -2698,11 +2698,21 @@ function renderCyGraph(data) {
     if (currentCy) { currentCy.destroy(); currentCy = null; }
     container.innerHTML = '';
 
+    const top5IDs = new Set();
+    (data.top5 || []).forEach(item => top5IDs.add(item.rule_id));
+
+    const contextNodes = (data.context || []).filter(n => !n.is_center) || [];
+    const centerNode = (data.context || []).find(n => n.is_center);
     const center = data.center || {};
-    const top5 = data.top5 || [];
 
     const nodes = [
-        { data: { id: 'center', label: center.name || center.code || '候选规则', type: 'center' } }
+        {
+            data: {
+                id: 'center',
+                label: center.name || center.code || '候选规则',
+                type: 'center'
+            }
+        }
     ];
     const edges = [];
 
@@ -2712,26 +2722,30 @@ function renderCyGraph(data) {
         logging: '#6366f1', error_handling: '#f59e0b', documentation: '#84cc16',
     };
 
-    top5.forEach((item, idx) => {
-        const nid = 'rule_' + item.rule_id;
+    // Add all existing rules as dim outer nodes; only top5 get connections
+    contextNodes.forEach(node => {
+        const nid = node.id;
+        const isTop5 = top5IDs.has(node.id);
         nodes.push({
             data: {
                 id: nid,
-                label: item.name || item.code || ('规则' + item.rule_id),
-                similarity: item.similarity,
-                method: item.method,
-                category: item.category,
-                type: 'rule'
+                label: node.name || node.code || ('规则' + node.id),
+                category: node.category,
+                type: isTop5 ? 'rule' : 'dim_rule',
+                isTop5
             }
         });
-        edges.push({
-            data: {
-                id: 'e' + idx,
-                source: 'center',
-                target: nid,
-                weight: item.similarity
-            }
-        });
+        if (isTop5) {
+            const item = (data.top5 || []).find(t => t.rule_id === node.id);
+            edges.push({
+                data: {
+                    id: 'e' + node.id,
+                    source: 'center',
+                    target: nid,
+                    weight: item ? item.similarity : 0
+                }
+            });
+        }
     });
 
     currentCy = cytoscape({
@@ -2742,7 +2756,7 @@ function renderCyGraph(data) {
                 selector: 'node[type="center"]',
                 style: {
                     'background-color': '#7c3aed',
-                    'width': 60, 'height': 60,
+                    'width': 64, 'height': 64,
                     'label': 'data(label)',
                     'color': '#fff',
                     'font-size': '11px',
@@ -2756,14 +2770,25 @@ function renderCyGraph(data) {
                 selector: 'node[type="rule"]',
                 style: {
                     'background-color': (ele) => catColors[ele.data('category')] || '#94a3b8',
-                    'width': 40, 'height': 40,
+                    'width': 42, 'height': 42,
                     'label': 'data(label)',
                     'color': '#334155',
                     'font-size': '10px',
                     'text-valign': 'bottom', 'text-halign': 'center',
                     'text-wrap': 'wrap', 'text-max-width': '60px',
                     'text-margin-y': 4,
-                    'border-width': 2, 'border-color': '#e2e8f0'
+                    'border-width': 2, 'border-color': (ele) => catColors[ele.data('category')] || '#e2e8f0',
+                    'font-weight': 'bold'
+                }
+            },
+            {
+                selector: 'node[type="dim_rule"]',
+                style: {
+                    'background-color': '#e2e8f0',
+                    'width': 18, 'height': 18,
+                    'color': '#cbd5e1',
+                    'font-size': '0px',
+                    'border-width': 1, 'border-color': '#f1f5f9'
                 }
             },
             {
@@ -2774,7 +2799,8 @@ function renderCyGraph(data) {
                     'target-arrow-color': '#c4b5fd',
                     'target-arrow-shape': 'triangle',
                     'arrow-scale': 0.8,
-                    'curve-style': 'bezier'
+                    'curve-style': 'bezier',
+                    'opacity': 0.8
                 }
             }
         ],
@@ -2782,7 +2808,7 @@ function renderCyGraph(data) {
             name: 'cose',
             padding: 30,
             componentSpacing: 60,
-            nodeRepulsion: 400000,
+            nodeRepulsion: (node) => node.data('type') === 'dim_rule' ? 80000 : 400000,
             edgeElasticity: 100,
             idealEdgeLength: 120,
             animate: true,
@@ -2792,8 +2818,12 @@ function renderCyGraph(data) {
 
     currentCy.on('tap', 'node', (evt) => {
         const nd = evt.target.data();
-        if (nd.type === 'rule' && nd.similarity) {
-            showToast(`${nd.label} · 相似度 ${(nd.similarity * 100).toFixed(1)}% · ${nd.method || ''}`);
+        if (nd.isTop5) {
+            const item = (data.top5 || []).find(t => t.rule_id === nd.id);
+            const sim = item ? (item.similarity * 100).toFixed(1) + '%' : '';
+            showToast(`${nd.label} · 相似度 ${sim} · ${item?.method || ''}`);
+        } else if (nd.type === 'dim_rule') {
+            showToast(`现有规则: ${nd.label}`);
         }
     });
 }
@@ -2865,17 +2895,32 @@ function renderProjection(data) {
     const ctx = canvas.getContext('2d');
     const nodes = data.context || [];
     const validNodes = nodes.filter(n => n.embedding && n.embedding.length > 0);
-    if (validNodes.length < 3) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '14px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('向量数据不足，无法生成投影图', canvas.width / 2, canvas.height / 2);
-        return;
-    }
 
     canvas.width = canvas.offsetWidth || 800;
     canvas.height = canvas.offsetHeight || 600;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (validNodes.length === 0) {
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('暂无向量数据，请确保 Embedding 模型已配置并运行相似检测', canvas.width / 2, canvas.height / 2);
+        return;
+    }
+
+    if (validNodes.length === 1) {
+        // Single point: draw it in center with a label
+        const n = validNodes[0];
+        ctx.fillStyle = '#7c3aed';
+        ctx.beginPath();
+        ctx.arc(canvas.width / 2, canvas.height / 2, 10, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#334155';
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(n.name || n.code || '规则', canvas.width / 2, canvas.height / 2 + 24);
+        return;
+    }
 
     const vectors = validNodes.map(n => n.embedding);
     const coords = pca2d(vectors);
@@ -2893,8 +2938,6 @@ function renderProjection(data) {
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
     const catColors = {
         security: '#ef4444', performance: '#f97316', readability: '#3b82f6',
         maintainability: '#8b5cf6', 'test_coverage': '#10b981', api_design: '#06b6d4',
@@ -2908,21 +2951,26 @@ function renderProjection(data) {
         const py = canvas.height / 2 + (y - cy) * scale;
         const isCenter = node.is_center;
         const isTop5 = node.is_top5;
-        const r = isCenter ? 10 : isTop5 ? 7 : 4;
-        const color = catColors[node.category] || '#94a3b8';
+        const baseR = isCenter ? 12 : isTop5 ? 7 : 3.5;
+        const z = isCenter ? 2 : isTop5 ? 1 : 0;
+        const color = isCenter ? '#7c3aed' : (catColors[node.category] || '#94a3b8');
+
+        // Glow for center / top5
+        if (z > 0) {
+            ctx.beginPath();
+            ctx.arc(px, py, baseR + 6, 0, Math.PI * 2);
+            ctx.fillStyle = (z === 2 ? 'rgba(124,58,237,0.12)' : 'rgba(0,0,0,0.06)');
+            ctx.fill();
+        }
 
         ctx.beginPath();
-        ctx.arc(px, py, r, 0, Math.PI * 2);
+        ctx.arc(px, py, baseR, 0, Math.PI * 2);
         ctx.fillStyle = color;
         ctx.fill();
 
-        if (isCenter) {
-            ctx.strokeStyle = '#7c3aed';
-            ctx.lineWidth = 3;
-            ctx.stroke();
-        } else if (isTop5) {
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 2;
+        if (isCenter || isTop5) {
+            ctx.strokeStyle = isCenter ? '#fff' : 'rgba(255,255,255,0.8)';
+            ctx.lineWidth = isCenter ? 3 : 2;
             ctx.stroke();
         }
 
@@ -2930,15 +2978,15 @@ function renderProjection(data) {
             ctx.fillStyle = '#334155';
             ctx.font = isCenter ? 'bold 12px sans-serif' : '11px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(node.name || node.code || '', px, py - r - 4);
+            ctx.fillText(node.name || node.code || '', px, py - baseR - 6);
         }
     });
 
-    // Label
+    // Legend
     ctx.fillStyle = '#94a3b8';
     ctx.font = '11px sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(`节点数: ${validNodes.length} · 中心 = 当前候选规则 · 大圆 = Top5 相似规则`, 12, canvas.height - 10);
+    ctx.fillText(`有效节点: ${validNodes.length}/${nodes.length} · 中心 = 当前候选规则 · 大圆 = Top5 相似规则`, 12, canvas.height - 10);
 }
 
 // ====== Init ======
