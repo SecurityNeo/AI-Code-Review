@@ -18,6 +18,7 @@ import (
 type IncubatorService struct {
 	embedSvc *EmbeddingService
 	store    vectorstore.Store
+	SSEHub   *PipelineSSEHub
 }
 
 // NewIncubatorService creates a new incubator service.
@@ -25,6 +26,7 @@ func NewIncubatorService(embedSvc *EmbeddingService, store vectorstore.Store) *I
 	return &IncubatorService{
 		embedSvc: embedSvc,
 		store:    store,
+		SSEHub:   NewPipelineSSEHub(),
 	}
 }
 
@@ -1203,9 +1205,25 @@ func autoCreateProjectReviewConfigs(ruleID uint) {
 
 // ---------- Pipeline Orchestration ----------
 
+// ErrPipelineRunning is returned when another pipeline_run is already in progress.
+type ErrPipelineRunning struct {
+	JobID uint
+}
+
+func (e *ErrPipelineRunning) Error() string {
+	return fmt.Sprintf("已有流水线正在执行 (Job #%d)", e.JobID)
+}
+
 // RunPipeline kicks off a full pipeline: cluster → refine → similar_check → sandbox_test.
 // It creates a pipeline_run job and executes steps asynchronously in a goroutine.
 func (s *IncubatorService) RunPipeline(timeRangeDays, minGroupSize int) (*model.RuleIncubationJob, error) {
+	// Check mutex: only one pipeline_run can be active at a time.
+	var existing model.RuleIncubationJob
+	if err := model.DB.Where("job_type = ? AND status = ?", "pipeline_run", "running").
+		Order("created_at DESC").First(&existing).Error; err == nil {
+		return nil, &ErrPipelineRunning{JobID: existing.ID}
+	}
+
 	paramsJSON, _ := json.Marshal(map[string]any{
 		"time_range_days": timeRangeDays,
 		"min_group_size":  minGroupSize,
@@ -1227,6 +1245,20 @@ func (s *IncubatorService) RunPipeline(timeRangeDays, minGroupSize int) (*model.
 }
 
 func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupSize int) {
+	broadcast := func(stepID, status, overall string) {
+		if s.SSEHub == nil {
+			return
+		}
+		b, _ := json.Marshal(map[string]any{
+			"job_id":          jobID,
+			"step_id":         stepID,
+			"status":          status,
+			"pipeline_status": overall,
+			"updated_at":      time.Now().Format(time.RFC3339),
+		})
+		s.SSEHub.Broadcast(int64(jobID), string(b))
+	}
+
 	updateStep := func(stepID, status string) {
 		var job model.RuleIncubationJob
 		if err := model.DB.First(&job, jobID).Error; err != nil {
@@ -1248,6 +1280,7 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 		summary["pipeline_steps"] = steps
 		b, _ := json.Marshal(summary)
 		model.DB.Model(&job).Update("result_summary", string(b))
+		broadcast(stepID, status, job.Status)
 	}
 
 	failJob := func(err error) {
@@ -1257,6 +1290,7 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 			"error_msg":    err.Error(),
 			"completed_at": &now,
 		})
+		broadcast("", "", "failed")
 	}
 
 	completeJob := func() {
@@ -1265,6 +1299,7 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 			"status":       "success",
 			"completed_at": &now,
 		})
+		broadcast("", "", "success")
 	}
 
 	// -------- Step 1: Cluster --------

@@ -586,7 +586,13 @@ function switchTab(tab) {
     document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
     document.querySelector(`.tab-btn[data-tab="${tab}"]`).classList.add('active');
     document.getElementById(`tab-${tab}`).classList.remove('hidden');
-    if (tab === 'pipeline') loadPipeline();
+    if (tab === 'pipeline') {
+        if (pipelineJobId && pipelineSSE) {
+            loadPipeline(pipelineJobId);
+        } else {
+            loadPipeline();
+        }
+    }
     if (tab === 'issues') loadIssues();
     if (tab === 'candidates') loadCandidates();
     if (tab === 'health') loadRuleHealth();
@@ -1712,14 +1718,47 @@ function renderHealthPagination(total, page, pageSize) {
 }
 
 // ====== Pipeline ======
-// Pipeline auto-refresh state
-let pipelinePollTimer = null;
+// Pipeline state management
 let pipelineJobId = null;
+let pipelineSSE = null;
+
+function connectPipelineSSE(jobId) {
+    if (pipelineSSE) pipelineSSE.close();
+    const url = API_BASE + '/incubator/pipeline/events?job_id=' + jobId;
+    const es = new EventSource(url);
+    es.onopen = () => console.log('[Pipeline SSE] connected for job', jobId);
+    es.addEventListener('connected', (e) => {
+        console.log('[Pipeline SSE] server acknowledged:', e.data);
+    });
+    es.addEventListener('pipeline_update', (e) => {
+        try {
+            const data = JSON.parse(e.data);
+            console.log('[Pipeline SSE] update:', data);
+            loadPipeline(jobId);
+            // Handle completion
+            if (data.pipeline_status === 'success' || data.pipeline_status === 'failed') {
+                const btn = document.getElementById('pipelineRunBtn');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-play mr-1"></i>一键运行流水线';
+                if (data.pipeline_status === 'success') showToast('流水线执行完成');
+                else showToast('流水线执行失败', 'error');
+                if (pipelineSSE) { pipelineSSE.close(); pipelineSSE = null; }
+                pipelineJobId = null;
+            }
+        } catch (err) { console.error('[Pipeline SSE] parse error:', err); }
+    });
+    es.onerror = (e) => {
+        console.warn('[Pipeline SSE] error', e);
+    };
+    pipelineSSE = es;
+}
 
 async function runPipeline() {
     const btn = document.getElementById('pipelineRunBtn');
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>启动中...';
+    // Close any existing SSE
+    if (pipelineSSE) { pipelineSSE.close(); pipelineSSE = null; }
     try {
         const res = await apiFetch(API_BASE + '/incubator/pipeline/run', {
             method: 'POST',
@@ -1728,8 +1767,17 @@ async function runPipeline() {
         const data = await res.json();
         if (data.code === 0) {
             pipelineJobId = data.data.job_id;
-            showToast('流水线已启动 (Job #' + pipelineJobId + ')，自动刷新中...');
-            startPipelinePolling();
+            showToast('流水线已启动 (Job #' + pipelineJobId + ')，实时推送中...');
+            connectPipelineSSE(pipelineJobId);
+            loadPipeline(pipelineJobId);
+        } else if (res.status === 409) {
+            // Already running - subscribe to the running one
+            pipelineJobId = data.job_id;
+            showToast(data.error + '，正在接入实时推送...');
+            connectPipelineSSE(pipelineJobId);
+            loadPipeline(pipelineJobId);
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>流水线执行中...';
         } else {
             showToast(data.error || '启动失败', 'error');
             btn.disabled = false;
@@ -1742,39 +1790,13 @@ async function runPipeline() {
     }
 }
 
-function startPipelinePolling() {
-    if (pipelinePollTimer) clearInterval(pipelinePollTimer);
-    pipelinePollTimer = setInterval(() => {
-        loadPipeline();
-        // Check if pipeline job finished
-        if (pipelineJobId) {
-            apiFetch(API_BASE + '/incubator/cluster/jobs/' + pipelineJobId).then(r => r.json()).then(d => {
-                const job = d.data || {};
-                if (job.status === 'success' || job.status === 'failed') {
-                    stopPipelinePolling();
-                    const btn = document.getElementById('pipelineRunBtn');
-                    btn.disabled = false;
-                    btn.innerHTML = '<i class="fas fa-play mr-1"></i>一键运行流水线';
-                    if (job.status === 'success') showToast('流水线执行完成');
-                    else showToast('流水线执行失败: ' + (job.error_msg || ''), 'error');
-                }
-            }).catch(() => {});
-        }
-    }, 3000);
-}
-
-function stopPipelinePolling() {
-    if (pipelinePollTimer) {
-        clearInterval(pipelinePollTimer);
-        pipelinePollTimer = null;
-    }
-}
-
-async function loadPipeline() {
+async function loadPipeline(jobId) {
     const container = document.getElementById('pipelineContainer');
     container.innerHTML = '<div class="text-center py-12 text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i>加载流水线状态...</div>';
     try {
-        const res = await apiFetch(API_BASE + '/incubator/pipeline');
+        let url = API_BASE + '/incubator/pipeline';
+        if (jobId) url += '?job_id=' + jobId;
+        const res = await apiFetch(url);
         const data = await res.json();
         const steps = (data.data || {}).steps || [];
         currentPipelineSteps = steps;

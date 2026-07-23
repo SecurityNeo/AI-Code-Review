@@ -26,8 +26,31 @@ type PipelineStep struct {
 	NextSteps     []string       `json:"next_steps"`
 }
 
+// getJobStepStatus returns the status string for a specific step from a pipeline run job.
+func getJobStepStatus(job model.RuleIncubationJob, stepID string) string {
+	var jr map[string]any
+	_ = json.Unmarshal([]byte(job.ResultSummary), &jr)
+	if stepsMap, ok := jr["pipeline_steps"].(map[string]any); ok {
+		if s, ok := stepsMap[stepID].(map[string]any); ok {
+			if st, ok := s["status"].(string); ok {
+				return st
+			}
+		}
+	}
+	return "idle"
+}
+
 // GetPipelineStatus aggregates the entire incubation pipeline data.
-func (s *IncubatorService) GetPipelineStatus() (*PipelineStatus, error) {
+// When jobID is provided, returns data scoped to that specific pipeline run.
+func (s *IncubatorService) GetPipelineStatus(jobID *uint) (*PipelineStatus, error) {
+	if jobID != nil {
+		return s.getPipelineStatusForJob(*jobID)
+	}
+	return s.getPipelineStatusGlobal()
+}
+
+// getPipelineStatusGlobal returns the global pipeline overview (legacy behavior).
+func (s *IncubatorService) getPipelineStatusGlobal() (*PipelineStatus, error) {
 	now := time.Now()
 	cfg := s.getConfig()
 
@@ -355,6 +378,230 @@ func (s *IncubatorService) GetPipelineStatus() (*PipelineStatus, error) {
 				}
 			}
 		}
+	}
+
+	return &PipelineStatus{Steps: steps}, nil
+}
+
+// getPipelineStatusForJob returns pipeline data scoped to a specific pipeline_run job.
+func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus, error) {
+	var job model.RuleIncubationJob
+	if err := model.DB.First(&job, jobID).Error; err != nil {
+		return nil, fmt.Errorf("pipeline job not found: %w", err)
+	}
+
+	// Parse params to get time range
+	var params map[string]any
+	_ = json.Unmarshal([]byte(job.Params), &params)
+	timeRangeDays := 30
+	if v, ok := params["time_range_days"].(float64); ok {
+		timeRangeDays = int(v)
+	}
+
+	// Parse per-step status from the job's result_summary
+	clusterStatus := getJobStepStatus(job, "cluster")
+	refineStatus := getJobStepStatus(job, "refine")
+	similarStatus := getJobStepStatus(job, "similar_check")
+	sandboxStatus := getJobStepStatus(job, "sandbox_test")
+
+	// Aggregate candidates produced by this pipeline run
+	var cands []model.RuleIncubation
+	model.DB.Where("pipeline_job_id = ?", jobID).Find(&cands)
+
+	totalCandidates := len(cands)
+	refinedCount := 0
+	similarChecked := 0
+	sandboxTested := 0
+	publishedCount := 0
+	for _, c := range cands {
+		if c.Status != "draft" {
+			refinedCount++
+		}
+		if c.SimilarRules != "{}" && c.SimilarRules != "" && c.SimilarRules != "null" {
+			similarChecked++
+		}
+		if c.TestResults != "{}" && c.TestResults != "" && c.TestResults != "null" {
+			sandboxTested++
+		}
+		if c.Status == "published" {
+			publishedCount++
+		}
+	}
+
+	// Issue pool scope: issues in the time window used by this pipeline
+	since := time.Now().AddDate(0, 0, -timeRangeDays)
+	var issueCount int64
+	model.DB.Model(&model.ReviewIssue{}).Where("rule_id IS NULL AND created_at >= ?", since).Count(&issueCount)
+
+	var clusterCount int64 = 0
+	model.DB.Model(&model.RuleIncubationJob{}).Where("job_type = ? AND created_at >= ?", "cluster", since).Count(&clusterCount)
+
+	steps := []PipelineStep{
+		{
+			StepID: "issue_pool",
+			Label:  "原始Issue池",
+			Status: "active",
+			Icon:   "fa-bug",
+			Color:  "gray",
+			Stats: map[string]any{
+				"total": issueCount,
+			},
+			InputSummary: map[string]any{
+				"回溯时间窗口": fmt.Sprintf("%d 天", timeRangeDays),
+			},
+			OutputSummary: map[string]any{
+				"本次扫描Issue数": fmt.Sprintf("%d 条", issueCount),
+			},
+			NextSteps: []string{"cluster"},
+		},
+		{
+			StepID: "cluster",
+			Label:  "聚类分析",
+			Status: clusterStatus,
+			Icon:   "fa-project-diagram",
+			Color:  "blue",
+			Stats: map[string]any{
+				"candidates_generated": totalCandidates,
+			},
+			InputSummary: map[string]any{
+				"时间窗口": fmt.Sprintf("%d 天", timeRangeDays),
+			},
+			OutputSummary: map[string]any{
+				"生成候选规则数": fmt.Sprintf("%d 个", totalCandidates),
+			},
+			NextSteps: []string{"refine", "similar_check", "sandbox_test"},
+		},
+		{
+			StepID: "candidate",
+			Label:  "候选规则池",
+			Status: func() string {
+				if totalCandidates > 0 {
+					return "active"
+				}
+				return "idle"
+			}(),
+			Icon:  "fa-lightbulb",
+			Color: "yellow",
+			Stats: map[string]any{
+				"draft":  totalCandidates - refinedCount,
+				"ready":  refinedCount - publishedCount,
+				"published": publishedCount,
+			},
+			InputSummary: map[string]any{
+				"来源": "聚类分析产出的候选规则",
+			},
+			OutputSummary: map[string]any{
+				"总数": fmt.Sprintf("%d 个", totalCandidates),
+			},
+			NextSteps: []string{"refine", "similar_check", "sandbox_test", "publish"},
+		},
+		{
+			StepID: "refine",
+			Label:  "智能提炼",
+			Status: refineStatus,
+			Icon:   "fa-magic",
+			Color:  "indigo",
+			Stats: map[string]any{
+				"total_runs": refinedCount,
+			},
+			InputSummary: map[string]any{
+				"规则数量": fmt.Sprintf("%d 个", totalCandidates),
+			},
+			OutputSummary: map[string]any{
+				"已提炼": fmt.Sprintf("%d 个", refinedCount),
+			},
+			NextSteps: []string{"similar_check", "sandbox_test"},
+		},
+		{
+			StepID: "similar_check",
+			Label:  "相似检测",
+			Status: similarStatus,
+			Icon:   "fa-search",
+			Color:  "orange",
+			Stats: map[string]any{
+				"total_runs": similarChecked,
+			},
+			InputSummary: map[string]any{
+				"规则数量": fmt.Sprintf("%d 个", similarChecked),
+			},
+			OutputSummary: map[string]any{
+				"已完成检测": fmt.Sprintf("%d 个", similarChecked),
+			},
+			NextSteps: []string{"sandbox_test", "publish"},
+		},
+		{
+			StepID: "sandbox_test",
+			Label:  "模拟测试",
+			Status: sandboxStatus,
+			Icon:   "fa-vial",
+			Color:  "teal",
+			Stats: map[string]any{
+				"total_runs": sandboxTested,
+			},
+			InputSummary: map[string]any{
+				"规则数量": fmt.Sprintf("%d 个", sandboxTested),
+			},
+			OutputSummary: map[string]any{
+				"已完成测试": fmt.Sprintf("%d 个", sandboxTested),
+			},
+			NextSteps: []string{"publish"},
+		},
+		{
+			StepID: "publish",
+			Label:  "发布规则",
+			Status: func() string {
+				if publishedCount > 0 {
+					return "active"
+				}
+				return "idle"
+			}(),
+			Icon:  "fa-rocket",
+			Color: "green",
+			Stats: map[string]any{
+				"total_published": publishedCount,
+			},
+			InputSummary: map[string]any{
+				"来源": "本次流水线产出的候选规则",
+			},
+			OutputSummary: map[string]any{
+				"已发布规则数": fmt.Sprintf("%d 个", publishedCount),
+			},
+			NextSteps: []string{"retro_match"},
+		},
+		{
+			StepID: "retro_match",
+			Label:  "回溯匹配",
+			Status: "active",
+			Icon:   "fa-history",
+			Color:  "blue",
+			Stats: map[string]any{
+				"total_published": publishedCount,
+			},
+			InputSummary: map[string]any{
+				"来源": fmt.Sprintf("本次流水线已发布 %d 条规则", publishedCount),
+			},
+			OutputSummary: map[string]any{
+				"说明": "回溯匹配历史 Issue",
+			},
+			NextSteps: []string{},
+		},
+		{
+			StepID: "health_check",
+			Label:  "健康检查",
+			Status: "active",
+			Icon:   "fa-heartbeat",
+			Color:  "red",
+			Stats: map[string]any{
+				"check_interval_days": 7,
+			},
+			InputSummary: map[string]any{
+				"来源": "所有已启用规则",
+			},
+			OutputSummary: map[string]any{
+				"说明": "定期评估规则质量",
+			},
+			NextSteps: []string{},
+		},
 	}
 
 	return &PipelineStatus{Steps: steps}, nil

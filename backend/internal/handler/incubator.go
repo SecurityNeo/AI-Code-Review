@@ -361,13 +361,60 @@ func (h *IncubatorHandler) TriggerSandboxTest(c *gin.Context) {
 // Pipeline returns the full incubation pipeline visualization data.
 // GET /api/v1/incubator/pipeline
 func (h *IncubatorHandler) Pipeline(c *gin.Context) {
-	status, err := h.svc.GetPipelineStatus()
+	jobIDStr := c.Query("job_id")
+	var jobID *uint
+	if jobIDStr != "" {
+		id, err := strconv.ParseUint(jobIDStr, 10, 32)
+		if err == nil && id > 0 {
+			uid := uint(id)
+			jobID = &uid
+		}
+	}
+	status, err := h.svc.GetPipelineStatus(jobID)
 	if err != nil {
 		zap.L().Error("get pipeline status failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(200, gin.H{"code": 0, "data": status})
+}
+
+// SubscribePipelineEvents SSE endpoint for real-time pipeline status updates.
+// GET /api/v1/incubator/pipeline/events?job_id=xxx
+func (h *IncubatorHandler) SubscribePipelineEvents(c *gin.Context) {
+	jobIDStr := c.Query("job_id")
+	jobID, err := strconv.ParseInt(jobIDStr, 10, 64)
+	if err != nil || jobID <= 0 {
+		c.JSON(400, gin.H{"error": "无效的 job_id"})
+		return
+	}
+
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+
+	client := h.svc.SSEHub.Subscribe(jobID, c.Writer)
+	defer h.svc.SSEHub.Unsubscribe(jobID, client)
+
+	c.SSEvent("connected", jobIDStr)
+	c.Writer.Flush()
+
+	for {
+		select {
+		case msg, ok := <-client.Chan:
+			if !ok {
+				return
+			}
+			c.SSEvent("pipeline_update", msg)
+			c.Writer.Flush()
+		case <-client.Done:
+			return
+		case <-c.Request.Context().Done():
+			return
+		}
+	}
 }
 
 // CandidateTrace returns the full bloodline trace of a candidate rule.
@@ -557,6 +604,13 @@ func (h *IncubatorHandler) RunPipeline(c *gin.Context) {
 	}
 	job, err := h.svc.RunPipeline(req.TimeRangeDays, req.MinGroupSize)
 	if err != nil {
+		if running, ok := err.(*service.ErrPipelineRunning); ok {
+			c.JSON(409, gin.H{
+				"error":  running.Error(),
+				"job_id": running.JobID,
+			})
+			return
+		}
 		zap.L().Error("run pipeline failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
