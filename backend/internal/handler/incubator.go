@@ -401,6 +401,30 @@ func (h *IncubatorHandler) SubscribePipelineEvents(c *gin.Context) {
 	c.SSEvent("connected", jobIDStr)
 	c.Writer.Flush()
 
+	// 连接建立后立即推送一次当前 Job 的完整步骤状态，解决前端错过早期广播的问题
+	var job model.RuleIncubationJob
+	if err := model.DB.First(&job, uint(jobID)).Error; err == nil {
+		var summary map[string]any
+		_ = json.Unmarshal([]byte(job.ResultSummary), &summary)
+		if stepsMap, ok := summary["pipeline_steps"].(map[string]any); ok {
+			for stepID, v := range stepsMap {
+				if m, ok := v.(map[string]any); ok {
+					if st, ok := m["status"].(string); ok && st != "idle" {
+						b, _ := json.Marshal(map[string]any{
+							"job_id":          uint(jobID),
+							"step_id":         stepID,
+							"status":          st,
+							"pipeline_status": job.Status,
+							"updated_at":      time.Now().Format(time.RFC3339),
+						})
+						c.SSEvent("pipeline_update", string(b))
+						c.Writer.Flush()
+					}
+				}
+			}
+		}
+	}
+
 	for {
 		select {
 		case msg, ok := <-client.Chan:

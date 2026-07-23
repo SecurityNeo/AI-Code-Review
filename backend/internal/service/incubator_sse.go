@@ -48,7 +48,8 @@ func (h *PipelineSSEHub) Unsubscribe(jobID int64, client *PipelineSSEClient) {
 	for i, c := range list {
 		if c == client {
 			close(c.Done)
-			close(c.Chan)
+			// 不关闭 c.Chan：让 handler select 的 <-client.Done 分支自然退出，
+			// 避免 Broadcast 向 closed channel 发送时 panic
 			h.clients[jobID] = append(list[:i], list[i+1:]...)
 			break
 		}
@@ -59,15 +60,23 @@ func (h *PipelineSSEHub) Unsubscribe(jobID int64, client *PipelineSSEClient) {
 }
 
 // Broadcast sends an event to all subscribers of a given job.
+// 使用 recover 兜底防止向已关闭的 channel 发送导致 panic。
 func (h *PipelineSSEHub) Broadcast(jobID int64, event string) {
 	h.mu.RLock()
 	list := h.clients[jobID]
 	h.mu.RUnlock()
 	for _, client := range list {
-		select {
-		case client.Chan <- event:
-		default: // drop if channel full (non-blocking)
-		}
+		func() {
+			defer func() {
+				if recover() != nil {
+					// channel closed, ignore silently
+				}
+			}()
+			select {
+			case client.Chan <- event:
+			default: // drop if channel full (non-blocking)
+			}
+		}()
 	}
 }
 

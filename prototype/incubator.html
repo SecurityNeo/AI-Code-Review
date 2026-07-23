@@ -1730,6 +1730,8 @@ function connectPipelineSSE(jobId) {
     es.onopen = () => console.log('[Pipeline SSE] connected for job', jobId);
     es.addEventListener('connected', (e) => {
         console.log('[Pipeline SSE] server acknowledged:', e.data);
+        // 连接建立后立即强制刷新一次当前状态（包含服务端推送的实时步骤快照）
+        loadPipeline(parseInt(e.data));
     });
     es.addEventListener('pipeline_update', (e) => {
         try {
@@ -1882,12 +1884,12 @@ function renderPipeline(steps) {
             const labels = { total: '总数', new_today: '新增', draft: '草稿', ready: '就绪', published: '已发布', rejected: '忽略', total_published: '已发布', total_retro_matched: '回溯', candidates_generated: '生成', total_runs: '测试' };
             return `<div class="text-center"><div class="text-lg font-bold text-gray-800">${v}</div><div class="text-[10px] text-gray-500">${labels[k] || k}</div></div>`;
         }).join('');
-        const hasInput = step.input_summary && Object.keys(step.input_summary).length > 0;
-        const hasOutput = step.output_summary && Object.keys(step.output_summary).length > 0;
-
         const isRunning = step.status === 'running';
         const headerIcon = isRunning ? `<i class="fas fa-spinner fa-spin text-xs"></i>` : `<i class="fas ${stepIcon} text-xs"></i>`;
         const statusLabel = isRunning ? '执行中...' : st.label;
+
+        // 额外：如果该步骤属于当前运行中的 pipeline，在卡片底部显示运行提示
+        const runningHint = isRunning ? `<div class="mt-2 text-[10px] text-purple-600 font-medium animate-pulse"><i class="fas fa-cog fa-spin mr-1"></i>正在执行...</div>` : '';
 
         html += `
         <div class="pipeline-node ${isRunning ? 'node-running' : ''}" data-step-id="${step.step_id}" data-idx="${idx}"
@@ -1909,10 +1911,7 @@ function renderPipeline(steps) {
                         <span class="text-[10px] text-gray-400">${theme.label}</span>
                     </div>
                     <div class="grid grid-cols-2 gap-2">${stats}</div>
-                    <div class="flex justify-between mt-3">
-                        ${hasInput ? `<div class="flex items-center gap-1"><div class="w-2 h-2 rounded-full bg-gray-300"></div><span class="text-[10px] text-gray-400">输入</span></div>` : '<div></div>'}
-                        ${hasOutput ? `<div class="flex items-center gap-1"><span class="text-[10px] text-gray-400">输出</span><div class="w-2 h-2 rounded-full bg-gray-300"></div></div>` : '<div></div>'}
-                    </div>
+                    ${runningHint}
                 </div>
             </div>
         </div>`;

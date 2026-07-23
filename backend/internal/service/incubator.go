@@ -1232,7 +1232,7 @@ func (s *IncubatorService) RunPipeline(timeRangeDays, minGroupSize int) (*model.
 		JobType:       "pipeline_run",
 		Status:        "running",
 		Params:        string(paramsJSON),
-		ResultSummary: `{"pipeline_steps":{"cluster":{"status":"idle"},"refine":{"status":"idle"},"similar_check":{"status":"idle"},"sandbox_test":{"status":"idle"}}}`,
+		ResultSummary: `{"pipeline_steps":{"cluster":{"status":"running"},"refine":{"status":"idle"},"similar_check":{"status":"idle"},"sandbox_test":{"status":"idle"}}}`,
 		ErrorMsg:      "{}",
 		CreatedAt:     time.Now(),
 		StartedAt:     func() *time.Time { t := time.Now(); return &t }(),
@@ -1245,6 +1245,27 @@ func (s *IncubatorService) RunPipeline(timeRangeDays, minGroupSize int) (*model.
 }
 
 func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupSize int) {
+	defer func() {
+		if r := recover(); r != nil {
+			zap.L().Error("pipeline run panicked, recovering",
+				zap.Uint("job_id", jobID),
+				zap.Any("panic", r))
+			now := time.Now()
+			model.DB.Model(&model.RuleIncubationJob{}).Where("id = ?", jobID).Updates(map[string]any{
+				"status":       "failed",
+				"error_msg":    fmt.Sprintf("pipeline panicked: %v", r),
+				"completed_at": &now,
+			})
+			if s.SSEHub != nil {
+				b, _ := json.Marshal(map[string]any{
+					"job_id": jobID, "step_id": "", "status": "",
+					"pipeline_status": "failed", "updated_at": time.Now().Format(time.RFC3339),
+				})
+				s.SSEHub.Broadcast(int64(jobID), string(b))
+			}
+		}
+	}()
+
 	broadcast := func(stepID, status, overall string) {
 		if s.SSEHub == nil {
 			return
@@ -1303,7 +1324,7 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 	}
 
 	// -------- Step 1: Cluster --------
-	updateStep("cluster", "running")
+	// 初始状态已在创建 Job 时设为 running，这里直接进入执行
 	summaryJSON, err := s.doClusterIssues(timeRangeDays, nil, minGroupSize, &jobID)
 	if err != nil {
 		failJob(fmt.Errorf("cluster failed: %w", err))

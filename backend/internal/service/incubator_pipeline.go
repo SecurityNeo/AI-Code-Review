@@ -42,9 +42,15 @@ func getJobStepStatus(job model.RuleIncubationJob, stepID string) string {
 
 // GetPipelineStatus aggregates the entire incubation pipeline data.
 // When jobID is provided, returns data scoped to that specific pipeline run.
+// When jobID is nil, returns data for the latest pipeline_run if any, otherwise global fallback.
 func (s *IncubatorService) GetPipelineStatus(jobID *uint) (*PipelineStatus, error) {
 	if jobID != nil {
 		return s.getPipelineStatusForJob(*jobID)
+	}
+	// 不传 job_id 时，优先取最新的 pipeline_run 来展示其产出数据
+	var pipeJob model.RuleIncubationJob
+	if err := model.DB.Where("job_type = ?", "pipeline_run").Order("created_at DESC").First(&pipeJob).Error; err == nil {
+		return s.getPipelineStatusForJob(pipeJob.ID)
 	}
 	return s.getPipelineStatusGlobal()
 }
