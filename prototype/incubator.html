@@ -323,13 +323,13 @@
 
                 <!-- 使用指南 Tab -->
                 <div id="tab-guide" class="tab-content p-4 hidden">
-                    <div class="max-w-6xl space-y-8">
+                    <div class="w-full space-y-8">
 
                         <!-- 概述 -->
                         <div class="bg-gradient-to-r from-blue-50/70 via-indigo-50/50 to-purple-50/70 border border-blue-100 rounded-xl p-6">
                             <div class="flex flex-col lg:flex-row gap-6 items-start">
                                 <!-- 左侧：文字介绍 -->
-                                <div class="flex-1 min-w-0">
+                                <div class="flex-1 min-w-0 max-w-3xl xl:max-w-4xl">
                                     <h3 class="font-bold text-gray-800 text-lg mb-3"><i class="fas fa-lightbulb text-yellow-500 mr-2"></i>什么是规则孵化台？</h3>
                                     <p class="text-sm text-gray-600 leading-relaxed mb-4">
                                         规则孵化台是智能评审规则的<strong>"制造工厂"</strong>。它从海量的历史评审 Issue 中自动发现规律、聚类分析、提炼生成候选规则，经过多轮 LLM 验证后发布到规则库，并持续监控规则质量，形成完整的<strong>规则全生命周期管理</strong>闭环。
@@ -383,20 +383,20 @@
                         </div>
 
                         <!-- 数据流总览 -->
-                        <div class="grid grid-cols-5 gap-3">
-                            <div class="bg-gradient-to-b from-slate-50 to-white border border-slate-200 rounded-lg p-3 text-center">
+                        <div class="flex items-center justify-center gap-6 flex-wrap">
+                            <div class="bg-gradient-to-b from-slate-50 to-white border border-slate-200 rounded-lg p-4 text-center min-w-[140px]">
                                 <i class="fas fa-database text-slate-400 text-lg mb-1"></i>
                                 <div class="text-xs font-bold text-gray-700">Issue 仓库</div>
                                 <div class="text-[10px] text-gray-400 mt-0.5">原始输入</div>
                             </div>
                             <div class="flex items-center justify-center"><i class="fas fa-arrow-right text-gray-300"></i></div>
-                            <div class="bg-gradient-to-b from-violet-50 to-white border border-violet-200 rounded-lg p-3 text-center">
+                            <div class="bg-gradient-to-b from-violet-50 to-white border border-violet-200 rounded-lg p-4 text-center min-w-[140px]">
                                 <i class="fas fa-magic text-violet-400 text-lg mb-1"></i>
                                 <div class="text-xs font-bold text-gray-700">流水线处理</div>
                                 <div class="text-[10px] text-gray-400 mt-0.5">自动精化</div>
                             </div>
                             <div class="flex items-center justify-center"><i class="fas fa-arrow-right text-gray-300"></i></div>
-                            <div class="bg-gradient-to-b from-green-50 to-white border border-green-200 rounded-lg p-3 text-center">
+                            <div class="bg-gradient-to-b from-green-50 to-white border border-green-200 rounded-lg p-4 text-center min-w-[140px]">
                                 <i class="fas fa-rocket text-green-400 text-lg mb-1"></i>
                                 <div class="text-xs font-bold text-gray-700">规则库</div>
                                 <div class="text-[10px] text-gray-400 mt-0.5">正式发布</div>
@@ -686,7 +686,7 @@
                         <!-- 快速上手指南 -->
                         <div>
                             <h4 class="font-bold text-gray-800 mb-4 text-base"><i class="fas fa-tasks text-green-600 mr-2"></i>快速上手指南</h4>
-                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4">
                                 <div class="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-md transition-shadow">
                                     <div class="flex items-center gap-2 mb-3">
                                         <span class="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold">1</span>
@@ -748,7 +748,7 @@
                                 <i class="fas fa-exclamation-triangle text-amber-500"></i>
                                 <span class="font-bold text-sm text-amber-800">注意事项</span>
                             </div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-amber-800/80">
+                            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 text-xs text-amber-800/80">
                                 <div class="flex items-start gap-2">
                                     <span class="w-5 h-5 rounded bg-amber-100 text-amber-600 flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5">!</span>
                                     <div><strong>聚类无结果？</strong> 尝试降低「最小簇大小」为 1，或扩大「时间窗口」纳入更多历史 Issue。</div>
