@@ -1724,7 +1724,8 @@ let pipelineSSE = null;
 
 function connectPipelineSSE(jobId) {
     if (pipelineSSE) pipelineSSE.close();
-    const url = API_BASE + '/incubator/pipeline/events?job_id=' + jobId;
+    const token = localStorage.getItem('auth_token') || '';
+    const url = API_BASE + '/incubator/pipeline/events?job_id=' + jobId + '&token=' + encodeURIComponent(token);
     const es = new EventSource(url);
     es.onopen = () => console.log('[Pipeline SSE] connected for job', jobId);
     es.addEventListener('connected', (e) => {
