@@ -338,12 +338,17 @@ type PublishRequest struct {
 // Designed for synchronous API calls. For asynchronous job execution, use doClusterIssues + caller-managed job record.
 func (s *IncubatorService) ClusterIssues(timeRangeDays int, languages []string, minGroupSize int) (*model.RuleIncubationJob, error) {
 	since := time.Now().AddDate(0, 0, -timeRangeDays)
+	paramsJSON, _ := json.Marshal(map[string]any{
+		"time_range_days": timeRangeDays,
+		"languages":       languages,
+		"min_group_size":  minGroupSize,
+	})
 	job := &model.RuleIncubationJob{
 		JobType:       "cluster",
 		Status:        "running",
 		TimeRangeFrom: &since,
 		TimeRangeTo:   func() *time.Time { t := time.Now(); return &t }(),
-		Params:        "{}",
+		Params:        string(paramsJSON),
 		ResultSummary: "{}",
 		ErrorMsg:      "{}",
 		CreatedBy:     0,

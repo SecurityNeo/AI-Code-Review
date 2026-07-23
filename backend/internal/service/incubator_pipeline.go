@@ -73,6 +73,22 @@ func (s *IncubatorService) GetPipelineStatus() (*PipelineStatus, error) {
 			"结果":     latestCluster.ResultSummary,
 		}
 	}
+	// Parse actual params from latest job if available
+	clusterInput := map[string]any{
+		"回溯时间窗口(天)": cfg.ClusterTimeWindowDays,
+		"最小组大小":       cfg.ClusterMinGroupSize,
+	}
+	if latestCluster.ID > 0 && latestCluster.Params != "" && latestCluster.Params != "{}" {
+		var p map[string]any
+		if err := json.Unmarshal([]byte(latestCluster.Params), &p); err == nil {
+			if v, ok := p["time_range_days"]; ok {
+				clusterInput["回溯时间窗口(天)"] = v
+			}
+			if v, ok := p["min_group_size"]; ok {
+				clusterInput["最小组大小"] = v
+			}
+		}
+	}
 	stepCluster := PipelineStep{
 		StepID: "cluster",
 		Label:  "聚类分析",
@@ -82,10 +98,7 @@ func (s *IncubatorService) GetPipelineStatus() (*PipelineStatus, error) {
 		Stats: map[string]any{
 			"latest_job_id": latestCluster.ID,
 		},
-		InputSummary: map[string]any{
-			"回溯时间窗口(天)": cfg.ClusterTimeWindowDays,
-			"最小组大小":       cfg.ClusterMinGroupSize,
-		},
+		InputSummary:  clusterInput,
 		OutputSummary: clusterOut,
 		NextSteps:     []string{"candidate"},
 	}

@@ -1057,12 +1057,12 @@ async function pollClusterJob(jobId) {
         const summary = job.result_summary || {};
 
         if (job.status === 'running') {
-            const scanned = summary.total_issues_scanned || '...';
+            const scanned = summary['扫描Issue数'] || '...';
             updateClusterStatus('running', `已扫描 ${scanned} 条 Issue，正在聚类...`);
         } else if (job.status === 'success') {
             stopClusterPolling();
-            const clusters = summary.clusters_found || 0;
-            const generated = summary.candidates_generated || 0;
+            const clusters = summary['发现簇数'] || 0;
+            const generated = summary['生成候选规则数'] || 0;
             updateClusterStatus('success',
                 `发现 <strong>${clusters}</strong> 个簇，已生成 <strong>${generated}</strong> 条候选规则
                 <button onclick="loadCandidates();switchTab('candidates');" class="ml-3 px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">查看候选规则</button>`);
@@ -1695,8 +1695,9 @@ async function loadDashboardStats() {
             document.getElementById('statRetro').textContent = (retroStep.stats || {}).total_retro_matched || 0;
         }
 
-        // Health stats
-        const healthList = healthData.data || [];
+        // Health stats (backend now returns paginated wrapper)
+        const healthPayload = healthData.data || {};
+        const healthList = healthPayload.list || [];
         const alertCount = healthList.filter(r => r.alert_level !== 'healthy').length;
         document.getElementById('statHealth').textContent = alertCount;
     } catch (e) { console.error('loadDashboardStats failed', e); }
