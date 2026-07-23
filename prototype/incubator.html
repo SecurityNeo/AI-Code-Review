@@ -99,6 +99,7 @@
                     <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800" data-tab="candidates" onclick="switchTab('candidates')">候选规则</button>
                     <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800" data-tab="health" onclick="switchTab('health')">规则健康度</button>
                     <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800" data-tab="config" onclick="switchTab('config')">孵化配置</button>
+                    <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-gray-800" data-tab="guide" onclick="switchTab('guide')"><i class="fas fa-book-reader mr-1"></i>使用指南</button>
                 </div>
 
                 <!-- 流水线 Tab -->
@@ -306,6 +307,139 @@
                         <button onclick="saveConfig()" class="px-5 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
                             <i class="fas fa-save mr-1"></i>保存配置
                         </button>
+                    </div>
+                </div>
+
+                <!-- 使用指南 Tab -->
+                <div id="tab-guide" class="tab-content p-4 hidden">
+                    <div class="max-w-4xl space-y-6">
+                        <!-- 概述 -->
+                        <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-xl p-5">
+                            <h3 class="font-bold text-gray-800 text-lg mb-2"><i class="fas fa-lightbulb text-yellow-500 mr-2"></i>什么是规则孵化台？</h3>
+                            <p class="text-sm text-gray-600 leading-relaxed">
+                                规则孵化台是智能评审规则的<strong>"制造工厂"</strong>。它从海量的历史评审 Issue 中自动发现规律、聚类分析、提炼生成候选规则，经过测试验证后发布到规则库，并持续监控规则质量，形成完整的<strong>规则全生命周期管理</strong>闭环。
+                            </p>
+                        </div>
+
+                        <!-- 流水线阶段说明 -->
+                        <div>
+                            <h4 class="font-bold text-gray-800 mb-3"><i class="fas fa-stream text-blue-600 mr-2"></i>孵化流水线（9 个阶段）</h4>
+                            <div class="space-y-3">
+                                <div class="flex gap-3 items-start">
+                                    <div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 text-xs font-bold flex-shrink-0 mt-0.5">1</div>
+                                    <div>
+                                        <div class="font-semibold text-sm text-gray-800">原始 Issue 池</div>
+                                        <div class="text-xs text-gray-500">收集所有未被规则命中的历史 Issue，是规则孵化的"原材料仓库"。</div>
+                                    </div>
+                                </div>
+                                <div class="flex gap-3 items-start">
+                                    <div class="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center text-violet-600 text-xs font-bold flex-shrink-0 mt-0.5">2</div>
+                                    <div>
+                                        <div class="font-semibold text-sm text-gray-800">聚类分析</div>
+                                        <div class="text-xs text-gray-500">按维度+语言+级别分组，通过关键词重叠（Jaccard）将相似 Issue 聚成簇。可配置时间窗口和最小簇大小。</div>
+                                    </div>
+                                </div>
+                                <div class="flex gap-3 items-start">
+                                    <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-xs font-bold flex-shrink-0 mt-0.5">3</div>
+                                    <div>
+                                        <div class="font-semibold text-sm text-gray-800">候选规则</div>
+                                        <div class="text-xs text-gray-500">每个有效簇自动生成一条候选规则，状态为"草稿"，包含名称、描述和初始 Prompt。</div>
+                                    </div>
+                                </div>
+                                <div class="flex gap-3 items-start">
+                                    <div class="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 text-xs font-bold flex-shrink-0 mt-0.5">4</div>
+                                    <div>
+                                        <div class="font-semibold text-sm text-gray-800">智能提炼</div>
+                                        <div class="text-xs text-gray-500">调用 LLM 分析源 Issue 样本，自动生成精炼的规则名称、描述和 Prompt，状态提升为"可发布"。</div>
+                                    </div>
+                                </div>
+                                <div class="flex gap-3 items-start">
+                                    <div class="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 text-xs font-bold flex-shrink-0 mt-0.5">5</div>
+                                    <div>
+                                        <div class="font-semibold text-sm text-gray-800">相似检测</div>
+                                        <div class="text-xs text-gray-500">对比现有规则库，检测候选规则是否与已有规则重复或高度相似，避免重复定义。</div>
+                                    </div>
+                                </div>
+                                <div class="flex gap-3 items-start">
+                                    <div class="w-8 h-8 rounded-full bg-teal-100 flex items-center justify-center text-teal-600 text-xs font-bold flex-shrink-0 mt-0.5">6</div>
+                                    <div>
+                                        <div class="font-semibold text-sm text-gray-800">模拟测试</div>
+                                        <div class="text-xs text-gray-500">用 LLM 对正例（源 Issue 代码）和反例（同类未命中代码）进行判定验证，输出准确率报告。</div>
+                                    </div>
+                                </div>
+                                <div class="flex gap-3 items-start">
+                                    <div class="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-600 text-xs font-bold flex-shrink-0 mt-0.5">7</div>
+                                    <div>
+                                        <div class="font-semibold text-sm text-gray-800">发布规则</div>
+                                        <div class="text-xs text-gray-500">审核通过的候选规则正式发布到评审规则库，可在项目中配置启用。</div>
+                                    </div>
+                                </div>
+                                <div class="flex gap-3 items-start">
+                                    <div class="w-8 h-8 rounded-full bg-cyan-100 flex items-center justify-center text-cyan-600 text-xs font-bold flex-shrink-0 mt-0.5">8</div>
+                                    <div>
+                                        <div class="font-semibold text-sm text-gray-800">回溯匹配</div>
+                                        <div class="text-xs text-gray-500">新规则发布后，自动在历史 Issue 中查找可被命中的记录，补全规则与 Issue 的关联。</div>
+                                    </div>
+                                </div>
+                                <div class="flex gap-3 items-start">
+                                    <div class="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center text-red-600 text-xs font-bold flex-shrink-0 mt-0.5">9</div>
+                                    <div>
+                                        <div class="font-semibold text-sm text-gray-800">健康监控</div>
+                                        <div class="text-xs text-gray-500">定期评估规则的命中、拒绝和同类未命中数据，发现退化或误报过高的规则并告警。</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 使用指导 -->
+                        <div>
+                            <h4 class="font-bold text-gray-800 mb-3"><i class="fas fa-tasks text-green-600 mr-2"></i>快速上手指南</h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div class="bg-white border rounded-lg p-4">
+                                    <div class="font-semibold text-sm text-gray-800 mb-2"><span class="text-blue-600 mr-1">①</span>执行聚类分析</div>
+                                    <div class="text-xs text-gray-500 space-y-1">
+                                        <p>1. 进入<span class="font-medium text-gray-700">「流水线」</span>Tab，点击<span class="font-medium text-gray-700">「执行聚类」</span>按钮</p>
+                                        <p>2. 设置时间范围（建议 30 天）和最小簇大小（建议 2~3）</p>
+                                        <p>3. 等待执行完成，点击<span class="font-medium text-gray-700">「查看候选规则」</span></p>
+                                    </div>
+                                </div>
+                                <div class="bg-white border rounded-lg p-4">
+                                    <div class="font-semibold text-sm text-gray-800 mb-2"><span class="text-blue-600 mr-1">②</span>完善候选规则</div>
+                                    <div class="text-xs text-gray-500 space-y-1">
+                                        <p>1. 进入<span class="font-medium text-gray-700">「候选规则」</span>Tab，点击规则卡片打开编辑面板</p>
+                                        <p>2. 使用<span class="font-medium text-gray-700">「智能提炼」</span>自动生成精炼的 Prompt</p>
+                                        <p>3. 使用<span class="font-medium text-gray-700">「相似检测」</span>和<span class="font-medium text-gray-700">「模拟测试」</span>验证质量</p>
+                                    </div>
+                                </div>
+                                <div class="bg-white border rounded-lg p-4">
+                                    <div class="font-semibold text-sm text-gray-800 mb-2"><span class="text-blue-600 mr-1">③</span>发布规则</div>
+                                    <div class="text-xs text-gray-500 space-y-1">
+                                        <p>1. 确认规则名称、描述、Prompt 准确无误</p>
+                                        <p>2. 点击编辑面板中的<span class="font-medium text-gray-700">「发布规则」</span>按钮</p>
+                                        <p>3. 查看发布确认弹框，确认后规则进入评审规则库</p>
+                                    </div>
+                                </div>
+                                <div class="bg-white border rounded-lg p-4">
+                                    <div class="font-semibold text-sm text-gray-800 mb-2"><span class="text-blue-600 mr-1">④</span>监控规则质量</div>
+                                    <div class="text-xs text-gray-500 space-y-1">
+                                        <p>1. 进入<span class="font-medium text-gray-700">「规则健康度」</span>Tab查看所有规则状态</p>
+                                        <p>2. 关注<span class="font-medium text-red-600">「严重告警」</span>和<span class="font-medium text-yellow-600">「警告」</span>规则</p>
+                                        <p>3. 根据系统建议优化 Prompt 或停用退化规则</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 注意事项 -->
+                        <div class="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                            <div class="font-semibold text-sm text-amber-800 mb-2"><i class="fas fa-exclamation-circle mr-1"></i>注意事项</div>
+                            <div class="text-xs text-amber-700 space-y-1">
+                                <p>• <strong>聚类无结果？</strong> 尝试降低「最小簇大小」为 1，或扩大「时间窗口」纳入更多历史 Issue。</p>
+                                <p>• <strong>Embedding 降级？</strong> 未配置 Embedding 模型时，系统仅使用关键词匹配，语义聚类等功能不可用。</p>
+                                <p>• <strong>规则发布后仍可编辑</strong>，但建议先在候选规则阶段充分测试验证，避免误报影响评审质量。</p>
+                                <p>• <strong>健康监控每周运行一次</strong>，告警规则会自动标红/标黄，请及时关注和处理。</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1883,7 +2017,7 @@ async function loadDashboardStats() {
         const [pipelineRes, candidatesRes, healthRes] = await Promise.all([
             apiFetch(API_BASE + '/incubator/pipeline'),
             apiFetch(API_BASE + '/incubator/candidates?page=1&page_size=1'),
-            apiFetch(API_BASE + '/incubator/health/rules')
+            apiFetch(API_BASE + '/incubator/health/rules?alert_only=true&page=1&page_size=1')
         ]);
         const pipelineData = await pipelineRes.json();
         const candidatesData = await candidatesRes.json();
@@ -1907,11 +2041,9 @@ async function loadDashboardStats() {
             document.getElementById('statRetro').textContent = (retroStep.stats || {}).total_retro_matched || 0;
         }
 
-        // Health stats (backend now returns paginated wrapper)
+        // Health stats (alert_only=true returns only unhealthy rules; total = unhealthy count)
         const healthPayload = healthData.data || {};
-        const healthList = healthPayload.list || [];
-        const alertCount = healthList.filter(r => r.alert_level !== 'healthy').length;
-        document.getElementById('statHealth').textContent = alertCount;
+        document.getElementById('statHealth').textContent = healthPayload.total || 0;
     } catch (e) { console.error('loadDashboardStats failed', e); }
 }
 

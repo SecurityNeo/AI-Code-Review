@@ -443,6 +443,7 @@ func (h *IncubatorHandler) RuleHealth(c *gin.Context) {
 	if pageSize > 100 {
 		pageSize = 100
 	}
+	alertOnly := c.Query("alert_only") == "true"
 
 	var rules []model.ReviewRule
 	if err := model.DB.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
@@ -511,6 +512,17 @@ func (h *IncubatorHandler) RuleHealth(c *gin.Context) {
 				result[i], result[j] = result[j], result[i]
 			}
 		}
+	}
+
+	// Filter if alert_only
+	if alertOnly {
+		var filtered []gin.H
+		for _, r := range result {
+			if r["alert_level"].(string) != "healthy" {
+				filtered = append(filtered, r)
+			}
+		}
+		result = filtered
 	}
 
 	total := len(result)
