@@ -2130,6 +2130,13 @@ function renderPipeline(steps) {
     const NODE_W = 250, NODE_H = 140, GAP_X = 80, GAP_Y = 60;
     const START_X = 40, START_Y = 30;
 
+    // Clear stale drag positions when step set changes (e.g., after removing cards)
+    const currentStepIds = steps.map(s => s.step_id).sort().join(',');
+    if (pipelineDrag.lastStepIds && pipelineDrag.lastStepIds !== currentStepIds) {
+        pipelineDrag.positions = {};
+    }
+    pipelineDrag.lastStepIds = currentStepIds;
+
     steps.forEach((step, idx) => {
         step._row = Math.floor(idx / COLS);
         step._col = idx % COLS;
@@ -2137,10 +2144,14 @@ function renderPipeline(steps) {
         // init position
         step._x = START_X + step._col * (NODE_W + GAP_X);
         step._y = START_Y + step._row * (NODE_H + GAP_Y);
-        // restore saved position
+        // restore saved position only if it exists and seems reasonable
         if (pipelineDrag.positions[step.step_id]) {
-            step._x = pipelineDrag.positions[step.step_id].x;
-            step._y = pipelineDrag.positions[step.step_id].y;
+            const saved = pipelineDrag.positions[step.step_id];
+            // sanity check: saved position should be within 2x the canvas area
+            if (saved.x >= -500 && saved.x < 3000 && saved.y >= -500 && saved.y < 2000) {
+                step._x = saved.x;
+                step._y = saved.y;
+            }
         }
     });
 
@@ -2180,10 +2191,10 @@ function renderPipeline(steps) {
 
         html += `
         <div class="pipeline-node ${isRunning ? 'node-running' : ''}" data-step-id="${step.step_id}" data-idx="${idx}"
-             style="left:${step._x}px; top:${step._y}px;"
+             style="left:${step._x}px; top:${step._y}px; z-index: 2;"
              onmousedown="startNodeDrag(event, '${step.step_id}')">
-            <div class="w-[240px] bg-white rounded-xl border-2 ${st.border} overflow-hidden hover:shadow-lg transition-shadow duration-200"
-                 style="background: ${theme.bg};">
+            <div class="bg-white rounded-xl border-2 ${st.border} overflow-hidden hover:shadow-lg transition-shadow duration-200"
+                 style="background: ${theme.bg}; width: ${NODE_W}px;">
                 <!-- Header Bar -->
                 <div class="${theme.topBg} text-white px-2.5 py-1.5 flex items-center gap-1.5 select-none">
                     <i class="fas fa-grip-vertical text-[10px] opacity-50 mr-0.5 cursor-grab"></i>
@@ -2204,19 +2215,30 @@ function renderPipeline(steps) {
             </div>`;
     });
 
+    // Log layout for debugging
+    console.log('[Pipeline] Rendering', steps.length, 'steps. stepIds:', steps.map(s => s.step_id).join(','));
+    steps.forEach(s => console.log(`[Pipeline] ${s.step_id}: row=${s._row} col=${s._col} x=${s._x} y=${s._y}`));
+
     // Reset container content completely
     container.innerHTML = html;
 
-    // Create SVG inside container via DOM API (after innerHTML so it won't be lost)
+    // Create SVG FIRST so it sits behind the card nodes
+    const svgW = Math.max(canvasW, 1200);
+    const svgH = Math.max(canvasH, 500);
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.id = 'pipelineSvg';
     svg.setAttribute('class', 'absolute top-0 left-0 pointer-events-none');
     svg.style.zIndex = '1';
-    svg.style.width = Math.max(canvasW, 1200) + 'px';
-    svg.style.height = Math.max(canvasH, 500) + 'px';
-    container.appendChild(svg);
+    svg.style.width = svgW + 'px';
+    svg.style.height = svgH + 'px';
+    svg.setAttribute('width', svgW);
+    svg.setAttribute('height', svgH);
+    container.insertBefore(svg, container.firstChild);
 
-    setTimeout(() => drawPipelineConnections(steps), 50);
+    setTimeout(() => {
+        console.log('[Pipeline] Drawing connections...');
+        drawPipelineConnections(steps);
+    }, 50);
 }
 
 function startNodeDrag(e, stepId) {
@@ -2324,15 +2346,23 @@ function drawPipelineConnections(steps) {
         const tW = toCard   ? toCard.offsetWidth    : 250;
         const tH = toCard   ? toCard.offsetHeight   : 140;
 
-        const isHorizontal = next._row === step._row;
+        const dx = (tLeft + tW/2) - (fLeft + fW/2);
+        const dy = (tTop + tH/2) - (fTop + fH/2);
+        const isHorizontal = Math.abs(dx) > Math.abs(dy) * 1.2;
+
+        console.log(`[Pipeline] connect ${step.step_id} → ${next.step_id}: ` +
+            `fL=${fLeft} fT=${fTop} tL=${tLeft} tT=${tTop} dx=${dx.toFixed(0)} dy=${dy.toFixed(0)} horizontal=${isHorizontal}`);
+
         let x1, y1, x2, y2, pathD;
 
         if (isHorizontal) {
-            // Same row: connect side-to-side
-            if (next._col > step._col) {
+            // Same row-ish: connect side-to-side
+            if (dx > 0) {
+                // next is to the right
                 x1 = fLeft + fW; y1 = fTop + fH / 2;
                 x2 = tLeft;      y2 = tTop + tH / 2;
             } else {
+                // next is to the left
                 x1 = fLeft;      y1 = fTop + fH / 2;
                 x2 = tLeft + tW; y2 = tTop + tH / 2;
             }
@@ -2340,8 +2370,15 @@ function drawPipelineConnections(steps) {
             pathD = `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`;
         } else {
             // Different row: connect bottom-to-top
-            x1 = fLeft + fW / 2; y1 = fTop + fH;
-            x2 = tLeft + tW / 2; y2 = tTop;
+            if (dy > 0) {
+                // next is below
+                x1 = fLeft + fW / 2; y1 = fTop + fH;
+                x2 = tLeft + tW / 2; y2 = tTop;
+            } else {
+                // next is above (unlikely but handle)
+                x1 = fLeft + fW / 2; y1 = fTop;
+                x2 = tLeft + tW / 2; y2 = tTop + tH;
+            }
             const midY = (y1 + y2) / 2;
             pathD = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
         }
