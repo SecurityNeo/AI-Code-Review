@@ -2108,9 +2108,6 @@ function renderPipeline(steps) {
         refine:       { brand: '#6366f1', bg: '#eef2ff', topBg: 'bg-indigo-500',  label: '处理节点' },
         similar_check:{ brand: '#f97316', bg: '#fff7ed', topBg: 'bg-orange-500',  label: '处理节点' },
         sandbox_test: { brand: '#14b8a6', bg: '#f0fdfa', topBg: 'bg-teal-500',    label: '处理节点' },
-        publish:      { brand: '#22c55e', bg: '#f0fdf4', topBg: 'bg-green-500',   label: '处理节点' },
-        retro_match:  { brand: '#06b6d4', bg: '#ecfeff', topBg: 'bg-cyan-500',    label: '处理节点' },
-        health_check: { brand: '#ef4444', bg: '#fef2f2', topBg: 'bg-red-500',     label: '处理节点' },
     };
 
     const statusConfig = {
@@ -2126,13 +2123,11 @@ function renderPipeline(steps) {
         issue_pool: 'fa-database', cluster: 'fa-project-diagram',
         candidate: 'fa-lightbulb', refine: 'fa-magic',
         similar_check: 'fa-search', sandbox_test: 'fa-vial',
-        publish: 'fa-rocket', retro_match: 'fa-history',
-        health_check: 'fa-heartbeat',
     };
 
     // Assign grid positions: 3 per row
     const COLS = 3;
-    const NODE_W = 220, NODE_H = 130, GAP_X = 80, GAP_Y = 60;
+    const NODE_W = 250, NODE_H = 140, GAP_X = 80, GAP_Y = 60;
     const START_X = 40, START_Y = 30;
 
     steps.forEach((step, idx) => {
@@ -2187,7 +2182,7 @@ function renderPipeline(steps) {
         <div class="pipeline-node ${isRunning ? 'node-running' : ''}" data-step-id="${step.step_id}" data-idx="${idx}"
              style="left:${step._x}px; top:${step._y}px;"
              onmousedown="startNodeDrag(event, '${step.step_id}')">
-            <div class="w-[200px] bg-white rounded-xl border-2 ${st.border} overflow-hidden hover:shadow-lg transition-shadow duration-200"
+            <div class="w-[240px] bg-white rounded-xl border-2 ${st.border} overflow-hidden hover:shadow-lg transition-shadow duration-200"
                  style="background: ${theme.bg};">
                 <!-- Header Bar -->
                 <div class="${theme.topBg} text-white px-2.5 py-1.5 flex items-center gap-1.5 select-none">
@@ -2199,15 +2194,14 @@ function renderPipeline(steps) {
                 </div>
                 <!-- Body -->
                 <div class="p-2" onclick="openPipelinePanel('${step.step_id}')">
-                    <div class="flex items-center justify-between mb-1">
+                    <div class="flex items-center justify-between mb-1.5">
                         <span class="text-[10px] px-1 py-0.5 rounded bg-gray-100 text-gray-600 border">${st.label}</span>
                         <span class="text-[10px] text-gray-400">${theme.label}</span>
                     </div>
-                    <div class="flex items-center justify-around gap-1 min-h-[42px] ${hasProgress ? 'items-center' : ''}">${stats}</div>
+                    <div class="flex items-center justify-around gap-1 min-h-[44px] ${hasProgress ? 'items-center' : ''}">${stats}</div>
                     ${progressHTML}
                 </div>
-            </div>
-        </div>`;
+            </div>`;
     });
 
     // Reset container content completely
@@ -2309,7 +2303,6 @@ function drawPipelineConnections(steps) {
     const brandColors = {
         issue_pool: '#64748b', cluster: '#8b5cf6', candidate: '#3b82f6',
         refine: '#6366f1', similar_check: '#f97316', sandbox_test: '#14b8a6',
-        publish: '#22c55e', retro_match: '#06b6d4', health_check: '#ef4444',
     };
 
     steps.forEach((step, idx) => {
@@ -2396,8 +2389,6 @@ function openPipelinePanel(stepId) {
         issue_pool: ['bg-slate-500', 'fa-database'], cluster: ['bg-violet-500', 'fa-project-diagram'],
         candidate: ['bg-blue-500', 'fa-lightbulb'], refine: ['bg-indigo-500', 'fa-magic'],
         similar_check: ['bg-orange-500', 'fa-search'], sandbox_test: ['bg-teal-500', 'fa-vial'],
-        publish: ['bg-green-500', 'fa-rocket'], retro_match: ['bg-cyan-500', 'fa-history'],
-        health_check: ['bg-red-500', 'fa-heartbeat'],
     };
     const t = themeMap[stepId] || ['bg-gray-500', 'fa-circle'];
     document.getElementById('panelNodeIcon').className = `w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm ${t[0]}`;
@@ -2458,8 +2449,7 @@ function openPipelinePanel(stepId) {
     if (step.next_steps && step.next_steps.length > 0) {
         const nextLabels = {
             cluster: '聚类分析', candidate: '候选规则', refine: '智能提炼',
-            similar_check: '相似检测', sandbox_test: '模拟测试', publish: '发布规则',
-            retro_match: '回溯匹配', health_check: '健康监控',
+            similar_check: '相似检测', sandbox_test: '模拟测试',
         };
         html += `<div class="border rounded-lg overflow-hidden">`;
         html += `<div class="bg-purple-50 px-3 py-2 text-xs font-medium text-purple-700 border-b"><i class="fas fa-code-branch mr-1"></i>下游节点</div>`;
@@ -2476,7 +2466,6 @@ function openPipelinePanel(stepId) {
         cluster: '<button onclick="openClusterModal()" class="w-full px-3 py-2 bg-violet-600 text-white rounded-lg text-sm hover:bg-violet-700"><i class="fas fa-play mr-1"></i>执行聚类分析</button>',
         candidate: '<button onclick="switchTab(\'candidates\')" class="w-full px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"><i class="fas fa-eye mr-1"></i>查看候选规则</button>',
         refine: '',
-        health_check: '<button onclick="switchTab(\'health\')" class="w-full px-3 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700"><i class="fas fa-eye mr-1"></i>查看健康度</button>',
     };
     if (actions[stepId]) {
         html += `<div class="pt-2">${actions[stepId]}</div>`;

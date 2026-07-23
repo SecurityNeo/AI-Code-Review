@@ -274,93 +274,6 @@ func (s *IncubatorService) getPipelineStatusGlobal() (*PipelineStatus, error) {
 		OutputSummary: map[string]any{
 			"说明": "使用LLM验证规则对正例/反例的判定准确率",
 		},
-		NextSteps: []string{"publish"},
-	}
-
-	// --- Step 7: Publish ---
-	var totalPublishedRules int64
-	model.DB.Model(&model.RuleIncubation{}).Where("status = ?", "published").Count(&totalPublishedRules)
-	stepPublish := PipelineStep{
-		StepID: "publish",
-		Label:  "发布规则",
-		Status: "active",
-		Icon:   "fa-rocket",
-		Color:  "green",
-		Stats: map[string]any{
-			"total_published": totalPublishedRules,
-		},
-		InputSummary: map[string]any{
-			"来源": "审核通过且测试达标的候选规则",
-		},
-		OutputSummary: map[string]any{
-			"已发布规则数": totalPublishedRules,
-			"说明":     "正式发布到评审规则库",
-		},
-		NextSteps: []string{"retro_match"},
-	}
-
-	// --- Step 8: Retro Match ---
-	var retroTotal int64
-	model.DB.Model(&model.ReviewIssueRuleMatch{}).Count(&retroTotal)
-	var latestRetro model.RuleIncubationJob
-	retroStatus := "idle"
-	if cfg.RetroMatchEnabled {
-		retroStatus = "active"
-	}
-	if err := model.DB.Where("job_type = ?", "retro_match").Order("created_at DESC").First(&latestRetro).Error; err == nil {
-		if latestRetro.Status == "pending" || latestRetro.Status == "running" {
-			retroStatus = "running"
-		} else if latestRetro.Status == "success" {
-			retroStatus = "completed"
-		}
-	}
-	stepRetro := PipelineStep{
-		StepID: "retro_match",
-		Label:  "回溯匹配",
-		Status: retroStatus,
-		Icon:   "fa-history",
-		Color:  "cyan",
-		Stats: map[string]any{
-			"total_retro_matched": retroTotal,
-			"latest_job_id":       latestRetro.ID,
-		},
-		InputSummary: map[string]any{
-			"来源":    "已发布的新规则",
-			"回溯天数":  cfg.RetroMatchMaxDaysLookback,
-			"置信度阈值": cfg.RetroMatchConfidenceThreshold,
-		},
-		OutputSummary: map[string]any{
-			"匹配总数": retroTotal,
-			"说明":   "在历史Issue中寻找可被新规则命中的记录",
-		},
-		NextSteps: []string{"health_check"},
-	}
-
-	// --- Step 9: Health Check ---
-	var enabledRulesCount int64
-	model.DB.Model(&model.ReviewRule{}).Where("is_enabled = ?", true).Count(&enabledRulesCount)
-
-	stepHealth := PipelineStep{
-		StepID: "health_check",
-		Label:  "健康监控",
-		Status: func() string {
-			if cfg.HealthCheckEnabled {
-				return "active"
-			}
-			return "disabled"
-		}(),
-		Icon:  "fa-heartbeat",
-		Color: "red",
-		Stats: map[string]any{
-			"check_interval_days": cfg.HealthCheckIntervalDays,
-			"enabled_rules":       enabledRulesCount,
-		},
-		InputSummary: map[string]any{
-			"来源": "所有已启用规则的命中/拒绝统计数据",
-		},
-		OutputSummary: map[string]any{
-			"说明": "定期评估规则质量，发现退化或误报过高的规则",
-		},
 		NextSteps: []string{},
 	}
 
@@ -380,9 +293,6 @@ func (s *IncubatorService) getPipelineStatusGlobal() (*PipelineStatus, error) {
 		stepRefine,
 		stepSimilar,
 		stepSandbox,
-		stepPublish,
-		stepRetro,
-		stepHealth,
 	}
 
 	// Merge active pipeline_run execution state into steps
@@ -581,7 +491,7 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 			OutputSummary: map[string]any{
 				"已完成检测": fmt.Sprintf("%d 个", similarChecked),
 			},
-			NextSteps: []string{"sandbox_test", "publish"},
+			NextSteps: []string{"sandbox_test"},
 		},
 		{
 			StepID: "sandbox_test",
@@ -604,62 +514,6 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 			},
 			OutputSummary: map[string]any{
 				"已完成测试": fmt.Sprintf("%d 个", sandboxTested),
-			},
-			NextSteps: []string{"publish"},
-		},
-		{
-			StepID: "publish",
-			Label:  "发布规则",
-			Status: func() string {
-				if publishedCount > 0 {
-					return "active"
-				}
-				return "idle"
-			}(),
-			Icon:  "fa-rocket",
-			Color: "green",
-			Stats: map[string]any{
-				"total_published": publishedCount,
-			},
-			InputSummary: map[string]any{
-				"来源": "本次流水线产出的候选规则",
-			},
-			OutputSummary: map[string]any{
-				"已发布规则数": fmt.Sprintf("%d 个", publishedCount),
-			},
-			NextSteps: []string{"retro_match"},
-		},
-		{
-			StepID: "retro_match",
-			Label:  "回溯匹配",
-			Status: "active",
-			Icon:   "fa-history",
-			Color:  "blue",
-			Stats: map[string]any{
-				"total_published": publishedCount,
-			},
-			InputSummary: map[string]any{
-				"来源": fmt.Sprintf("本次流水线已发布 %d 条规则", publishedCount),
-			},
-			OutputSummary: map[string]any{
-				"说明": "回溯匹配历史 Issue",
-			},
-			NextSteps: []string{},
-		},
-		{
-			StepID: "health_check",
-			Label:  "健康检查",
-			Status: "active",
-			Icon:   "fa-heartbeat",
-			Color:  "red",
-			Stats: map[string]any{
-				"check_interval_days": 7,
-			},
-			InputSummary: map[string]any{
-				"来源": "所有已启用规则",
-			},
-			OutputSummary: map[string]any{
-				"说明": "定期评估规则质量",
 			},
 			NextSteps: []string{},
 		},

@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/ai-optimizer/backend/internal/model"
@@ -184,10 +187,7 @@ func (s *IncubatorService) CreateCandidate(req CreateCandidateRequest, userID ui
 	}
 	sourceProjectsJSON, _ := json.Marshal(sourceProjects)
 
-	code := fmt.Sprintf("incubated-%s-%s-%s-%d", modeKey(catCount), modeKey(langCount), req.ClusterID, time.Now().UnixNano())
-	if len(code) > 128 {
-		code = code[:128]
-	}
+	code := generateIncubationCode(issues)
 
 	cand := &model.RuleIncubation{
 		Status:          "draft",
@@ -631,6 +631,70 @@ func (s *IncubatorService) SaveConfig(updates map[string]any) error {
 	return model.DB.Model(&cfg).Updates(clean).Error
 }
 
+// generateIncubationCode creates a semantic, readable code for a candidate rule.
+// Format: incubated_{semantic_slug}_{8-char-random}
+func generateIncubationCode(issues []model.ReviewIssue) string {
+	randStr := generateRandomString(8)
+	if len(issues) == 0 {
+		return fmt.Sprintf("incubated_rule_%s", randStr)
+	}
+	msg := issues[0].Message
+	if msg == "" {
+		return fmt.Sprintf("incubated_rule_%s", randStr)
+	}
+	keyword := extractSemanticSlug(msg)
+	code := fmt.Sprintf("incubated_%s_%s", keyword, randStr)
+	if len(code) > 128 {
+		code = code[:128]
+	}
+	return code
+}
+
+// extractSemanticSlug turns a message into a short, URL-safe slug.
+func extractSemanticSlug(msg string) string {
+	if msg == "" {
+		return "rule"
+	}
+	// Normalize: lowercase, collapse whitespace
+	msg = strings.ToLower(strings.TrimSpace(msg))
+	// Take first 25 runes to keep it concise
+	runes := []rune(msg)
+	if len(runes) > 25 {
+		runes = runes[:25]
+	}
+	text := string(runes)
+	// Replace non-word chars with underscore
+	var sb strings.Builder
+	prevUnderscore := false
+	for _, r := range text {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			sb.WriteRune(r)
+			prevUnderscore = false
+		} else if !prevUnderscore {
+			sb.WriteRune('_')
+			prevUnderscore = true
+		}
+	}
+	result := strings.Trim(sb.String(), "_")
+	// Collapse consecutive underscores
+	re := regexp.MustCompile(`_+`)
+	result = re.ReplaceAllString(result, "_")
+	if result == "" {
+		return "rule"
+	}
+	return result
+}
+
+// generateRandomString produces a lowercase alphanumeric string of length n.
+func generateRandomString(n int) string {
+	const letters = "abcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(b)
+}
+
 // ValidateEmbedding checks whether the configured embedding model is reachable.
 // If modelID > 0, tests that specific model directly (useful before saving config).
 func (s *IncubatorService) ValidateEmbedding(modelID uint) (map[string]any, error) {
@@ -1002,11 +1066,13 @@ Please output in the following JSON format (do not include markdown code block):
 func (s *IncubatorService) runSimilarCheck(incubationID uint) error {
 	cand, _, err := s.GetCandidate(incubationID)
 	if err != nil {
+		zap.L().Warn("similarCheck: get candidate failed", zap.Uint("incubation_id", incubationID), zap.Error(err))
 		return err
 	}
 
 	var rules []model.ReviewRule
 	if err := model.DB.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
+		zap.L().Warn("similarCheck: query rules failed", zap.Uint("incubation_id", incubationID), zap.Error(err))
 		return err
 	}
 
@@ -1037,81 +1103,48 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) error {
 	}
 	if codeExists > 0 {
 		updates["code"] = fmt.Sprintf("%s-%d", cand.Code, time.Now().Unix())
+		zap.L().Info("similarCheck: code collision, renamed",
+			zap.Uint("incubation_id", incubationID), zap.String("new_code", updates["code"].(string)))
 	}
 
-	return s.UpdateCandidate(incubationID, updates)
+	if err := s.UpdateCandidate(incubationID, updates); err != nil {
+		zap.L().Warn("similarCheck: update candidate failed",
+			zap.Uint("incubation_id", incubationID), zap.Error(err))
+		return err
+	}
+
+	zap.L().Info("similarCheck: completed",
+		zap.Uint("incubation_id", incubationID),
+		zap.Int("rules_checked", len(rules)),
+		zap.Int("similar_found", len(similar)))
+	return nil
 }
 
-// runSandboxTest uses LLM to verify the candidate rule against positive/negative test cases.
+// runSandboxTest uses LLM to verify the candidate rule by generating test code and validating it.
 func (s *IncubatorService) runSandboxTest(incubationID uint) error {
-	cand, issues, err := s.GetCandidate(incubationID)
+	cand, _, err := s.GetCandidate(incubationID)
 	if err != nil {
+		zap.L().Warn("sandboxTest: get candidate failed", zap.Uint("incubation_id", incubationID), zap.Error(err))
 		return err
 	}
 	if cand.Prompt == "" {
 		return fmt.Errorf("prompt is empty, cannot test")
 	}
 
-	// Build positive cases from accepted/interesting issues and negative from sibling code without issues
-	type testCase struct {
-		No       int    `json:"no"`
-		Type     string `json:"type"` // positive / negative
-		Code     string `json:"code"`
-		File     string `json:"file"`
-		Expected bool   `json:"expected"`
-		Actual   bool   `json:"actual"`
-		Pass     bool   `json:"pass"`
-		Reason   string `json:"reason"`
+	// Step 1: Ask LLM to generate positive and negative test code
+	cases, err := s.generateLLMTestCases(cand)
+	if err != nil {
+		zap.L().Warn("sandboxTest: generate test cases failed",
+			zap.Uint("incubation_id", incubationID), zap.Error(err))
+		return err
+	}
+	if len(cases) == 0 {
+		return fmt.Errorf("no test cases generated")
 	}
 
-	var cases []testCase
-
-	// Positive: source issues that have code snippets
-	posCount := 0
-	for _, iss := range issues {
-		if posCount >= 5 {
-			break
-		}
-		if iss.CodeSnippet != "" {
-			cases = append(cases, testCase{
-				No:       posCount + 1,
-				Type:     "positive",
-				Code:     iss.CodeSnippet,
-				File:     iss.File,
-				Expected: true,
-			})
-			posCount++
-		}
-	}
-	if posCount == 0 {
-		return fmt.Errorf("no code snippets for positive test cases")
-	}
-
-	// Negative: find issues with same language/category but NOT in source_issue_ids
-	var negativeIssues []model.ReviewIssue
-	var sourceIDs []uint
-	json.Unmarshal([]byte(cand.SourceIssueIDs), &sourceIDs)
-	negDB := model.DB.Where("code_snippet != ''").Limit(3)
-	if cand.Language != "" && cand.Language != "common" {
-		negDB = negDB.Where("file LIKE ?", "%"+cand.Language+"%") // rough language match by file extension
-	}
-	if cand.Category != "" {
-		negDB = negDB.Where("category = ?", cand.Category)
-	}
-	if len(sourceIDs) > 0 {
-		negDB = negDB.Where("id NOT IN ?", sourceIDs)
-	}
-	negDB.Find(&negativeIssues)
-
-	for _, iss := range negativeIssues {
-		cases = append(cases, testCase{
-			No:       len(cases) + 1,
-			Type:     "negative",
-			Code:     iss.CodeSnippet,
-			File:     iss.File,
-			Expected: false,
-		})
-	}
+	zap.L().Info("sandboxTest: test cases generated",
+		zap.Uint("incubation_id", incubationID),
+		zap.Int("total_cases", len(cases)))
 
 	llmSvc := NewLLMService()
 	passed := 0
@@ -1128,7 +1161,6 @@ func (s *IncubatorService) runSandboxTest(incubationID uint) error {
 		}
 
 		answer := strings.ToUpper(strings.TrimSpace(resp.Content))
-		// Strictly determine YES vs NO based on the first occurrence of a decisive word.
 		actual := "unknown"
 		if idxYes := strings.Index(answer, "YES"); idxYes >= 0 {
 			actual = "yes"
@@ -1144,7 +1176,7 @@ func (s *IncubatorService) runSandboxTest(incubationID uint) error {
 		case "no":
 			cases[i].Actual = false
 		default:
-			cases[i].Actual = !cases[i].Expected // unknown -> mark as fail
+			cases[i].Actual = !cases[i].Expected
 			cases[i].Reason = "LLM answer unclear"
 			continue
 		}
@@ -1156,15 +1188,160 @@ func (s *IncubatorService) runSandboxTest(incubationID uint) error {
 		}
 	}
 
+	accuracy := 0.0
+	if len(cases) > 0 {
+		accuracy = float64(passed) / float64(len(cases))
+	}
+
 	testResult := map[string]any{
 		"total_cases": len(cases),
 		"passed":      passed,
-		"accuracy":    float64(passed) / float64(len(cases)),
+		"accuracy":    accuracy,
 		"details":     cases,
 	}
 	resultJSON, _ := json.Marshal(testResult)
 
-	return model.DB.Model(&model.RuleIncubation{}).Where("id = ?", incubationID).Update("test_results", string(resultJSON)).Error
+	if err := model.DB.Model(&model.RuleIncubation{}).Where("id = ?", incubationID).Update("test_results", string(resultJSON)).Error; err != nil {
+		zap.L().Warn("sandboxTest: save results failed",
+			zap.Uint("incubation_id", incubationID), zap.Error(err))
+		return err
+	}
+
+	zap.L().Info("sandboxTest: completed",
+		zap.Uint("incubation_id", incubationID),
+		zap.Int("total_cases", len(cases)),
+		zap.Int("passed", passed),
+		zap.Float64("accuracy", accuracy))
+	return nil
+}
+
+// generateLLMTestCases asks the LLM to generate positive (violating) and negative (compliant) code snippets.
+func (s *IncubatorService) generateLLMTestCases(cand *model.RuleIncubation) ([]testCase, error) {
+	type tc struct {
+		No       int    `json:"no"`
+		Type     string `json:"type"`
+		Code     string `json:"code"`
+		File     string `json:"file"`
+		Expected bool   `json:"expected"`
+		Actual   bool   `json:"actual"`
+		Pass     bool   `json:"pass"`
+		Reason   string `json:"reason"`
+	}
+
+	systemPrompt := `You are a code review test-case generator. Based on the given review rule, generate realistic, concise test code snippets.
+
+Output ONLY in this exact plain-text format (do not use markdown code blocks):
+
+POSITIVE_CASES:
+===
+<code snippet 1>
+===
+<code snippet 2>
+===
+
+NEGATIVE_CASES:
+===
+<code snippet 1>
+===
+<code snippet 2>
+===
+
+Requirements:
+- Generate 2 POSITIVE cases: code that VIOLATES the described review rule.
+- Generate 2 NEGATIVE cases: clean code that does NOT violate the review rule.
+- Use the programming language context implied by the rule (e.g., Go, Java, Python).
+- Each snippet should be short, realistic, and self-contained.
+- Do NOT add explanations outside the format.`
+
+	userPrompt := fmt.Sprintf("Review rule:\n%s\n\nGenerate test code snippets.", cand.Prompt)
+
+	llmSvc := NewLLMService()
+	resp, err := llmSvc.ChatCompletion(nil, 0, "sandbox_test", systemPrompt, userPrompt)
+	if err != nil {
+		return nil, fmt.Errorf("llm generate test cases failed: %w", err)
+	}
+
+	content := resp.Content
+	var cases []tc
+
+	// Parse positive cases
+	posStart := strings.Index(content, "POSITIVE_CASES:")
+	negStart := strings.Index(content, "NEGATIVE_CASES:")
+	if posStart < 0 {
+		return nil, fmt.Errorf("no POSITIVE_CASES section in LLM output")
+	}
+	if negStart < 0 {
+		negStart = len(content)
+	}
+
+	posSection := content[posStart:negStart]
+	negSection := ""
+	if negStart < len(content) {
+		negSection = content[negStart:]
+	}
+
+	// Split by "===" and extract non-empty snippets
+	parseSnippets := func(section string) []string {
+		parts := strings.Split(section, "===")
+		var snippets []string
+		for i, p := range parts {
+			if i == 0 {
+				continue // skip header line
+			}
+			s := strings.TrimSpace(p)
+			if s != "" {
+				snippets = append(snippets, s)
+			}
+		}
+		return snippets
+	}
+
+	posSnippets := parseSnippets(posSection)
+	negSnippets := parseSnippets(negSection)
+
+	if len(posSnippets) == 0 && len(negSnippets) == 0 {
+		return nil, fmt.Errorf("no test cases parsed from LLM output")
+	}
+
+	idx := 1
+	for _, snip := range posSnippets {
+		cases = append(cases, tc{
+			No:       idx,
+			Type:     "positive",
+			Code:     snip,
+			File:     cand.Language,
+			Expected: true,
+		})
+		idx++
+	}
+	for _, snip := range negSnippets {
+		cases = append(cases, tc{
+			No:       idx,
+			Type:     "negative",
+			Code:     snip,
+			File:     cand.Language,
+			Expected: false,
+		})
+		idx++
+	}
+
+	// Convert to the public testCase type
+	var result []testCase
+	for _, c := range cases {
+		result = append(result, testCase(c))
+	}
+	return result, nil
+}
+
+type testCase struct {
+	No       int    `json:"no"`
+	Type     string `json:"type"` // positive / negative
+	Code     string `json:"code"`
+	File     string `json:"file"`
+	Expected bool   `json:"expected"`
+	Actual   bool   `json:"actual"`
+	Pass     bool   `json:"pass"`
+	Reason   string `json:"reason"`
 }
 
 // runRetroMatch performs retroactive matching for a published rule against historical issues.
