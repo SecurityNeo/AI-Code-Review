@@ -207,6 +207,10 @@ func (s *IncubatorService) CreateCandidate(req CreateCandidateRequest, userID ui
 		return nil, err
 	}
 
+	if req.AutoRefine {
+		_, _ = QueueJob("refine", map[string]any{"incubation_id": cand.ID})
+	}
+
 	return cand, nil
 }
 
@@ -410,7 +414,7 @@ func (s *IncubatorService) doClusterIssues(timeRangeDays int, languages []string
 		_, err := s.CreateCandidate(CreateCandidateRequest{
 			SourceIssueIDs: cl.IssueIDs,
 			ClusterID:      cl.ID,
-			AutoRefine:     false,
+			AutoRefine:     true,
 		}, 0)
 		if err == nil {
 			generated++
