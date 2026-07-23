@@ -86,6 +86,11 @@ func (s *EmbeddingService) callEmbeddingAPI(ctx context.Context, m model.LLMMode
 	}
 	body, _ := json.Marshal(reqBody)
 
+	zap.L().Info("[Embedding] calling embedding API",
+		zap.String("model_id", m.ModelID),
+		zap.String("base_url", m.BaseURL),
+		zap.Int("input_len", len(text)))
+
 	req, err := http.NewRequestWithContext(ctx, "POST", m.BaseURL+"/embeddings", bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, err
@@ -95,12 +100,16 @@ func (s *EmbeddingService) callEmbeddingAPI(ctx context.Context, m model.LLMMode
 
 	resp, err := client.Do(req)
 	if err != nil {
+		zap.L().Error("[Embedding] request failed", zap.Error(err))
 		return nil, 0, fmt.Errorf("embedding request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
+		zap.L().Error("[Embedding] API returned non-OK status",
+			zap.Int("status", resp.StatusCode),
+			zap.String("body", string(respBody)))
 		return nil, 0, fmt.Errorf("embedding API error: status=%d, body=%s", resp.StatusCode, string(respBody))
 	}
 
@@ -114,6 +123,7 @@ func (s *EmbeddingService) callEmbeddingAPI(ctx context.Context, m model.LLMMode
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(respBody, &result); err != nil {
+		zap.L().Error("[Embedding] parse response failed", zap.String("body", string(respBody)), zap.Error(err))
 		return nil, 0, fmt.Errorf("parse embedding response failed: %w", err)
 	}
 	if len(result.Data) == 0 {
@@ -125,6 +135,12 @@ func (s *EmbeddingService) callEmbeddingAPI(ctx context.Context, m model.LLMMode
 	for i, v := range emb {
 		vec[i] = float32(v)
 	}
+
+	zap.L().Info("[Embedding] success",
+		zap.String("model_id", m.ModelID),
+		zap.Int("dimension", len(vec)),
+		zap.Int("tokens_used", result.Usage.TotalTokens))
+
 	return vec, result.Usage.TotalTokens, nil
 }
 

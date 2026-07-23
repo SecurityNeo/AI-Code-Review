@@ -343,6 +343,26 @@ func (s *IncubatorService) PublishCandidate(id uint, req PublishRequest, userID 
 		"resolved_at":       now,
 	})
 
+	// Asynchronously vectorize the published rule
+	if s.embedSvc != nil && s.embedSvc.IsAvailable() {
+		go func(r model.ReviewRule) {
+			cfg := s.getConfig()
+			if cfg.EmbeddingModelID == nil {
+				return
+			}
+			key := vectorstore.Key{
+				EntityType: "rule",
+				EntityID:   r.ID,
+				ModelID:    *cfg.EmbeddingModelID,
+			}
+			text := r.Name + " " + r.Description + " " + r.Prompt
+			ctx := context.Background()
+			if err := s.embedSvc.EmbedAndStore(ctx, key, text); err != nil {
+				zap.L().Warn("embed rule failed", zap.Uint("rule_id", r.ID), zap.Error(err))
+			}
+		}(rule)
+	}
+
 	return rule.ID, nil
 }
 
@@ -411,6 +431,28 @@ func (s *IncubatorService) doClusterIssues(timeRangeDays int, languages []string
 		return "", err
 	}
 
+	// Asynchronously vectorize issues when embedding is available
+	if s.embedSvc != nil && s.embedSvc.IsAvailable() {
+		go func(issList []model.ReviewIssue) {
+			cfg := s.getConfig()
+			if cfg.EmbeddingModelID == nil {
+				return
+			}
+			ctx := context.Background()
+			for _, iss := range issList {
+				key := vectorstore.Key{
+					EntityType: "issue",
+					EntityID:   iss.ID,
+					ModelID:    *cfg.EmbeddingModelID,
+				}
+				text := iss.Message + " " + iss.Suggestion
+				if err := s.embedSvc.EmbedAndStore(ctx, key, text); err != nil {
+					zap.L().Warn("embed issue failed", zap.Uint("issue_id", iss.ID), zap.Error(err))
+				}
+			}
+		}(issues)
+	}
+
 	clusters := s.keywordCluster(issues, minGroupSize)
 
 	generated := 0
@@ -432,9 +474,9 @@ func (s *IncubatorService) doClusterIssues(timeRangeDays int, languages []string
 	}
 
 	summary := map[string]any{
-		"扫描Issue数":   len(issues),
+		"扫描Issue数": len(issues),
 		"发现簇数":     len(clusters),
-		"生成候选规则数": generated,
+		"生成候选规则数":  generated,
 	}
 	summaryJSON, err := json.Marshal(summary)
 	if err != nil {
@@ -871,7 +913,7 @@ func (s *IncubatorService) runRefine(incubationID uint) error {
 
 	llmSvc := NewLLMService()
 	systemPrompt := "You are a code-review rule engineer. Your task is to analyze a set of code issues and abstract them into a general review rule. You must output valid JSON. All double-quote characters inside string values must be properly escaped with backslash. Use single quotes in code examples within string values to simplify escaping."
-  userPrompt := fmt.Sprintf(`Analyze the following code-review issues and output a structured review rule.
+	userPrompt := fmt.Sprintf(`Analyze the following code-review issues and output a structured review rule.
 
 Issues:
 %s
@@ -925,7 +967,33 @@ Please output in the following JSON format (do not include markdown code block):
 	}
 	updates["status"] = "ready"
 	if len(updates) > 0 {
-		return s.UpdateCandidate(incubationID, updates)
+		if err := s.UpdateCandidate(incubationID, updates); err != nil {
+			return err
+		}
+	}
+
+	// Asynchronously vectorize the refined candidate
+	if s.embedSvc != nil && s.embedSvc.IsAvailable() {
+		go func(id uint) {
+			cfg := s.getConfig()
+			if cfg.EmbeddingModelID == nil {
+				return
+			}
+			var cand model.RuleIncubation
+			if err := model.DB.First(&cand, id).Error; err != nil {
+				return
+			}
+			key := vectorstore.Key{
+				EntityType: "incubation",
+				EntityID:   cand.ID,
+				ModelID:    *cfg.EmbeddingModelID,
+			}
+			text := cand.Name + " " + cand.Description + " " + cand.Prompt
+			ctx := context.Background()
+			if err := s.embedSvc.EmbedAndStore(ctx, key, text); err != nil {
+				zap.L().Warn("embed incubation failed", zap.Uint("incubation_id", cand.ID), zap.Error(err))
+			}
+		}(incubationID)
 	}
 	return nil
 }
@@ -1435,17 +1503,11 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 		return
 	}
 
-	// Find freshly created draft candidates
-	since := time.Now().Add(-5 * time.Minute)
-	var draftCands []model.RuleIncubation
-	model.DB.Where("status = ? AND created_at >= ?", "draft", since).Find(&draftCands)
-	if len(draftCands) == 0 {
-		model.DB.Where("status = ? AND created_at >= ?", "ready", since).Find(&draftCands)
-	}
-
 	// -------- Step 2: Refine --------
+	var pipeCands []model.RuleIncubation
+	model.DB.Where("pipeline_job_id = ?", jobID).Find(&pipeCands)
 	updateStep("refine", "running")
-	for _, cand := range draftCands {
+	for _, cand := range pipeCands {
 		if cand.Status == "draft" {
 			_ = s.runRefine(cand.ID)
 		}
@@ -1454,19 +1516,17 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 
 	// -------- Step 3: Similar Check --------
 	updateStep("similar_check", "running")
-	var refinedCands []model.RuleIncubation
-	model.DB.Where("created_at >= ?", since).Find(&refinedCands)
-	for _, cand := range refinedCands {
+	for _, cand := range pipeCands {
 		_ = s.runSimilarCheck(cand.ID)
 	}
 	updateStep("similar_check", "completed")
 
 	// -------- Step 4: Sandbox Test --------
 	updateStep("sandbox_test", "running")
-	var readyCands []model.RuleIncubation
-	model.DB.Where("status = ? AND created_at >= ?", "ready", since).Find(&readyCands)
-	for _, cand := range readyCands {
-		_ = s.runSandboxTest(cand.ID)
+	for _, cand := range pipeCands {
+		if cand.Status == "ready" {
+			_ = s.runSandboxTest(cand.ID)
+		}
 	}
 	updateStep("sandbox_test", "completed")
 

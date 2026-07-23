@@ -1888,32 +1888,29 @@ function renderPipeline(steps) {
         }).join('');
         const isRunning = step.status === 'running';
         const headerIcon = isRunning ? `<i class="fas fa-spinner fa-spin text-xs"></i>` : `<i class="fas ${stepIcon} text-xs"></i>`;
-        const statusLabel = isRunning ? '执行中...' : st.label;
-
-        // 额外：如果该步骤属于当前运行中的 pipeline，在卡片底部显示运行提示
-        const runningHint = isRunning ? `<div class="mt-2 text-[10px] text-purple-600 font-medium animate-pulse"><i class="fas fa-cog fa-spin mr-1"></i>正在执行...</div>` : '';
+        const runningTag = isRunning ? `<span class="text-[10px] font-medium text-white/90 animate-pulse whitespace-nowrap">执行中…</span>` : '';
 
         html += `
         <div class="pipeline-node ${isRunning ? 'node-running' : ''}" data-step-id="${step.step_id}" data-idx="${idx}"
              style="left:${step._x}px; top:${step._y}px;"
              onmousedown="startNodeDrag(event, '${step.step_id}')">
-            <div class="w-[220px] bg-white rounded-xl border-2 ${st.border} overflow-hidden hover:shadow-lg transition-shadow duration-200"
+            <div class="w-[200px] bg-white rounded-xl border-2 ${st.border} overflow-hidden hover:shadow-lg transition-shadow duration-200"
                  style="background: ${theme.bg};">
-                <!-- Header Bar with drag hint -->
-                <div class="${theme.topBg} text-white px-3 py-2 flex items-center gap-2 select-none">
-                    <i class="fas fa-grip-vertical text-[10px] opacity-50 mr-1 cursor-grab"></i>
+                <!-- Header Bar -->
+                <div class="${theme.topBg} text-white px-2.5 py-1.5 flex items-center gap-1.5 select-none">
+                    <i class="fas fa-grip-vertical text-[10px] opacity-50 mr-0.5 cursor-grab"></i>
                     ${headerIcon}
                     <span class="text-xs font-medium flex-1 truncate">${step.label}</span>
+                    ${runningTag}
                     <span class="w-1.5 h-1.5 rounded-full ${st.dot} ${st.pulse}"></span>
                 </div>
                 <!-- Body -->
-                <div class="p-3" onclick="openPipelinePanel('${step.step_id}')">
-                    <div class="flex items-center justify-between mb-2">
-                        <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 border">${st.label}</span>
+                <div class="p-2" onclick="openPipelinePanel('${step.step_id}')">
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="text-[10px] px-1 py-0.5 rounded bg-gray-100 text-gray-600 border">${st.label}</span>
                         <span class="text-[10px] text-gray-400">${theme.label}</span>
                     </div>
-                    <div class="grid grid-cols-2 gap-2">${stats}</div>
-                    ${runningHint}
+                    <div class="flex items-center justify-around gap-1 min-h-[42px]">${stats}</div>
                 </div>
             </div>
         </div>`;
