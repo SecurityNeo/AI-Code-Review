@@ -280,6 +280,22 @@ func (h *IncubatorHandler) PublishCandidate(c *gin.Context) {
 	})
 }
 
+// GetSimilarGraph returns the similarity graph for a candidate rule.
+// GET /api/v1/incubator/candidates/:id/similar-graph
+func (h *IncubatorHandler) GetSimilarGraph(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
+	data, err := h.svc.GetSimilarGraph(uint(id))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(404, gin.H{"error": "候选规则不存在"})
+			return
+		}
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "data": data})
+}
+
 // GetConfig returns incubator configuration.
 // GET /api/v1/incubator/config
 func (h *IncubatorHandler) GetConfig(c *gin.Context) {

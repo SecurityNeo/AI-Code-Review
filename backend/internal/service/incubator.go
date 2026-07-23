@@ -428,7 +428,104 @@ type PublishRequest struct {
 	IsEnabled bool `json:"is_enabled"`
 }
 
-// ClusterIssues performs keyword-based clustering on unmatched issues and manages its own job record.
+// GetSimilarGraph returns the center candidate plus top-5 similar rules
+// and optional embedding vectors for frontend projection.
+func (s *IncubatorService) GetSimilarGraph(incubationID uint) (map[string]any, error) {
+	cand, _, err := s.GetCandidate(incubationID)
+	if err != nil {
+		return nil, err
+	}
+
+	center := map[string]any{
+		"id":         cand.ID,
+		"code":       cand.Code,
+		"name":       cand.Name,
+		"category":   cand.Category,
+		"severity":   cand.Severity,
+		"prompt":     cand.Prompt,
+		"confidence": cand.ConfidenceScore,
+	}
+
+	// Parse stored top5
+	var top5 []map[string]any
+	if cand.SimilarRules != "" && cand.SimilarRules != "{}" {
+		_ = json.Unmarshal([]byte(cand.SimilarRules), &top5)
+	}
+
+	// Build context: all enabled rules + current candidate for vector projection
+	var rules []model.ReviewRule
+	model.DB.Where("is_enabled = ?", true).Find(&rules)
+
+	type contextNode struct {
+		ID       uint    `json:"id"`
+		Code     string  `json:"code"`
+		Name     string  `json:"name"`
+		Category string  `json:"category"`
+		Severity string  `json:"severity"`
+		IsCenter bool    `json:"is_center"`
+		IsTop5   bool    `json:"is_top5"`
+		Embedding []float32 `json:"embedding,omitempty"`
+	}
+
+	top5IDs := make(map[uint]struct{})
+	for _, n := range top5 {
+		if id, ok := n["rule_id"].(float64); ok {
+			top5IDs[uint(id)] = struct{}{}
+		}
+	}
+
+	var contextNodes []contextNode
+	cfg := s.getConfig()
+
+	// Helper to fetch embedding for a rule
+	fetchVec := func(entityType string, entityID uint) []float32 {
+		if s.store == nil || cfg.EmbeddingModelID == nil {
+			return nil
+		}
+		ctx := context.Background()
+		vec, err := s.store.Get(ctx, vectorstore.Key{
+			EntityType: entityType,
+			EntityID:   entityID,
+			ModelID:    *cfg.EmbeddingModelID,
+		})
+		if err != nil {
+			return nil
+		}
+		return vec
+	}
+
+	// Candidate as a context node
+	candNode := contextNode{
+		ID:       cand.ID,
+		Code:     cand.Code,
+		Name:     cand.Name,
+		Category: cand.Category,
+		Severity: cand.Severity,
+		IsCenter: true,
+		Embedding: fetchVec("incubation", cand.ID),
+	}
+	contextNodes = append(contextNodes, candNode)
+
+	for _, r := range rules {
+		_, isTop5 := top5IDs[r.ID]
+		contextNodes = append(contextNodes, contextNode{
+			ID:        r.ID,
+			Code:      r.Code,
+			Name:      r.Name,
+			Category:  r.Category,
+			Severity:  r.Severity,
+			IsCenter:  false,
+			IsTop5:    isTop5,
+			Embedding: fetchVec("rule", r.ID),
+		})
+	}
+
+	return map[string]any{
+		"center":  center,
+		"top5":    top5,
+		"context": contextNodes,
+	}, nil
+}
 // Designed for synchronous API calls. For asynchronous job execution, use doClusterIssues + caller-managed job record.
 func (s *IncubatorService) ClusterIssues(timeRangeDays int, languages []string, minGroupSize int) (*model.RuleIncubationJob, error) {
 	since := time.Now().AddDate(0, 0, -timeRangeDays)
@@ -1256,6 +1353,7 @@ Please output in the following JSON format (do not include markdown code block):
 }
 
 // runSimilarCheck detects similarity between the candidate and existing rules.
+// Combines L1 keyword (Jaccard) and L2 semantic (Embedding cosine) matching.
 // Returns true if the candidate passes originality check (no similar rules found).
 func (s *IncubatorService) runSimilarCheck(incubationID uint) (bool, error) {
 	cand, _, err := s.GetCandidate(incubationID)
@@ -1264,27 +1362,113 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) (bool, error) {
 		return false, err
 	}
 
+	// --- L1: Jaccard keyword matching (fast, structural) ---
 	var rules []model.ReviewRule
 	if err := model.DB.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
 		zap.L().Warn("similarCheck: query rules failed", zap.Uint("incubation_id", incubationID), zap.Error(err))
 		return false, err
 	}
 
-	var similar []map[string]any
+	similarMap := make(map[uint]map[string]any) // dedup by rule_id
 	candKeywords := extractKeywords(cand.Name + " " + cand.Description + " " + cand.Prompt)
 	for _, r := range rules {
 		ruleKeywords := extractKeywords(r.Name + " " + r.Description + " " + r.Prompt)
 		score := jaccard(candKeywords, ruleKeywords)
 		if score >= 0.5 {
-			similar = append(similar, map[string]any{
+			similarMap[r.ID] = map[string]any{
 				"rule_id":    r.ID,
 				"name":       r.Name,
-				"similarity": score,
-			})
+				"code":       r.Code,
+				"similarity": math.Round(score*1000) / 1000,
+				"method":     "jaccard",
+				"category":   r.Category,
+				"severity":   r.Severity,
+			}
 		}
 	}
 
-	similarJSON, err := json.Marshal(similar)
+	// --- L2: Semantic embedding cosine (accurate, depth) ---
+	if s.embedSvc != nil && s.embedSvc.IsAvailable() && s.store != nil {
+		cfg := s.getConfig()
+		if cfg.EmbeddingModelID != nil {
+			modelID := *cfg.EmbeddingModelID
+			ctx := context.Background()
+
+			// Try to get existing vector; if absent, embed on-the-fly.
+			candVec, err := s.store.Get(ctx, vectorstore.Key{
+				EntityType: "incubation",
+				EntityID:   cand.ID,
+				ModelID:    modelID,
+			})
+			if err != nil {
+				// Embed real-time if not persisted yet (e.g. async embed still pending)
+				text := cand.Name + " " + cand.Description + " " + cand.Prompt
+				vec, _, err := s.embedSvc.Embed(ctx, text)
+				if err == nil && len(vec) > 0 {
+					candVec = vec
+					// Persist for future queries
+					_ = s.store.Save(ctx, vectorstore.Item{
+						Key: vectorstore.Key{
+							EntityType: "incubation",
+							EntityID:   cand.ID,
+							ModelID:    modelID,
+						},
+						Vector:    vec,
+						Dimension: len(vec),
+					})
+				}
+			}
+
+			if len(candVec) > 0 {
+				res, err := s.store.Search(ctx, candVec, vectorstore.SearchOpts{
+					TopK:     10,
+					MinScore: 0.3,
+					Filters:  map[string]any{"entity_type": "rule", "model_id": modelID},
+				})
+				if err == nil {
+					for _, r := range res {
+						if r.Score >= 0.5 { // only high-confidence semantic matches
+							if existing, ok := similarMap[r.Key.EntityID]; ok && existing != nil {
+								// Upgrade similarity if embedding is higher
+								if r.Score > existing["similarity"].(float64) {
+									existing["similarity"] = math.Round(r.Score*1000) / 1000
+									existing["method"] = "embedding"
+								}
+							} else {
+								// Hydrate rule details
+								var rule model.ReviewRule
+								if _ = model.DB.First(&rule, r.Key.EntityID).Error; rule.ID > 0 {
+									similarMap[rule.ID] = map[string]any{
+										"rule_id":    rule.ID,
+										"name":       rule.Name,
+										"code":       rule.Code,
+										"similarity": math.Round(r.Score*1000) / 1000,
+										"method":     "embedding",
+										"category":   rule.Category,
+										"severity":   rule.Severity,
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Convert map to sorted slice (Top 5)
+	var similarList []map[string]any
+	for _, v := range similarMap {
+		similarList = append(similarList, v)
+	}
+	sort.Slice(similarList, func(i, j int) bool {
+		return similarList[i]["similarity"].(float64) > similarList[j]["similarity"].(float64)
+	})
+	if len(similarList) > 5 {
+		similarList = similarList[:5]
+	}
+
+	similarJSON, err := json.Marshal(similarList)
 	if err != nil {
 		return false, err
 	}
@@ -1307,11 +1491,11 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) (bool, error) {
 		return false, err
 	}
 
-	passed := len(similar) == 0
+	passed := len(similarList) == 0
 	zap.L().Info("similarCheck: completed",
 		zap.Uint("incubation_id", incubationID),
 		zap.Int("rules_checked", len(rules)),
-		zap.Int("similar_found", len(similar)),
+		zap.Int("similar_found", len(similarList)),
 		zap.Bool("passed", passed))
 
 	// Recalculate confidence after similar-check

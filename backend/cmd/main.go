@@ -508,6 +508,7 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 			incubator.POST("/candidates/:id/refine", h.TriggerRefine)
 			incubator.POST("/candidates/:id/similar-check", h.TriggerSimilarCheck)
 			incubator.POST("/candidates/:id/test", h.TriggerSandboxTest)
+			incubator.GET("/candidates/:id/similar-graph", h.GetSimilarGraph)
 			incubator.POST("/retro-match", h.RetroMatch)
 			incubator.GET("/health/rules", h.RuleHealth)
 			incubator.GET("/config", h.GetConfig)
