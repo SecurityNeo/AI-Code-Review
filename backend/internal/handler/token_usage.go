@@ -3,7 +3,9 @@ package handler
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ai-optimizer/backend/internal/middleware"
@@ -12,6 +14,28 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
+
+// callerLabelMap 调用方英文标识 → 中文名称
+var callerLabelMap = map[string]string{
+	"score":                 "代码评审",
+	"rule_refine":           "智能提炼",
+	"sandbox_test":          "模拟测试",
+	"similar_check":         "相似检测",
+	"rule_incubator":        "规则孵化平台",
+	"retry":                 "解析重试",
+	"runAIReview":           "AI 评审",
+	"runAIReviewStructured": "AI 评审（结构化）",
+	"runAIReviewFallback":   "AI 评审（分批）",
+	"callLLMAPI":            "LLM 调用",
+}
+
+// incubatorCallers 是规则孵化平台相关的 caller 标识列表
+var incubatorCallers = []string{"rule_refine", "sandbox_test", "similar_check"}
+
+// incubatorCallersInSQL 生成用于 SQL IN 子句的字符串（如 'rule_refine','sandbox_test'）
+func incubatorCallersInSQL() string {
+	return "'" + strings.Join(incubatorCallers, "','") + "'"
+}
 
 type TokenUsageHandler struct{}
 
@@ -283,15 +307,17 @@ func (h *TokenUsageHandler) GetByProject(c *gin.Context) {
 		CallCount        int64  `json:"call_count"`
 	}
 	var rows []row
-	if err := q.Select(`p.id AS project_id,
-		COALESCE(NULLIF(p.name, ''), '未分类项目') AS project_name,
+	incubatorsSQL := incubatorCallersInSQL()
+	if err := q.Select(fmt.Sprintf(`
+		CASE WHEN l.caller IN (%s) THEN 0 ELSE p.id END AS project_id,
+		CASE WHEN l.caller IN (%s) THEN '规则孵化平台' ELSE COALESCE(NULLIF(p.name, ''), '未分类项目') END AS project_name,
 		SUM(l.total_tokens)        AS total_tokens,
 		SUM(l.prompt_tokens)       AS prompt_tokens,
 		SUM(l.completion_tokens)   AS completion_tokens,
 		COUNT(DISTINCT l.task_id)  AS task_count,
-		COUNT(*)                   AS call_count`).
+		COUNT(*)                   AS call_count`, incubatorsSQL, incubatorsSQL)).
 		Joins("LEFT JOIN projects p ON p.id = t.project_id").
-		Group("p.id, p.name").
+		Group(fmt.Sprintf(`CASE WHEN l.caller IN (%s) THEN 0 ELSE p.id END, CASE WHEN l.caller IN (%s) THEN '规则孵化平台' ELSE COALESCE(NULLIF(p.name, ''), '未分类项目') END`, incubatorsSQL, incubatorsSQL)).
 		Order("total_tokens DESC").
 		Offset((page - 1) * pageSize).Limit(pageSize).
 		Scan(&rows).Error; err != nil {
@@ -319,13 +345,15 @@ func (h *TokenUsageHandler) GetByAuthor(c *gin.Context) {
 		CallCount        int64  `json:"call_count"`
 	}
 	var rows []row
-	if err := q.Select(`COALESCE(NULLIF(t.mr_author, ''), '未分类作者') AS author,
+	incubatorsSQL := incubatorCallersInSQL()
+	if err := q.Select(fmt.Sprintf(`
+		CASE WHEN l.caller IN (%s) THEN '规则孵化平台' ELSE COALESCE(NULLIF(t.mr_author, ''), '未分类作者') END AS author,
 		SUM(l.total_tokens)        AS total_tokens,
 		SUM(l.prompt_tokens)       AS prompt_tokens,
 		SUM(l.completion_tokens)   AS completion_tokens,
 		COUNT(DISTINCT l.task_id)  AS task_count,
-		COUNT(*)                   AS call_count`).
-		Group("t.mr_author").
+		COUNT(*)                   AS call_count`, incubatorsSQL)).
+		Group(fmt.Sprintf(`CASE WHEN l.caller IN (%s) THEN '规则孵化平台' ELSE COALESCE(NULLIF(t.mr_author, ''), '未分类作者') END`, incubatorsSQL)).
 		Order("total_tokens DESC").
 		Offset((page - 1) * pageSize).Limit(pageSize).
 		Scan(&rows).Error; err != nil {
@@ -411,6 +439,11 @@ func (h *TokenUsageHandler) ListCalls(c *gin.Context) {
 		Scan(&rows).Error; err != nil {
 		respondDBError(c, "calls list", err)
 		return
+	}
+	for i := range rows {
+		if label, ok := callerLabelMap[rows[i].Caller]; ok {
+			rows[i].Caller = label
+		}
 	}
 	c.JSON(200, gin.H{
 		"data":      rows,

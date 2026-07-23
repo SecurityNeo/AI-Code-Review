@@ -238,9 +238,12 @@
     const CALLER_LABELS = {
         runAIReview:           { text: 'AI 评审',           cls: 'bg-blue-50 text-blue-700 border-blue-200' },
         runAIReviewStructured: { text: 'AI 评审（结构化）', cls: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
-        runAIReviewFallback:   { text: 'AI 评审（分批）',   cls: 'bg-purple-50 text-purple-700 border-purple-200' },
+        runAIReviewFallback:   { text: 'AI 评审（分批）',   cls: 'bg-purple-50 text-purple-700 border-indigo-200' },
         retry:                 { text: '解析重试',         cls: 'bg-orange-50 text-orange-700 border-orange-200' },
         callLLMAPI:            { text: 'LLM 调用',         cls: 'bg-gray-100 text-gray-600 border-gray-200' },
+        rule_refine:           { text: '智能提炼',         cls: 'bg-pink-50 text-pink-700 border-pink-200' },
+        sandbox_test:          { text: '模拟测试',         cls: 'bg-teal-50 text-teal-700 border-teal-200' },
+        similar_check:         { text: '相似检测',         cls: 'bg-orange-50 text-orange-700 border-orange-200' },
     };
     function renderCallerBadge(caller) {
         const info = CALLER_LABELS[caller] || { text: caller || '-', cls: 'bg-gray-50 text-gray-500 border-gray-200' };
