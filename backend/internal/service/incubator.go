@@ -750,16 +750,33 @@ func extractJSON(s string) string {
 		return s
 	}
 	depth := 0
+	inString := false
+	escape := false
 	end := -1
 	for i := start; i < len(s); i++ {
-		switch s[i] {
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				end = i
-				break
+		c := s[i]
+		if escape {
+			escape = false
+			continue
+		}
+		if c == '\\' {
+			escape = true
+			continue
+		}
+		if c == '"' {
+			inString = !inString
+			continue
+		}
+		if !inString {
+			switch c {
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					end = i
+					break
+				}
 			}
 		}
 		if end >= 0 {
@@ -773,6 +790,62 @@ func extractJSON(s string) string {
 		}
 	}
 	return s[start : end+1]
+}
+
+// tryFixInnerQuotes attempts to fix unescaped inner double-quotes inside JSON string values.
+// This is a best-effort heuristic for LLM-generated JSON that contains code examples with
+// unescaped quotes like: {"key": "example: `MapClaims{"a":1}`"}
+func tryFixInnerQuotes(raw string) string {
+	inString := false
+	escape := false
+	result := make([]rune, 0, len(raw))
+	for _, c := range raw {
+		if escape {
+			result = append(result, c)
+			escape = false
+			continue
+		}
+		if c == '\\' {
+			result = append(result, c)
+			escape = true
+			continue
+		}
+		if c == '"' {
+			// If we are already inside a string, this might be an unescaped inner quote
+			// that should have been \".  We count whether it makes sense structurally.
+			if inString {
+				// Heuristic: if the next non-space character looks like a JSON control character
+				// or end-of-object, treat this quote as a string terminator.
+				// Otherwise escape it.
+				if looksLikeJSONControlAfter(raw, len(result)) {
+					inString = false
+					result = append(result, c)
+				} else {
+					result = append(result, '\\', c)
+				}
+			} else {
+				inString = true
+				result = append(result, c)
+			}
+			continue
+		}
+		result = append(result, c)
+	}
+	return string(result)
+}
+
+func looksLikeJSONControlAfter(s string, pos int) bool {
+	for i := pos; i < len(s); i++ {
+		switch s[i] {
+		case ' ', '\t', '\n', '\r':
+			continue
+		case ',', '}', ']':
+			return true
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // runRefine uses LLM to generate rule name, description and prompt from source issues.
@@ -797,7 +870,7 @@ func (s *IncubatorService) runRefine(incubationID uint) error {
 	sampleText := strings.Join(samples, "\n\n")
 
 	llmSvc := NewLLMService()
-	systemPrompt := "You are a code-review rule engineer. Your task is to analyze a set of code issues and abstract them into a general review rule."
+	systemPrompt := "You are a code-review rule engineer. Your task is to analyze a set of code issues and abstract them into a general review rule. You must output valid JSON. All double-quote characters inside string values must be properly escaped with backslash. Use single quotes in code examples within string values to simplify escaping."
   userPrompt := fmt.Sprintf(`Analyze the following code-review issues and output a structured review rule.
 
 Issues:
@@ -807,7 +880,7 @@ Please output in the following JSON format (do not include markdown code block):
 {
   "name": "A concise Chinese rule name (within 20 characters)",
   "description": "A 1-2 sentence description of what this rule checks, why it matters, and how to fix it (in Chinese)",
-  "prompt": "In Chinese. ONLY describe: 1) what to check (check objectives), 2) judgment criteria, 3) examples of violation vs non-violation. DO NOT include role-setting sentences like 'you are a code review assistant...' or output constraints like 'do not output extra explanation...'. Keep it concise and focused on the review logic itself."
+  "prompt": "In Chinese. ONLY describe: 1) what to check (check objectives), 2) judgment criteria, 3) examples of violation vs non-violation. DO NOT include role-setting sentences like 'you are a code review assistant...' or output constraints like 'do not output extra explanation...'. IMPORTANT: when providing code examples inside the prompt field, use single quotes for inner strings to avoid JSON escaping issues, e.g. use {'user_id': 1} instead of {\"user_id\": 1}. Keep it concise and focused on the review logic itself."
 }
 `, sampleText)
 
@@ -824,7 +897,19 @@ Please output in the following JSON format (do not include markdown code block):
 	}
 	content := extractJSON(resp.Content)
 	if err := json.Unmarshal([]byte(content), &refineResult); err != nil {
-		return fmt.Errorf("parse refine result failed: %w, raw: %s", err, resp.Content)
+		// Try sanitized version: replace unescaped inner double quotes that commonly break LLM JSON
+		// The LLM sometimes generates examples like: `MapClaims{"k": "v"}` where inner quotes are NOT escaped
+		sanitized := tryFixInnerQuotes(content)
+		if json.Unmarshal([]byte(sanitized), &refineResult) == nil {
+			zap.L().Info("refine JSON parsed after sanitization", zap.Uint("incubation_id", incubationID))
+		} else {
+			zap.L().Error("parse refine result failed",
+				zap.Uint("incubation_id", incubationID),
+				zap.String("raw", resp.Content),
+				zap.String("extracted", content),
+				zap.String("error", err.Error()))
+			return fmt.Errorf("parse refine result failed: %w", err)
+		}
 	}
 
 	// Update candidate
