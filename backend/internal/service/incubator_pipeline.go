@@ -396,12 +396,16 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 		return nil, fmt.Errorf("pipeline job not found: %w", err)
 	}
 
-	// Parse params to get time range
+	// Parse params to get time range and min group size
 	var params map[string]any
 	_ = json.Unmarshal([]byte(job.Params), &params)
 	timeRangeDays := 30
+	minGroupSize := 2
 	if v, ok := params["time_range_days"].(float64); ok {
 		timeRangeDays = int(v)
+	}
+	if v, ok := params["min_group_size"].(float64); ok {
+		minGroupSize = int(v)
 	}
 
 	// Parse per-step status from the job's result_summary
@@ -470,11 +474,18 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 				"candidates_generated": totalCandidates,
 			},
 			InputSummary: map[string]any{
-				"时间窗口": fmt.Sprintf("%d 天", timeRangeDays),
+				"时间窗口":   fmt.Sprintf("%d 天", timeRangeDays),
+				"最小簇大小": fmt.Sprintf("%d 条", minGroupSize),
 			},
-			OutputSummary: map[string]any{
-				"生成候选规则数": fmt.Sprintf("%d 个", totalCandidates),
-			},
+			OutputSummary: func() map[string]any {
+				out := map[string]any{
+					"生成候选规则数": fmt.Sprintf("%d 个", totalCandidates),
+				}
+				if totalCandidates == 0 {
+					out["提示"] = fmt.Sprintf("扫描了 %d 条Issue，所有簇均小于 %d 条，未生成候选规则", issueCount, minGroupSize)
+				}
+				return out
+			}(),
 			NextSteps: []string{"refine", "similar_check", "sandbox_test"},
 		},
 		{
