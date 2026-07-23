@@ -231,7 +231,7 @@ func (s *IncubatorService) GetPipelineStatus() (*PipelineStatus, error) {
 
 	// --- Step 7: Publish ---
 	var totalPublishedRules int64
-	model.DB.Model(&model.ReviewRule{}).Where("is_built_in = ?", false).Count(&totalPublishedRules)
+	model.DB.Model(&model.RuleIncubation{}).Where("status = ?", "published").Count(&totalPublishedRules)
 	stepPublish := PipelineStep{
 		StepID: "publish",
 		Label:  "发布规则",
