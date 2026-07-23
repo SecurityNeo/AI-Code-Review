@@ -334,69 +334,114 @@
 
                         <!-- 流水线阶段说明 -->
                         <div>
-                            <h4 class="font-bold text-gray-800 mb-3"><i class="fas fa-stream text-blue-600 mr-2"></i>孵化流水线（9 个阶段）</h4>
-                            <div class="space-y-3">
-                                <div class="flex gap-3 items-start">
-                                    <div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 text-xs font-bold flex-shrink-0 mt-0.5">1</div>
-                                    <div>
-                                        <div class="font-semibold text-sm text-gray-800">原始 Issue 池</div>
-                                        <div class="text-xs text-gray-500">收集所有未被规则命中的历史 Issue，是规则孵化的"原材料仓库"。</div>
+                            <h4 class="font-bold text-gray-800 mb-4 text-base"><i class="fas fa-stream text-blue-600 mr-2"></i>孵化流水线（9 个阶段）</h4>
+                            
+                            <!-- 阶段一：自动发现 -->
+                            <div class="mb-5">
+                                <div class="flex items-center gap-2 mb-3">
+                                    <span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-100">自动发现</span>
+                                    <div class="flex-1 h-px bg-gradient-to-r from-blue-100 to-transparent"></div>
+                                    <span class="text-[10px] text-gray-400">系统自动执行</span>
+                                </div>
+                                <div class="grid grid-cols-3 gap-3">
+                                    <div class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow">
+                                        <div class="flex items-center gap-2 mb-2">
+                                            <div class="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 text-[11px] font-bold">1</div>
+                                            <div class="font-semibold text-sm text-gray-800">原始 Issue 池</div>
+                                        </div>
+                                        <div class="text-xs text-gray-500 leading-relaxed">收集所有未被规则命中的历史 Issue，是规则孵化的"原材料仓库"。</div>
+                                    </div>
+                                    <div class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow">
+                                        <div class="flex items-center gap-2 mb-2">
+                                            <div class="w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center text-violet-600 text-[11px] font-bold">2</div>
+                                            <div class="font-semibold text-sm text-gray-800">聚类分析</div>
+                                        </div>
+                                        <div class="text-xs text-gray-500 leading-relaxed">按维度+语言+级别分组，通过关键词重叠（Jaccard）将相似 Issue 聚成簇。</div>
+                                    </div>
+                                    <div class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow">
+                                        <div class="flex items-center gap-2 mb-2">
+                                            <div class="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-[11px] font-bold">3</div>
+                                            <div class="font-semibold text-sm text-gray-800">候选规则</div>
+                                        </div>
+                                        <div class="text-xs text-gray-500 leading-relaxed">每个有效簇自动生成一条候选规则，状态为"草稿"，包含基础信息。</div>
                                     </div>
                                 </div>
-                                <div class="flex gap-3 items-start">
-                                    <div class="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center text-violet-600 text-xs font-bold flex-shrink-0 mt-0.5">2</div>
-                                    <div>
-                                        <div class="font-semibold text-sm text-gray-800">聚类分析</div>
-                                        <div class="text-xs text-gray-500">按维度+语言+级别分组，通过关键词重叠（Jaccard）将相似 Issue 聚成簇。可配置时间窗口和最小簇大小。</div>
+                            </div>
+                            
+                            <!-- 向下箭头 -->
+                            <div class="flex justify-center -mt-2 mb-3">
+                                <div class="w-8 h-8 rounded-full bg-gray-50 border border-gray-200 flex items-center justify-center">
+                                    <i class="fas fa-arrow-down text-gray-400 text-xs"></i>
+                                </div>
+                            </div>
+                            
+                            <!-- 阶段二：智能精化 -->
+                            <div class="mb-5">
+                                <div class="flex items-center gap-2 mb-3">
+                                    <span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">智能精化</span>
+                                    <div class="flex-1 h-px bg-gradient-to-r from-indigo-100 to-transparent"></div>
+                                    <span class="text-[10px] text-gray-400">LLM 驱动验证</span>
+                                </div>
+                                <div class="grid grid-cols-3 gap-3">
+                                    <div class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow">
+                                        <div class="flex items-center gap-2 mb-2">
+                                            <div class="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 text-[11px] font-bold">4</div>
+                                            <div class="font-semibold text-sm text-gray-800">智能提炼</div>
+                                        </div>
+                                        <div class="text-xs text-gray-500 leading-relaxed">调用 LLM 分析源 Issue 样本，自动生成精炼的规则名称、描述和 Prompt。</div>
+                                    </div>
+                                    <div class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow">
+                                        <div class="flex items-center gap-2 mb-2">
+                                            <div class="w-7 h-7 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 text-[11px] font-bold">5</div>
+                                            <div class="font-semibold text-sm text-gray-800">相似检测</div>
+                                        </div>
+                                        <div class="text-xs text-gray-500 leading-relaxed">对比现有规则库，检测候选规则是否与已有规则重复或高度相似。</div>
+                                    </div>
+                                    <div class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow">
+                                        <div class="flex items-center gap-2 mb-2">
+                                            <div class="w-7 h-7 rounded-full bg-teal-100 flex items-center justify-center text-teal-600 text-[11px] font-bold">6</div>
+                                            <div class="font-semibold text-sm text-gray-800">模拟测试</div>
+                                        </div>
+                                        <div class="text-xs text-gray-500 leading-relaxed">用 LLM 对正例和反例进行判定验证，输出准确率报告。</div>
                                     </div>
                                 </div>
-                                <div class="flex gap-3 items-start">
-                                    <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-xs font-bold flex-shrink-0 mt-0.5">3</div>
-                                    <div>
-                                        <div class="font-semibold text-sm text-gray-800">候选规则</div>
-                                        <div class="text-xs text-gray-500">每个有效簇自动生成一条候选规则，状态为"草稿"，包含名称、描述和初始 Prompt。</div>
-                                    </div>
+                            </div>
+                            
+                            <!-- 向下箭头 -->
+                            <div class="flex justify-center -mt-2 mb-3">
+                                <div class="w-8 h-8 rounded-full bg-gray-50 border border-gray-200 flex items-center justify-center">
+                                    <i class="fas fa-arrow-down text-gray-400 text-xs"></i>
                                 </div>
-                                <div class="flex gap-3 items-start">
-                                    <div class="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 text-xs font-bold flex-shrink-0 mt-0.5">4</div>
-                                    <div>
-                                        <div class="font-semibold text-sm text-gray-800">智能提炼</div>
-                                        <div class="text-xs text-gray-500">调用 LLM 分析源 Issue 样本，自动生成精炼的规则名称、描述和 Prompt，状态提升为"可发布"。</div>
-                                    </div>
+                            </div>
+                            
+                            <!-- 阶段三：发布与监控 -->
+                            <div>
+                                <div class="flex items-center gap-2 mb-3">
+                                    <span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-green-50 text-green-700 border border-green-100">发布与监控</span>
+                                    <div class="flex-1 h-px bg-gradient-to-r from-green-100 to-transparent"></div>
+                                    <span class="text-[10px] text-gray-400">人工确认 + 自动巡检</span>
                                 </div>
-                                <div class="flex gap-3 items-start">
-                                    <div class="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 text-xs font-bold flex-shrink-0 mt-0.5">5</div>
-                                    <div>
-                                        <div class="font-semibold text-sm text-gray-800">相似检测</div>
-                                        <div class="text-xs text-gray-500">对比现有规则库，检测候选规则是否与已有规则重复或高度相似，避免重复定义。</div>
+                                <div class="grid grid-cols-3 gap-3">
+                                    <div class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow">
+                                        <div class="flex items-center gap-2 mb-2">
+                                            <div class="w-7 h-7 rounded-full bg-green-100 flex items-center justify-center text-green-600 text-[11px] font-bold">7</div>
+                                            <div class="font-semibold text-sm text-gray-800">发布规则</div>
+                                        </div>
+                                        <div class="text-xs text-gray-500 leading-relaxed">审核通过的候选规则正式发布到评审规则库，可在项目中配置启用。</div>
                                     </div>
-                                </div>
-                                <div class="flex gap-3 items-start">
-                                    <div class="w-8 h-8 rounded-full bg-teal-100 flex items-center justify-center text-teal-600 text-xs font-bold flex-shrink-0 mt-0.5">6</div>
-                                    <div>
-                                        <div class="font-semibold text-sm text-gray-800">模拟测试</div>
-                                        <div class="text-xs text-gray-500">用 LLM 对正例（源 Issue 代码）和反例（同类未命中代码）进行判定验证，输出准确率报告。</div>
+                                    <div class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow">
+                                        <div class="flex items-center gap-2 mb-2">
+                                            <div class="w-7 h-7 rounded-full bg-cyan-100 flex items-center justify-center text-cyan-600 text-[11px] font-bold">8</div>
+                                            <div class="font-semibold text-sm text-gray-800">回溯匹配</div>
+                                        </div>
+                                        <div class="text-xs text-gray-500 leading-relaxed">新规则发布后，自动在历史 Issue 中查找可被命中的记录，补全关联。</div>
                                     </div>
-                                </div>
-                                <div class="flex gap-3 items-start">
-                                    <div class="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-600 text-xs font-bold flex-shrink-0 mt-0.5">7</div>
-                                    <div>
-                                        <div class="font-semibold text-sm text-gray-800">发布规则</div>
-                                        <div class="text-xs text-gray-500">审核通过的候选规则正式发布到评审规则库，可在项目中配置启用。</div>
-                                    </div>
-                                </div>
-                                <div class="flex gap-3 items-start">
-                                    <div class="w-8 h-8 rounded-full bg-cyan-100 flex items-center justify-center text-cyan-600 text-xs font-bold flex-shrink-0 mt-0.5">8</div>
-                                    <div>
-                                        <div class="font-semibold text-sm text-gray-800">回溯匹配</div>
-                                        <div class="text-xs text-gray-500">新规则发布后，自动在历史 Issue 中查找可被命中的记录，补全规则与 Issue 的关联。</div>
-                                    </div>
-                                </div>
-                                <div class="flex gap-3 items-start">
-                                    <div class="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center text-red-600 text-xs font-bold flex-shrink-0 mt-0.5">9</div>
-                                    <div>
-                                        <div class="font-semibold text-sm text-gray-800">健康监控</div>
-                                        <div class="text-xs text-gray-500">定期评估规则的命中、拒绝和同类未命中数据，发现退化或误报过高的规则并告警。</div>
+                                    <div class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow">
+                                        <div class="flex items-center gap-2 mb-2">
+                                            <div class="w-7 h-7 rounded-full bg-red-100 flex items-center justify-center text-red-600 text-[11px] font-bold">9</div>
+                                            <div class="font-semibold text-sm text-gray-800">健康监控</div>
+                                        </div>
+                                        <div class="text-xs text-gray-500 leading-relaxed">定期评估规则命中、拒绝和同类未命中数据，发现退化并告警。</div>
                                     </div>
                                 </div>
                             </div>
