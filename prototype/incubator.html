@@ -328,35 +328,20 @@
                         <!-- 概述 -->
                         <div class="bg-gradient-to-r from-blue-50/70 via-indigo-50/50 to-purple-50/70 border border-blue-100 rounded-xl p-6">
                             <h3 class="font-bold text-gray-800 text-lg mb-3"><i class="fas fa-lightbulb text-yellow-500 mr-2"></i>什么是规则孵化台？</h3>
-                            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                                <div class="col-span-2">
-                                    <p class="text-sm text-gray-600 leading-relaxed mb-3">
-                                        规则孵化台是智能评审规则的<strong>"制造工厂"</strong>。它从海量的历史评审 Issue 中自动发现规律、聚类分析、提炼生成候选规则，经过多轮 LLM 验证后发布到规则库，并持续监控规则质量，形成完整的<strong>规则全生命周期管理</strong>闭环。
-                                    </p>
-                                    <div class="flex flex-wrap gap-2">
-                                        <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-blue-200 text-xs text-blue-700"><i class="fas fa-robot mr-1.5"></i>LLM 驱动</span>
-                                        <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-purple-200 text-xs text-purple-700"><i class="fas fa-project-diagram mr-1.5"></i>自动聚类</span>
-                                        <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-teal-200 text-xs text-teal-700"><i class="fas fa-vial mr-1.5"></i>模拟测试</span>
-                                        <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-orange-200 text-xs text-orange-700"><i class="fas fa-chart-line mr-1.5"></i>质量监控</span>
-                                    </div>
+                            <div class="max-w-3xl">
+                                <p class="text-sm text-gray-600 leading-relaxed mb-4">
+                                    规则孵化台是智能评审规则的<strong>"制造工厂"</strong>。它从海量的历史评审 Issue 中自动发现规律、聚类分析、提炼生成候选规则，经过多轮 LLM 验证后发布到规则库，并持续监控规则质量，形成完整的<strong>规则全生命周期管理</strong>闭环。
+                                </p>
+                                <div class="flex flex-wrap gap-2 mb-4">
+                                    <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-blue-200 text-xs text-blue-700"><i class="fas fa-robot mr-1.5"></i>LLM 驱动</span>
+                                    <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-purple-200 text-xs text-purple-700"><i class="fas fa-project-diagram mr-1.5"></i>自动聚类</span>
+                                    <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-teal-200 text-xs text-teal-700"><i class="fas fa-vial mr-1.5"></i>模拟测试</span>
+                                    <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-orange-200 text-xs text-orange-700"><i class="fas fa-chart-line mr-1.5"></i>质量监控</span>
                                 </div>
-                                <div class="bg-white/80 rounded-lg border border-blue-100 p-4">
-                                    <div class="text-xs text-gray-500 mb-2 font-medium">系统运行依赖</div>
-                                    <div class="space-y-2 text-xs">
-                                        <div class="flex items-center justify-between">
-                                            <span class="text-gray-600">LLM 对话模型</span>
-                                            <span class="text-green-600 font-medium">必须</span>
-                                        </div>
-                                        <div class="flex items-center justify-between">
-                                            <span class="text-gray-600">Embedding 模型</span>
-                                            <span class="text-amber-600 font-medium">可选（降级可用）</span>
-                                        </div>
-                                        <div class="flex items-center justify-between">
-                                            <span class="text-gray-600">历史 Issue 数据</span>
-                                            <span class="text-green-600 font-medium">必须</span>
-                                        </div>
-                                    </div>
-                                </div>
+                                <p class="text-xs text-gray-400 leading-relaxed">
+                                    <i class="fas fa-info-circle text-gray-300 mr-1"></i>
+                                    系统运行依赖：LLM 对话模型（必须）用于智能提炼和模拟测试；Embedding 模型（可选，未配置时降级为关键词匹配）；历史 Issue 数据（必须）作为规则孵化的原材料。
+                                </p>
                             </div>
                         </div>
 
