@@ -377,6 +377,7 @@ type SystemConfig struct {
 	LogRetentionDay         int    `gorm:"default:90" json:"log_retention_day"`
 	AILogTemplate           string `gorm:"type:text" json:"ai_log_template"`
 	ScoreThreshold          int    `gorm:"default:60" json:"score_threshold"`
+	DeepReviewEnabled       bool   `gorm:"default:false" json:"deep_review_enabled"`
 	ReviewTemplate          string `gorm:"type:text" json:"review_template"`
 	DiffTruncationThreshold int    `gorm:"default:5000" json:"diff_truncation_threshold"`
 	MaxDiffFiles            int    `gorm:"default:50;column:max_diff_files" json:"max_diff_files"`

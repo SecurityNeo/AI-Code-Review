@@ -1137,6 +1137,10 @@ func (s *TaskService) checkThresholdAndTrigger(task model.Task, score int) {
 	if err := model.DB.First(&sysCfg).Error; err != nil || sysCfg.ScoreThreshold <= 0 {
 		return
 	}
+	if !sysCfg.DeepReviewEnabled {
+		zap.L().Info("深度代码审查已禁用，跳过阈值触发", zap.Uint("task_id", task.ID), zap.Int("score", score))
+		return
+	}
 	if score >= sysCfg.ScoreThreshold {
 		return
 	}

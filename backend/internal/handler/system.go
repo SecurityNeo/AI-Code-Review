@@ -37,6 +37,8 @@ func (h *SystemHandler) GetConfig(c *gin.Context) {
 			LLMRetryInitialDelayMs:  1000,
 			LLMRetryBackoffMultiplier: 2.0,
 			LLMRetryMaxDelayMs:      30000,
+			ScoreThreshold:           60,
+			DeepReviewEnabled:        false,
 			AlertDurationSec:        300,
 			AlertCooldownSec:        3600,
 			AlertNotifierID:         0,
@@ -124,6 +126,9 @@ func (h *SystemHandler) UpdateConfig(c *gin.Context) {
 			val = 100
 		}
 		updates["score_threshold"] = val
+	}
+	if v, ok := data["deep_review_enabled"]; ok {
+		updates["deep_review_enabled"] = v.(bool)
 	}
 	if v, ok := data["diff_truncation_threshold"]; ok {
 		val := int(v.(float64))
