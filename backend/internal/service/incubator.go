@@ -783,7 +783,7 @@ func (s *IncubatorService) runRefine(incubationID uint) error {
 
 	llmSvc := NewLLMService()
 	systemPrompt := "You are a code-review rule engineer. Your task is to analyze a set of code issues and abstract them into a general review rule."
-	userPrompt := fmt.Sprintf(`Analyze the following code-review issues and output a structured review rule.
+  userPrompt := fmt.Sprintf(`Analyze the following code-review issues and output a structured review rule.
 
 Issues:
 %s
@@ -792,7 +792,7 @@ Please output in the following JSON format (do not include markdown code block):
 {
   "name": "A concise Chinese rule name (within 20 characters)",
   "description": "A 1-2 sentence description of what this rule checks, why it matters, and how to fix it (in Chinese)",
-  "prompt": "A detailed instruction in Chinese for an LLM to perform this check. Include: 1) clear check objectives, 2) judgment criteria, 3) examples of what constitutes a violation and what does not, 4) only output instruction text, no explanatory text."
+  "prompt": "In Chinese. ONLY describe: 1) what to check (check objectives), 2) judgment criteria, 3) examples of violation vs non-violation. DO NOT include role-setting sentences like 'you are a code review assistant...' or output constraints like 'do not output extra explanation...'. Keep it concise and focused on the review logic itself."
 }
 `, sampleText)
 
