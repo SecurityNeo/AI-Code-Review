@@ -11,6 +11,7 @@
     <script src="js/sidebar.js?v=2"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
+    <script src="https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
     <style>
         .modal { display: none; }
         .modal.active { display: flex; }
@@ -867,6 +868,36 @@
     </div>
 </div>
 
+<!-- 相似规则图谱 Modal -->
+<div id="similarGraphModal" class="modal fixed inset-0 z-50 items-center justify-center bg-black/60 hidden">
+    <div class="bg-white rounded-xl w-[90vw] h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+        <div class="flex items-center justify-between px-5 py-3 border-b bg-gray-50">
+            <div class="flex items-center gap-3">
+                <h3 class="font-bold text-gray-800"><i class="fas fa-project-diagram text-purple-600 mr-2"></i>相似规则图谱</h3>
+                <div class="flex bg-white rounded-lg border p-0.5">
+                    <button id="tab-graph-cyto" onclick="switchGraphTab('cyto')" class="px-3 py-1 text-xs rounded-md bg-purple-100 text-purple-700 font-medium">知识图谱</button>
+                    <button id="tab-graph-proj" onclick="switchGraphTab('proj')" class="px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-50">向量投影</button>
+                </div>
+            </div>
+            <button onclick="closeSimilarGraphModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="flex-1 relative overflow-hidden">
+            <div id="cyGraphContainer" class="absolute inset-0"></div>
+            <canvas id="projectionCanvas" class="absolute inset-0 hidden bg-white"></canvas>
+            <div id="graphLoading" class="absolute inset-0 flex items-center justify-center bg-white z-10">
+                <div class="text-center">
+                    <i class="fas fa-spinner fa-spin text-purple-500 text-2xl mb-2"></i>
+                    <div class="text-sm text-gray-500">加载图谱数据...</div>
+                </div>
+            </div>
+        </div>
+        <div class="px-5 py-2 border-t bg-gray-50 text-[11px] text-gray-500 flex items-center justify-between">
+            <span id="graphLegend">中心节点 = 当前候选规则 · 连线粗细 = 相似度</span>
+            <span class="text-gray-400">鼠标悬停节点查看详情 · 拖拽可调整布局</span>
+        </div>
+    </div>
+</div>
+
 <script>
 const API_BASE = '/api/v1';
 let issuePage = 1, issuePageSize = 20, candPage = 1, candPageSize = 20;
@@ -1073,6 +1104,9 @@ async function loadCandidates(page = 1) {
                             <span><i class="fas fa-chart-line mr-1"></i>置信 ${(c.confidence_score || 0).toFixed(2)}</span>
                         </div>
                         <div class="flex items-center gap-2">
+                            <button onclick="event.stopPropagation(); openSimilarGraphModal(${c.id})" class="text-xs text-purple-600 hover:text-purple-800 px-2 py-1 rounded hover:bg-purple-50">
+                                <i class="fas fa-project-diagram mr-1"></i>图谱
+                            </button>
                             <button onclick="event.stopPropagation(); showCandidate(${c.id})" class="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50">
                                 <i class="fas fa-eye mr-1"></i>查看
                             </button>
@@ -1210,6 +1244,7 @@ async function showCandidate(id) {
                 <div class="flex gap-2 pt-2 border-t">
                     <button onclick="saveCandidate(${c.id})" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">保存</button>
                     ${c.status !== 'published' ? `<button onclick="publishCandidate(${c.id})" class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">发布规则</button>` : ''}
+                    <button onclick="openSimilarGraphModal(${c.id})" class="px-4 py-2 border border-purple-300 rounded-lg text-sm hover:bg-purple-50 text-purple-600" title="查看Top5相似规则知识图谱"><i class="fas fa-project-diagram mr-1"></i>相似图谱</button>
                     <button onclick="showCandidateBloodline(${c.id})" class="px-4 py-2 border border-purple-300 rounded-lg text-sm hover:bg-purple-50 text-purple-600" title="查看完整上下游血缘关系"><i class="fas fa-project-diagram mr-1"></i>血缘</button>
                     <button onclick="deleteCandidate(${c.id})" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 text-red-600">忽略</button>
                 </div>
@@ -2603,6 +2638,307 @@ async function loadDashboardStats() {
         const healthPayload = healthData.data || {};
         document.getElementById('statHealth').textContent = healthPayload.total || 0;
     } catch (e) { console.error('loadDashboardStats failed', e); }
+}
+
+// ====== Similar Rule Graph ======
+let currentCy = null;
+
+async function openSimilarGraphModal(incubationID) {
+    const modal = document.getElementById('similarGraphModal');
+    modal.classList.remove('hidden');
+    modal.classList.add('active');
+    switchGraphTab('cyto');
+    document.getElementById('graphLoading').classList.remove('hidden');
+
+    try {
+        const res = await apiFetch(API_BASE + '/incubator/candidates/' + incubationID + '/similar-graph');
+        const payload = await res.json();
+        const data = payload.data || {};
+        window._similarGraphData = data;
+        document.getElementById('graphLoading').classList.add('hidden');
+        renderCyGraph(data);
+        renderProjection(data);
+    } catch (e) {
+        document.getElementById('graphLoading').innerHTML = `<div class="text-red-500 text-center"><i class="fas fa-exclamation-circle mb-2"></i><div>加载失败: ${e.message}</div></div>`;
+    }
+}
+
+function closeSimilarGraphModal() {
+    const modal = document.getElementById('similarGraphModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('active');
+    if (currentCy) { currentCy.destroy(); currentCy = null; }
+}
+
+function switchGraphTab(tab) {
+    const btnCyto = document.getElementById('tab-graph-cyto');
+    const btnProj = document.getElementById('tab-graph-proj');
+    const cyContainer = document.getElementById('cyGraphContainer');
+    const projCanvas = document.getElementById('projectionCanvas');
+    const legend = document.getElementById('graphLegend');
+
+    if (tab === 'cyto') {
+        btnCyto.className = 'px-3 py-1 text-xs rounded-md bg-purple-100 text-purple-700 font-medium';
+        btnProj.className = 'px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-50';
+        cyContainer.classList.remove('hidden');
+        projCanvas.classList.add('hidden');
+        legend.textContent = '中心节点 = 当前候选规则 · 连线粗细 = 相似度';
+    } else {
+        btnCyto.className = 'px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-50';
+        btnProj.className = 'px-3 py-1 text-xs rounded-md bg-purple-100 text-purple-700 font-medium';
+        cyContainer.classList.add('hidden');
+        projCanvas.classList.remove('hidden');
+        legend.textContent = '二维 PCA 投影 · 距离越近语义越相似';
+        if (window._similarGraphData) renderProjection(window._similarGraphData);
+    }
+}
+
+function renderCyGraph(data) {
+    const container = document.getElementById('cyGraphContainer');
+    if (currentCy) { currentCy.destroy(); currentCy = null; }
+    container.innerHTML = '';
+
+    const center = data.center || {};
+    const top5 = data.top5 || [];
+
+    const nodes = [
+        { data: { id: 'center', label: center.name || center.code || '候选规则', type: 'center' } }
+    ];
+    const edges = [];
+
+    const catColors = {
+        security: '#ef4444', performance: '#f97316', readability: '#3b82f6',
+        maintainability: '#8b5cf6', 'test_coverage': '#10b981', api_design: '#06b6d4',
+        logging: '#6366f1', error_handling: '#f59e0b', documentation: '#84cc16',
+    };
+
+    top5.forEach((item, idx) => {
+        const nid = 'rule_' + item.rule_id;
+        nodes.push({
+            data: {
+                id: nid,
+                label: item.name || item.code || ('规则' + item.rule_id),
+                similarity: item.similarity,
+                method: item.method,
+                category: item.category,
+                type: 'rule'
+            }
+        });
+        edges.push({
+            data: {
+                id: 'e' + idx,
+                source: 'center',
+                target: nid,
+                weight: item.similarity
+            }
+        });
+    });
+
+    currentCy = cytoscape({
+        container: container,
+        elements: { nodes, edges },
+        style: [
+            {
+                selector: 'node[type="center"]',
+                style: {
+                    'background-color': '#7c3aed',
+                    'width': 60, 'height': 60,
+                    'label': 'data(label)',
+                    'color': '#fff',
+                    'font-size': '11px',
+                    'text-valign': 'center', 'text-halign': 'center',
+                    'text-wrap': 'wrap', 'text-max-width': '70px',
+                    'font-weight': 'bold',
+                    'border-width': 3, 'border-color': '#a78bfa'
+                }
+            },
+            {
+                selector: 'node[type="rule"]',
+                style: {
+                    'background-color': (ele) => catColors[ele.data('category')] || '#94a3b8',
+                    'width': 40, 'height': 40,
+                    'label': 'data(label)',
+                    'color': '#334155',
+                    'font-size': '10px',
+                    'text-valign': 'bottom', 'text-halign': 'center',
+                    'text-wrap': 'wrap', 'text-max-width': '60px',
+                    'text-margin-y': 4,
+                    'border-width': 2, 'border-color': '#e2e8f0'
+                }
+            },
+            {
+                selector: 'edge',
+                style: {
+                    'width': (ele) => Math.max(1, ele.data('weight') * 4),
+                    'line-color': '#c4b5fd',
+                    'target-arrow-color': '#c4b5fd',
+                    'target-arrow-shape': 'triangle',
+                    'arrow-scale': 0.8,
+                    'curve-style': 'bezier'
+                }
+            }
+        ],
+        layout: {
+            name: 'cose',
+            padding: 30,
+            componentSpacing: 60,
+            nodeRepulsion: 400000,
+            edgeElasticity: 100,
+            idealEdgeLength: 120,
+            animate: true,
+            animationDuration: 500
+        }
+    });
+
+    currentCy.on('tap', 'node', (evt) => {
+        const nd = evt.target.data();
+        if (nd.type === 'rule' && nd.similarity) {
+            showToast(`${nd.label} · 相似度 ${(nd.similarity * 100).toFixed(1)}% · ${nd.method || ''}`);
+        }
+    });
+}
+
+// PCA2D: simple power-iteration PCA returning 2D coordinates
+function pca2d(vectors) {
+    const n = vectors.length;
+    const dim = vectors[0].length;
+
+    // Mean center
+    const mean = new Float64Array(dim);
+    for (let v of vectors) for (let i = 0; i < dim; i++) mean[i] += v[i];
+    for (let i = 0; i < dim; i++) mean[i] /= n;
+
+    const centered = vectors.map(v => {
+        const c = new Float64Array(dim);
+        for (let i = 0; i < dim; i++) c[i] = v[i] - mean[i];
+        return c;
+    });
+
+    function powerIter(mat, steps = 25) {
+        let vec = new Float64Array(dim);
+        vec.fill(1);
+        for (let s = 0; s < steps; s++) {
+            const next = new Float64Array(dim).fill(0);
+            for (let row of mat) {
+                let dot = 0;
+                for (let i = 0; i < dim; i++) dot += row[i] * vec[i];
+                for (let i = 0; i < dim; i++) next[i] += row[i] * dot;
+            }
+            let norm = 0;
+            for (let i = 0; i < dim; i++) norm += next[i] * next[i];
+            norm = Math.sqrt(norm);
+            if (norm < 1e-10) break;
+            for (let i = 0; i < dim; i++) vec[i] = next[i] / norm;
+        }
+        return vec;
+    }
+
+    const pc1 = powerIter(centered);
+
+    // Deflate for PC2
+    const proj1 = centered.map(v => {
+        let dot = 0;
+        for (let i = 0; i < dim; i++) dot += v[i] * pc1[i];
+        return dot;
+    });
+
+    const deflated = centered.map((v, idx) => {
+        const d = new Float64Array(dim);
+        for (let i = 0; i < dim; i++) d[i] = v[i] - proj1[idx] * pc1[i];
+        return d;
+    });
+
+    const pc2 = powerIter(deflated);
+
+    return centered.map(v => {
+        let x = 0, y = 0;
+        for (let i = 0; i < dim; i++) {
+            x += v[i] * pc1[i];
+            y += v[i] * pc2[i];
+        }
+        return [x, y];
+    });
+}
+
+function renderProjection(data) {
+    const canvas = document.getElementById('projectionCanvas');
+    const ctx = canvas.getContext('2d');
+    const nodes = data.context || [];
+    const validNodes = nodes.filter(n => n.embedding && n.embedding.length > 0);
+    if (validNodes.length < 3) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('向量数据不足，无法生成投影图', canvas.width / 2, canvas.height / 2);
+        return;
+    }
+
+    canvas.width = canvas.offsetWidth || 800;
+    canvas.height = canvas.offsetHeight || 600;
+
+    const vectors = validNodes.map(n => n.embedding);
+    const coords = pca2d(vectors);
+
+    // Normalize to [margin, width-margin], [margin, height-margin]
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const [x, y] of coords) {
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+    }
+    const margin = 60;
+    const scaleX = (canvas.width - margin * 2) / (maxX - minX || 1);
+    const scaleY = (canvas.height - margin * 2) / (maxY - minY || 1);
+    const scale = Math.min(scaleX, scaleY) * 0.9;
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const catColors = {
+        security: '#ef4444', performance: '#f97316', readability: '#3b82f6',
+        maintainability: '#8b5cf6', 'test_coverage': '#10b981', api_design: '#06b6d4',
+        logging: '#6366f1', error_handling: '#f59e0b', documentation: '#84cc16',
+    };
+
+    // Draw points
+    validNodes.forEach((node, idx) => {
+        const [x, y] = coords[idx];
+        const px = canvas.width / 2 + (x - cx) * scale;
+        const py = canvas.height / 2 + (y - cy) * scale;
+        const isCenter = node.is_center;
+        const isTop5 = node.is_top5;
+        const r = isCenter ? 10 : isTop5 ? 7 : 4;
+        const color = catColors[node.category] || '#94a3b8';
+
+        ctx.beginPath();
+        ctx.arc(px, py, r, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+
+        if (isCenter) {
+            ctx.strokeStyle = '#7c3aed';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+        } else if (isTop5) {
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        if (isCenter || isTop5) {
+            ctx.fillStyle = '#334155';
+            ctx.font = isCenter ? 'bold 12px sans-serif' : '11px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(node.name || node.code || '', px, py - r - 4);
+        }
+    });
+
+    // Label
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`节点数: ${validNodes.length} · 中心 = 当前候选规则 · 大圆 = Top5 相似规则`, 12, canvas.height - 10);
 }
 
 // ====== Init ======
