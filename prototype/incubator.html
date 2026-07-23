@@ -586,7 +586,17 @@ async function showCandidate(id) {
                 <div class="grid grid-cols-3 gap-3">
                     <div>
                         <label class="text-xs text-gray-500">维度</label>
-                        <input type="text" id="editCandCategory" class="w-full px-3 py-2 border rounded-lg text-sm mt-1" value="${escapeHtml(c.category)}">
+                        <select id="editCandCategory" class="w-full px-3 py-2 border rounded-lg text-sm mt-1 bg-white">
+                            <option value="security" ${c.category==='security'?'selected':''}>安全</option>
+                            <option value="performance" ${c.category==='performance'?'selected':''}>性能</option>
+                            <option value="readability" ${c.category==='readability'?'selected':''}>可读性</option>
+                            <option value="maintainability" ${c.category==='maintainability'?'selected':''}>可维护性</option>
+                            <option value="test_coverage" ${c.category==='test_coverage'?'selected':''}>测试覆盖</option>
+                            <option value="api_design" ${c.category==='api_design'?'selected':''}>API设计</option>
+                            <option value="logging" ${c.category==='logging'?'selected':''}>日志</option>
+                            <option value="error_handling" ${c.category==='error_handling'?'selected':''}>错误处理</option>
+                            <option value="documentation" ${c.category==='documentation'?'selected':''}>文档</option>
+                        </select>
                     </div>
                     <div>
                         <label class="text-xs text-gray-500">级别</label>
@@ -600,7 +610,18 @@ async function showCandidate(id) {
                     </div>
                     <div>
                         <label class="text-xs text-gray-500">语言</label>
-                        <input type="text" id="editCandLanguage" class="w-full px-3 py-2 border rounded-lg text-sm mt-1" value="${escapeHtml(c.language)}">
+                        <select id="editCandLanguage" class="w-full px-3 py-2 border rounded-lg text-sm mt-1 bg-white">
+                            <option value="golang" ${c.language==='golang'?'selected':''}>Go</option>
+                            <option value="python" ${c.language==='python'?'selected':''}>Python</option>
+                            <option value="java" ${c.language==='java'?'selected':''}>Java</option>
+                            <option value="frontend" ${c.language==='frontend'?'selected':''}>前端</option>
+                            <option value="common" ${c.language==='common'?'selected':''}>通用</option>
+                            <option value="sql" ${c.language==='sql'?'selected':''}>SQL</option>
+                            <option value="shell" ${c.language==='shell'?'selected':''}>Shell</option>
+                            <option value="php" ${c.language==='php'?'selected':''}>PHP</option>
+                            <option value="ruby" ${c.language==='ruby'?'selected':''}>Ruby</option>
+                            <option value="rust" ${c.language==='rust'?'selected':''}>Rust</option>
+                        </select>
                     </div>
                 </div>
                 <div>
