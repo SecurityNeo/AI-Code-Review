@@ -131,7 +131,7 @@
                         <div style="background-image: radial-gradient(circle, #e5e7eb 1px, transparent 1px); background-size: 20px 20px; position: absolute; inset: 0;"></div>
 
                         <!-- Nodes Layer -->
-                        <div id="pipelineContainer" class="relative flex flex-wrap justify-center gap-x-16 gap-y-12 p-8" style="z-index: 2; min-width: 1200px;">
+                        <div id="pipelineContainer" class="relative overflow-visible" style="z-index: 2; min-width: 1200px; min-height: 500px;">
                         </div>
                     </div>
                     
@@ -2212,6 +2212,8 @@ function renderPipeline(steps) {
     svg.id = 'pipelineSvg';
     svg.setAttribute('class', 'absolute top-0 left-0 pointer-events-none');
     svg.style.zIndex = '1';
+    svg.style.width = Math.max(canvasW, 1200) + 'px';
+    svg.style.height = Math.max(canvasH, 500) + 'px';
     container.appendChild(svg);
 
     setTimeout(() => drawPipelineConnections(steps), 50);
@@ -2295,9 +2297,7 @@ function drawPipelineConnections(steps) {
     const svg = document.getElementById('pipelineSvg');
     if (!svg) return;
 
-    // Dynamic canvas expansion so dragged nodes never clip
     ensureCanvasSize();
-
     svg.innerHTML = '';
 
     const brandColors = {
@@ -2312,29 +2312,41 @@ function drawPipelineConnections(steps) {
         const toNode = document.querySelector(`.pipeline-node[data-step-id="${next.step_id}"]`);
         if (!fromNode || !toNode) return;
 
-        // Get positions from style (accounting for drag)
         const fLeft = parseFloat(fromNode.style.left) || 0;
-        const fTop = parseFloat(fromNode.style.top) || 0;
-        const tLeft = parseFloat(toNode.style.left) || 0;
-        const tTop = parseFloat(toNode.style.top) || 0;
+        const fTop  = parseFloat(fromNode.style.top)  || 0;
+        const tLeft = parseFloat(toNode.style.left)   || 0;
+        const tTop  = parseFloat(toNode.style.top)    || 0;
 
         const fromCard = fromNode.querySelector('.rounded-xl');
         const toCard   = toNode.querySelector('.rounded-xl');
-        const fW = fromCard ? fromCard.offsetWidth  : 220;
-        const fH = fromCard ? fromCard.offsetHeight : 130;
-        const tW = toCard   ? toCard.offsetWidth    : 220;
-        const tH = toCard   ? toCard.offsetHeight   : 130;
+        const fW = fromCard ? fromCard.offsetWidth  : 250;
+        const fH = fromCard ? fromCard.offsetHeight : 140;
+        const tW = toCard   ? toCard.offsetWidth    : 250;
+        const tH = toCard   ? toCard.offsetHeight   : 140;
 
-        const x1 = fLeft + fW / 2;
-        const y1 = fTop  + fH;
-        const x2 = tLeft + tW / 2;
-        const y2 = tTop;
+        const isHorizontal = next._row === step._row;
+        let x1, y1, x2, y2, pathD;
+
+        if (isHorizontal) {
+            // Same row: connect side-to-side
+            if (next._col > step._col) {
+                x1 = fLeft + fW; y1 = fTop + fH / 2;
+                x2 = tLeft;      y2 = tTop + tH / 2;
+            } else {
+                x1 = fLeft;      y1 = fTop + fH / 2;
+                x2 = tLeft + tW; y2 = tTop + tH / 2;
+            }
+            const midX = (x1 + x2) / 2;
+            pathD = `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`;
+        } else {
+            // Different row: connect bottom-to-top
+            x1 = fLeft + fW / 2; y1 = fTop + fH;
+            x2 = tLeft + tW / 2; y2 = tTop;
+            const midY = (y1 + y2) / 2;
+            pathD = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
+        }
 
         const color = brandColors[next.step_id] || '#cbd5e1';
-        const dist = Math.abs(y2 - y1);
-        const c1y = y1 + Math.max(20, dist * 0.5);
-        const c2y = y2 - Math.max(20, dist * 0.5);
-        const pathD = `M ${x1} ${y1} C ${x1} ${c1y}, ${x2} ${c2y}, ${x2} ${y2}`;
 
         const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         pathEl.setAttribute('d', pathD);
@@ -2345,12 +2357,15 @@ function drawPipelineConnections(steps) {
         pathEl.setAttribute('opacity', '0.6');
         svg.appendChild(pathEl);
 
-        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        circle.setAttribute('cx', x2);
-        circle.setAttribute('cy', y2);
-        circle.setAttribute('r', '4');
-        circle.setAttribute('fill', color);
-        svg.appendChild(circle);
+        // Draw a small arrow head circle only for vertical connections
+        if (!isHorizontal) {
+            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            circle.setAttribute('cx', x2);
+            circle.setAttribute('cy', y2);
+            circle.setAttribute('r', '4');
+            circle.setAttribute('fill', color);
+            svg.appendChild(circle);
+        }
     });
 }
 
