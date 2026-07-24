@@ -49,6 +49,7 @@
 | 🔍 | **结构化 Issue 评审** | 按规则拆分代码审查结果，支持逐条/批量采纳与拒绝，拒绝需填写原因 |
 | 📋 | **评审规则库** | 内置通用/Go/Python/前端/Java 多语言规则库，项目级启用/禁用与严重程度覆盖 |
 | 📊 | **规则命中统计** | 独立的规则命中率、修复率、误报率统计页面；支持规则钻取、最近命中分页与代码片段查看 |
+| 🧪 | **规则孵化台** | 从Issue自动聚类提炼候选规则，经LLM智能提炼、相似检测、模拟测试后发布，支持6节点流水线可视化与向量投影 |
 | 💰 | **Token 用量监控** | 全量 LLM 调用 token 用量记录（输入/输出/缓存/成本），按模型/项目/作者/任务维度聚合分析 |
 | 🔁 | **LLM HTTP 重试** | 502/503/504 + 网络层瞬时错误自动指数退避重试；最大次数/初始延迟/退避倍率/最大延迟全部可配置 |
 
@@ -108,26 +109,26 @@
       +-------+-------+  +------+------+  +------+------+
               |                |               |
 +------------v----------------v---------------v---------------------+
-|                         Service Layer                               |
-|   ProjectService  TaskService  PoolService  ModelService           |
-|   ReportService  NotifierService  MemberMappingService             |
-|   LLMService  UserService  MRReviewLogService                       |
-+------------+--------------+--------------+--------------+---------+
-             |              |              |              |
-   +---------v------+ +----v------+ +----v------+ +----v----------+
-   |    GORM ORM     | |   Cron    | |  GitLab   | |  SMTP /      |
-   |  (MySQL)        | | Scheduler | |  API      | |  WeCom       |
-   |                 | |           | |  Client   | |  Webhook     |
-   +-----------------+ +-----------+ +-----------+ +--------------+
-           |                                              |
-   +-------v-------+                            +--------v---------+
-   |  codeguard    |                            | External Services|
-   |   (Main DB)   |                            | - OpenCode Pool  |
-   +---------------+                            | - LLM APIs       |
-                                                | - GitLab CE/EE   |
-                                                | - WeCom Bot      |
-                                                | - Mail Server    |
-                                                +------------------+
+ |                         Service Layer                               |
+ |   ProjectService  TaskService  PoolService  ModelService           |
+ |   ReportService  NotifierService  MemberMappingService             |
+ |   LLMService  UserService  MRReviewLogService  IncubatorService     |
+ +------------+--------------+--------------+--------------+---------+
+              |              |              |              |
+    +---------v------+ +----v------+ +----v------+ +----v----------+
+    |    GORM ORM     | |   Cron    | |  GitLab   | |  SMTP /      |
+    |  (MySQL)        | | Scheduler | |  API      | |  WeCom       |
+    |                 | |           | |  Client   | |  Webhook     |
+    +-----------------+ +-----------+ +-----------+ +--------------+
+            |              |                              |
+    +-------v-------+ +----v----+               +--------v---------+
+    |  codeguard    | | Vector  |               | External Services|
+    |   (Main DB)   | | Store   |               | - OpenCode Pool  |
+    +---------------+ +---------+               | - LLM APIs       |
+                                                 | - GitLab CE/EE   |
+                                                 | - WeCom Bot      |
+                                                 | - Mail Server    |
+                                                 +------------------+
 ```
 
 ### 任务执行流程

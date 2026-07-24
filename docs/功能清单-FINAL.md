@@ -1,7 +1,7 @@
 # CodeGuard - 功能清单
 
-> 版本: v4.5
-> 更新日期: 2026-07-21
+> 版本: v4.6
+> 更新日期: 2026-07-24
 > 适用范围: Go 后端 + Web 前端全栈开发
 
 ---
@@ -25,12 +25,13 @@
 15. [系统管理](#15-系统管理)
 16. [数据洞察：Token 用量监控](#16-数据洞察token-用量监控)
 17. [数据洞察：规则命中统计](#17-数据洞察规则命中统计)
-18. [前端体验：主题与导航](#18-前端体验主题与导航)
-19. [数据模型定义](#19-数据模型定义)
-20. [核心业务流程](#20-核心业务流程)
-21. [接口清单](#21-接口清单)
-22. [技术栈](#22-技术栈)
-23. [附录：认证与鉴权](#23-附录认证与鉴权)
+18. [规则孵化台](#18-规则孵化台)
+19. [前端体验：主题与导航](#19-前端体验主题与导航)
+20. [数据模型定义](#20-数据模型定义)
+21. [核心业务流程](#21-核心业务流程)
+22. [接口清单](#22-接口清单)
+23. [技术栈](#23-技术栈)
+24. [附录：认证与鉴权](#24-附录认证与鉴权)
 
 ---
 
@@ -1087,7 +1088,159 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 
 ---
 
-## 18. 前端体验：主题与导航
+## 18. 规则孵化台
+
+`incubator.html` 是规则孵化台的完整管理页面（admin 可见）。系统通过 6 节点流水线从 Issue 自动聚类提炼候选规则，经 LLM 智能提炼、相似检测、模拟测试后发布上线。
+
+### 18.1 6 节点流水线可视化
+
+| 节点 | 说明 | 实现状态 |
+|------|------|----------|
+| 原始 Issue 池 | 展示未匹配规则的 Issue 数量与回溯时间窗口 | ✅ |
+| 聚类分析 | 对 Issue 进行聚类，生成候选规则集 | ✅ |
+| 候选规则池 | 展示所有候选规则，区分草稿/就绪状态 | ✅ |
+| 智能提炼 | LLM 对候选规则进行自动命名、描述、Prompt 生成 | ✅ |
+| 相似检测 | L1 Jaccard + L2 Embedding 余弦相似度双重检测 | ✅ |
+| 模拟测试 | LLM 自动生成测试用例并验证规则有效性 | ✅ |
+
+#### 画布交互
+
+| 功能 | 说明 | 实现状态 |
+|------|------|----------|
+| Dify 风格蛇形布局 | 6 节点按 3×2 蛇形排列，奇数行反向 | ✅ |
+| 节点拖拽 | 支持鼠标拖拽调整节点位置 | ✅ |
+| 实时进度 | 流水线执行期间 SSE 实时推送每节点进度 | ✅ |
+| 状态色彩 | 运行中/已完成/空闲/错误 不同颜色标识 | ✅ |
+| 节点点击 | 点击节点展开右侧详情面板 | ✅ |
+| 自动重连 | 切换 Tab 后 SSE 自动恢复连接 | ✅ |
+
+### 18.2 聚类分析
+
+| 功能 | 说明 | 实现状态 |
+|------|------|----------|
+| 自动触发 | 流水线启动时自动执行聚类 | ✅ |
+| 时间窗口 | 可配置回溯天数（默认 30 天） | ✅ |
+| 最小簇大小 | 可配置最小聚类 Issue 数（默认 3） | ✅ |
+| 最大候选数 | 可配置单次最多生成候选规则数（默认 20） | ✅ |
+| 进度面板 | 聚类期间实时展示各簇处理进度 | ✅ |
+
+### 18.3 候选规则管理
+
+#### 列表展示
+
+| 字段 | 说明 | 实现状态 |
+|------|------|----------|
+| 状态标签 | draft（灰色）/ ready（蓝色）/ published（绿色） | ✅ |
+| 来源标识 | 流水线任务编号 或 手动创建 | ✅ |
+| 规则名称 | LLM 生成的语义化名称 | ✅ |
+| 规则代码 | `incubated-{slug}-{rand}` 格式 | ✅ |
+| 来源 Issue 数 | 关联的 Issue 数量 | ✅ |
+| 置信度 | 0.40~1.00 动态评分 | ✅ |
+
+#### 筛选与搜索
+
+| 功能 | 说明 | 实现状态 |
+|------|------|----------|
+| 状态筛选 | draft / ready / published / rejected | ✅ |
+| 严重程度筛选 | critical / high / medium / low / info | ✅ |
+| 关键词搜索 | 规则名称、代码模糊搜索 | ✅ |
+| 统一分页 | 支持页码跳转 | ✅ |
+
+#### 操作
+
+| 操作 | 说明 | 实现状态 |
+|------|------|----------|
+| 查看详情 | 右侧滑出抽屉展示规则完整信息 | ✅ |
+| 向量投影 | 3D 散点图展示候选规则与 Top5 相似规则的空间分布 | ✅ |
+| 删除 | 删除候选规则（保护 published），级联删除向量数据 | ✅ |
+| 手动创建 | 支持从 Issue 多选批量创建候选规则 | ✅ |
+| 发布 | 将候选规则转为正式 ReviewRule | ✅ |
+
+#### 状态标签
+
+| 标签 | 条件 | 实现状态 |
+|------|------|----------|
+| 相似检测未通过 | `similar_passed == false` | ✅ |
+| 模拟测试未通过 | `test_results.accuracy < 0.5` | ✅ |
+
+### 18.4 智能提炼
+
+| 功能 | 说明 | 实现状态 |
+|------|------|----------|
+| LLM 自动提炼 | 基于 Issue 聚类结果自动生成规则名称、描述、Prompt | ✅ |
+| 语义化代码 | `incubated-{semantic-slug}-{4-char-rand}` 格式 | ✅ |
+| 置信度计算 | 基于 Prompt 完整度 / 名称描述质量 / 模拟测试准确率 / 相似检测结果动态计算 | ✅ |
+| 异步向量化 | 提炼完成后异步触发 Embedding 生成 | ✅ |
+
+### 18.5 相似检测
+
+#### 双重检测策略
+
+| 层级 | 算法 | 阈值 | 说明 | 实现状态 |
+|------|------|------|------|----------|
+| L1 | Jaccard 关键词 | `similarity_pass_threshold`（默认 0.5） | 结构级快速匹配 | ✅ |
+| L2 | Embedding 余弦相似度 | `similarity_pass_threshold` | 语义级深度匹配 | ✅ |
+
+#### 检测过程
+
+| 功能 | 说明 | 实现状态 |
+|------|------|----------|
+| 实时嵌入 | 向量缺失时实时调用 Embedding API 生成 | ✅ |
+| 去重策略 | 同一 `rule_id` 取最高相似度 | ✅ |
+| Top 5 限制 | 最多保留 5 条最相似的现有规则 | ✅ |
+| 方法标记 | 标注匹配方法（jaccard / embedding） | ✅ |
+| 代码碰撞 | 检测 code 重复，自动重命名 | ✅ |
+
+#### 通过判断
+
+| 字段 | 说明 | 实现状态 |
+|------|------|----------|
+| `similar_passed` | `true` = 无相似规则通过；`false` = 存在高相似规则 | ✅ |
+| `similar_rules` | JSON 数组，存储 Top5 相似规则详情 | ✅ |
+
+### 18.6 模拟测试
+
+| 功能 | 说明 | 实现状态 |
+|------|------|----------|
+| 测试用例生成 | LLM 基于规则 Prompt 生成正例/反例 | ✅ |
+| 双重验证 | LLM 对每个用例判断 YES/NO，计算准确率 | ✅ |
+| 结果存储 | `test_results` JSON 存储 accuracy / cases / timestamp | ✅ |
+| 置信度联动 | 测试准确率直接参与置信度评分计算 | ✅ |
+
+### 18.7 向量投影（3D 可视化）
+
+| 功能 | 说明 | 实现状态 |
+|------|------|----------|
+| ECharts GL | 基于 ECharts GL 的 3D 散点图 | ✅ |
+| 中心节点 | 候选规则自身（紫色） | ✅ |
+| Top5 节点 | 最相似的 5 条现有规则（蓝色） | ✅ |
+| 悬浮提示 | 展示规则 ID、名称、代码、相似度、分类、严重级别、Prompt 片段 | ✅ |
+| 文本换行 | Tooltip 强制自动换行，防止长文本溢出 | ✅ |
+
+### 18.8 Embedding 引擎配置
+
+| 功能 | 说明 | 实现状态 |
+|------|------|----------|
+| 模型选择 | 从已配置的 Embedding 模型中选择 | ✅ |
+| 测试连接 | 选中模型后可直接测试 API 连通性（无需先保存配置） | ✅ |
+| 相似度阈值 | 可配置通过阈值（0.1~1.0，默认 0.5） | ✅ |
+| 向量化触发 | 手动触发已有规则批量向量化 | ✅ |
+| 增量同步 | 规则 Create / Update / Publish 时自动异步触发向量化 | ✅ |
+| 进度持久化 | 从 `review_rule_vectors` 表实时查询，服务重启不丢失 | ✅ |
+
+### 18.9 数据表
+
+| 表名 | 说明 |
+|------|------|
+| `rule_incubations` | 候选规则主表（含 `similar_passed`, `similar_rules`, `test_results`） |
+| `rule_incubation_jobs` | 流水线任务记录（cluster / refine / similar_check / sandbox_test / pipeline_run） |
+| `rule_incubation_vectors` | 候选规则向量存储 |
+| `incubator_configs` | 孵化台全局配置（单例表） |
+| `review_rule_vectors` | 已有规则的向量存储 |
+
+---
+
+## 19. 前端体验：主题与导航
 
 ### 21.1 主题系统
 
@@ -1133,9 +1286,9 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 
 ---
 
-## 19. 数据模型定义
+## 20. 数据模型定义
 
-### 19.1 User (User)
+### 20.1 User (User)
 
 ```go
 type User struct {
@@ -1148,7 +1301,7 @@ type User struct {
 }
 ```
 
-### 19.2 Token (Token)
+### 20.2 Token (Token)
 
 ```go
 type Token struct {
@@ -1161,7 +1314,7 @@ type Token struct {
 }
 ```
 
-### 19.3 Project (Project)
+### 20.3 Project (Project)
 
 ```go
 type Project struct {
@@ -1193,7 +1346,7 @@ type Project struct {
 }
 ```
 
-### 19.4 Task (Task)
+### 20.4 Task (Task)
 
 ```go
 type TaskStatus string
@@ -1242,7 +1395,7 @@ type Task struct {
 }
 ```
 
-### 19.5 Project Template (ProjectTemplate)
+### 20.5 Project Template (ProjectTemplate)
 
 ```go
 type ProjectTemplate struct {
@@ -1255,7 +1408,7 @@ type ProjectTemplate struct {
 }
 ```
 
-### 19.6 Resource Pool (ResourcePool)
+### 20.6 Resource Pool (ResourcePool)
 
 ```go
 type PoolStatus string
@@ -1288,7 +1441,7 @@ type ResourcePool struct {
 }
 ```
 
-### 19.7 LLM Model (LLMModel)
+### 20.7 LLM Model (LLMModel)
 
 ```go
 type LLMModel struct {
@@ -1322,7 +1475,7 @@ type LLMModel struct {
 }
 ```
 
-### 19.8 WeCom Notifier (WeComNotifier)
+### 20.8 WeCom Notifier (WeComNotifier)
 
 ```go
 type WeComNotifier struct {
@@ -1339,7 +1492,7 @@ type WeComNotifier struct {
 }
 ```
 
-### 19.9 Operation Log (OperationLog)
+### 20.9 Operation Log (OperationLog)
 
 ```go
 type OperationLog struct {
@@ -1354,7 +1507,7 @@ type OperationLog struct {
 }
 ```
 
-### 19.10 System Config (SystemConfig)
+### 20.10 System Config (SystemConfig)
 
 ```go
 type SystemConfig struct {
@@ -1408,7 +1561,7 @@ type SystemConfig struct {
 }
 ```
 
-### 19.11 MR Review Log (MergeRequestReviewLog) (this app DB)
+### 20.11 MR Review Log (MergeRequestReviewLog) (this app DB)
 
 ```go
 type MergeRequestReviewLog struct {
@@ -1433,7 +1586,7 @@ type MergeRequestReviewLog struct {
 }
 ```
 
-### 19.12 SMTP Config (SMTPConfig)
+### 20.12 SMTP Config (SMTPConfig)
 
 ```go
 type SMTPConfig struct {
@@ -1633,7 +1786,7 @@ type LLMCallLog struct {
 
 ---
 
-## 20. 核心业务流程
+## 21. 核心业务流程
 
 ### 20.1 GitLab Webhook Processing Flow
 
@@ -1808,7 +1961,7 @@ Override window.fetch:
 
 ---
 
-## 21. 接口清单
+## 22. 接口清单
 
 ### 21.1 Auth
 
@@ -2017,7 +2170,7 @@ Override window.fetch:
 
 ---
 
-## 22. 技术栈
+## 23. 技术栈
 
 | Layer | Tech | Description |
 |------|------|------|
@@ -2037,9 +2190,9 @@ Override window.fetch:
 
 ---
 
-## 23. 附录：认证与鉴权
+## 24. 附录：认证与鉴权
 
-### 20.1 Auth Flow
+### 24.1 Auth Flow
 
 1. User submits username/password via `/api/v1/login`
 2. Backend verifies with bcrypt
@@ -2047,7 +2200,7 @@ Override window.fetch:
 4. Return Token to frontend
 5. Frontend stores in `localStorage.auth_token`
 
-### 20.2 Authorization Flow
+### 24.2 Authorization Flow
 
 1. `auth.js` globally intercepts all `fetch` calls
 2. API requests auto-inject `Authorization: Bearer <token>`
@@ -2055,7 +2208,7 @@ Override window.fetch:
 4. Backend `Auth()` middleware verifies token
 5. Frontend 401 → auto redirect to login
 
-### 20.3 Whitelist Paths
+### 24.3 Whitelist Paths
 
 | Path Pattern | Description |
 |----------|------|
