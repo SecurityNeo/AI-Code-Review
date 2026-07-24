@@ -230,7 +230,7 @@
 
                 <!-- 候选规则 Tab -->
                 <div id="tab-candidates" class="tab-content p-4 hidden">
-                    <div class="flex items-center gap-3 mb-4">
+                    <div class="flex items-center gap-3 mb-4 flex-wrap">
                         <input type="text" id="candKeyword" placeholder="搜索名称或编码..." class="px-3 py-2 border rounded-lg text-sm w-64">
                         <select id="candStatus" class="px-3 py-2 border rounded-lg text-sm">
                             <option value="">全部状态</option>
@@ -249,6 +249,10 @@
                         </select>
                         <button onclick="loadCandidates()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
                             <i class="fas fa-search mr-1"></i>查询
+                        </button>
+                        <div class="flex-1"></div>
+                        <button onclick="openCreateCandidateModal()" class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">
+                            <i class="fas fa-plus mr-1"></i>创建候选规则
                         </button>
                     </div>
                     <div id="candidatesGrid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
@@ -282,8 +286,29 @@
                                     <i class="fas fa-bolt text-yellow-500 mr-1"></i>测试连接
                                 </button>
                             </div>
-                            <p class="text-xs text-gray-500 mt-2">配置 Embedding 模型后可启用语义聚类、语义去重、智能回溯等功能。</p>
                             <div id="embeddingTestResult" class="mt-2 text-sm"></div>
+                            <div id="vectorizePanel" class="hidden">
+                                <div id="vectorizeProgressBox" class="mt-3 hidden">
+                                    <div class="flex items-center justify-between mb-1">
+                                        <span class="text-xs font-medium text-gray-600">向量化处理</span>
+                                        <span id="vectorizeProgressText" class="text-xs font-bold text-amber-700">0 / 0</span>
+                                    </div>
+                                    <div class="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                                        <div id="vectorizeProgressBar" class="h-full bg-amber-500 rounded-full transition-all duration-300" style="width:0%"></div>
+                                    </div>
+                                </div>
+                                <div id="vectorizeZone" class="mt-3 flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                    <i class="fas fa-info-circle text-amber-500"></i>
+                                    <div class="flex-1">
+                                        <div class="text-xs text-amber-800 font-medium">首次配置 Embedding 模型后，需要触发向量化操作</div>
+                                        <div class="text-[10px] text-amber-600">系统将扫描所有已有规则并生成向量坐标，用于后续相似度检测。</div>
+                                    </div>
+                                    <button id="vectorizeBtn" onclick="vectorizeExistingRules()" class="px-3 py-1.5 bg-amber-600 text-white rounded text-xs hover:bg-amber-700 whitespace-nowrap">
+                                        <i class="fas fa-play mr-1"></i>向量化已有规则
+                                    </button>
+                                </div>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-2">配置 Embedding 模型后可启用语义聚类、语义去重、智能回溯等功能。</p>
                         </div>
 
                         <div class="bg-white border rounded-lg p-4">
@@ -318,6 +343,17 @@
                             </div>
                         </div>
 
+                        <div class="bg-white border rounded-lg p-4">
+                            <h3 class="font-semibold text-gray-800 mb-3">相似度检测</h3>
+                            <div class="flex items-center gap-4">
+                                <div>
+                                    <label class="text-xs text-gray-500">通过阈值 (0.1~1.0)</label>
+                                    <input type="number" id="cfgSimilarityThreshold" step="0.05" min="0.1" max="1.0" class="px-3 py-2 border rounded-lg text-sm w-24" value="0.5">
+                                </div>
+                                <p class="text-xs text-gray-500">高于此值的规则会被标记为“相似”。阈值越高越宽松。</p>
+                            </div>
+                        </div>
+
                         <button onclick="saveConfig()" class="px-5 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
                             <i class="fas fa-save mr-1"></i>保存配置
                         </button>
@@ -326,333 +362,215 @@
 
                 <!-- 使用指南 Tab -->
                 <div id="tab-guide" class="tab-content p-4 hidden">
-                    <div class="w-full space-y-8">
+                    <div class="w-full space-y-6">
 
-                        <!-- 概述 -->
-                        <div class="bg-gradient-to-r from-blue-50/70 via-indigo-50/50 to-purple-50/70 border border-blue-100 rounded-xl p-6">
-                            <div class="flex flex-col lg:flex-row gap-6 items-start">
-                                <!-- 左侧：文字介绍 -->
-                                <div class="flex-1 min-w-0 max-w-3xl xl:max-w-4xl">
-                                    <h3 class="font-bold text-gray-800 text-lg mb-3"><i class="fas fa-lightbulb text-yellow-500 mr-2"></i>什么是规则孵化台？</h3>
-                                    <p class="text-sm text-gray-600 leading-relaxed mb-4">
-                                        规则孵化台是智能评审规则的<strong>"制造工厂"</strong>。它从海量的历史评审 Issue 中自动发现规律、聚类分析、提炼生成候选规则，经过多轮 LLM 验证后发布到规则库，并持续监控规则质量，形成完整的<strong>规则全生命周期管理</strong>闭环。
-                                    </p>
-                                    <div class="flex flex-wrap gap-2 mb-4">
-                                        <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-blue-200 text-xs text-blue-700"><i class="fas fa-robot mr-1.5"></i>LLM 驱动</span>
-                                        <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-purple-200 text-xs text-purple-700"><i class="fas fa-project-diagram mr-1.5"></i>自动聚类</span>
-                                        <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-teal-200 text-xs text-teal-700"><i class="fas fa-vial mr-1.5"></i>模拟测试</span>
-                                        <span class="inline-flex items-center px-2 py-1 rounded-md bg-white border border-orange-200 text-xs text-orange-700"><i class="fas fa-chart-line mr-1.5"></i>质量监控</span>
+                        <!-- Hero: What is it? -->
+                        <div class="bg-gradient-to-br from-slate-50 via-white to-blue-50 rounded-2xl p-8 border border-gray-200 shadow-lg relative overflow-hidden">
+                            <div class="absolute top-0 right-0 w-64 h-64 bg-blue-50/40 rounded-full -translate-y-1/2 translate-x-1/2"></div>
+                            <div class="absolute bottom-0 left-0 w-48 h-48 bg-indigo-50/30 rounded-full translate-y-1/2 -translate-x-1/2"></div>
+                            <div class="relative z-10 text-gray-800">
+                                <div class="flex items-center gap-3 mb-4">
+                                    <div class="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600">
+                                        <i class="fas fa-flask text-2xl"></i>
                                     </div>
-                                    <p class="text-xs text-gray-400 leading-relaxed">
-                                        <i class="fas fa-info-circle text-gray-300 mr-1"></i>
-                                        系统运行依赖：LLM 对话模型（必须）用于智能提炼和模拟测试；Embedding 模型（可选，未配置时降级为关键词匹配）；历史 Issue 数据（必须）作为规则孵化的原材料。
-                                    </p>
+                                    <div>
+                                        <h2 class="text-2xl font-bold text-gray-900">规则孵化台</h2>
+                                        <p class="text-gray-500 text-sm">智能评审规则的自动化制造工厂</p>
+                                    </div>
                                 </div>
-                                <!-- 右侧：全生命周期概览 -->
-                                <div class="w-full lg:w-64 shrink-0 bg-white/60 border border-white rounded-lg p-4 backdrop-blur-sm">
-                                    <h4 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">全生命周期</h4>
-                                    <div class="space-y-2.5">
-                                        <div class="flex items-center gap-2 text-xs">
-                                            <div class="w-5 h-5 rounded bg-slate-100 flex items-center justify-center text-slate-500 shrink-0"><i class="fas fa-database text-[10px]"></i></div>
-                                            <span class="text-gray-600">Issue 发现与向量化</span>
-                                        </div>
-                                        <div class="flex items-center gap-2 text-xs">
-                                            <div class="w-5 h-5 rounded bg-violet-100 flex items-center justify-center text-violet-600 shrink-0"><i class="fas fa-object-group text-[10px]"></i></div>
-                                            <span class="text-gray-600">语义聚类生成簇</span>
-                                        </div>
-                                        <div class="flex items-center gap-2 text-xs">
-                                            <div class="w-5 h-5 rounded bg-blue-100 flex items-center justify-center text-blue-600 shrink-0"><i class="fas fa-lightbulb text-[10px]"></i></div>
-                                            <span class="text-gray-600">LLM 提炼候选规则</span>
-                                        </div>
-                                        <div class="flex items-center gap-2 text-xs">
-                                            <div class="w-5 h-5 rounded bg-indigo-100 flex items-center justify-center text-indigo-600 shrink-0"><i class="fas fa-wand-magic-sparkles text-[10px]"></i></div>
-                                            <span class="text-gray-600">候选规则自动精化</span>
-                                        </div>
-                                        <div class="flex items-center gap-2 text-xs">
-                                            <div class="w-5 h-5 rounded bg-orange-100 flex items-center justify-center text-orange-600 shrink-0"><i class="fas fa-shield-alt text-[10px]"></i></div>
-                                            <span class="text-gray-600">相似度与去重校验</span>
-                                        </div>
-                                        <div class="flex items-center gap-2 text-xs">
-                                            <div class="w-5 h-5 rounded bg-teal-100 flex items-center justify-center text-teal-600 shrink-0"><i class="fas fa-vial text-[10px]"></i></div>
-                                            <span class="text-gray-600">沙盒模拟测试</span>
-                                        </div>
-                                        <div class="flex items-center gap-2 text-xs pt-1 border-t border-gray-100">
-                                            <div class="w-5 h-5 rounded bg-green-100 flex items-center justify-center text-green-600 shrink-0"><i class="fas fa-check-circle text-[10px]"></i></div>
-                                            <span class="text-gray-600 font-medium">发布上线 + 健康巡检</span>
-                                        </div>
+                                <p class="text-gray-700 leading-relaxed max-w-3xl mb-6">
+                                    从海量历史评审 Issue 中<strong class="text-gray-900">自动发现规律</strong>，通过聚类分析提炼生成候选规则，经 LLM 多轮验证后发布上线，持续监控规则质量，形成完整的<strong class="text-gray-900">规则全生命周期管理</strong>闭环。
+                                </p>
+                                <div class="flex flex-wrap gap-3">
+                                    <div class="bg-blue-50/80 border border-blue-100 px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 text-blue-700">
+                                        <i class="fas fa-robot text-blue-500"></i> LLM 驱动
+                                    </div>
+                                    <div class="bg-indigo-50/80 border border-indigo-100 px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 text-indigo-700">
+                                        <i class="fas fa-project-diagram text-indigo-500"></i> 自动聚类
+                                    </div>
+                                    <div class="bg-teal-50/80 border border-teal-100 px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 text-teal-700">
+                                        <i class="fas fa-vial text-teal-500"></i> 模拟测试
+                                    </div>
+                                    <div class="bg-purple-50/80 border border-purple-100 px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 text-purple-700">
+                                        <i class="fas fa-chart-line text-purple-500"></i> 持续监控
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- 数据流总览 -->
-                        <div class="flex items-center justify-center gap-6 flex-wrap">
-                            <div class="bg-gradient-to-b from-slate-50 to-white border border-slate-200 rounded-lg p-4 text-center min-w-[140px]">
-                                <i class="fas fa-database text-slate-400 text-lg mb-1"></i>
-                                <div class="text-xs font-bold text-gray-700">Issue 仓库</div>
-                                <div class="text-[10px] text-gray-400 mt-0.5">原始输入</div>
+                        <!-- Core Features -->
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div class="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-lg transition-all duration-200 group">
+                                <div class="w-10 h-10 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                                    <i class="fas fa-magic text-lg"></i>
+                                </div>
+                                <h4 class="font-bold text-gray-800 mb-2">自动发现</h4>
+                                <p class="text-xs text-gray-500 leading-relaxed">
+                                    扫描未被规则覆盖的 Issue，按维度+语言+严重级别自动聚类，将相似问题聚合为候选规则源材料。
+                                </p>
                             </div>
-                            <div class="flex items-center justify-center"><i class="fas fa-arrow-right text-gray-300"></i></div>
-                            <div class="bg-gradient-to-b from-violet-50 to-white border border-violet-200 rounded-lg p-4 text-center min-w-[140px]">
-                                <i class="fas fa-magic text-violet-400 text-lg mb-1"></i>
-                                <div class="text-xs font-bold text-gray-700">流水线处理</div>
-                                <div class="text-[10px] text-gray-400 mt-0.5">自动精化</div>
+                            <div class="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-lg transition-all duration-200 group">
+                                <div class="w-10 h-10 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                                    <i class="fas fa-brain text-lg"></i>
+                                </div>
+                                <h4 class="font-bold text-gray-800 mb-2">智能提炼</h4>
+                                <p class="text-xs text-gray-500 leading-relaxed">
+                                    调用 LLM 自动提炼规则名称、描述和审查 Prompt，无需手动编写，降低规则编写门槛。
+                                </p>
                             </div>
-                            <div class="flex items-center justify-center"><i class="fas fa-arrow-right text-gray-300"></i></div>
-                            <div class="bg-gradient-to-b from-green-50 to-white border border-green-200 rounded-lg p-4 text-center min-w-[140px]">
-                                <i class="fas fa-rocket text-green-400 text-lg mb-1"></i>
-                                <div class="text-xs font-bold text-gray-700">规则库</div>
-                                <div class="text-[10px] text-gray-400 mt-0.5">正式发布</div>
+                            <div class="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-lg transition-all duration-200 group">
+                                <div class="w-10 h-10 rounded-lg bg-teal-100 text-teal-600 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                                    <i class="fas fa-shield-alt text-lg"></i>
+                                </div>
+                                <h4 class="font-bold text-gray-800 mb-2">多维验证</h4>
+                                <p class="text-xs text-gray-500 leading-relaxed">
+                                    相似度检测避免重复，沙盒测试验证规则准确性，置信度评分辅助判断规则质量。
+                                </p>
                             </div>
                         </div>
 
-                        <!-- 流水线阶段说明 -->
+                        <!-- Data Flow -->
+                        <div class="bg-gray-50 rounded-xl p-6 border border-gray-200">
+                            <h4 class="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                                <i class="fas fa-stream text-blue-500"></i>
+                                数据流转
+                            </h4>
+                            <div class="flex items-center justify-between gap-2 flex-wrap">
+                                <div class="flex flex-col items-center gap-2 flex-1 min-w-[100px]">
+                                    <div class="w-12 h-12 rounded-full bg-slate-100 border-2 border-slate-300 flex items-center justify-center text-slate-500">
+                                        <i class="fas fa-database"></i>
+                                    </div>
+                                    <span class="text-xs font-medium text-gray-700">Issue 仓库</span>
+                                    <span class="text-[10px] text-gray-400">原始输入</span>
+                                </div>
+                                <div class="flex-1 h-px bg-gradient-to-r from-slate-300 to-violet-300 max-w-[60px]"></div>
+                                <div class="flex flex-col items-center gap-2 flex-1 min-w-[100px]">
+                                    <div class="w-12 h-12 rounded-full bg-violet-100 border-2 border-violet-300 flex items-center justify-center text-violet-500">
+                                        <i class="fas fa-object-group"></i>
+                                    </div>
+                                    <span class="text-xs font-medium text-gray-700">聚类分析</span>
+                                    <span class="text-[10px] text-gray-400">生成簇</span>
+                                </div>
+                                <div class="flex-1 h-px bg-gradient-to-r from-violet-300 to-indigo-300 max-w-[60px]"></div>
+                                <div class="flex flex-col items-center gap-2 flex-1 min-w-[100px]">
+                                    <div class="w-12 h-12 rounded-full bg-indigo-100 border-2 border-indigo-300 flex items-center justify-center text-indigo-500">
+                                        <i class="fas fa-lightbulb"></i>
+                                    </div>
+                                    <span class="text-xs font-medium text-gray-700">智能提炼</span>
+                                    <span class="text-[10px] text-gray-400">生成规则</span>
+                                </div>
+                                <div class="flex-1 h-px bg-gradient-to-r from-indigo-300 to-orange-300 max-w-[60px]"></div>
+                                <div class="flex flex-col items-center gap-2 flex-1 min-w-[100px]">
+                                    <div class="w-12 h-12 rounded-full bg-orange-100 border-2 border-orange-300 flex items-center justify-center text-orange-500">
+                                        <i class="fas fa-check-double"></i>
+                                    </div>
+                                    <span class="text-xs font-medium text-gray-700">验证去重</span>
+                                    <span class="text-[10px] text-gray-400">确保质量</span>
+                                </div>
+                                <div class="flex-1 h-px bg-gradient-to-r from-orange-300 to-green-300 max-w-[60px]"></div>
+                                <div class="flex flex-col items-center gap-2 flex-1 min-w-[100px]">
+                                    <div class="w-12 h-12 rounded-full bg-green-100 border-2 border-green-300 flex items-center justify-center text-green-500">
+                                        <i class="fas fa-rocket"></i>
+                                    </div>
+                                    <span class="text-xs font-medium text-gray-700">发布上线</span>
+                                    <span class="text-[10px] text-gray-400">正式规则</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Pipeline Stages -->
                         <div>
-                            <h4 class="font-bold text-gray-800 mb-4 text-base"><i class="fas fa-stream text-blue-600 mr-2"></i>孵化流水线（9 个阶段）</h4>
-                            
-                            <!-- 阶段一：自动发现 -->
-                            <div class="mb-6">
-                                <div class="flex items-center gap-2 mb-3">
-                                    <span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-100 shadow-sm">阶段一：自动发现</span>
-                                    <div class="flex-1 h-px bg-gradient-to-r from-blue-100 to-transparent"></div>
-                                    <span class="text-[10px] text-gray-400">系统自动执行 · 零人工干预</span>
-                                </div>
-                                <div class="grid grid-cols-3 gap-4">
-                                    <!-- 1 原始 Issue 池 -->
-                                    <div class="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
-                                        <div class="flex items-center gap-2 mb-3">
-                                            <div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 text-xs font-bold">1</div>
-                                            <div class="font-bold text-sm text-gray-800">原始 Issue 池</div>
-                                        </div>
-                                        <div class="text-xs text-gray-500 leading-relaxed mb-3">收集所有未被规则命中的历史 Issue，是规则孵化的"原材料仓库"。</div>
-                                        <div class="space-y-1.5 text-[10px]">
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-slate-400 font-medium w-10 flex-shrink-0">输入</span>
-                                                <span class="text-gray-600">未被规则覆盖的 Review Issue</span>
-                                            </div>
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-slate-400 font-medium w-10 flex-shrink-0">过滤</span>
-                                                <span class="text-gray-600">按配置时间窗口（默认 30 天）筛选</span>
-                                            </div>
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-slate-400 font-medium w-10 flex-shrink-0">产出</span>
-                                                <span class="text-gray-600">待聚类的 Issue 集合</span>
-                                            </div>
-                                        </div>
+                            <h4 class="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                                <i class="fas fa-layer-group text-purple-500"></i>
+                                孵化流水线
+                            </h4>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <!-- Stage 1 -->
+                                <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                                    <div class="bg-blue-50 px-4 py-2 border-b border-blue-100 flex items-center gap-2">
+                                        <span class="w-5 h-5 rounded-full bg-blue-500 text-white text-[10px] font-bold flex items-center justify-center">1</span>
+                                        <span class="text-xs font-bold text-blue-700">自动发现</span>
                                     </div>
-                                    <!-- 2 聚类分析 -->
-                                    <div class="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
-                                        <div class="flex items-center gap-2 mb-3">
-                                            <div class="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center text-violet-600 text-xs font-bold">2</div>
-                                            <div class="font-bold text-sm text-gray-800">聚类分析</div>
-                                        </div>
-                                        <div class="text-xs text-gray-500 leading-relaxed mb-3">按维度+语言+严重级别三维分组，通过关键词重叠度（Jaccard）将相似 Issue 聚成簇。</div>
-                                        <div class="space-y-1.5 text-[10px]">
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-violet-400 font-medium w-10 flex-shrink-0">算法</span>
-                                                <span class="text-gray-600">Jaccard 关键词相似度 + 结构化分组</span>
-                                            </div>
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-violet-400 font-medium w-10 flex-shrink-0">参数</span>
-                                                <span class="text-gray-600">最小簇大小（默认 2）、时间窗口</span>
-                                            </div>
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-violet-400 font-medium w-10 flex-shrink-0">产出</span>
-                                                <span class="text-gray-600">N 个有效 Issue 簇，每个簇 ≥ 最小簇大小</span>
+                                    <div class="p-4 space-y-3">
+                                        <div class="flex items-start gap-2">
+                                            <i class="fas fa-database text-slate-400 mt-0.5 text-xs"></i>
+                                            <div>
+                                                <div class="text-xs font-medium text-gray-700">原始 Issue 池</div>
+                                                <div class="text-[10px] text-gray-500">收集未被规则覆盖的 Review Issue</div>
                                             </div>
                                         </div>
-                                    </div>
-                                    <!-- 3 候选规则 -->
-                                    <div class="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
-                                        <div class="flex items-center gap-2 mb-3">
-                                            <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-xs font-bold">3</div>
-                                            <div class="font-bold text-sm text-gray-800">候选规则</div>
+                                        <div class="flex items-start gap-2">
+                                            <i class="fas fa-object-group text-violet-400 mt-0.5 text-xs"></i>
+                                            <div>
+                                                <div class="text-xs font-medium text-gray-700">聚类分析</div>
+                                                <div class="text-[10px] text-gray-500">Jaccard 相似度 + 结构化分组</div>
+                                            </div>
                                         </div>
-                                        <div class="text-xs text-gray-500 leading-relaxed mb-3">每个有效簇自动生成一条候选规则，状态为"草稿"，包含基础信息。</div>
-                                        <div class="space-y-1.5 text-[10px]">
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-blue-400 font-medium w-10 flex-shrink-0">生成</span>
-                                                <span class="text-gray-600">自动推断名称、维度、语言、严重级别</span>
-                                            </div>
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-blue-400 font-medium w-10 flex-shrink-0">状态</span>
-                                                <span class="text-gray-600">草稿（draft）→ 等待智能提炼</span>
-                                            </div>
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-blue-400 font-medium w-10 flex-shrink-0">入口</span>
-                                                <span class="text-gray-600">也可手动创建，绑定指定 Issue</span>
+                                        <div class="flex items-start gap-2">
+                                            <i class="fas fa-file-alt text-blue-400 mt-0.5 text-xs"></i>
+                                            <div>
+                                                <div class="text-xs font-medium text-gray-700">生成候选规则</div>
+                                                <div class="text-[10px] text-gray-500">每簇一条草稿规则</div>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                            
-                            <!-- 向下箭头 -->
-                            <div class="flex justify-center -mt-3 mb-4">
-                                <div class="w-10 h-10 rounded-full bg-gray-50 border border-gray-200 flex items-center justify-center shadow-sm">
-                                    <i class="fas fa-arrow-down text-gray-400 text-sm"></i>
-                                </div>
-                            </div>
-                            
-                            <!-- 阶段二：智能精化 -->
-                            <div class="mb-6">
-                                <div class="flex items-center gap-2 mb-3">
-                                    <span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-sm">阶段二：智能精化</span>
-                                    <div class="flex-1 h-px bg-gradient-to-r from-indigo-100 to-transparent"></div>
-                                    <span class="text-[10px] text-gray-400">LLM 驱动验证 · 逐条处理候选人</span>
-                                </div>
-                                <div class="grid grid-cols-3 gap-4">
-                                    <!-- 4 智能提炼 -->
-                                    <div class="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
-                                        <div class="flex items-center gap-2 mb-3">
-                                            <div class="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 text-xs font-bold">4</div>
-                                            <div class="font-bold text-sm text-gray-800">智能提炼</div>
-                                        </div>
-                                        <div class="text-xs text-gray-500 leading-relaxed mb-3">调用 LLM 分析源 Issue 样本，自动生成精炼的规则名称、规则描述和审查 Prompt。</div>
-                                        <div class="space-y-1.5 text-[10px]">
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-indigo-400 font-medium w-10 flex-shrink-0">输入</span>
-                                                <span class="text-gray-600">源 Issue 列表（最多取 5 条样本）</span>
-                                            </div>
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-indigo-400 font-medium w-10 flex-shrink-0">模型</span>
-                                                <span class="text-gray-600">配置的主 LLM / 备用 LLM</span>
-                                            </div>
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-indigo-400 font-medium w-10 flex-shrink-0">产出</span>
-                                                <span class="text-gray-600">精炼的 name / description / prompt</span>
-                                            </div>
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-indigo-400 font-medium w-10 flex-shrink-0">状态</span>
-                                                <span class="text-gray-600">草稿 → 可发布（ready）</span>
-                                            </div>
-                                        </div>
+                                <!-- Stage 2 -->
+                                <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                                    <div class="bg-indigo-50 px-4 py-2 border-b border-indigo-100 flex items-center gap-2">
+                                        <span class="w-5 h-5 rounded-full bg-indigo-500 text-white text-[10px] font-bold flex items-center justify-center">2</span>
+                                        <span class="text-xs font-bold text-indigo-700">智能精化</span>
                                     </div>
-                                    <!-- 5 相似检测 -->
-                                    <div class="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
-                                        <div class="flex items-center gap-2 mb-3">
-                                            <div class="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 text-xs font-bold">5</div>
-                                            <div class="font-bold text-sm text-gray-800">相似检测</div>
-                                        </div>
-                                        <div class="text-xs text-gray-500 leading-relaxed mb-3">对比现有规则库，检测候选规则是否与已有规则重复或高度相似，避免重复定义。</div>
-                                        <div class="space-y-1.5 text-[10px]">
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-orange-400 font-medium w-10 flex-shrink-0">比对</span>
-                                                <span class="text-gray-600">候选规则 vs 所有已启用规则</span>
-                                            </div>
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-orange-400 font-medium w-10 flex-shrink-0">算法</span>
-                                                <span class="text-gray-600">Jaccard 关键词相似度（阈值 0.5）</span>
-                                            </div>
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-orange-400 font-medium w-10 flex-shrink-0">去重</span>
-                                                <span class="text-gray-600">Code 冲突时自动重命名</span>
+                                    <div class="p-4 space-y-3">
+                                        <div class="flex items-start gap-2">
+                                            <i class="fas fa-magic text-indigo-400 mt-0.5 text-xs"></i>
+                                            <div>
+                                                <div class="text-xs font-medium text-gray-700">智能提炼</div>
+                                                <div class="text-[10px] text-gray-500">LLM 生成名称/描述/Prompt</div>
                                             </div>
                                         </div>
-                                    </div>
-                                    <!-- 6 模拟测试 -->
-                                    <div class="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
-                                        <div class="flex items-center gap-2 mb-3">
-                                            <div class="w-8 h-8 rounded-full bg-teal-100 flex items-center justify-center text-teal-600 text-xs font-bold">6</div>
-                                            <div class="font-bold text-sm text-gray-800">模拟测试</div>
+                                        <div class="flex items-start gap-2">
+                                            <i class="fas fa-shield-alt text-orange-400 mt-0.5 text-xs"></i>
+                                            <div>
+                                                <div class="text-xs font-medium text-gray-700">相似检测</div>
+                                                <div class="text-[10px] text-gray-500">Embedding + Jaccard 比对去重</div>
+                                            </div>
                                         </div>
-                                        <div class="text-xs text-gray-500 leading-relaxed mb-3">用 LLM 对正例（源 Issue 代码片段）和反例（同类未命中代码）进行判定验证。</div>
-                                        <div class="space-y-1.5 text-[10px]">
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-teal-400 font-medium w-10 flex-shrink-0">正例</span>
-                                                <span class="text-gray-600">源 Issue 的代码片段（应该命中）</span>
-                                            </div>
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-teal-400 font-medium w-10 flex-shrink-0">反例</span>
-                                                <span class="text-gray-600">同维度 Issue 的未命中代码（不应命中）</span>
-                                            </div>
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-teal-400 font-medium w-10 flex-shrink-0">判定</span>
-                                                <span class="text-gray-600">LLM 逐条判定 YES / NO，输出准确率</span>
+                                        <div class="flex items-start gap-2">
+                                            <i class="fas fa-vial text-teal-400 mt-0.5 text-xs"></i>
+                                            <div>
+                                                <div class="text-xs font-medium text-gray-700">模拟测试</div>
+                                                <div class="text-[10px] text-gray-500">正例/反例自动判定验证</div>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                            
-                            <!-- 向下箭头 -->
-                            <div class="flex justify-center -mt-3 mb-4">
-                                <div class="w-10 h-10 rounded-full bg-gray-50 border border-gray-200 flex items-center justify-center shadow-sm">
-                                    <i class="fas fa-arrow-down text-gray-400 text-sm"></i>
-                                </div>
-                            </div>
-                            
-                            <!-- 阶段三：发布与监控 -->
-                            <div>
-                                <div class="flex items-center gap-2 mb-3">
-                                    <span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-green-50 text-green-700 border border-green-100 shadow-sm">阶段三：发布与监控</span>
-                                    <div class="flex-1 h-px bg-gradient-to-r from-green-100 to-transparent"></div>
-                                    <span class="text-[10px] text-gray-400">人工确认 + 自动巡检</span>
-                                </div>
-                                <div class="grid grid-cols-3 gap-4">
-                                    <!-- 7 发布规则 -->
-                                    <div class="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
-                                        <div class="flex items-center gap-2 mb-3">
-                                            <div class="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-600 text-xs font-bold">7</div>
-                                            <div class="font-bold text-sm text-gray-800">发布规则</div>
-                                        </div>
-                                        <div class="text-xs text-gray-500 leading-relaxed mb-3">审核通过的候选规则正式发布到评审规则库，可在各项目中独立配置启用。</div>
-                                        <div class="space-y-1.5 text-[10px]">
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-green-400 font-medium w-10 flex-shrink-0">触发</span>
-                                                <span class="text-gray-600">人工在候选规则面板点击「发布」</span>
-                                            </div>
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-green-400 font-medium w-10 flex-shrink-0">约束</span>
-                                                <span class="text-gray-600">Code 唯一性校验、非重复规则</span>
-                                            </div>
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-green-400 font-medium w-10 flex-shrink-0">产出</span>
-                                                <span class="text-gray-600">ReviewRule 记录 + 项目默认配置</span>
-                                            </div>
-                                        </div>
+                                <!-- Stage 3 -->
+                                <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                                    <div class="bg-green-50 px-4 py-2 border-b border-green-100 flex items-center gap-2">
+                                        <span class="w-5 h-5 rounded-full bg-green-500 text-white text-[10px] font-bold flex items-center justify-center">3</span>
+                                        <span class="text-xs font-bold text-green-700">发布与监控</span>
                                     </div>
-                                    <!-- 8 回溯匹配 -->
-                                    <div class="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
-                                        <div class="flex items-center gap-2 mb-3">
-                                            <div class="w-8 h-8 rounded-full bg-cyan-100 flex items-center justify-center text-cyan-600 text-xs font-bold">8</div>
-                                            <div class="font-bold text-sm text-gray-800">回溯匹配</div>
-                                        </div>
-                                        <div class="text-xs text-gray-500 leading-relaxed mb-3">新规则发布后，自动在历史 Issue 中查找可被命中的记录，补全规则与 Issue 的关联。</div>
-                                        <div class="space-y-1.5 text-[10px]">
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-cyan-400 font-medium w-10 flex-shrink-0">策略</span>
-                                                <span class="text-gray-600">L1 结构过滤 → L2 关键词预匹配 → L3 语义比对</span>
-                                            </div>
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-cyan-400 font-medium w-10 flex-shrink-0">范围</span>
-                                                <span class="text-gray-600">最近 N 天的历史 Issue（可配置）</span>
-                                            </div>
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-cyan-400 font-medium w-10 flex-shrink-0">产出</span>
-                                                <span class="text-gray-600">ReviewIssueRuleMatch 关联记录</span>
+                                    <div class="p-4 space-y-3">
+                                        <div class="flex items-start gap-2">
+                                            <i class="fas fa-rocket text-green-400 mt-0.5 text-xs"></i>
+                                            <div>
+                                                <div class="text-xs font-medium text-gray-700">发布规则</div>
+                                                <div class="text-[10px] text-gray-500">人工审核后正式上线</div>
                                             </div>
                                         </div>
-                                    </div>
-                                    <!-- 9 健康监控 -->
-                                    <div class="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
-                                        <div class="flex items-center gap-2 mb-3">
-                                            <div class="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center text-red-600 text-xs font-bold">9</div>
-                                            <div class="font-bold text-sm text-gray-800">健康监控</div>
+                                        <div class="flex items-start gap-2">
+                                            <i class="fas fa-history text-cyan-400 mt-0.5 text-xs"></i>
+                                            <div>
+                                                <div class="text-xs font-medium text-gray-700">回溯匹配</div>
+                                                <div class="text-[10px] text-gray-500">历史 Issue 自动关联</div>
+                                            </div>
                                         </div>
-                                        <div class="text-xs text-gray-500 leading-relaxed mb-3">定期评估规则的命中、拒绝和同类未命中数据，发现退化或误报过高并自动告警。</div>
-                                        <div class="space-y-1.5 text-[10px]">
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-red-400 font-medium w-10 flex-shrink-0">频率</span>
-                                                <span class="text-gray-600">每 7 天自动执行一次巡检</span>
-                                            </div>
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-red-400 font-medium w-10 flex-shrink-0">指标</span>
-                                                <span class="text-gray-600">接受率、误触发率、同类未命中率</span>
-                                            </div>
-                                            <div class="flex items-start gap-1.5">
-                                                <span class="text-red-400 font-medium w-10 flex-shrink-0">分级</span>
-                                                <span class="text-gray-600">严重告警（红）/ 警告（黄）/ 正常（绿）</span>
+                                        <div class="flex items-start gap-2">
+                                            <i class="fas fa-heartbeat text-red-400 mt-0.5 text-xs"></i>
+                                            <div>
+                                                <div class="text-xs font-medium text-gray-700">健康监控</div>
+                                                <div class="text-[10px] text-gray-500">每 7 天自动巡检告警</div>
                                             </div>
                                         </div>
                                     </div>
@@ -660,113 +578,161 @@
                             </div>
                         </div>
 
-                        <!-- 候选规则状态流转 -->
+                        <!-- Status Flow -->
+                        <div class="bg-white rounded-xl border border-gray-200 p-5">
+                            <h4 class="font-bold text-gray-800 mb-6 flex items-center gap-2">
+                                <i class="fas fa-exchange-alt text-indigo-500"></i>
+                                候选规则状态流转
+                            </h4>
+                            <div class="relative overflow-x-auto pb-4">
+                                <!-- 主流程连接线 -->
+                                <div class="absolute top-[40px] left-[60px] right-[140px] h-1 bg-gradient-to-r from-gray-200 via-indigo-100 to-green-200 rounded-full"></div>
+                                <div class="relative flex items-start justify-between gap-6 min-w-[640px] px-2">
+                                    <!-- 草稿 -->
+                                    <div class="flex flex-col items-center gap-2 min-w-[100px]">
+                                        <div class="relative z-10 w-20 h-20 rounded-full bg-gray-50 border-[3px] border-gray-300 flex items-center justify-center text-gray-500 shadow-sm">
+                                            <i class="fas fa-file text-2xl"></i>
+                                        </div>
+                                        <div class="text-center">
+                                            <div class="text-sm font-bold text-gray-700">草稿</div>
+                                            <div class="text-[10px] text-gray-400 mt-0.5">初始状态</div>
+                                        </div>
+                                    </div>
+                                    <!-- 步骤1 -->
+                                    <div class="flex flex-col items-center gap-2 mt-6 min-w-[100px]">
+                                        <div class="flex items-center justify-center w-8 h-8 rounded-full bg-white border border-indigo-200 shadow-sm">
+                                            <i class="fas fa-chevron-right text-indigo-400 text-xs"></i>
+                                        </div>
+                                        <span class="text-[10px] text-indigo-500 font-medium">智能提炼</span>
+                                    </div>
+                                    <!-- 可发布 -->
+                                    <div class="flex flex-col items-center gap-2 min-w-[100px]">
+                                        <div class="relative z-10 w-20 h-20 rounded-full bg-indigo-50 border-[3px] border-indigo-300 flex items-center justify-center text-indigo-600 shadow-sm">
+                                            <i class="fas fa-check-circle text-2xl"></i>
+                                        </div>
+                                        <div class="text-center">
+                                            <div class="text-sm font-bold text-indigo-700">可发布</div>
+                                            <div class="text-[10px] text-gray-400 mt-0.5">ready</div>
+                                        </div>
+                                    </div>
+                                    <!-- 步骤2 -->
+                                    <div class="flex flex-col items-center gap-2 mt-6 min-w-[100px]">
+                                        <div class="flex items-center justify-center w-8 h-8 rounded-full bg-white border border-green-200 shadow-sm">
+                                            <i class="fas fa-chevron-right text-green-400 text-xs"></i>
+                                        </div>
+                                        <span class="text-[10px] text-green-500 font-medium">人工发布</span>
+                                    </div>
+                                    <!-- 已发布 -->
+                                    <div class="flex flex-col items-center gap-2 min-w-[100px]">
+                                        <div class="relative z-10 w-20 h-20 rounded-full bg-green-50 border-[3px] border-green-300 flex items-center justify-center text-green-600 shadow-sm">
+                                            <i class="fas fa-rocket text-2xl"></i>
+                                        </div>
+                                        <div class="text-center">
+                                            <div class="text-sm font-bold text-green-700">已发布</div>
+                                            <div class="text-[10px] text-gray-400 mt-0.5">正式生效</div>
+                                        </div>
+                                    </div>
+                                    <!-- 分支：已忽略 -->
+                                    <div class="flex flex-col items-center gap-2 min-w-[100px] relative">
+                                        <div class="relative z-10 w-20 h-20 rounded-full bg-gray-50 border-[3px] border-gray-300 border-dashed flex items-center justify-center text-gray-400 shadow-sm">
+                                            <i class="fas fa-ban text-2xl"></i>
+                                        </div>
+                                        <div class="text-center">
+                                            <div class="text-sm font-bold text-gray-500">已忽略</div>
+                                            <div class="text-[10px] text-gray-400 mt-0.5">rejected</div>
+                                        </div>
+                                        <!-- 分支连线（从可发布分支） -->
+                                        <div class="absolute -left-[30px] top-[40px] w-[30px] h-px border-t-2 border-dashed border-gray-300"></div>
+                                        <div class="absolute -left-[30px] top-[40px] w-px h-[20px] border-l-2 border-dashed border-gray-300"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Quick Start -->
                         <div>
-                            <h4 class="font-bold text-gray-800 mb-3 text-base"><i class="fas fa-exchange-alt text-indigo-600 mr-2"></i>候选规则状态流转</h4>
-                            <div class="flex items-center justify-center gap-2 py-3 bg-gray-50 rounded-xl border border-gray-200">
-                                <div class="text-center px-3 py-1.5 bg-white rounded-lg border border-gray-200 shadow-sm">
-                                    <div class="text-[10px] text-gray-400">初始</div>
-                                    <div class="text-xs font-bold text-gray-700">草稿</div>
-                                </div>
-                                <i class="fas fa-arrow-right text-gray-300 text-xs"></i>
-                                <div class="text-center px-3 py-1.5 bg-indigo-50 rounded-lg border border-indigo-200 shadow-sm">
-                                    <div class="text-[10px] text-indigo-400">智能提炼后</div>
-                                    <div class="text-xs font-bold text-indigo-700">可发布</div>
-                                </div>
-                                <i class="fas fa-arrow-right text-gray-300 text-xs"></i>
-                                <div class="text-center px-3 py-1.5 bg-green-50 rounded-lg border border-green-200 shadow-sm">
-                                    <div class="text-[10px] text-green-500">人工发布</div>
-                                    <div class="text-xs font-bold text-green-700">已发布</div>
-                                </div>
-                                <div class="mx-1 text-gray-300">|</div>
-                                <div class="text-center px-3 py-1.5 bg-gray-100 rounded-lg border border-gray-200 shadow-sm">
-                                    <div class="text-[10px] text-gray-400">可忽略</div>
-                                    <div class="text-xs font-bold text-gray-600">已忽略</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- 快速上手指南 -->
-                        <div>
-                            <h4 class="font-bold text-gray-800 mb-4 text-base"><i class="fas fa-tasks text-green-600 mr-2"></i>快速上手指南</h4>
-                            <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4">
-                                <div class="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-md transition-shadow">
-                                    <div class="flex items-center gap-2 mb-3">
-                                        <span class="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold">1</span>
-                                        <div class="font-bold text-sm text-gray-800">执行聚类分析</div>
-                                    </div>
-                                    <div class="text-xs text-gray-500 space-y-2 leading-relaxed">
-                                        <p>进入「流水线」Tab，点击「执行聚类」按钮，设置时间范围（建议 <span class="font-medium text-gray-700">30 天</span>）和最小簇大小（建议 <span class="font-medium text-gray-700">2~3</span>）。</p>
-                                        <p>系统将自动扫描 Issue 池，把相似 Issue 聚成簇，每簇生成一条候选规则。执行完成后点击「查看候选规则」跳转到详细列表。</p>
-                                        <div class="mt-2 p-2 bg-blue-50 rounded-lg text-[10px] text-blue-700">
-                                            <i class="fas fa-lightbulb mr-1"></i>提示：聚类无结果时，尝试降低「最小簇大小」为 1，或扩大时间窗口纳入更多历史数据。
+                            <h4 class="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                                <i class="fas fa-rocket text-green-500"></i>
+                                快速上手
+                            </h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                <div class="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group cursor-pointer" onclick="switchTab('pipeline')">
+                                    <div class="absolute top-0 right-0 w-20 h-20 bg-blue-50 rounded-full -translate-y-1/2 translate-x-1/2 group-hover:scale-150 transition-transform duration-500"></div>
+                                    <div class="relative z-10">
+                                        <div class="flex items-center gap-2 mb-3">
+                                            <span class="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-bold">1</span>
+                                            <span class="font-bold text-sm text-gray-800">执行聚类</span>
+                                        </div>
+                                        <p class="text-xs text-gray-500 leading-relaxed mb-3">进入「流水线」执行自动聚类，从 Issue 池中发现规律并生成候选规则。</p>
+                                        <div class="flex items-center text-xs text-blue-600 font-medium">
+                                            开始执行 <i class="fas fa-arrow-right ml-1"></i>
                                         </div>
                                     </div>
                                 </div>
-                                <div class="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-md transition-shadow">
-                                    <div class="flex items-center gap-2 mb-3">
-                                        <span class="w-6 h-6 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-xs font-bold">2</span>
-                                        <div class="font-bold text-sm text-gray-800">完善候选规则</div>
-                                    </div>
-                                    <div class="text-xs text-gray-500 space-y-2 leading-relaxed">
-                                        <p>进入「候选规则」Tab，点击规则卡片打开编辑面板。使用「智能提炼」自动生成精炼的 Prompt。</p>
-                                        <p>随后使用「相似检测」避免与现有规则重复，再通过「模拟测试」用正例/反例验证规则准确性。测试通过后规则状态变为「可发布」。</p>
-                                        <div class="mt-2 p-2 bg-indigo-50 rounded-lg text-[10px] text-indigo-700">
-                                            <i class="fas fa-lightbulb mr-1"></i>提示：Prompt 质量直接决定规则准确性，建议人工审核 LLM 生成的 Prompt。
+                                <div class="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group cursor-pointer" onclick="switchTab('candidates')">
+                                    <div class="absolute top-0 right-0 w-20 h-20 bg-indigo-50 rounded-full -translate-y-1/2 translate-x-1/2 group-hover:scale-150 transition-transform duration-500"></div>
+                                    <div class="relative z-10">
+                                        <div class="flex items-center gap-2 mb-3">
+                                            <span class="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm font-bold">2</span>
+                                            <span class="font-bold text-sm text-gray-800">完善规则</span>
+                                        </div>
+                                        <p class="text-xs text-gray-500 leading-relaxed mb-3">进入「候选规则」Tab，使用智能提炼生成 Prompt，运行相似检测和模拟测试。</p>
+                                        <div class="flex items-center text-xs text-indigo-600 font-medium">
+                                            查看候选 <i class="fas fa-arrow-right ml-1"></i>
                                         </div>
                                     </div>
                                 </div>
-                                <div class="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-md transition-shadow">
-                                    <div class="flex items-center gap-2 mb-3">
-                                        <span class="w-6 h-6 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-xs font-bold">3</span>
-                                        <div class="font-bold text-sm text-gray-800">发布规则</div>
-                                    </div>
-                                    <div class="text-xs text-gray-500 space-y-2 leading-relaxed">
-                                        <p>确认规则名称、描述、Prompt 准确无误后，点击编辑面板中的「发布规则」按钮。</p>
-                                        <p>查看发布确认弹框，确认后规则进入评审规则库。系统会自动为所有项目创建默认禁用配置，需要管理员在项目设置中手动启用。</p>
-                                        <div class="mt-2 p-2 bg-green-50 rounded-lg text-[10px] text-green-700">
-                                            <i class="fas fa-lightbulb mr-1"></i>提示：发布后规则仍可编辑，但修改会直接影响所有已启用该规则的项目评审结果。
+                                <div class="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group cursor-pointer" onclick="switchTab('candidates')">
+                                    <div class="absolute top-0 right-0 w-20 h-20 bg-green-50 rounded-full -translate-y-1/2 translate-x-1/2 group-hover:scale-150 transition-transform duration-500"></div>
+                                    <div class="relative z-10">
+                                        <div class="flex items-center gap-2 mb-3">
+                                            <span class="w-8 h-8 rounded-lg bg-green-100 text-green-600 flex items-center justify-center text-sm font-bold">3</span>
+                                            <span class="font-bold text-sm text-gray-800">发布上线</span>
+                                        </div>
+                                        <p class="text-xs text-gray-500 leading-relaxed mb-3">确认规则信息准确无误后，点击「发布规则」按钮，规则正式进入评审规则库。</p>
+                                        <div class="flex items-center text-xs text-green-600 font-medium">
+                                            去发布 <i class="fas fa-arrow-right ml-1"></i>
                                         </div>
                                     </div>
                                 </div>
-                                <div class="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-md transition-shadow">
-                                    <div class="flex items-center gap-2 mb-3">
-                                        <span class="w-6 h-6 rounded-full bg-red-100 text-red-600 flex items-center justify-center text-xs font-bold">4</span>
-                                        <div class="font-bold text-sm text-gray-800">监控规则质量</div>
-                                    </div>
-                                    <div class="text-xs text-gray-500 space-y-2 leading-relaxed">
-                                        <p>进入「规则健康度」Tab 查看所有规则状态。关注「严重告警」（红色）和「警告」（黄色）规则。</p>
-                                        <p>根据系统建议优化 Prompt、调整规则参数或停用退化规则。健康监控每 7 天自动执行一次，异常规则会推送告警。</p>
-                                        <div class="mt-2 p-2 bg-red-50 rounded-lg text-[10px] text-red-700">
-                                            <i class="fas fa-lightbulb mr-1"></i>提示：误触发率过高（&gt;50%）的规则建议立即停用并重新提炼 Prompt。
+                                <div class="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group cursor-pointer" onclick="switchTab('health')">
+                                    <div class="absolute top-0 right-0 w-20 h-20 bg-red-50 rounded-full -translate-y-1/2 translate-x-1/2 group-hover:scale-150 transition-transform duration-500"></div>
+                                    <div class="relative z-10">
+                                        <div class="flex items-center gap-2 mb-3">
+                                            <span class="w-8 h-8 rounded-lg bg-red-100 text-red-600 flex items-center justify-center text-sm font-bold">4</span>
+                                            <span class="font-bold text-sm text-gray-800">监控质量</span>
+                                        </div>
+                                        <p class="text-xs text-gray-500 leading-relaxed mb-3">进入「规则健康度」Tab，定期巡检规则命中率和误触发率，及时优化退化规则。</p>
+                                        <div class="flex items-center text-xs text-red-600 font-medium">
+                                            查看健康度 <i class="fas fa-arrow-right ml-1"></i>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- 注意事项 -->
-                        <div class="bg-amber-50/70 border border-amber-200 rounded-xl p-5">
+                        <!-- Tips -->
+                        <div class="bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200 rounded-xl p-5">
                             <div class="flex items-center gap-2 mb-3">
-                                <i class="fas fa-exclamation-triangle text-amber-500"></i>
-                                <span class="font-bold text-sm text-amber-800">注意事项</span>
+                                <i class="fas fa-lightbulb text-amber-500 text-lg"></i>
+                                <span class="font-bold text-sm text-amber-800">使用贴士</span>
                             </div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 text-xs text-amber-800/80">
-                                <div class="flex items-start gap-2">
-                                    <span class="w-5 h-5 rounded bg-amber-100 text-amber-600 flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5">!</span>
-                                    <div><strong>聚类无结果？</strong> 尝试降低「最小簇大小」为 1，或扩大「时间窗口」纳入更多历史 Issue。</div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div class="flex items-start gap-2 bg-white/60 rounded-lg p-3">
+                                    <span class="w-6 h-6 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center text-[10px] font-bold flex-shrink-0">1</span>
+                                    <div class="text-xs text-gray-700"><span class="font-medium">首次使用？</span> 建议先执行一次聚类分析（时间范围 30 天），观察系统能发现多少潜在规则。</div>
                                 </div>
-                                <div class="flex items-start gap-2">
-                                    <span class="w-5 h-5 rounded bg-amber-100 text-amber-600 flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5">!</span>
-                                    <div><strong>Embedding 降级？</strong> 未配置 Embedding 模型时，系统退化为纯关键词匹配，语义聚类不可用。</div>
+                                <div class="flex items-start gap-2 bg-white/60 rounded-lg p-3">
+                                    <span class="w-6 h-6 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center text-[10px] font-bold flex-shrink-0">2</span>
+                                    <div class="text-xs text-gray-700"><span class="font-medium">聚类无结果？</span> 尝试降低「最小簇大小」为 1，或扩大「时间窗口」纳入更多历史 Issue。</div>
                                 </div>
-                                <div class="flex items-start gap-2">
-                                    <span class="w-5 h-5 rounded bg-amber-100 text-amber-600 flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5">!</span>
-                                    <div><strong>规则发布后仍可编辑</strong>，但建议先在候选规则阶段充分测试，避免误报影响评审质量。</div>
+                                <div class="flex items-start gap-2 bg-white/60 rounded-lg p-3">
+                                    <span class="w-6 h-6 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center text-[10px] font-bold flex-shrink-0">3</span>
+                                    <div class="text-xs text-gray-700"><span class="font-medium">Prompt 质量是关键</span>：人工审核 LLM 生成的 Prompt，确保规则逻辑准确，这是规则准确率的根本保障。</div>
                                 </div>
-                                <div class="flex items-start gap-2">
-                                    <span class="w-5 h-5 rounded bg-amber-100 text-amber-600 flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5">!</span>
-                                    <div><strong>健康监控每周运行一次</strong>，告警规则会自动标红/标黄，请及时关注和处理。</div>
+                                <div class="flex items-start gap-2 bg-white/60 rounded-lg p-3">
+                                    <span class="w-6 h-6 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center text-[10px] font-bold flex-shrink-0">4</span>
+                                    <div class="text-xs text-gray-700"><span class="font-medium">误触发率过高？</span> 立即停用该规则并重新提炼 Prompt，避免影响项目评审质量。</div>
                                 </div>
                             </div>
                         </div>
@@ -870,33 +836,85 @@
     </div>
 </div>
 
-<!-- 相似规则图谱 Modal -->
+<!-- 创建候选规则 Modal -->
+<div id="createCandidateModal" class="modal fixed inset-0 z-50 items-center justify-center bg-black/50 hidden">
+    <div class="bg-white rounded-xl w-[700px] max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+        <div class="flex items-center justify-between px-5 py-3 border-b bg-gray-50">
+            <h3 class="font-bold text-gray-800"><i class="fas fa-plus-circle text-green-600 mr-2"></i>创建候选规则</h3>
+            <button onclick="closeCreateCandidateModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="p-4 border-b bg-gray-50/50">
+            <p class="text-xs text-gray-500 mb-3">选择一条或多条 Issue，系统将为选中的 Issue 生成候选规则。</p>
+            <div class="flex items-center gap-2">
+                <input type="text" id="createCandIssueKeyword" placeholder="搜索 Issue 标题或描述..." class="px-3 py-2 border rounded-lg text-sm flex-1" onkeydown="if(event.key==='Enter')loadIssuesForCreateCandidate()">
+                <select id="createCandIssueSeverity" class="px-3 py-2 border rounded-lg text-sm">
+                    <option value="">全部级别</option>
+                    <option value="critical">严重</option>
+                    <option value="high">高危</option>
+                    <option value="medium">中危</option>
+                    <option value="low">低危</option>
+                    <option value="info">提示</option>
+                </select>
+                <button onclick="loadIssuesForCreateCandidate()" class="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
+                    <i class="fas fa-search mr-1"></i>查询
+                </button>
+            </div>
+        </div>
+        <div class="flex-1 overflow-auto p-4">
+            <table class="w-full text-sm">
+                <thead class="bg-gray-50 sticky top-0">
+                    <tr>
+                        <th class="px-3 py-2 text-left w-10">
+                            <input type="checkbox" id="createCandSelectAll" onchange="toggleCreateCandSelectAll()">
+                        </th>
+                        <th class="px-3 py-2 text-left">Issue 信息</th>
+                        <th class="px-3 py-2 text-left w-24">维度</th>
+                        <th class="px-3 py-2 text-left w-20">级别</th>
+                        <th class="px-3 py-2 text-left w-24">时间</th>
+                    </tr>
+                </thead>
+                <tbody id="createCandIssueList"></tbody>
+            </table>
+            <div id="createCandEmptyState" class="hidden text-center py-8">
+                <i class="fas fa-inbox text-gray-300 text-3xl mb-2"></i>
+                <div class="text-sm text-gray-400">暂无匹配 Issue</div>
+            </div>
+        </div>
+        <div class="flex items-center justify-between px-5 py-3 border-t bg-gray-50">
+            <span class="text-sm text-gray-500">已选 <b id="createCandSelectedCount">0</b> 条</span>
+            <div class="flex items-center gap-3">
+                <div class="flex gap-1" id="createCandPagination"></div>
+                <button onclick="submitCreateCandidate()" id="createCandSubmitBtn" class="px-5 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                    <i class="fas fa-plus mr-1"></i>创建候选规则
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 相似规则向量投影 Modal -->
 <div id="similarGraphModal" class="modal fixed inset-0 z-50 items-center justify-center bg-black/60 hidden">
     <div class="bg-white rounded-xl w-[90vw] h-[85vh] flex flex-col shadow-2xl overflow-hidden">
         <div class="flex items-center justify-between px-5 py-3 border-b bg-gray-50">
             <div class="flex items-center gap-3">
-                <h3 class="font-bold text-gray-800"><i class="fas fa-project-diagram text-purple-600 mr-2"></i>相似规则图谱</h3>
-                <div class="flex bg-white rounded-lg border p-0.5">
-                    <button id="tab-graph-cyto" onclick="switchGraphTab('cyto')" class="px-3 py-1 text-xs rounded-md bg-purple-100 text-purple-700 font-medium">知识图谱</button>
-                    <button id="tab-graph-proj" onclick="switchGraphTab('proj')" class="px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-50">向量投影</button>
-                </div>
+                <h3 class="font-bold text-gray-800"><i class="fas fa-cube text-purple-600 mr-2"></i>相似规则向量投影</h3>
             </div>
             <button onclick="closeSimilarGraphModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
         </div>
         <div class="flex-1 relative overflow-hidden">
-            <div id="cyGraphContainer" class="absolute inset-0"></div>
-            <div id="projectionEchart" class="absolute inset-0 hidden"></div>
-            <div id="graphTooltip" class="fixed hidden z-20 bg-white/95 backdrop-blur border border-gray-200 rounded-xl shadow-2xl p-4 pointer-events-none transition-opacity duration-150" style="max-width: 340px; left:0; top:0;"></div>
+            <div id="cyGraphContainer" class="absolute inset-0 hidden"></div>
+            <div id="projectionEchart" class="absolute inset-0"></div>
+            <div id="graphTooltip" class="fixed hidden z-20 bg-white/95 backdrop-blur border border-gray-200 rounded-xl shadow-2xl p-5 pointer-events-none transition-opacity duration-150" style="max-width: 420px; left:0; top:0;"></div>
             <div id="graphLoading" class="absolute inset-0 flex items-center justify-center bg-white z-10">
                 <div class="text-center">
                     <i class="fas fa-spinner fa-spin text-purple-500 text-2xl mb-2"></i>
-                    <div class="text-sm text-gray-500">加载图谱数据...</div>
+                    <div class="text-base text-gray-500">加载向量投影数据...</div>
                 </div>
             </div>
         </div>
-        <div class="px-5 py-2 border-t bg-gray-50 text-[11px] text-gray-500 flex items-center justify-between">
-            <span id="graphLegend">中心节点 = 当前候选规则 · 连线粗细 = 相似度</span>
-            <span class="text-gray-400">鼠标悬停节点查看详情 · 拖拽可调整布局</span>
+        <div class="px-5 py-3 border-t bg-gray-50 text-sm text-gray-600 flex items-center justify-between">
+            <span id="graphLegend" class="font-medium">三维向量空间投影 · 距离越近语义越相似</span>
+            <span class="text-gray-400">鼠标悬停节点查看详情 · 拖拽旋转视角</span>
         </div>
     </div>
 </div>
@@ -937,7 +955,9 @@ function switchTab(tab) {
     document.querySelector(`.tab-btn[data-tab="${tab}"]`).classList.add('active');
     document.getElementById(`tab-${tab}`).classList.remove('hidden');
     if (tab === 'pipeline') {
-        if (pipelineJobId && pipelineSSE) {
+        if (pipelineJobId) {
+            // Always reconnect SSE if disconnected
+            if (!pipelineSSE) connectPipelineSSE(pipelineJobId);
             loadPipeline(pipelineJobId);
         } else {
             loadPipeline();
@@ -1062,6 +1082,9 @@ async function batchCreateCandidate() {
 }
 
 // ====== Candidates ======
+function checkSimilarFailed(similarPassed) { return similarPassed === false; }
+function checkSandboxFailed(tr) { if (!tr || tr === '{}') return false; try { const obj = JSON.parse(tr); return (obj.accuracy || 1) < 0.5; } catch(e) { return false; } }
+
 async function loadCandidates(page = 1) {
     candPage = page;
     const params = new URLSearchParams();
@@ -1101,6 +1124,10 @@ async function loadCandidates(page = 1) {
                         <span class="text-xs text-gray-400">#${c.id}</span>
                     </div>
                     <p class="text-xs text-gray-600 mt-2 line-clamp-2 cursor-pointer" onclick="showCandidate(${c.id})">${escapeHtml(c.description || '暂无说明')}</p>
+                        <div class="flex items-center gap-2 mt-2 flex-wrap">
+                            ${c.similar_passed === false ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-orange-50 text-orange-600 border border-orange-100">相似检测未通过</span>' : ''}
+                            ${checkSandboxFailed(c.test_results) ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-red-50 text-red-600 border border-red-100">模拟测试未通过</span>' : ''}
+                        </div>
                     <div class="flex items-center justify-between mt-3 pt-2 border-t border-gray-100">
                         <div class="flex items-center gap-3 text-xs text-gray-500">
                             <span><i class="fas fa-file-alt mr-1"></i>${c.source_count || 0} Issue</span>
@@ -1108,7 +1135,7 @@ async function loadCandidates(page = 1) {
                         </div>
                         <div class="flex items-center gap-2">
                             <button onclick="event.stopPropagation(); openSimilarGraphModal(${c.id})" class="text-xs text-purple-600 hover:text-purple-800 px-2 py-1 rounded hover:bg-purple-50">
-                                <i class="fas fa-project-diagram mr-1"></i>图谱
+                                <i class="fas fa-cube mr-1"></i>向量投影
                             </button>
                             <button onclick="event.stopPropagation(); showCandidate(${c.id})" class="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50">
                                 <i class="fas fa-eye mr-1"></i>查看
@@ -1247,7 +1274,7 @@ async function showCandidate(id) {
                 <div class="flex gap-2 pt-2 border-t">
                     <button onclick="saveCandidate(${c.id})" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">保存</button>
                     ${c.status !== 'published' ? `<button onclick="publishCandidate(${c.id})" class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">发布规则</button>` : ''}
-                    <button onclick="openSimilarGraphModal(${c.id})" class="px-4 py-2 border border-purple-300 rounded-lg text-sm hover:bg-purple-50 text-purple-600" title="查看Top5相似规则知识图谱"><i class="fas fa-project-diagram mr-1"></i>相似图谱</button>
+                    <button onclick="openSimilarGraphModal(${c.id})" class="px-4 py-2 border border-purple-300 rounded-lg text-sm hover:bg-purple-50 text-purple-600" title="查看Top5相似规则向量投影"><i class="fas fa-cube mr-1"></i>向量投影</button>
                     <button onclick="showCandidateBloodline(${c.id})" class="px-4 py-2 border border-purple-300 rounded-lg text-sm hover:bg-purple-50 text-purple-600" title="查看完整上下游血缘关系"><i class="fas fa-project-diagram mr-1"></i>血缘</button>
                     <button onclick="deleteCandidate(${c.id})" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 text-red-600">忽略</button>
                 </div>
@@ -1365,6 +1392,164 @@ function closePublishModal() {
     const modal = document.getElementById('publishModal');
     modal.classList.add('hidden');
     modal.classList.remove('active');
+}
+
+// ========== 创建候选规则 Modal ==========
+let createCandSelectedIds = new Set();
+let createCandCurrentPage = 1;
+let createCandTotalPages = 1;
+
+function openCreateCandidateModal() {
+    document.getElementById('createCandidateModal').classList.remove('hidden');
+    document.getElementById('createCandidateModal').classList.add('active');
+    createCandSelectedIds.clear();
+    createCandCurrentPage = 1;
+    document.getElementById('createCandIssueKeyword').value = '';
+    document.getElementById('createCandIssueSeverity').value = '';
+    loadIssuesForCreateCandidate();
+}
+
+function closeCreateCandidateModal() {
+    const modal = document.getElementById('createCandidateModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('active');
+    createCandSelectedIds.clear();
+}
+
+async function loadIssuesForCreateCandidate(page = 1) {
+    createCandCurrentPage = page;
+    const keyword = document.getElementById('createCandIssueKeyword').value.trim();
+    const severity = document.getElementById('createCandIssueSeverity').value;
+
+    try {
+        const params = new URLSearchParams();
+        params.set('page', page);
+        params.set('page_size', 10);
+        params.set('only_unmatched', 'true');
+        if (keyword) params.set('keyword', keyword);
+        if (severity) params.set('severity', severity);
+
+        const res = await apiFetch(API_BASE + '/incubator/issues?' + params.toString());
+        const data = await res.json();
+
+        if (data.code !== 0) {
+            showToast(data.error || '加载 Issue 失败', 'error');
+            return;
+        }
+
+        const tbody = document.getElementById('createCandIssueList');
+        const issues = data.data.items || [];
+
+        if (issues.length === 0) {
+            tbody.innerHTML = '';
+            document.getElementById('createCandEmptyState').classList.remove('hidden');
+        } else {
+            document.getElementById('createCandEmptyState').classList.add('hidden');
+            tbody.innerHTML = issues.map(issue => {
+                const checked = createCandSelectedIds.has(issue.id) ? 'checked' : '';
+                const sevClass = {
+                    'critical': 'bg-red-50 text-red-700 border-red-200',
+                    'high': 'bg-orange-50 text-orange-700 border-orange-200',
+                    'medium': 'bg-yellow-50 text-yellow-700 border-yellow-200',
+                    'low': 'bg-blue-50 text-blue-700 border-blue-200',
+                    'info': 'bg-gray-50 text-gray-700 border-gray-200'
+                }[issue.severity] || 'bg-gray-50 text-gray-700 border-gray-200';
+                const sevLabel = { 'critical': '严重', 'high': '高危', 'medium': '中危', 'low': '低危', 'info': '提示' }[issue.severity] || issue.severity;
+                return `<tr class="border-b hover:bg-gray-50 transition-colors">
+                    <td class="px-3 py-2">
+                        <input type="checkbox" value="${issue.id}" ${checked} onchange="toggleCreateCandIssue(this)">
+                    </td>
+                    <td class="px-3 py-2">
+                        <div class="font-medium text-gray-800 text-xs">${issue.title || '无标题'}</div>
+                        <div class="text-[10px] text-gray-500 mt-0.5 line-clamp-1">${issue.description || ''}</div>
+                    </td>
+                    <td class="px-3 py-2">
+                        <span class="inline-block px-2 py-0.5 text-[10px] rounded border bg-gray-50 text-gray-600">${issue.dimension || '-'}</span>
+                    </td>
+                    <td class="px-3 py-2">
+                        <span class="inline-block px-2 py-0.5 text-[10px] rounded border ${sevClass}">${sevLabel}</span>
+                    </td>
+                    <td class="px-3 py-2 text-[10px] text-gray-500">${issue.created_at ? issue.created_at.slice(0, 10) : '-'}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        // 更新分页
+        createCandTotalPages = data.data.total_pages || 1;
+        renderCreateCandPagination();
+        updateCreateCandSelectionUI();
+    } catch (e) {
+        showToast('加载 Issue 失败: ' + e.message, 'error');
+    }
+}
+
+function toggleCreateCandIssue(cb) {
+    const id = parseInt(cb.value);
+    if (cb.checked) createCandSelectedIds.add(id);
+    else createCandSelectedIds.delete(id);
+    updateCreateCandSelectionUI();
+}
+
+function toggleCreateCandSelectAll() {
+    const all = document.getElementById('createCandSelectAll').checked;
+    document.querySelectorAll('#createCandIssueList input[type="checkbox"]').forEach(cb => {
+        cb.checked = all;
+        const id = parseInt(cb.value);
+        if (all) createCandSelectedIds.add(id);
+        else createCandSelectedIds.delete(id);
+    });
+    updateCreateCandSelectionUI();
+}
+
+function updateCreateCandSelectionUI() {
+    document.getElementById('createCandSelectedCount').textContent = createCandSelectedIds.size;
+    document.getElementById('createCandSubmitBtn').disabled = createCandSelectedIds.size === 0;
+}
+
+function renderCreateCandPagination() {
+    const container = document.getElementById('createCandPagination');
+    if (createCandTotalPages <= 1) {
+        container.innerHTML = '';
+        return;
+    }
+    let html = '';
+    if (createCandCurrentPage > 1) {
+        html += `<button onclick="loadIssuesForCreateCandidate(${createCandCurrentPage - 1})" class="px-2 py-1 border rounded text-xs hover:bg-gray-50"><i class="fas fa-chevron-left"></i></button>`;
+    }
+    html += `<span class="px-2 py-1 text-xs text-gray-500">${createCandCurrentPage} / ${createCandTotalPages}</span>`;
+    if (createCandCurrentPage < createCandTotalPages) {
+        html += `<button onclick="loadIssuesForCreateCandidate(${createCandCurrentPage + 1})" class="px-2 py-1 border rounded text-xs hover:bg-gray-50"><i class="fas fa-chevron-right"></i></button>`;
+    }
+    container.innerHTML = html;
+}
+
+async function submitCreateCandidate() {
+    if (createCandSelectedIds.size === 0) {
+        showToast('请至少选择一条 Issue', 'error');
+        return;
+    }
+    const btn = document.getElementById('createCandSubmitBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>创建中...';
+    try {
+        const res = await apiFetch(API_BASE + '/incubator/candidates/batch', {
+            method: 'POST',
+            body: JSON.stringify({ source_issue_ids: Array.from(createCandSelectedIds) })
+        });
+        const data = await res.json();
+        if (data.code === 0) {
+            showToast(`成功创建 ${data.data?.length || createCandSelectedIds.size} 条候选规则`);
+            closeCreateCandidateModal();
+            loadCandidates();
+        } else {
+            showToast(data.error || '创建失败', 'error');
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-plus mr-1"></i>创建候选规则';
+    }
 }
 
 async function doPublishCandidate(id) {
@@ -1899,9 +2084,86 @@ async function loadConfig() {
         document.getElementById('cfgTimeWindow').value = cfg.cluster_time_window_days || 30;
         document.getElementById('cfgMinGroupSize').value = cfg.cluster_min_group_size || 3;
         document.getElementById('cfgMaxGroups').value = cfg.cluster_max_groups_per_run || 20;
+        document.getElementById('cfgSimilarityThreshold').value = (cfg.similarity_pass_threshold > 0 && cfg.similarity_pass_threshold <= 1) ? cfg.similarity_pass_threshold : 0.5;
         document.getElementById('cfgRetroEnabled').checked = cfg.retro_match_enabled !== false;
         document.getElementById('cfgRetroDays').value = cfg.retro_match_max_days_lookback || 30;
+
+        // 加载向量状态，根据是否配置模型决定如何展示
+        const hasModel = !!cfg.embedding_model_id;
+        try {
+            const vRes = await apiFetch(API_BASE + '/incubator/vectorization-status');
+            const vData = await vRes.json();
+            updateVectorizeUI(hasModel, vData.data || {});
+        } catch (_e) {
+            updateVectorizeUI(hasModel, {});
+        }
     } catch (e) { console.error(e); }
+}
+
+// 根据向量状态刷新配置页的提示区域
+// hasModel: 是否已选择 Embedding 模型
+function updateVectorizeUI(hasModel, st) {
+    const panel = document.getElementById('vectorizePanel');
+    const btn = document.getElementById('vectorizeBtn');
+    const progressBox = document.getElementById('vectorizeProgressBox');
+    const progressText = document.getElementById('vectorizeProgressText');
+    const progressBar = document.getElementById('vectorizeProgressBar');
+    const zone = document.getElementById('vectorizeZone');
+
+    // 未配置模型 → 隐藏整个提示面板
+    if (!hasModel) {
+        panel.classList.add('hidden');
+        return;
+    }
+
+    panel.classList.remove('hidden');
+
+    if (st.running) {
+        // 正在执行
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>向量化中...';
+        progressBox.classList.remove('hidden');
+        progressText.textContent = (st.done || 0) + ' / ' + (st.total || 0);
+        const pct = st.total > 0 ? Math.round((st.done / st.total) * 100) : 0;
+        progressBar.style.width = pct + '%';
+        zone.style.display = 'flex';
+        return;
+    }
+
+    if (st.total > 0 && st.done >= st.total) {
+        // 全部完成：展示已完成数量/总数
+        progressBox.classList.remove('hidden');
+        progressText.textContent = `${st.done} / ${st.total}`;
+        progressBar.style.width = '100%';
+        progressBar.className = 'h-full bg-green-500 rounded-full transition-all duration-300';
+        zone.style.display = 'none';
+        return;
+    }
+
+    if (st.total > 0) {
+        // 部分完成（之前运行过但没跑完，或用户手动刷新）
+        progressBox.classList.remove('hidden');
+        progressText.textContent = `${st.done || 0} / ${st.total}`;
+        const pct = st.total > 0 ? Math.round(((st.done || 0) / st.total) * 100) : 0;
+        progressBar.style.width = pct + '%';
+        progressBar.className = 'h-full bg-amber-500 rounded-full transition-all duration-300';
+    } else {
+        // 从未运行过
+        progressBox.classList.add('hidden');
+    }
+
+    // 默认状态：等待触发
+    zone.style.display = 'flex';
+    zone.className = 'mt-3 flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg';
+    zone.innerHTML = `
+        <i class="fas fa-info-circle text-amber-500"></i>
+        <div class="flex-1">
+            <div class="text-xs text-amber-800 font-medium">首次配置 Embedding 模型后，需要触发向量化操作</div>
+            <div class="text-[10px] text-amber-600">系统将扫描所有已有规则并生成向量坐标，用于后续相似度检测。</div>
+        </div>
+        <button id="vectorizeBtn" onclick="vectorizeExistingRules()" class="px-3 py-1.5 bg-amber-600 text-white rounded text-xs hover:bg-amber-700 whitespace-nowrap">
+            <i class="fas fa-play mr-1"></i>向量化已有规则
+        </button>`;
 }
 
 async function saveConfig() {
@@ -1910,6 +2172,7 @@ async function saveConfig() {
         cluster_time_window_days: parseInt(document.getElementById('cfgTimeWindow').value),
         cluster_min_group_size: parseInt(document.getElementById('cfgMinGroupSize').value),
         cluster_max_groups_per_run: parseInt(document.getElementById('cfgMaxGroups').value),
+        similarity_pass_threshold: parseFloat(document.getElementById('cfgSimilarityThreshold').value),
         retro_match_enabled: document.getElementById('cfgRetroEnabled').checked,
         retro_match_max_days_lookback: parseInt(document.getElementById('cfgRetroDays').value),
     };
@@ -1923,15 +2186,18 @@ async function saveConfig() {
 async function testEmbedding() {
     const result = document.getElementById('embeddingTestResult');
     const modelId = parseInt(document.getElementById('cfgEmbeddingModel').value) || 0;
+    console.log('[testEmbedding] selected modelId =', modelId, 'raw value =', document.getElementById('cfgEmbeddingModel').value);
     if (!modelId) {
         result.innerHTML = '<span class="text-red-600">请先选择一个Embedding模型</span>';
         return;
     }
     result.innerHTML = '<span class="text-gray-500">测试中...</span>';
+    const bodyStr = JSON.stringify({ model_id: modelId });
+    console.log('[testEmbedding] request body =', bodyStr);
     try {
         const res = await apiFetch(API_BASE + '/incubator/config/validate-embedding', {
             method: 'POST',
-            body: JSON.stringify({ model_id: modelId })
+            body: bodyStr
         });
         const data = await res.json();
         const d = data.data || {};
@@ -1941,6 +2207,51 @@ async function testEmbedding() {
             result.innerHTML = `<span class="text-red-600"><i class="fas fa-times-circle mr-1"></i>${d.error || '连接失败'}</span>`;
         }
     } catch (e) { result.innerHTML = `<span class="text-red-600">测试异常: ${e.message}</span>`; }
+}
+
+async function vectorizeExistingRules() {
+    const btn = document.getElementById('vectorizeBtn');
+    const progressBox = document.getElementById('vectorizeProgressBox');
+    const progressText = document.getElementById('vectorizeProgressText');
+    const progressBar = document.getElementById('vectorizeProgressBar');
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>向量化中...';
+    progressBox.classList.remove('hidden');
+
+    // Start polling immediately so user sees current totals as soon as scanning begins
+    const pollInterval = setInterval(async () => {
+        try {
+            const res = await apiFetch(API_BASE + '/incubator/vectorization-status');
+            const payload = await res.json();
+            const st = payload.data || {};
+            progressText.textContent = `${st.done || 0} / ${st.total || 0}`;
+            const pct = st.total > 0 ? Math.round((st.done / st.total) * 100) : 0;
+            progressBar.style.width = pct + '%';
+            if (!st.running && (st.done >= st.total)) {
+                clearInterval(pollInterval);
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-check mr-1"></i>向量化完成';
+                showToast('向量化任务已完成');
+            }
+        } catch (e) { /* ignore poll errors */ }
+    }, 2000);
+
+    try {
+        const res = await apiFetch(API_BASE + '/incubator/vectorize-rules', { method: 'POST' });
+        const data = await res.json();
+        if (data.code !== 0) {
+            showToast(data.error || '启动失败', 'error');
+            clearInterval(pollInterval);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-play mr-1"></i>向量化已有规则';
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+        clearInterval(pollInterval);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-play mr-1"></i>向量化已有规则';
+    }
 }
 
 // ====== Utilities ======
@@ -2115,7 +2426,7 @@ function connectPipelineSSE(jobId) {
 async function runPipeline() {
     const btn = document.getElementById('pipelineRunBtn');
     btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>启动中...';
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>运行中...';
     // Close any existing SSE
     if (pipelineSSE) { pipelineSSE.close(); pipelineSSE = null; }
     try {
@@ -2242,27 +2553,59 @@ function renderPipeline(steps) {
         const theme = nodeThemes[step.step_id] || nodeThemes.issue_pool;
         const st = statusConfig[step.status] || statusConfig.idle;
         const stepIcon = stepIcons[step.step_id] || 'fa-circle';
-        const statsEntries = Object.entries(step.stats || {}).filter(([k]) => k !== 'current' && k !== 'total');
-        const stats = statsEntries.slice(0, 2).map(([k, v]) => {
-            const labels = { total: '总数', new_today: '新增', draft: '草稿', ready: '就绪', published: '已发布', rejected: '忽略', total_published: '已发布', total_retro_matched: '回溯', candidates_generated: '生成', total_runs: '测试' };
-            return `<div class="text-center"><div class="text-lg font-bold text-gray-800">${v}</div><div class="text-[10px] text-gray-500">${labels[k] || k}</div></div>`;
-        }).join('');
+
+        // Determine if this step should show current/total ratio format
+        const cur = step.stats?.current;
+        const checked = step.stats?.checked;
+        const passed = step.stats?.passed;
+        const tot = step.stats?.total;
+        const hasRatio = cur !== undefined && tot !== undefined && tot > 0;
+        const hasCheckedPassed = checked !== undefined && passed !== undefined && tot !== undefined && tot > 0;
+        const isRatioStep = ['refine', 'similar_check', 'sandbox_test'].includes(step.step_id);
         const isRunning = step.status === 'running';
-        const hasProgress = isRunning && step.stats && step.stats.total > 0;
-        const progressPercent = hasProgress ? Math.round((step.stats.current / step.stats.total) * 100) : 0;
+
+        let stats = '';
+        if (isRatioStep && hasCheckedPassed && !isRunning) {
+            // Checked / Passed / Total display for non-running similar_check etc.
+            stats = `<div class="flex flex-col w-full gap-1">
+                <div class="flex items-baseline gap-1">
+                    <span class="text-sm font-bold text-gray-800">${checked}</span>
+                    <span class="text-[10px] text-gray-400">检测</span>
+                    <span class="text-sm font-bold text-gray-800 ml-2">${passed}</span>
+                    <span class="text-[10px] text-gray-400">通过</span>
+                </div>
+            </div>`;
+        } else if (isRatioStep && hasRatio) {
+            // Compact ratio display: "5 / 11" with micro circular progress
+            const pct = Math.round((cur / tot) * 100);
+            stats = `<div class="flex items-center gap-2 w-full">
+                <div class="flex-1">
+                    <div class="flex items-baseline gap-1">
+                        <span class="text-lg font-bold text-gray-800">${cur}</span>
+                        <span class="text-xs text-gray-400">/ ${tot}</span>
+                    </div>
+                </div>
+                <div class="w-12 h-10 relative">
+                    <svg viewBox="0 0 36 36" class="w-full h-full rotate-[-90deg]">
+                        <circle cx="18" cy="18" r="14" fill="none" stroke="#f3f4f6" stroke-width="4"/>
+                        <circle cx="18" cy="18" r="14" fill="none" stroke="${theme.brand}" stroke-width="4"
+                            stroke-dasharray="${pct * 0.88}, 88" stroke-linecap="round"/>
+                    </svg>
+                    <div class="absolute inset-0 flex items-center justify-center">
+                        <span class="text-[9px] font-bold text-gray-600">${pct}%</span>
+                    </div>
+                </div>
+            </div>`;
+        } else {
+            const normalEntries = Object.entries(step.stats || {}).filter(([k]) => !['current', 'total', 'checked', 'passed'].includes(k));
+            stats = normalEntries.slice(0, 2).map(([k, v]) => {
+                const labels = { total: '总数', new_today: '新增', draft: '草稿', ready: '可发布', rejected: '忽略', candidates_generated: '生成' };
+                return `<div class="text-center"><div class="text-lg font-bold text-gray-800">${v}</div><div class="text-[10px] text-gray-500">${labels[k] || k}</div></div>`;
+            }).join('');
+        }
+
         const headerIcon = isRunning ? `<i class="fas fa-spinner fa-spin text-xs"></i>` : `<i class="fas ${stepIcon} text-xs"></i>`;
         const runningTag = isRunning ? `<span class="text-[10px] font-medium text-white/90 animate-pulse whitespace-nowrap">执行中…</span>` : '';
-
-        const progressHTML = hasProgress ? `
-            <div class="mt-1.5">
-                <div class="flex items-center justify-between text-[10px] text-gray-500 mb-0.5">
-                    <span>处理进度</span>
-                    <span class="font-mono font-bold text-purple-700">${step.stats.current} / ${step.stats.total}</span>
-                </div>
-                <div class="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div class="h-full bg-gradient-to-r from-violet-400 to-purple-500 rounded-full transition-all duration-300" style="width:${progressPercent}%"></div>
-                </div>
-            </div>` : '';
 
         html += `
         <div class="pipeline-node ${isRunning ? 'node-running' : ''}" data-step-id="${step.step_id}" data-idx="${idx}"
@@ -2279,13 +2622,12 @@ function renderPipeline(steps) {
                     <span class="w-1.5 h-1.5 rounded-full ${st.dot} ${st.pulse}"></span>
                 </div>
                 <!-- Body -->
-                <div class="p-2" onclick="openPipelinePanel('${step.step_id}')">
-                    <div class="flex items-center justify-between mb-1.5">
-                        <span class="text-[10px] px-1 py-0.5 rounded bg-gray-100 text-gray-600 border">${st.label}</span>
+                <div class="px-3 py-2" onclick="openPipelinePanel('${step.step_id}')">
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="text-[10px] px-1.5 py-0.5 rounded bg-white/70 text-gray-600 border border-gray-100">${st.label}</span>
                         <span class="text-[10px] text-gray-400">${theme.label}</span>
                     </div>
-                    <div class="flex items-center justify-around gap-1 min-h-[44px] ${hasProgress ? 'items-center' : ''}">${stats}</div>
-                    ${progressHTML}
+                    <div class="flex items-center justify-around gap-1 min-h-[40px]">${stats}</div>
                 </div>
             </div>
         </div>`;
@@ -2558,13 +2900,13 @@ function openPipelinePanel(stepId) {
         html += `</div></div>`;
     }
 
-    // Stats section
-    if (step.stats && Object.keys(step.stats).length > 0) {
+    // Stats section (skip for refine / similar_check / sandbox_test)
+    if (step.stats && Object.keys(step.stats).length > 0 && !['refine', 'similar_check', 'sandbox_test'].includes(stepId)) {
         html += `<div class="border rounded-lg overflow-hidden">`;
         html += `<div class="bg-gray-50 px-3 py-2 text-xs font-medium text-gray-700 border-b"><i class="fas fa-chart-bar mr-1"></i>统计指标</div>`;
         html += `<div class="p-3 grid grid-cols-2 gap-2">`;
         Object.entries(step.stats).forEach(([k, v]) => {
-            const labels = { total: '总数', new_today: '今日新增', draft: '草稿', ready: '可发布', published: '已发布', rejected: '已忽略', total_published: '已发布规则', total_retro_matched: '回溯匹配', total_candidates: '候选规则', awaiting_review: '待审核', total_runs: '测试次数', enabled_rules: '已启用规则', check_interval_days: '检查间隔(天)', latest_job_id: '最新Job' };
+            const labels = { total: '总数', new_today: '今日新增', draft: '草稿', ready: '可发布', published: '已发布', rejected: '已忽略', total_published: '已发布规则', total_retro_matched: '回溯匹配', total_candidates: '候选规则', awaiting_review: '待审核', total_runs: '测试次数', enabled_rules: '已启用规则', check_interval_days: '检查间隔(天)', latest_job_id: '最新Job', checked: '已检测', passed: '已通过' };
             html += `<div class="bg-gray-50 rounded p-2 text-center"><div class="text-lg font-bold text-gray-800">${v}</div><div class="text-[10px] text-gray-500">${labels[k] || k}</div></div>`;
         });
         html += `</div></div>`;
@@ -2650,7 +2992,6 @@ async function openSimilarGraphModal(incubationID) {
     const modal = document.getElementById('similarGraphModal');
     modal.classList.remove('hidden');
     modal.classList.add('active');
-    switchGraphTab('cyto');
     document.getElementById('graphLoading').classList.remove('hidden');
 
     try {
@@ -2659,7 +3000,6 @@ async function openSimilarGraphModal(incubationID) {
         const data = payload.data || {};
         window._similarGraphData = data;
         document.getElementById('graphLoading').classList.add('hidden');
-        renderCyGraph(data);
         renderProjection(data);
     } catch (e) {
         document.getElementById('graphLoading').innerHTML = `<div class="text-red-500 text-center"><i class="fas fa-exclamation-circle mb-2"></i><div>加载失败: ${e.message}</div></div>`;
@@ -2688,26 +3028,12 @@ function hideGraphTooltip() {
 }
 
 function switchGraphTab(tab) {
-    const btnCyto = document.getElementById('tab-graph-cyto');
-    const btnProj = document.getElementById('tab-graph-proj');
-    const cyContainer = document.getElementById('cyGraphContainer');
+    // 知识图谱 tab 已移除，只保留向量投影视图
     const projDiv = document.getElementById('projectionEchart');
     const legend = document.getElementById('graphLegend');
-
-    if (tab === 'cyto') {
-        btnCyto.className = 'px-3 py-1 text-xs rounded-md bg-purple-100 text-purple-700 font-medium';
-        btnProj.className = 'px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-50';
-        cyContainer.classList.remove('hidden');
-        projDiv.classList.add('hidden');
-        legend.textContent = '中心节点 = 当前候选规则 · 连线粗细 = 相似度';
-    } else {
-        btnCyto.className = 'px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-50';
-        btnProj.className = 'px-3 py-1 text-xs rounded-md bg-purple-100 text-purple-700 font-medium';
-        cyContainer.classList.add('hidden');
-        projDiv.classList.remove('hidden');
-        legend.textContent = '3D 空间投影 · 距离越近语义越相似';
-        if (window._similarGraphData) renderProjection(window._similarGraphData);
-    }
+    projDiv.classList.remove('hidden');
+    legend.textContent = '三维向量空间投影 · 距离越近语义越相似';
+    if (window._similarGraphData) renderProjection(window._similarGraphData);
 }
 
 function renderCyGraph(data) {
@@ -2783,7 +3109,7 @@ function renderCyGraph(data) {
                     'width': 110, 'height': 110,
                     'label': 'data(label)',
                     'color': '#fff',
-                    'font-size': '14px',
+                    'font-size': '16px',
                     'text-valign': 'center', 'text-halign': 'center',
                     'text-wrap': 'wrap', 'text-max-width': '120px',
                     'font-weight': 'bold',
@@ -2801,7 +3127,7 @@ function renderCyGraph(data) {
                     'width': 70, 'height': 70,
                     'label': 'data(label)',
                     'color': '#fff',
-                    'font-size': '12px',
+                    'font-size': '14px',
                     'text-valign': 'center', 'text-halign': 'center',
                     'text-wrap': 'wrap', 'text-max-width': '90px',
                     'font-weight': 'bold',
@@ -2856,29 +3182,29 @@ function renderCyGraph(data) {
 
         let html = '';
         if (nd.data('type') === 'center') {
-            html = `<div class="font-bold text-purple-700 mb-1">候选规则</div>
-                    <div class="text-xs text-gray-600">ID: ${center.id}</div>
-                    <div class="text-sm font-semibold text-gray-800 mt-1">${escapeHtml(center.name || '')}</div>
-                    <div class="text-xs text-gray-500 font-mono">${center.code || ''}</div>
-                    <div class="mt-2 text-xs text-gray-600 leading-relaxed">${escapeHtml(center.prompt ? center.prompt.substring(0,200) : (center.description || '暂无描述'))}${center.prompt && center.prompt.length > 200 ? '...' : ''}</div>`;
+            html = `<div class="font-bold text-purple-700 text-base mb-1.5">候选规则</div>
+                    <div class="text-sm text-gray-600">ID: ${center.id}</div>
+                    <div class="text-base font-semibold text-gray-800 mt-1.5">${escapeHtml(center.name || '')}</div>
+                    <div class="text-sm text-gray-500 font-mono">${center.code || ''}</div>
+                    <div class="mt-3 text-sm text-gray-600 leading-relaxed">${escapeHtml(center.prompt ? center.prompt.substring(0,200) : (center.description || '暂无描述'))}${center.prompt && center.prompt.length > 200 ? '...' : ''}</div>`;
         } else if (nd.data('isTop5')) {
             const item = (data.top5 || []).find(t => t.rule_id === nd.data('rawId'));
             const meta = ruleMap[nd.data('rawId')];
-            html = `<div class="font-bold text-blue-600 mb-1">相似规则 (Top 5)</div>
-                    <div class="text-xs text-gray-600">ID: ${nd.data('rawId')}</div>
-                    <div class="text-sm font-semibold text-gray-800 mt-1">${escapeHtml(meta?.name || nd.data('label'))}</div>
-                    <div class="text-xs text-gray-500 font-mono">${meta?.code || ''}</div>
-                    <div class="mt-2 flex items-center gap-2">
-                        <span class="text-xs px-2 py-0.5 rounded bg-purple-50 text-purple-700 font-bold">相似度 ${(item?.similarity * 100).toFixed(1)}%</span>
-                        <span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-600">${item?.method || ''}</span>
+            html = `<div class="font-bold text-blue-600 text-base mb-1.5">相似规则 (Top 5)</div>
+                    <div class="text-sm text-gray-600">ID: ${nd.data('rawId')}</div>
+                    <div class="text-base font-semibold text-gray-800 mt-1.5">${escapeHtml(meta?.name || nd.data('label'))}</div>
+                    <div class="text-sm text-gray-500 font-mono">${meta?.code || ''}</div>
+                    <div class="mt-3 flex items-center gap-2">
+                        <span class="text-sm px-2 py-0.5 rounded bg-purple-50 text-purple-700 font-bold">相似度 ${(item?.similarity * 100).toFixed(1)}%</span>
+                        <span class="text-sm px-2 py-0.5 rounded bg-gray-100 text-gray-600">${item?.method || ''}</span>
                     </div>
-                    <div class="mt-2 text-xs text-gray-600 leading-relaxed">${escapeHtml(meta?.prompt ? meta.prompt.substring(0,180) : (meta?.description || ''))}${meta?.prompt && meta.prompt.length > 180 ? '...' : ''}</div>`;
+                    <div class="mt-3 text-sm text-gray-600 leading-relaxed">${escapeHtml(meta?.prompt ? meta.prompt.substring(0,180) : (meta?.description || ''))}${meta?.prompt && meta.prompt.length > 180 ? '...' : ''}</div>`;
         } else {
             const meta = ruleMap[nd.data('rawId')];
-            html = `<div class="font-bold text-gray-500 mb-1">现有规则</div>
-                    <div class="text-xs text-gray-600">ID: ${nd.data('rawId')}</div>
-                    <div class="text-sm font-semibold text-gray-800 mt-1">${escapeHtml(meta?.name || nd.data('label'))}</div>
-                    <div class="text-xs text-gray-500 font-mono">${meta?.code || ''}</div>`;
+            html = `<div class="font-bold text-gray-500 text-base mb-1.5">现有规则</div>
+                    <div class="text-sm text-gray-600">ID: ${nd.data('rawId')}</div>
+                    <div class="text-base font-semibold text-gray-800 mt-1.5">${escapeHtml(meta?.name || nd.data('label'))}</div>
+                    <div class="text-sm text-gray-500 font-mono">${meta?.code || ''}</div>`;
         }
         showGraphTooltip(tipX, tipY, html);
     });
@@ -2920,6 +3246,7 @@ function renderProjection(data) {
     items.push({
         name: center.name || center.code || '候选规则',
         value: [0, 0, 0, center.id, 'center'],
+        nodeType: 'center',
         itemStyle: { color: '#7c3aed' },
         symbolSize: 36,
         label: { show: true, fontSize: 14, fontWeight: 'bold', formatter: '{b}', distance: 10 }
@@ -2938,6 +3265,7 @@ function renderProjection(data) {
         items.push({
             name: item.name || item.code || ('规则' + item.rule_id),
             value: [x, y, z, item.rule_id, 'top5', item.similarity, item.method],
+            nodeType: 'top5',
             itemStyle: { color: color },
             symbolSize: 24,
             label: { show: true, fontSize: 12, fontWeight: 'bold', formatter: '{b}', distance: 8 }
@@ -2953,27 +3281,53 @@ function renderProjection(data) {
             backgroundColor: 'rgba(255,255,255,0.95)',
             borderColor: '#e2e8f0',
             borderWidth: 1,
-            padding: [12, 16],
-            textStyle: { color: '#334155', fontSize: 12 },
-            extraCssText: 'box-shadow: 0 8px 30px rgba(0,0,0,0.12); border-radius: 12px; max-width: 300px;',
+            padding: [16, 20],
+            textStyle: { color: '#334155', fontSize: 13 },
+            extraCssText: 'box-shadow: 0 8px 30px rgba(0,0,0,0.12); border-radius: 12px; max-width: 360px; white-space: normal !important; overflow-wrap: break-word;',
             formatter: (params) => {
-                const v = params.data.value || params.value;
-                const d = params.data;
-                if (v[4] === 'center') {
-                    return `<div class="font-bold text-purple-700 mb-1">候选规则</div>
-                            <div class="text-xs text-gray-600">ID: ${v[3]}</div>
-                            <div class="text-sm font-semibold text-gray-800 mt-1">${escapeHtml(center.name || '')}</div>
-                            <div class="text-xs text-gray-500 font-mono">${center.code || ''}</div>`;
-                } else {
-                    const similarity = v[5] || 0;
-                    const method = v[6] || '';
-                    return `<div class="font-bold text-blue-600 mb-1">Top5 相似规则</div>
-                            <div class="text-xs text-gray-600">ID: ${v[3]}</div>
-                            <div class="text-sm font-semibold text-gray-800 mt-1">${escapeHtml(d.name || '')}</div>
-                            <div class="mt-2 flex items-center gap-2">
-                                <span class="text-xs px-2 py-0.5 rounded bg-purple-50 text-purple-700 font-bold">相似度 ${(similarity * 100).toFixed(1)}%</span>
-                                <span class="text-xs text-gray-500">${method}</span>
-                            </div>`;
+                try {
+                    // ECharts GL 3D scatter 中 params 结构可能不一致，做防御性读取
+                    const d = params.data || {};
+                    const v = (Array.isArray(d.value) ? d.value : d.value && d.value.value) || params.value || [];
+                    const isCenter = d.nodeType === 'center' || (Array.isArray(v) && v[4] === 'center');
+
+                    if (isCenter) {
+                        const desc = center.prompt ? center.prompt.substring(0, 240) : (center.description || '暂无描述');
+                        const suffix = (center.prompt && center.prompt.length > 240) || (center.description && center.description.length > 240) ? '...' : '';
+                        return `<div class="font-bold text-purple-700 text-base mb-1.5">候选规则</div>
+                                <div class="text-sm text-gray-600">ID: ${v[3] || ''}</div>
+                                <div class="text-base font-semibold text-gray-800 mt-1.5">${escapeHtml(center.name || '')}</div>
+                                <div class="text-sm text-gray-500 font-mono mt-0.5">${center.code || ''}</div>
+                                <div class="mt-3 text-sm text-gray-600 leading-relaxed" style="word-break:break-all; overflow-wrap:anywhere;">${escapeHtml(desc)}${suffix}</div>`;
+                    } else {
+                        const similarity = (v[5] != null ? v[5] : 0) || 0;
+                        const method = v[6] || '';
+                        const meta = contextMap[v[3]] || {};
+                        const name = meta.name || d.name || '';
+                        const code = meta.code || '';
+                        const category = meta.category || '';
+                        const severity = meta.severity || '';
+                        const prompt = meta.prompt ? meta.prompt.substring(0, 200) : (meta.description || '');
+                        const suffix = (meta.prompt && meta.prompt.length > 200) || (meta.description && meta.description.length > 200) ? '...' : '';
+
+                        const sevBadge = severity ? `<span class="text-xs px-2 py-0.5 rounded border bg-gray-50 text-gray-600 ml-1">${severity}</span>` : '';
+                        const catBadge = category ? `<span class="text-xs px-2 py-0.5 rounded border bg-blue-50 text-blue-600 ml-1">${category}</span>` : '';
+
+                        return `<div class="font-bold text-blue-600 text-base mb-1.5">Top5 相似规则</div>
+                                <div class="text-sm text-gray-600">ID: ${v[3] || ''}</div>
+                                <div class="flex items-center gap-1 mt-1.5 flex-wrap">
+                                    <div class="text-base font-semibold text-gray-800">${escapeHtml(name)}</div>
+                                    ${catBadge}${sevBadge}
+                                </div>
+                                <div class="text-sm text-gray-500 font-mono mt-0.5">${code}</div>
+                                <div class="mt-3 flex items-center gap-2">
+                                    <span class="text-sm px-2 py-0.5 rounded bg-purple-50 text-purple-700 font-bold">相似度 ${(similarity * 100).toFixed(1)}%</span>
+                                    <span class="text-sm px-2 py-0.5 rounded bg-gray-100 text-gray-600">${method}</span>
+                                </div>
+                                <div class="mt-3 text-sm text-gray-600 leading-relaxed" style="word-break:break-all; overflow-wrap:anywhere;">${escapeHtml(prompt)}${suffix}</div>`;
+                    }
+                } catch (e) {
+                    return '<div class="text-xs text-red-500">tooltip 渲染异常</div>';
                 }
             }
         },

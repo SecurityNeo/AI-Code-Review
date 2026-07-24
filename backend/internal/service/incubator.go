@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -15,6 +16,14 @@ import (
 	"github.com/ai-optimizer/backend/internal/vectorstore"
 	"go.uber.org/zap"
 )
+
+// incubationVecStatus tracks EnsureRuleEmbeddings progress across goroutines.
+var incubationVecStatus struct {
+	sync.Mutex
+	Total   int
+	Done    int
+	Running bool
+}
 
 // IncubatorService handles rule incubation business logic.
 type IncubatorService struct {
@@ -52,16 +61,25 @@ func (s *IncubatorService) EnsureRuleEmbeddings() {
 		return
 	}
 
+	incubationVecStatus.Lock()
+	incubationVecStatus.Running = true
+	incubationVecStatus.Total = len(rules)
+	incubationVecStatus.Done = 0
+	incubationVecStatus.Unlock()
+
 	ctx := context.Background()
 	missing := 0
 	stored := 0
-	for _, r := range rules {
+	for i, r := range rules {
 		_, err := s.store.Get(ctx, vectorstore.Key{
 			EntityType: "rule",
 			EntityID:   r.ID,
 			ModelID:    modelID,
 		})
 		if err == nil {
+			incubationVecStatus.Lock()
+			incubationVecStatus.Done = i + 1
+			incubationVecStatus.Unlock()
 			continue // already exists
 		}
 		missing++
@@ -70,6 +88,9 @@ func (s *IncubatorService) EnsureRuleEmbeddings() {
 		if err != nil {
 			zap.L().Warn("EnsureRuleEmbeddings: embed failed",
 				zap.Uint("rule_id", r.ID), zap.String("code", r.Code), zap.Error(err))
+			incubationVecStatus.Lock()
+			incubationVecStatus.Done = i + 1
+			incubationVecStatus.Unlock()
 			continue
 		}
 		if err := s.store.Save(ctx, vectorstore.Item{
@@ -83,14 +104,47 @@ func (s *IncubatorService) EnsureRuleEmbeddings() {
 		}); err != nil {
 			zap.L().Warn("EnsureRuleEmbeddings: save failed",
 				zap.Uint("rule_id", r.ID), zap.Error(err))
+			incubationVecStatus.Lock()
+			incubationVecStatus.Done = i + 1
+			incubationVecStatus.Unlock()
 			continue
 		}
 		stored++
+		incubationVecStatus.Lock()
+		incubationVecStatus.Done = i + 1
+		incubationVecStatus.Unlock()
 	}
+	incubationVecStatus.Lock()
+	incubationVecStatus.Running = false
+	incubationVecStatus.Unlock()
 	zap.L().Info("EnsureRuleEmbeddings: completed",
 		zap.Int("total_rules", len(rules)),
 		zap.Int("missing", missing),
 		zap.Int("stored", stored))
+}
+
+// GetVectorizationStatus returns the current progress of rule embedding generation.
+// total = total enabled rules, done = how many already have vectors for the current model.
+func (s *IncubatorService) GetVectorizationStatus() (int, int, bool) {
+	cfg := s.getConfig()
+	if cfg.EmbeddingModelID == nil {
+		return 0, 0, false
+	}
+	modelID := *cfg.EmbeddingModelID
+
+	var total int64
+	model.DB.Model(&model.ReviewRule{}).Where("is_enabled = ?", true).Count(&total)
+
+	var done int64
+	model.DB.Table("review_rule_vectors").
+		Where("model_id = ?", modelID).
+		Count(&done)
+
+	incubationVecStatus.Lock()
+	running := incubationVecStatus.Running
+	incubationVecStatus.Unlock()
+
+	return int(total), int(done), running
 }
 
 // Status returns the current incubator status including embedding availability.
@@ -388,6 +442,25 @@ func (s *IncubatorService) DeleteCandidate(id uint) error {
 	if cand.Status == "published" {
 		return fmt.Errorf("cannot delete published candidate")
 	}
+
+	// Delete associated vector if store is available
+	if s.store != nil {
+		cfg := s.getConfig()
+		if cfg.EmbeddingModelID != nil {
+			ctx := context.Background()
+			if err := s.store.Delete(ctx, vectorstore.Key{
+				EntityType: "incubation",
+				EntityID:   cand.ID,
+				ModelID:    *cfg.EmbeddingModelID,
+			}); err != nil {
+				zap.L().Warn("DeleteCandidate: failed to delete vector",
+					zap.Uint("incubation_id", cand.ID),
+					zap.Uint("model_id", *cfg.EmbeddingModelID),
+					zap.Error(err))
+			}
+		}
+	}
+
 	return model.DB.Delete(&cand).Error
 }
 
@@ -926,6 +999,20 @@ func (s *IncubatorService) SaveConfig(updates map[string]any) error {
 	if v, ok := updates["retro_match_confidence_threshold"]; ok {
 		clean["retro_match_confidence_threshold"] = v
 	}
+	if v, ok := updates["similarity_pass_threshold"]; ok {
+		switch val := v.(type) {
+		case float64:
+			if val > 0 && val <= 1.0 {
+				clean["similarity_pass_threshold"] = val
+			}
+		case int:
+			if val > 0 && val <= 1 {
+				clean["similarity_pass_threshold"] = float64(val)
+			}
+		default:
+			clean["similarity_pass_threshold"] = v
+		}
+	}
 	if v, ok := updates["health_check_enabled"]; ok {
 		clean["health_check_enabled"] = v
 	}
@@ -1137,7 +1224,8 @@ func (s *IncubatorService) ValidateEmbedding(modelID uint) (map[string]any, erro
 	}
 
 	start := time.Now()
-	_, tokens, err := s.embedSvc.Embed(context.Background(), "test validation")
+	// Use the explicitly selected model, bypassing Embed() which reads DB config
+	vec, tokens, err := s.embedSvc.callEmbeddingAPI(context.Background(), m, "test validation")
 	latency := time.Since(start).Milliseconds()
 
 	if err != nil {
@@ -1149,6 +1237,7 @@ func (s *IncubatorService) ValidateEmbedding(modelID uint) (map[string]any, erro
 		"model_name":  m.ModelID,
 		"latency_ms":  latency,
 		"tokens_used": tokens,
+		"vector_dim":  len(vec),
 	}, nil
 }
 
@@ -1526,6 +1615,12 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) (bool, error) {
 		return false, err
 	}
 
+	cfg := s.getConfig()
+	threshold := cfg.SimilarityPassThreshold
+	if threshold <= 0 || threshold > 1 {
+		threshold = 0.5
+	}
+
 	// --- L1: Jaccard keyword matching (fast, structural) ---
 	var rules []model.ReviewRule
 	if err := model.DB.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
@@ -1538,7 +1633,7 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) (bool, error) {
 	for _, r := range rules {
 		ruleKeywords := extractKeywords(r.Name + " " + r.Description + " " + r.Prompt)
 		score := jaccard(candKeywords, ruleKeywords)
-		if score >= 0.5 {
+		if score >= threshold {
 			similarMap[r.ID] = map[string]any{
 				"rule_id":    r.ID,
 				"name":       r.Name,
@@ -1553,7 +1648,6 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) (bool, error) {
 
 	// --- L2: Semantic embedding cosine (accurate, depth) ---
 	if s.embedSvc != nil && s.embedSvc.IsAvailable() && s.store != nil {
-		cfg := s.getConfig()
 		if cfg.EmbeddingModelID != nil {
 			modelID := *cfg.EmbeddingModelID
 			ctx := context.Background()
@@ -1591,7 +1685,7 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) (bool, error) {
 				})
 				if err == nil {
 					for _, r := range res {
-						if r.Score >= 0.5 { // only high-confidence semantic matches
+						if r.Score >= threshold { // only high-confidence semantic matches
 							if existing, ok := similarMap[r.Key.EntityID]; ok && existing != nil {
 								// Upgrade similarity if embedding is higher
 								if r.Score > existing["similarity"].(float64) {
@@ -1621,7 +1715,7 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) (bool, error) {
 	}
 
 	// Convert map to sorted slice (Top 5)
-	var similarList []map[string]any
+	similarList := make([]map[string]any, 0, len(similarMap))
 	for _, v := range similarMap {
 		similarList = append(similarList, v)
 	}
@@ -1637,11 +1731,14 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) (bool, error) {
 		return false, err
 	}
 
+	passed := len(similarList) == 0
+
 	// Also check code uniqueness
 	var codeExists int64
 	model.DB.Model(&model.ReviewRule{}).Where("code = ?", cand.Code).Count(&codeExists)
 	updates := map[string]any{
-		"similar_rules": string(similarJSON),
+		"similar_rules":  string(similarJSON),
+		"similar_passed": passed,
 	}
 	if codeExists > 0 {
 		updates["code"] = fmt.Sprintf("%s-%d", cand.Code, time.Now().Unix())
@@ -1655,7 +1752,6 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) (bool, error) {
 		return false, err
 	}
 
-	passed := len(similarList) == 0
 	zap.L().Info("similarCheck: completed",
 		zap.Uint("incubation_id", incubationID),
 		zap.Int("rules_checked", len(rules)),
@@ -2263,41 +2359,48 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 		return
 	}
 
-	// -------- Step 2: Refine --------
-	var pipeCands []model.RuleIncubation
-	model.DB.Where("pipeline_job_id = ?", jobID).Find(&pipeCands)
-	updateStep("refine", "running", 0, len(pipeCands))
-	for i, cand := range pipeCands {
-		if cand.Status == "draft" {
-			_ = s.runRefine(cand.ID)
-		}
-		updateStep("refine", "running", i+1, len(pipeCands))
-	}
-	updateStep("refine", "completed", len(pipeCands), len(pipeCands))
+    // -------- Step 2: Refine --------
+    var pipeCands []model.RuleIncubation
+    model.DB.Where("pipeline_job_id = ?", jobID).Find(&pipeCands)
+    updateStep("refine", "running", 0, len(pipeCands))
+    refineDone := 0
+    for i, cand := range pipeCands {
+        if cand.Status == "draft" {
+            if err := s.runRefine(cand.ID); err == nil {
+                refineDone++
+            }
+        } else {
+            refineDone++
+        }
+        updateStep("refine", "running", i+1, len(pipeCands))
+    }
+    updateStep("refine", "completed", refineDone, len(pipeCands))
 
-	// -------- Step 3: Similar Check --------
-	updateStep("similar_check", "running", 0, len(pipeCands))
-	similarPassed := 0
-	for i, cand := range pipeCands {
-		if ok, _ := s.runSimilarCheck(cand.ID); ok {
-			similarPassed++
-		}
-		updateStep("similar_check", "running", i+1, len(pipeCands))
-	}
-	updateStep("similar_check", "completed", similarPassed, len(pipeCands))
+    // Reload candidates after refine to get fresh status for downstream steps
+    var freshCands []model.RuleIncubation
+    model.DB.Where("pipeline_job_id = ?", jobID).Find(&freshCands)
 
-	// -------- Step 4: Sandbox Test --------
-	updateStep("sandbox_test", "running", 0, len(pipeCands))
-	sandboxPassed := 0
-	for i, cand := range pipeCands {
-		if cand.Status == "ready" {
-			if ok, _ := s.runSandboxTest(cand.ID); ok {
-				sandboxPassed++
-			}
-		}
-		updateStep("sandbox_test", "running", i+1, len(pipeCands))
-	}
-	updateStep("sandbox_test", "completed", sandboxPassed, len(pipeCands))
+    // -------- Step 3: Similar Check --------
+    updateStep("similar_check", "running", 0, len(freshCands))
+    similarDone := 0
+    for i, cand := range freshCands {
+        if _, err := s.runSimilarCheck(cand.ID); err == nil {
+            similarDone++
+        }
+        updateStep("similar_check", "running", i+1, len(freshCands))
+    }
+    updateStep("similar_check", "completed", similarDone, len(freshCands))
+
+    // -------- Step 4: Sandbox Test --------
+    updateStep("sandbox_test", "running", 0, len(freshCands))
+    sandboxDone := 0
+    for i, cand := range freshCands {
+        if _, err := s.runSandboxTest(cand.ID); err == nil {
+            sandboxDone++
+        }
+        updateStep("sandbox_test", "running", i+1, len(freshCands))
+    }
+    updateStep("sandbox_test", "completed", sandboxDone, len(freshCands))
 
 	completeJob()
 	zap.L().Info("pipeline_run completed", zap.Uint("job_id", jobID))

@@ -1,18 +1,24 @@
 package handler
 
 import (
+	"context"
 	"strconv"
 	"time"
 
 	"github.com/ai-optimizer/backend/internal/model"
+	"github.com/ai-optimizer/backend/internal/service"
+	"github.com/ai-optimizer/backend/internal/vectorstore"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
 
-type ReviewRuleHandler struct{}
+type ReviewRuleHandler struct {
+	embedSvc *service.EmbeddingService
+	store    vectorstore.Store
+}
 
-func NewReviewRuleHandler() *ReviewRuleHandler {
-	return &ReviewRuleHandler{}
+func NewReviewRuleHandler(embedSvc *service.EmbeddingService, store vectorstore.Store) *ReviewRuleHandler {
+	return &ReviewRuleHandler{embedSvc: embedSvc, store: store}
 }
 
 // List 获取规则库列表
@@ -166,6 +172,9 @@ func (h *ReviewRuleHandler) Create(c *gin.Context) {
 	// 为所有已有项目自动插入默认配置（默认禁用），确保项目列表统计和规则配置页能正确显示
 	autoCreateProjectReviewConfigs(rule.ID)
 
+	// 异步生成规则 embedding 向量
+	h.embedRule(rule)
+
 	c.JSON(200, gin.H{"code": 0, "message": "created", "data": rule})
 }
 
@@ -198,6 +207,10 @@ func (h *ReviewRuleHandler) Update(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+
+	// 重新加载更新后的规则并异步刷新 embedding
+	model.DB.First(&rule, rule.ID)
+	h.embedRule(rule)
 
 	c.JSON(200, gin.H{"message": "updated"})
 }
@@ -256,4 +269,41 @@ func autoCreateProjectReviewConfigs(ruleID uint) {
 				zap.Error(err))
 		}
 	}
+}
+
+// embedRule asynchronously generates embedding for a review rule.
+// It reads the model ID from incubator config; if unavailable, it silently skips.
+func (h *ReviewRuleHandler) embedRule(rule model.ReviewRule) {
+	if h.embedSvc == nil || !h.embedSvc.IsAvailable() || h.store == nil {
+		return
+	}
+	var cfg model.IncubatorConfig
+	var modelID uint
+	if err := model.DB.First(&cfg, 1).Error; err == nil && cfg.EmbeddingModelID != nil && *cfg.EmbeddingModelID > 0 {
+		modelID = *cfg.EmbeddingModelID
+	} else {
+		if err == nil {
+			zap.L().Warn("embedRule: no embedding model configured", zap.Uint("rule_id", rule.ID))
+		}
+		return
+	}
+	go func(r model.ReviewRule, mid uint) {
+		key := vectorstore.Key{
+			EntityType: "rule",
+			EntityID:   r.ID,
+			ModelID:    mid,
+		}
+		text := r.Name + " " + r.Description + " " + r.Prompt
+		ctx := context.Background()
+		if err := h.embedSvc.EmbedAndStore(ctx, key, text); err != nil {
+			zap.L().Warn("embedRule failed",
+				zap.Uint("rule_id", r.ID),
+				zap.String("code", r.Code),
+				zap.Error(err))
+		} else {
+			zap.L().Info("embedRule succeeded",
+				zap.Uint("rule_id", r.ID),
+				zap.String("code", r.Code))
+		}
+	}(rule, modelID)
 }

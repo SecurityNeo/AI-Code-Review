@@ -77,9 +77,6 @@ func main() {
 	incubSvc := service.NewIncubatorService(embedSvc, vectorStore)
 	service.NewIncubatorJobRunner(incubSvc, embedSvc).Start()
 
-	// 5.3.1. 启动时自动补齐已有规则缺失的 embedding 向量（首次运行可能耗时较长）
-	go incubSvc.EnsureRuleEmbeddings()
-
 	// 5.3.5. 启动规则健康检查定时 Job（每周一次）
 	_, _ = cronRunner.AddFunc("0 2 * * 1", func() {
 		if _, err := service.QueueJob("health_check", map[string]any{}); err != nil {
@@ -91,7 +88,7 @@ func main() {
 	llmcall.Start()
 
 	// 6. 初始化 HTTP Router
-	router := setupRouter(cfg)
+	router := setupRouter(cfg, embedSvc, vectorStore)
 
 	// 7. 启动服务
 	srv := &http.Server{
@@ -158,7 +155,7 @@ func initCron(cfg *config.Config) *cron.Cron {
 	return cronRunner
 }
 
-func setupRouter(cfg *config.Config) *gin.Engine {
+func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store vectorstore.Store) *gin.Engine {
 	if !cfg.Debug {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -384,7 +381,7 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 		// 评审规则库管理
 		reviewRules := adminOnly.Group("/review-rules")
 		{
-			h := handler.NewReviewRuleHandler()
+			h := handler.NewReviewRuleHandler(embedSvc, store)
 			reviewRules.GET("", h.List)
 			reviewRules.GET("/tree", h.Tree)
 			reviewRules.POST("", h.Create)
@@ -517,6 +514,8 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 			incubator.GET("/config", h.GetConfig)
 			incubator.PUT("/config", h.SaveConfig)
 			incubator.POST("/config/validate-embedding", h.ValidateEmbedding)
+			incubator.POST("/vectorize-rules", h.VectorizeRules)
+			incubator.GET("/vectorization-status", h.VectorizationStatus)
 		}
 
 		// 系统管理

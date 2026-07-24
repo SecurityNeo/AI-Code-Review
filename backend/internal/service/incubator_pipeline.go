@@ -354,14 +354,18 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 	totalCandidates := len(cands)
 	refinedCount := 0
 	similarChecked := 0
+	similarPassed := 0
 	sandboxTested := 0
 	publishedCount := 0
 	for _, c := range cands {
 		if c.Status != "draft" {
 			refinedCount++
 		}
-		if c.SimilarRules != "{}" && c.SimilarRules != "" && c.SimilarRules != "null" {
+		if c.SimilarRules != "" && c.SimilarRules != "null" {
 			similarChecked++
+		}
+		if c.SimilarPassed {
+			similarPassed++
 		}
 		if c.TestResults != "{}" && c.TestResults != "" && c.TestResults != "null" {
 			sandboxTested++
@@ -419,7 +423,7 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 				}
 				return out
 			}(),
-			NextSteps: []string{"refine", "similar_check", "sandbox_test"},
+			NextSteps: []string{"refine"},
 		},
 		{
 			StepID: "candidate",
@@ -433,9 +437,8 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 			Icon:  "fa-lightbulb",
 			Color: "yellow",
 			Stats: map[string]any{
-				"draft":     totalCandidates - refinedCount,
-				"ready":     refinedCount - publishedCount,
-				"published": publishedCount,
+				"ready": refinedCount,
+				"draft": totalCandidates - refinedCount,
 			},
 			InputSummary: map[string]any{
 				"来源": "聚类分析产出的候选规则",
@@ -443,7 +446,7 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 			OutputSummary: map[string]any{
 				"总数": fmt.Sprintf("%d 个", totalCandidates),
 			},
-			NextSteps: []string{"refine", "similar_check", "sandbox_test", "publish"},
+			NextSteps: []string{"refine"},
 		},
 		{
 			StepID: "refine",
@@ -452,12 +455,13 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 			Icon:   "fa-magic",
 			Color:  "indigo",
 			Stats: func() map[string]any {
-				st := map[string]any{
-					"total_runs": refinedCount,
-				}
+				st := map[string]any{}
 				if refineStatus == "running" && refineTot > 0 {
 					st["current"] = refineCur
 					st["total"] = refineTot
+				} else {
+					st["current"] = refinedCount
+					st["total"] = totalCandidates
 				}
 				return st
 			}(),
@@ -467,7 +471,7 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 			OutputSummary: map[string]any{
 				"已提炼": fmt.Sprintf("%d 个", refinedCount),
 			},
-			NextSteps: []string{"similar_check", "sandbox_test"},
+			NextSteps: []string{"similar_check"},
 		},
 		{
 			StepID: "similar_check",
@@ -476,20 +480,23 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 			Icon:   "fa-search",
 			Color:  "orange",
 			Stats: func() map[string]any {
-				st := map[string]any{
-					"total_runs": similarChecked,
-				}
+				st := map[string]any{}
 				if similarStatus == "running" && similarTot > 0 {
 					st["current"] = similarCur
 					st["total"] = similarTot
+				} else {
+					st["checked"] = similarChecked
+					st["passed"] = similarPassed
+					st["total"] = totalCandidates
 				}
 				return st
 			}(),
 			InputSummary: map[string]any{
-				"规则数量": fmt.Sprintf("%d 个", similarChecked),
+				"规则数量": fmt.Sprintf("%d 个", totalCandidates),
 			},
 			OutputSummary: map[string]any{
-				"已完成检测": fmt.Sprintf("%d 个", similarChecked),
+				"已完成检测": fmt.Sprintf("%d / %d", similarChecked, totalCandidates),
+				"通过检测":   fmt.Sprintf("%d / %d", similarPassed, totalCandidates),
 			},
 			NextSteps: []string{"sandbox_test"},
 		},
@@ -500,12 +507,13 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 			Icon:   "fa-vial",
 			Color:  "teal",
 			Stats: func() map[string]any {
-				st := map[string]any{
-					"total_runs": sandboxTested,
-				}
+				st := map[string]any{}
 				if sandboxStatus == "running" && sandboxTot > 0 {
 					st["current"] = sandboxCur
 					st["total"] = sandboxTot
+				} else {
+					st["current"] = sandboxTested
+					st["total"] = totalCandidates
 				}
 				return st
 			}(),

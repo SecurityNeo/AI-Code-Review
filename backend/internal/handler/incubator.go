@@ -325,14 +325,68 @@ func (h *IncubatorHandler) ValidateEmbedding(c *gin.Context) {
 	var req struct {
 		ModelID uint `json:"model_id"`
 	}
-	c.ShouldBindJSON(&req)
+	
+	// Try ShouldBindJSON first
+	bindErr := c.ShouldBindJSON(&req)
+	
+	// Fallback: manual JSON unmarshal from raw body
+	if bindErr != nil || req.ModelID == 0 {
+		body, _ := c.GetRawData()
+		zap.L().Warn("ValidateEmbedding: ShouldBindJSON failed or model_id=0, trying manual parse",
+			zap.Error(bindErr),
+			zap.Uint("parsed_model_id", req.ModelID),
+			zap.ByteString("raw_body", body))
+		
+		var raw map[string]any
+		if err := json.Unmarshal(body, &raw); err == nil {
+			if v, ok := raw["model_id"]; ok {
+				switch val := v.(type) {
+				case float64:
+					req.ModelID = uint(val)
+				case int:
+					req.ModelID = uint(val)
+				case json.Number:
+					if n, err := val.Int64(); err == nil {
+						req.ModelID = uint(n)
+					}
+				}
+			}
+		}
+	}
+	
+	if req.ModelID == 0 {
+		c.JSON(200, gin.H{"code": 0, "data": map[string]any{
+			"available": false,
+			"error":     "model_id 不能为 0，请先在列表中选中一个 Embedding 模型",
+		}})
+		return
+	}
 
+	zap.L().Info("ValidateEmbedding: testing model", zap.Uint("model_id", req.ModelID))
 	data, err := h.svc.ValidateEmbedding(req.ModelID)
 	if err != nil {
 		c.JSON(200, gin.H{"code": 0, "data": map[string]any{"available": false, "error": err.Error()}})
 		return
 	}
 	c.JSON(200, gin.H{"code": 0, "data": data})
+}
+
+// VectorizeRules triggers a background job to vectorize all existing enabled rules.
+// POST /api/v1/incubator/vectorize-rules
+func (h *IncubatorHandler) VectorizeRules(c *gin.Context) {
+	go h.svc.EnsureRuleEmbeddings()
+	c.JSON(200, gin.H{"code": 0, "message": "已有规则向量化任务已在后台启动"})
+}
+
+// VectorizationStatus returns the current progress of rule embedding generation.
+// GET /api/v1/incubator/vectorization-status
+func (h *IncubatorHandler) VectorizationStatus(c *gin.Context) {
+	total, done, running := h.svc.GetVectorizationStatus()
+	c.JSON(200, gin.H{"code": 0, "data": map[string]any{
+		"total":   total,
+		"done":    done,
+		"running": running,
+	}})
 }
 
 // TriggerRefine queues a refine job for a candidate.

@@ -245,6 +245,9 @@ func autoMigrate() error {
 	// 初始化 IncubatorConfig 单例（确保 id=1 存在）
 	initIncubatorConfig()
 
+	// 兼容：为已有 rule_incubations 补充 similar_passed 默认值（根据 similar_rules 推断）
+	DB.Exec("UPDATE rule_incubations SET similar_passed = true WHERE similar_rules IN ('[]','{}','null') AND similar_passed = false")
+
 	return nil
 }
 

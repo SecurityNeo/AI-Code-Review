@@ -547,8 +547,9 @@ type IncubatorConfig struct {
 	ClusterMaxGroupsPerRun        int       `gorm:"default:20" json:"cluster_max_groups_per_run"`
 	ClusterTimeWindowDays         int       `gorm:"default:30" json:"cluster_time_window_days"`
 	RetroMatchEnabled             bool      `gorm:"default:true" json:"retro_match_enabled"`
-	RetroMatchConfidenceThreshold float64   `gorm:"default:0.6" json:"retro_match_confidence_threshold"`
-	RetroMatchMaxDaysLookback     int       `gorm:"default:30" json:"retro_match_max_days_lookback"`
+	RetroMatchConfidenceThreshold float64  `gorm:"default:0.6" json:"retro_match_confidence_threshold"`
+	SimilarityPassThreshold       float64  `gorm:"default:0.5" json:"similarity_pass_threshold"`
+	RetroMatchMaxDaysLookback     int      `gorm:"default:30" json:"retro_match_max_days_lookback"`
 	HealthCheckEnabled            bool      `gorm:"default:true" json:"health_check_enabled"`
 	HealthCheckIntervalDays       int       `gorm:"default:7" json:"health_check_interval_days"`
 	VectorStoreType               string    `gorm:"size:20;default:'mysql'" json:"vector_store_type"`
@@ -574,8 +575,9 @@ type RuleIncubation struct {
 	ConfidenceScore  float64    `gorm:"default:0" json:"confidence_score"`
 	UserAcceptRate   float64    `gorm:"default:0;column:user_accept_rate" json:"user_accept_rate"`
 	MergedIntoRuleID *uint      `gorm:"index" json:"merged_into_rule_id"`
-	SimilarRules     string     `gorm:"type:json" json:"similar_rules"`
-	TestResults      string     `gorm:"type:json" json:"test_results"`
+	SimilarRules     string  `gorm:"type:json" json:"similar_rules"`
+	SimilarPassed    bool    `gorm:"default:false" json:"similar_passed"`
+	TestResults      string  `gorm:"type:json" json:"test_results"`
 	PublishedRuleID  *uint      `gorm:"index" json:"published_rule_id"`
 	CreatedBy        uint       `gorm:"index" json:"created_by"`
 	ResolvedBy       uint       `json:"resolved_by"`
