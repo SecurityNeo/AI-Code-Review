@@ -16,10 +16,25 @@ func NewProjectStewardHandler() *ProjectStewardHandler {
 }
 
 // ListByProject 列出某项目的环节负责人
+// 支持两种调用方式：
+//   GET /project-stewards?project_id=xxx  （前端调用方式）
+//   GET /project-stewards/projects/:project_id  （兼容路径参数）
 func (h *ProjectStewardHandler) ListByProject(c *gin.Context) {
-	projectID, _ := strconv.ParseUint(c.Param("project_id"), 10, 64)
+	projectID := uint64(0)
+	// 优先读路径参数
+	if pid := c.Param("project_id"); pid != "" {
+		projectID, _ = strconv.ParseUint(pid, 10, 64)
+	} else if pid := c.Query("project_id"); pid != "" {
+		// 回退到查询参数
+		projectID, _ = strconv.ParseUint(pid, 10, 64)
+	}
+
 	var list []model.ProjectSteward
-	if err := model.DB.Preload("User").Where("project_id = ?", projectID).Order("role_type, priority").Find(&list).Error; err != nil {
+	db := model.DB.Preload("User")
+	if projectID > 0 {
+		db = db.Where("project_id = ?", projectID)
+	}
+	if err := db.Order("role_type, priority").Find(&list).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

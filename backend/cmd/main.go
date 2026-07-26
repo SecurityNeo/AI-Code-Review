@@ -515,6 +515,7 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 		steward := adminOnly.Group("/project-stewards")
 		{
 			h := handler.NewProjectStewardHandler()
+			steward.GET("", h.ListByProject)
 			steward.GET("/projects/:project_id", h.ListByProject)
 			steward.POST("", h.Create)
 			steward.PUT("/:id", h.Update)
