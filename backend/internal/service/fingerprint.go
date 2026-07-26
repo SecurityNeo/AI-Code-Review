@@ -40,8 +40,8 @@ func (s *FingerprintService) MatchBest(mrID uint, fingerprint string) *model.Rev
 		Order("created_at DESC").Limit(5).Find(&issues)
 	// 优先返回有明确处理状态的历史记录
 	for _, iss := range issues {
-		if iss.Status == model.IssueStatusRejected || iss.Status == model.IssueStatusDismissed ||
-			iss.Status == model.IssueStatusAccepted || iss.Status == model.IssueStatusAutoFiltered {
+		if iss.Status == model.IssueStatusFalsePositive || iss.Status == model.IssueStatusIgnored ||
+			iss.Status == model.IssueStatusResolved || iss.Status == model.IssueStatusAutoFiltered {
 			return &iss
 		}
 	}

@@ -175,11 +175,14 @@ function renderIssueCard(issue) {
                     </div>
                 </div>
                 <div class="flex items-center gap-2 flex-shrink-0">
-                    <button onclick="resolveIssue(${issue.id}, 'accepted')" class="text-xs px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-1">
+                    <button onclick="resolveIssue(${issue.id}, 'resolved')" class="text-xs px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-1">
                         <i class="fas fa-check"></i>已处理
                     </button>
-                    <button onclick="resolveIssue(${issue.id}, 'rejected')" class="text-xs px-3 py-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200 flex items-center gap-1">
+                    <button onclick="resolveIssue(${issue.id}, 'false_positive')" class="text-xs px-3 py-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200 flex items-center gap-1">
                         <i class="fas fa-times"></i>误报
+                    </button>
+                    <button onclick="resolveIssue(${issue.id}, 'ignored')" class="text-xs px-3 py-1.5 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 flex items-center gap-1">
+                        <i class="fas fa-pause"></i>忽略
                     </button>
                 </div>
             </div>
@@ -208,7 +211,12 @@ async function resolveIssue(issueId, status) {
         });
         const data = await res.json();
         if (data.message === 'updated') {
-            showToast(status === 'accepted' ? '已标记为已处理' : '已标记为误报', 'success');
+            const toastMap = {
+                'resolved': '已标记为已处理',
+                'false_positive': '已标记为误报',
+                'ignored': '已标记为忽略'
+            };
+            showToast(toastMap[status] || '操作成功', 'success');
             loadDashboard(true);
         } else {
             showToast('操作失败: ' + (data.error || '未知错误'), 'error');

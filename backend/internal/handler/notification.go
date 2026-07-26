@@ -87,19 +87,19 @@ func (h *NotificationHandler) MarkAllRead(c *gin.Context) {
 func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 	user := c.MustGet("user").(model.User)
 
-	// 待处理统计
+	// 待处理统计（包含 pending 和 pending_inherited）
 	var pendingCount, criticalCount, highCount int64
 	model.DB.Model(&model.ReviewIssue{}).
-		Where("deleted_at IS NULL AND status = ? AND (owner_id = ? OR current_owner_id = ?)",
-			model.IssueStatusPending, user.ID, user.ID).
+		Where("deleted_at IS NULL AND status IN (?) AND (owner_id = ? OR current_owner_id = ?)",
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID).
 		Count(&pendingCount)
 	model.DB.Model(&model.ReviewIssue{}).
-		Where("deleted_at IS NULL AND status = ? AND severity = ? AND (owner_id = ? OR current_owner_id = ?)",
-			model.IssueStatusPending, "critical", user.ID, user.ID).
+		Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?)",
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "critical", user.ID, user.ID).
 		Count(&criticalCount)
 	model.DB.Model(&model.ReviewIssue{}).
-		Where("deleted_at IS NULL AND status = ? AND severity = ? AND (owner_id = ? OR current_owner_id = ?)",
-			model.IssueStatusPending, "high", user.ID, user.ID).
+		Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?)",
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "high", user.ID, user.ID).
 		Count(&highCount)
 
 	// 本周统计（简化：近7天）
@@ -111,14 +111,14 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 		Count(&weekReceived)
 	model.DB.Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND (owner_id = ? OR current_owner_id = ?) AND resolved_at >= ? AND status IN (?)",
-			user.ID, user.ID, since, []string{model.IssueStatusAccepted, model.IssueStatusRejected, model.IssueStatusDismissed}).
+			user.ID, user.ID, since, []string{model.IssueStatusResolved, model.IssueStatusFalsePositive, model.IssueStatusIgnored}).
 		Count(&weekResolved)
 
-	// 待处理列表（按超期风险排序）
+	// 待处理列表（按超期风险排序：escalation_level 越低越优先 > severity > original_created_at ASC）
 	var pendingIssues []model.ReviewIssue
-	model.DB.Where("deleted_at IS NULL AND status = ? AND (owner_id = ? OR current_owner_id = ?)",
-		model.IssueStatusPending, user.ID, user.ID).
-		Order("severity DESC, created_at ASC").
+	model.DB.Where("deleted_at IS NULL AND status IN (?) AND (owner_id = ? OR current_owner_id = ?)",
+		[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID).
+		Order("escalation_level ASC, severity DESC, original_created_at ASC").
 		Limit(20).Find(&pendingIssues)
 
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{

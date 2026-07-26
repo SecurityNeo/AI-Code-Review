@@ -54,7 +54,7 @@ func (s *MemberMappingService) Get(id uint) (*model.MemberMapping, error) {
 // GetByGitUsername 根据 Git 用户名和平台查询映射
 func (s *MemberMappingService) GetByGitUsername(gitUsername string, platform model.IMPlatform) (*model.MemberMapping, error) {
 	var mapping model.MemberMapping
-	if err := model.DB.Where("git_username = ? AND im_platform = ?", gitUsername, platform).First(&mapping).Error; err != nil {
+	if err := model.DB.Where("git_username = ? AND im_platform = ? AND enabled = ?", gitUsername, platform, true).First(&mapping).Error; err != nil {
 		return nil, err
 	}
 	return &mapping, nil

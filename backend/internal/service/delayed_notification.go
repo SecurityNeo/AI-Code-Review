@@ -64,7 +64,7 @@ func (q *DelayedNotificationQueue) Enqueue(task model.Task, stats IssueStats) {
 	// 尝试根据 MRAuthor 查找 DisplayName
 	devName := task.MRAuthor
 	var mapping model.MemberMapping
-	if err := model.DB.Where("git_username = ? AND im_platform = ?", task.MRAuthor, model.IMPlatformWeCom).First(&mapping).Error; err == nil && mapping.DisplayName != "" {
+	if err := model.DB.Where("git_username = ? AND im_platform = ? AND enabled = ?", task.MRAuthor, model.IMPlatformWeCom, true).First(&mapping).Error; err == nil && mapping.DisplayName != "" {
 		devName = mapping.DisplayName
 	}
 
@@ -145,7 +145,7 @@ func (q *DelayedNotificationQueue) executeJob(taskID uint, job *pendingNotifyJob
 	// 1. 站内信通知开发者（MR 提交者）
 	var mapping model.MemberMapping
 	var mentionUserID string
-	if err := model.DB.Where("git_username = ? AND im_platform = ?", payload.MRAuthor, model.IMPlatformWeCom).First(&mapping).Error; err == nil {
+	if err := model.DB.Where("git_username = ? AND im_platform = ? AND enabled = ?", payload.MRAuthor, model.IMPlatformWeCom, true).First(&mapping).Error; err == nil {
 		mentionUserID = mapping.IMUserID
 	}
 
@@ -230,6 +230,11 @@ func buildInboxContent(payload notifyPayload) string {
 }
 
 func buildIMMarkdown(payload notifyPayload, mentionUserID string) string {
+	// 非工作时间（22:00-09:00）降级 @ 为纯文本，避免强提醒打扰
+	if mentionUserID != "" && isQuietHours() {
+		mentionUserID = ""
+	}
+
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("**🔍 AI 代码评审任务完成**\n\n"))
 	sb.WriteString(fmt.Sprintf("**项目：** %s\n", payload.ProjectName))
@@ -277,6 +282,12 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// isQuietHours 判断当前是否处于静默时段（22:00-09:00）
+func isQuietHours() bool {
+	hour := time.Now().Hour()
+	return hour >= 22 || hour < 9
 }
 
 // 兼容旧 notifier.go 中可能需要的辅助函数

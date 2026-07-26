@@ -231,6 +231,7 @@ type MemberMapping struct {
 	IMPlatform  IMPlatform `gorm:"size:20;not null;index:idx_git_im,unique" json:"im_platform"`
 	IMUserID    string     `gorm:"size:100;not null" json:"im_user_id"`
 	DisplayName string     `gorm:"size:100" json:"display_name"`
+	Enabled     bool       `gorm:"default:true" json:"enabled"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 }

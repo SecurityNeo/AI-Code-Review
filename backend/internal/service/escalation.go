@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ai-optimizer/backend/internal/model"
@@ -105,14 +106,16 @@ const (
 
 // EscalationService 升级路由服务
 type EscalationService struct {
-	calc     *WorkdayCalculator
-	notifSvc *NotificationService
+	calc       *WorkdayCalculator
+	notifSvc   *NotificationService
+	notifierSvc *NotifierService
 }
 
 func NewEscalationService() *EscalationService {
 	return &EscalationService{
-		calc:     GetWorkdayCalculator(),
-		notifSvc: NewNotificationService(),
+		calc:        GetWorkdayCalculator(),
+		notifSvc:    NewNotificationService(),
+		notifierSvc: NewNotifierService(),
 	}
 }
 
@@ -125,7 +128,7 @@ func (s *EscalationService) RunDailyEscalation() {
 
 	for {
 		var issues []model.ReviewIssue
-		model.DB.Where("deleted_at IS NULL AND status = ?", model.IssueStatusPending).
+		model.DB.Where("deleted_at IS NULL AND status IN (?)", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}).
 			Order("id ASC").Limit(batchSize).Offset(offset).Find(&issues)
 		if len(issues) == 0 {
 			break
@@ -137,8 +140,8 @@ func (s *EscalationService) RunDailyEscalation() {
 			if issue.OriginalCreatedAt == nil || issue.OriginalCreatedAt.IsZero() {
 				model.DB.Model(issue).UpdateColumn("original_created_at", issue.CreatedAt)
 				issue.OriginalCreatedAt = &issue.CreatedAt
-			}
-		}
+	}
+}
 
 		// 预加载关联 Task 和 Project，避免 N+1
 		taskMap, projectMap := s.preloadTaskProjects(issues)
@@ -236,7 +239,7 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 		}
 
 	case EscalationLevel72h:
-		// 强提醒开发者 + 抄送负责人
+		// 强提醒开发者 + 抄送负责人（IM + 站内信）
 		if issue.OwnerID != nil {
 			s.notifSvc.SendInbox(*issue.OwnerID, model.NotificationTypeIssueEscalation,
 				fmt.Sprintf("Issue #%d 已超期 3 个工作日", issue.ID),
@@ -245,7 +248,7 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 				"",
 			)
 		}
-		stewards := s.findStewards(task.ProjectID, issue.Category)
+		stewards := s.findStewards(task.ProjectID, issue.Category, project.Language)
 		for _, st := range stewards {
 			s.notifSvc.SendInbox(st.UserID, model.NotificationTypeIssueEscalation,
 				fmt.Sprintf("协助督促：Issue #%d", issue.ID),
@@ -254,19 +257,26 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 				"",
 			)
 		}
+		// IM 推送到项目群（含 @相关人员）
+		s.sendEscalationIM(project, issue, task, "72h", stewards)
 
 	case EscalationLevel120hSteward:
-		// 正式升级给项目负责人，current_owner 变更
-		stewards := s.findStewards(task.ProjectID, issue.Category)
+		// 正式升级给项目负责人，current_owner 变更，全部通知
+		stewards := s.findStewards(task.ProjectID, issue.Category, project.Language)
 		if len(stewards) > 0 {
-			steward := stewards[0]
-			model.DB.Model(issue).UpdateColumn("current_owner_id", steward.UserID)
-			s.notifSvc.SendInbox(steward.UserID, model.NotificationTypeIssueEscalation,
-				fmt.Sprintf("Issue #%d 已升级给您处理", issue.ID),
-				fmt.Sprintf("开发者 %s 的 Issue 已超期 5 天，现升级给您协助处理。\n项目：%s\nMR：%s\n问题：%s",
-					task.MRAuthor, project.Name, task.MRTitle, issue.Message),
-				"",
-			)
+			// current_owner 设为优先级最高的负责人
+			model.DB.Model(issue).UpdateColumn("current_owner_id", stewards[0].UserID)
+			// 给所有匹配的负责人发站内信
+			for _, st := range stewards {
+				s.notifSvc.SendInbox(st.UserID, model.NotificationTypeIssueEscalation,
+					fmt.Sprintf("Issue #%d 已升级给您处理", issue.ID),
+					fmt.Sprintf("开发者 %s 的 Issue 已超期 5 天，现升级给您协助处理。\n项目：%s\nMR：%s\n问题：%s",
+						task.MRAuthor, project.Name, task.MRTitle, issue.Message),
+					"",
+				)
+			}
+			// IM 推送所有负责人
+			s.sendEscalationIM(project, issue, task, "120h", stewards)
 		}
 		if issue.OwnerID != nil {
 			s.notifSvc.SendInbox(*issue.OwnerID, model.NotificationTypeIssueEscalation,
@@ -319,10 +329,10 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 	model.DB.Model(issue).UpdateColumn("escalation_level", nextLevel)
 }
 
-// findStewards 查找项目环节负责人
-func (s *EscalationService) findStewards(projectID uint, category string) []model.ProjectSteward {
+// findStewards 查找项目环节负责人（category → language → default）
+func (s *EscalationService) findStewards(projectID uint, category, language string) []model.ProjectSteward {
 	var stewards []model.ProjectSteward
-	// 先按 category 匹配
+	// 1. 先按 category 匹配
 	if category != "" {
 		model.DB.Where("project_id = ? AND role_type = ?", projectID, category).
 			Order("priority ASC, created_at ASC").Find(&stewards)
@@ -330,7 +340,15 @@ func (s *EscalationService) findStewards(projectID uint, category string) []mode
 			return stewards
 		}
 	}
-	// fallback 到 default
+	// 2. 按 language 匹配（category 未命中时）
+	if language != "" {
+		model.DB.Where("project_id = ? AND role_type = ?", projectID, language).
+			Order("priority ASC, created_at ASC").Find(&stewards)
+		if len(stewards) > 0 {
+			return stewards
+		}
+	}
+	// 3. fallback 到 default
 	model.DB.Where("project_id = ? AND role_type = ?", projectID, "default").
 		Order("priority ASC, created_at ASC").Find(&stewards)
 	return stewards
@@ -356,7 +374,7 @@ func (s *EscalationService) checkBatchAlerts() {
 		if err := model.DB.First(&project, r.ProjectID).Error; err != nil {
 			continue
 		}
-		stewards := s.findStewards(r.ProjectID, "")
+		stewards := s.findStewards(r.ProjectID, "", "")
 		for _, st := range stewards {
 			s.notifSvc.SendInbox(st.UserID, model.NotificationTypeBatchAlert,
 				fmt.Sprintf("【项目告警】%s 积压 %d 条未处理 Issue", project.Name, r.PendingCount),
@@ -387,9 +405,9 @@ func (s *EscalationService) SendDailyDigest() {
 	model.DB.Raw(`
 		SELECT current_owner_id AS user_id, COUNT(*) AS pending_count
 		FROM review_issues
-		WHERE deleted_at IS NULL AND status = ? AND current_owner_id > 0
+		WHERE deleted_at IS NULL AND status IN (?) AND current_owner_id > 0
 		GROUP BY current_owner_id
-	`, model.IssueStatusPending).Scan(&stats)
+	`, []string{model.IssueStatusPending, model.IssueStatusPendingInherited}).Scan(&stats)
 
 	for _, st := range stats {
 		s.notifSvc.SendInbox(st.UserID, model.NotificationTypeDailyDigest,
@@ -397,5 +415,71 @@ func (s *EscalationService) SendDailyDigest() {
 			fmt.Sprintf("您当前有 %d 条 Issue 等待处理，请及时闭环。", st.PendingCount),
 			"",
 		)
+	}
+}
+
+// sendEscalationIM 发送升级 IM 消息到项目群
+func (s *EscalationService) sendEscalationIM(project model.Project, issue *model.ReviewIssue, task model.Task, stage string, stewards []model.ProjectSteward) {
+	// 查找项目相关的 WeCom Notifier
+	var notifiers []model.WeComNotifier
+	db := model.DB.Where("enabled = ?", true)
+	if project.ID > 0 {
+		db = db.Where("project_id IS NULL OR project_id = ?", project.ID)
+	} else {
+		db = db.Where("project_id IS NULL")
+	}
+	db.Find(&notifiers)
+	if len(notifiers) == 0 {
+		return
+	}
+
+	// 构建 @ 列表
+	var mentions []string
+	for _, st := range stewards {
+		// 通过 UserID 获取 GitLab 用户名，再查 MemberMapping
+		var user model.User
+		if err := model.DB.First(&user, st.UserID).Error; err == nil && user.GitlabUsername != "" {
+			var mapping model.MemberMapping
+			if err := model.DB.Where("git_username = ? AND im_platform = ? AND enabled = ?", user.GitlabUsername, model.IMPlatformWeCom, true).First(&mapping).Error; err == nil && mapping.IMUserID != "" {
+				mentions = append(mentions, fmt.Sprintf("<@%s>", mapping.IMUserID))
+			}
+		}
+	}
+	mentionStr := ""
+	if len(mentions) > 0 {
+		mentionStr = "\n" + strings.Join(mentions, " ")
+	}
+
+	var stageText string
+	switch stage {
+	case "72h":
+		stageText = "已超期 3 个工作日"
+	case "120h":
+		stageText = "已超期 5 个工作日，正式升级"
+	default:
+		stageText = "升级提醒"
+	}
+
+	msg := fmt.Sprintf("**⚠️ Issue 升级告警**\n\n**项目：** %s\n**MR：** !%d %s\n**开发者：** %s\n**问题：** %s\n**状态：** %s\n\n> 请在 2 个工作日内处理，否则将自动归档。%s",
+		project.Name, task.MRMergeID, task.MRTitle, task.MRAuthor, issue.Message, stageText, mentionStr)
+
+	for _, notifier := range notifiers {
+		ok, detail, err := s.notifierSvc.SendMessage(notifier.WebhookUrl, msg, "")
+		log := model.NotificationDeliveryLog{
+			NotifierID:     &notifier.ID,
+			TaskID:         &task.ID,
+			Channel:        "wecom",
+			RecipientType:  "steward",
+			MessagePreview: truncate(msg, 200),
+			Status:         "success",
+		}
+		if !ok || err != nil {
+			log.Status = "failed"
+			log.ErrorMsg = detail
+			if err != nil {
+				log.ErrorMsg = err.Error()
+			}
+		}
+		model.DB.Create(&log)
 	}
 }

@@ -114,7 +114,7 @@ func CalcIssueStats(taskID uint, mrID int) IssueStats {
 			// 曾 resolved 又出现的
 			var parent model.ReviewIssue
 			if model.DB.Unscoped().Where("id = ?", *issue.InheritedFromIssueID).First(&parent).Error == nil {
-				if parent.Status == model.IssueStatusAccepted {
+				if parent.Status == model.IssueStatusResolved {
 					stats.ResolvedReappeared++
 				}
 			}

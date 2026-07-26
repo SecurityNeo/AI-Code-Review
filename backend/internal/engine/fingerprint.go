@@ -97,14 +97,14 @@ func ApplyFingerprintAndInheritance(issue *model.ReviewIssue, historyMap map[str
 	if hist, ok := historyMap[issue.Fingerprint]; ok {
 		issue.InheritedFromIssueID = &hist.ID
 		switch hist.Status {
-		case model.IssueStatusRejected, model.IssueStatusDismissed, model.IssueStatusAutoFiltered:
+		case model.IssueStatusFalsePositive, model.IssueStatusIgnored, model.IssueStatusAutoFiltered:
 			issue.Status = model.IssueStatusAutoFiltered
 			issue.OriginalCreatedAt = hist.OriginalCreatedAt
 			if issue.OriginalCreatedAt == nil || issue.OriginalCreatedAt.IsZero() {
 				issue.OriginalCreatedAt = &hist.CreatedAt
 			}
-		case model.IssueStatusAccepted:
-			issue.Status = model.IssueStatusPending
+		case model.IssueStatusResolved:
+			issue.Status = model.IssueStatusPendingInherited
 			issue.OriginalCreatedAt = hist.OriginalCreatedAt
 			if issue.OriginalCreatedAt == nil || issue.OriginalCreatedAt.IsZero() {
 				issue.OriginalCreatedAt = &hist.CreatedAt

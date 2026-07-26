@@ -49,12 +49,13 @@ type Holiday struct {
 }
 
 const (
-	IssueStatusPending        = "pending"
-	IssueStatusAccepted       = "accepted"      // 兼容现有：已接受/已修复
-	IssueStatusRejected       = "rejected"      // 兼容现有：被驳回/误报
-	IssueStatusDismissed      = "dismissed"     // 兼容现有：被忽略
-	IssueStatusAutoFiltered   = "auto_filtered" // 新增：系统自动过滤（历史误报继承）
-	IssueStatusAutoArchived   = "auto_archived" // 新增：超期自动归档
+	IssueStatusPending          = "pending"
+	IssueStatusPendingInherited = "pending_inherited" // 历史 resolved 问题复现
+	IssueStatusResolved         = "resolved"         // 用户确认已修复（原 accepted）
+	IssueStatusFalsePositive    = "false_positive"   // 用户判定为误报（原 rejected）
+	IssueStatusIgnored          = "ignored"          // 用户主动忽略（原 dismissed）
+	IssueStatusAutoFiltered     = "auto_filtered"    // 系统自动过滤（历史误报/忽略继承）
+	IssueStatusAutoArchived     = "auto_archived"    // 超期自动归档
 )
 
 const (

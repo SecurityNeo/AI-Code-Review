@@ -178,7 +178,7 @@ func (s *NotifierService) NotifyAIReviewCompleted(task model.Task) {
 	// 查询开发人员的 IM 用户 ID（用于 @）
 	var mentionUserId string
 	var mapping model.MemberMapping
-	if err := model.DB.Where("git_username = ? AND im_platform = ?", task.MRAuthor, model.IMPlatformWeCom).First(&mapping).Error; err == nil {
+	if err := model.DB.Where("git_username = ? AND im_platform = ? AND enabled = ?", task.MRAuthor, model.IMPlatformWeCom, true).First(&mapping).Error; err == nil {
 		mentionUserId = mapping.IMUserID
 	}
 
@@ -206,7 +206,7 @@ func buildReviewMessage(template string, task *model.Task) string {
 	// 查询开发人员展示名映射
 	developer := task.MRAuthor
 	var mapping model.MemberMapping
-	if err := model.DB.Where("git_username = ? AND im_platform = ?", task.MRAuthor, model.IMPlatformWeCom).
+	if err := model.DB.Where("git_username = ? AND im_platform = ? AND enabled = ?", task.MRAuthor, model.IMPlatformWeCom, true).
 		First(&mapping).Error; err == nil && mapping.DisplayName != "" {
 		developer = task.MRAuthor + "(" + mapping.DisplayName + ")"
 	}

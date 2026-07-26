@@ -74,16 +74,16 @@ func (s *IssueGovernanceService) ProcessTaskCompletion(taskID uint, newIssues []
 				if hist != nil {
 					issue.InheritedFromIssueID = &hist.ID
 					switch hist.Status {
-					case model.IssueStatusRejected, model.IssueStatusDismissed, model.IssueStatusAutoFiltered:
-						// 历史为误报/忽略/自动过滤 → 直接继承 auto_filtered
-						issue.Status = model.IssueStatusAutoFiltered
-						issue.OriginalCreatedAt = hist.OriginalCreatedAt
-						if issue.OriginalCreatedAt == nil || issue.OriginalCreatedAt.IsZero() {
-							issue.OriginalCreatedAt = &hist.CreatedAt
-						}
-					case model.IssueStatusAccepted:
-						// 历史为已修复 → 新出现保持 pending（代码可能回退或不同语境）
-						issue.Status = model.IssueStatusPending
+				case model.IssueStatusFalsePositive, model.IssueStatusIgnored, model.IssueStatusAutoFiltered:
+					// 历史为误报/忽略/自动过滤 → 直接继承 auto_filtered
+					issue.Status = model.IssueStatusAutoFiltered
+					issue.OriginalCreatedAt = hist.OriginalCreatedAt
+					if issue.OriginalCreatedAt == nil || issue.OriginalCreatedAt.IsZero() {
+						issue.OriginalCreatedAt = &hist.CreatedAt
+					}
+				case model.IssueStatusResolved:
+					// 历史为已修复 → 复现标记为 pending_inherited
+					issue.Status = model.IssueStatusPendingInherited
 						issue.OriginalCreatedAt = hist.OriginalCreatedAt
 						if issue.OriginalCreatedAt == nil || issue.OriginalCreatedAt.IsZero() {
 							issue.OriginalCreatedAt = &hist.CreatedAt
@@ -134,7 +134,7 @@ func (s *IssueGovernanceService) ProcessTaskCompletion(taskID uint, newIssues []
 
 // ResolveIssue 用户处理 Issue（前端调用）
 func (s *IssueGovernanceService) ResolveIssue(issueID uint, userID uint, status string, reason string) error {
-	if status != model.IssueStatusAccepted && status != model.IssueStatusRejected && status != model.IssueStatusDismissed {
+	if status != model.IssueStatusResolved && status != model.IssueStatusFalsePositive && status != model.IssueStatusIgnored {
 		return fmt.Errorf("invalid status: %s", status)
 	}
 	now := time.Now()

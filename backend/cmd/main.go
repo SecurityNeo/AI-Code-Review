@@ -225,7 +225,7 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 		c.File(frontendPath + "/statistics.html")
 	})
 	r.GET("/", func(c *gin.Context) {
-		c.File(frontendPath + "/statistics.html")
+		c.File(frontendPath + "/developer-dashboard.html")
 	})
 	r.GET("/index.html", func(c *gin.Context) {
 		// 301 重定向需显式保留 query 参数，避免 GitLab OAuth 回调的 ?token=xxx 被丢弃
