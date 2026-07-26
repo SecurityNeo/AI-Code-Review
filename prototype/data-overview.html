@@ -5,7 +5,7 @@
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>首页 - CodeGuard</title>
+    <title>数据概览 - CodeGuard</title>
         <script defer src="/vendor/echarts.min.js"></script>
     <script src="js/auth.js?v=5"></script>
     <script src="js/menu-config.js?v=2"></script>
@@ -130,7 +130,7 @@
         <main class="flex-1 overflow-y-auto">
                 <header class="bg-white border-b px-8 py-4 flex items-center justify-between sticky top-0 z-10">
                 <div>
-                    <h2 class="text-xl font-bold text-gray-800">📊 首页</h2>
+                    <h2 class="text-xl font-bold text-gray-800">📊 数据概览</h2>
                     <p class="text-sm text-gray-500 mt-1">全面洞察团队代码质量与开发活跃度</p>
                 </div>
             </header>
@@ -1268,7 +1268,7 @@
             loadFilterOptions();
             loadStatistics();
             loadTokenSummary();
-            renderSidebar('dashboard');
+            renderSidebar('data-overview');
             // 普通用户：作者筛选框只显示自己（数据已由后端过滤）
             if (isUser()) {
                 restrictAuthorFilterToSelf();

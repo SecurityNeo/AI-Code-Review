@@ -27,6 +27,7 @@ const MENU_CONFIG = [
         icon: 'fa-chart-bar',
         role: ['admin', 'user'],
         children: [
+            { id: 'data-overview', name: '全局数据概览', href: 'data-overview.html', icon: 'fa-chart-line', role: ['admin', 'user'] },
             { id: 'mr-stats',    name: '代码提交统计', href: 'mr-stats.html',    icon: 'fa-code-branch', role: ['admin', 'user'] },
             { id: 'rule-stats',  name: '规则命中统计', href: 'rule-stats.html',  icon: 'fa-bullseye',    role: ['admin', 'user'] },
             { id: 'token-usage', name: 'Token 用量',   href: 'token-usage.html', icon: 'fa-coins',       role: ['admin'] },

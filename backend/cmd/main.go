@@ -221,9 +221,7 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 	r.GET("/mr-stats.html", func(c *gin.Context) {
 		c.File(frontendPath + "/mr-stats.html")
 	})
-	r.GET("/statistics.html", func(c *gin.Context) {
-		c.File(frontendPath + "/statistics.html")
-	})
+	r.StaticFile("/data-overview.html", frontendPath+"/data-overview.html")
 	r.GET("/", func(c *gin.Context) {
 		c.File(frontendPath + "/developer-dashboard.html")
 	})
