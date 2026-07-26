@@ -257,6 +257,12 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 		c.File(frontendPath + "/incubator.html")
 	})
 
+	// 新增 Issue 治理与通知系统页面路由
+	r.StaticFile("/developer-dashboard.html", frontendPath+"/developer-dashboard.html")
+	r.StaticFile("/notifications.html", frontendPath+"/notifications.html")
+	r.StaticFile("/admin-dashboard.html", frontendPath+"/admin-dashboard.html")
+	r.StaticFile("/project-stewards.html", frontendPath+"/project-stewards.html")
+
 	// 健康检查
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
