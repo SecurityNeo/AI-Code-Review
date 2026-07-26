@@ -383,8 +383,9 @@
                                 <span class="text-xs font-medium text-gray-600">筛选：</span>
                                 <button onclick="filterIssues('all')" class="issue-filter-btn active text-xs px-3 py-1.5 rounded-full font-medium bg-blue-100 text-blue-700" data-filter="all">全部</button>
                                 <button onclick="filterIssues('pending')" class="issue-filter-btn text-xs px-3 py-1.5 rounded-full font-medium bg-gray-100 text-gray-600 hover:bg-gray-200" data-filter="pending">待处理</button>
-                                <button onclick="filterIssues('resolved')" class="issue-filter-btn text-xs px-3 py-1.5 rounded-full font-medium bg-green-100 text-green-700 hover:bg-green-200" data-filter="accepted">已采纳</button>
-                                <button onclick="filterIssues('false_positive')" class="issue-filter-btn text-xs px-3 py-1.5 rounded-full font-medium bg-red-100 text-red-700 hover:bg-red-200" data-filter="rejected">已拒绝</button>
+                                <button onclick="filterIssues('resolved')" class="issue-filter-btn text-xs px-3 py-1.5 rounded-full font-medium bg-green-100 text-green-700 hover:bg-green-200" data-filter="resolved">已处理</button>
+                                <button onclick="filterIssues('false_positive')" class="issue-filter-btn text-xs px-3 py-1.5 rounded-full font-medium bg-red-100 text-red-700 hover:bg-red-200" data-filter="false_positive">误报</button>
+                                <button onclick="filterIssues('ignored')" class="issue-filter-btn text-xs px-3 py-1.5 rounded-full font-medium bg-gray-100 text-gray-600 hover:bg-gray-200" data-filter="ignored">已忽略</button>
                                 <button onclick="filterIssues('auto_filtered')" class="issue-filter-btn text-xs px-3 py-1.5 rounded-full font-medium bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200" data-filter="auto_filtered">已过滤</button>
                                 <select id="issueFileFilter" onchange="renderIssues()" class="text-xs px-3 py-1.5 border rounded-lg ml-auto bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none">
                                     <option value="">所有文件</option>

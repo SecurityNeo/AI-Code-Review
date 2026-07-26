@@ -62,6 +62,8 @@
                     <button onclick="filterType('deadline_digest')" id="tab-deadline" class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50">截止</button>
                     <button onclick="filterType('daily_digest')" id="tab-digest" class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50">日报</button>
                     <button onclick="filterType('batch_alert')" id="tab-batch" class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50">告警</button>
+                    <button onclick="filterType('auto_archived')" id="tab-archived" class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50">归档</button>
+                    <button onclick="filterType('task_completed_no_issue')" id="tab-noissue" class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50">无问题</button>
                     <button onclick="filterUnread()" id="tab-unread" class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50 ml-auto">
                         <i class="fas fa-envelope mr-1"></i>仅未读
                     </button>
@@ -97,6 +99,7 @@ let unreadOnly = false;
 
 const NOTIF_TYPE_LABEL = {
     'task_completed': { label: '任务', icon: 'fa-tasks', color: 'notif-type-task' },
+    'task_completed_no_issue': { label: '无问题', icon: 'fa-check-circle', color: 'notif-type-task' },
     'issue_escalation': { label: '升级', icon: 'fa-level-up-alt', color: 'notif-type-escalation' },
     'deadline_digest': { label: '截止', icon: 'fa-clock', color: 'notif-type-deadline' },
     'daily_digest': { label: '日报', icon: 'fa-calendar-day', color: 'notif-type-digest' },
