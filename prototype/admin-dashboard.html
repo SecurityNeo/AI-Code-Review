@@ -144,6 +144,7 @@
 </div>
 
 <script>
+const API_BASE = '/api/v1';
 async function loadAdminDashboard(force = false) {
     try {
         const res = await apiFetch(API_BASE + '/dashboard/admin');
