@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script src="js/theme.js?v=1"></script>
+    <style>html{background-color:#1e293b;}</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>消息中心 - CodeGuard</title>
+    <script src="js/auth.js?v=5"></script>
+    <script src="js/menu-config.js?v=2"></script>
+    <script src="js/sidebar.js?v=2"></script>
+    <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="css/theme.css?v=1">
+    <style>
+        .sidebar-item:hover { background-color: rgba(255,255,255,0.1); }
+        .sidebar-item.active { background-color: rgba(255,255,255,0.15); border-left: 3px solid #3b82f6; }
+        .notif-unread { background-color: #f0f9ff; border-left: 4px solid #3b82f6; }
+        .notif-read { background-color: white; }
+        .notif-type-task { color: #3b82f6; }
+        .notif-type-escalation { color: #f59e0b; }
+        .notif-type-deadline { color: #ef4444; }
+        .notif-type-digest { color: #6b7280; }
+        .notif-type-system { color: #8b5cf6; }
+        .notif-type-auto_archived { color: #9ca3af; }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans">
+
+<div id="page-transition" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#1e293b;z-index:99999;transition:opacity .25s ease;"></div>
+<script>
+(function(){
+  function hide(){var el=document.getElementById('page-transition');if(el){el.style.opacity='0';setTimeout(function(){el.remove();},250);}}
+  if(document.readyState==='complete'){hide();}else{window.addEventListener('load',hide);}
+})();
+</script>
+
+<div class="flex h-screen">
+    <aside id="sidebar" class="w-64 bg-slate-900 text-white flex-shrink-0 flex flex-col">
+        <nav style="padding: 20px; text-align: center; color: var(--cg-text-tertiary); font-size: 13px;">加载中...</nav>
+    </aside>
+
+    <main class="flex-1 overflow-y-auto">
+        <header class="bg-white border-b px-8 py-4 flex items-center justify-between sticky top-0 z-10">
+            <div>
+                <h2 class="text-xl font-bold text-gray-800">消息中心</h2>
+                <p class="text-sm text-gray-500 mt-1">站内信与通知管理</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <button onclick="markAllRead()" class="text-sm text-blue-600 hover:text-blue-800 px-3 py-1.5 rounded hover:bg-blue-50">
+                    <i class="fas fa-check-double mr-1"></i>全部已读
+                </button>
+            </div>
+        </header>
+
+        <div class="px-8 py-6 space-y-6">
+            <!-- 分类筛选 + 统计 -->
+            <div class="flex items-center gap-4">
+                <div class="bg-white rounded-xl border px-4 py-3 flex items-center gap-3 flex-1">
+                    <button onclick="filterType('')" id="tab-all" class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium bg-blue-50 text-blue-700">全部</button>
+                    <button onclick="filterType('task_completed')" id="tab-task" class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50">任务</button>
+                    <button onclick="filterType('issue_escalation')" id="tab-escalation" class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50">升级</button>
+                    <button onclick="filterType('deadline_digest')" id="tab-deadline" class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50">截止</button>
+                    <button onclick="filterType('daily_digest')" id="tab-digest" class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50">日报</button>
+                    <button onclick="filterType('batch_alert')" id="tab-batch" class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50">告警</button>
+                    <button onclick="filterUnread()" id="tab-unread" class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50 ml-auto">
+                        <i class="fas fa-envelope mr-1"></i>仅未读
+                    </button>
+                </div>
+            </div>
+
+            <!-- 消息列表 -->
+            <div id="notifList" class="space-y-3">
+                <!-- 动态填充 -->
+            </div>
+
+            <!-- 分页 -->
+            <div id="paginationArea" class="flex items-center justify-between pt-4 border-t">
+                <span id="totalCount" class="text-sm text-gray-500">共 0 条记录</span>
+                <div class="flex items-center gap-4">
+                    <select id="pageSizeSelect" onchange="changePageSize()" class="px-2 py-1 border rounded text-sm">
+                        <option value="10" selected>10条/页</option>
+                        <option value="20">20条/页</option>
+                        <option value="50">50条/页</option>
+                    </select>
+                    <div id="pagination" class="flex gap-2"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script>
+let page = 1;
+let pageSize = 10;
+let currentType = '';
+let unreadOnly = false;
+
+const NOTIF_TYPE_LABEL = {
+    'task_completed': { label: '任务', icon: 'fa-tasks', color: 'notif-type-task' },
+    'issue_escalation': { label: '升级', icon: 'fa-level-up-alt', color: 'notif-type-escalation' },
+    'deadline_digest': { label: '截止', icon: 'fa-clock', color: 'notif-type-deadline' },
+    'daily_digest': { label: '日报', icon: 'fa-calendar-day', color: 'notif-type-digest' },
+    'auto_archived': { label: '归档', icon: 'fa-archive', color: 'notif-type-auto_archived' },
+    'batch_alert': { label: '告警', icon: 'fa-bell', color: 'notif-type-deadline' },
+};
+
+function typeInfo(type) {
+    return NOTIF_TYPE_LABEL[type] || { label: '系统', icon: 'fa-info-circle', color: 'notif-type-system' };
+}
+
+function formatTime(ts) {
+    if (!ts) return '';
+    const t = new Date(ts);
+    const now = new Date();
+    const diff = Math.floor((now - t) / 1000);
+    if (diff < 60) return '刚刚';
+    if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
+    if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
+    if (diff < 604800) return Math.floor(diff / 86400) + ' 天前';
+    return t.toLocaleDateString('zh-CN');
+}
+
+async function loadNotifications() {
+    const container = document.getElementById('notifList');
+    container.innerHTML = '<div class="text-center py-8 text-gray-400"><i class="fas fa-spinner fa-spin mr-2"></i>加载中...</div>';
+    try {
+        const params = new URLSearchParams();
+        params.set('page', page);
+        params.set('page_size', pageSize);
+        if (currentType) params.set('type', currentType);
+        if (unreadOnly) params.set('is_read', 'false');
+
+        const res = await apiFetch(API_BASE + '/notifications?' + params.toString());
+        const data = await res.json();
+        const list = data.data || [];
+        const total = data.total || 0;
+
+        if (list.length === 0) {
+            container.innerHTML = '<div class="text-center py-8 text-gray-400">暂无消息</div>';
+        } else {
+            container.innerHTML = list.map(n => {
+                const info = typeInfo(n.type);
+                const unreadClass = !n.is_read ? 'notif-unread' : 'notif-read';
+                const readBtn = !n.is_read
+                    ? `<button onclick="event.stopPropagation(); markRead(${n.id}, this)" class="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50">标记已读</button>`
+                    : `<span class="text-xs text-gray-400 px-2">已读</span>`;
+                return `
+                    <div onclick="openNotif(${n.id}, '${escapeHtml(n.link || '')}')" class="${unreadClass} rounded-lg border p-4 hover:shadow-md transition-shadow cursor-pointer group">
+                        <div class="flex items-start gap-3">
+                            <div class="flex-shrink-0 mt-0.5">
+                                <i class="fas ${info.icon} ${info.color} text-lg"></i>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center justify-between mb-1">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-600">${info.label}</span>
+                                        <h4 class="font-semibold text-gray-800 text-sm truncate">${escapeHtml(n.title)}</h4>
+                                    </div>
+                                    <span class="text-xs text-gray-400 flex-shrink-0">${formatTime(n.created_at)}</span>
+                                </div>
+                                <p class="text-sm text-gray-600 line-clamp-2">${escapeHtml(n.content)}</p>
+                                <div class="flex items-center justify-between mt-2">
+                                    <div class="flex items-center gap-2">
+                                        ${n.link ? '<span class="text-xs text-blue-500"><i class="fas fa-external-link-alt mr-1"></i>点击查看</span>' : ''}
+                                    </div>
+                                    <div>${readBtn}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        document.getElementById('totalCount').textContent = `共 ${total} 条记录`;
+        renderPagination('pagination', page, Math.ceil(total / pageSize) || 1, loadNotifications);
+    } catch (err) {
+        container.innerHTML = `<div class="text-center py-8 text-red-500">加载失败: ${err.message}</div>`;
+    }
+}
+
+function filterType(type) {
+    currentType = type;
+    unreadOnly = false;
+    page = 1;
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('bg-blue-50', 'text-blue-700');
+        btn.classList.add('text-gray-600');
+    });
+    const activeId = type ? 'tab-' + type.replace('_', '-') : 'tab-all';
+    const activeBtn = document.getElementById(activeId);
+    if (activeBtn) {
+        activeBtn.classList.add('bg-blue-50', 'text-blue-700');
+        activeBtn.classList.remove('text-gray-600');
+    }
+    loadNotifications();
+}
+
+function filterUnread() {
+    unreadOnly = !unreadOnly;
+    page = 1;
+    const btn = document.getElementById('tab-unread');
+    if (unreadOnly) {
+        btn.classList.add('bg-blue-50', 'text-blue-700');
+        btn.classList.remove('text-gray-600');
+    } else {
+        btn.classList.remove('bg-blue-50', 'text-blue-700');
+        btn.classList.add('text-gray-600');
+    }
+    loadNotifications();
+}
+
+function changePageSize() {
+    pageSize = parseInt(document.getElementById('pageSizeSelect').value);
+    page = 1;
+    loadNotifications();
+}
+
+async function markRead(id, btnEl) {
+    try {
+        await apiFetch(API_BASE + '/notifications/' + id + '/read', { method: 'POST' });
+        const card = btnEl.closest('.notif-unread');
+        if (card) {
+            card.classList.remove('notif-unread');
+            card.classList.add('notif-read');
+        }
+        btnEl.outerHTML = '<span class="text-xs text-gray-400 px-2">已读</span>';
+        updateUnreadBadge();
+    } catch (err) {
+        console.error('mark read failed', err);
+    }
+}
+
+async function markAllRead() {
+    try {
+        await apiFetch(API_BASE + '/notifications/read-all', { method: 'POST' });
+        loadNotifications();
+        updateUnreadBadge();
+    } catch (err) {
+        console.error('mark all read failed', err);
+    }
+}
+
+function openNotif(id, link) {
+    // 标记已读后跳转
+    apiFetch(API_BASE + '/notifications/' + id + '/read', { method: 'POST' }).catch(() => {});
+    if (link) {
+        window.open(link, '_blank');
+    }
+    updateUnreadBadge();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadNotifications();
+});
+</script>
+
+</body>
+</html>

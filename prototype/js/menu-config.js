@@ -19,7 +19,9 @@ const MENU_CONFIG = [
         role: ['admin', 'user']
     },
 
-    // ========== 数据洞察 ==========
+        { id: 'notifications', name: '消息中心', href: 'notifications.html', icon: 'fa-bell', role: ['admin', 'user'] },
+
+        // ========== 数据洞察 ==========
     {
         id: 'insights-group',
         name: '数据洞察',

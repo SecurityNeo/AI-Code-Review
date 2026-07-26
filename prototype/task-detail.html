@@ -385,6 +385,7 @@
                                 <button onclick="filterIssues('pending')" class="issue-filter-btn text-xs px-3 py-1.5 rounded-full font-medium bg-gray-100 text-gray-600 hover:bg-gray-200" data-filter="pending">待处理</button>
                                 <button onclick="filterIssues('accepted')" class="issue-filter-btn text-xs px-3 py-1.5 rounded-full font-medium bg-green-100 text-green-700 hover:bg-green-200" data-filter="accepted">已采纳</button>
                                 <button onclick="filterIssues('rejected')" class="issue-filter-btn text-xs px-3 py-1.5 rounded-full font-medium bg-red-100 text-red-700 hover:bg-red-200" data-filter="rejected">已拒绝</button>
+                                <button onclick="filterIssues('auto_filtered')" class="issue-filter-btn text-xs px-3 py-1.5 rounded-full font-medium bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200" data-filter="auto_filtered">已过滤</button>
                                 <select id="issueFileFilter" onchange="renderIssues()" class="text-xs px-3 py-1.5 border rounded-lg ml-auto bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none">
                                     <option value="">所有文件</option>
                                 </select>
@@ -984,7 +985,11 @@ function renderIssues() {
         return;
     }
     let issues = data.issues;
-    if (issueFilter !== 'all') issues = issues.filter(i => i.status === issueFilter);
+    // 默认隐藏 auto_filtered（系统自动过滤的历史误报）
+    if (issueFilter !== 'auto_filtered') {
+        issues = issues.filter(i => i.status !== 'auto_filtered');
+    }
+    if (issueFilter !== 'all' && issueFilter !== 'auto_filtered') issues = issues.filter(i => i.status === issueFilter);
     const fileFilter = document.getElementById('issueFileFilter').value;
     if (fileFilter) issues = issues.filter(i => i.file === fileFilter);
     if (issues.length === 0) {
@@ -995,10 +1000,26 @@ function renderIssues() {
     const severityLabels = { critical: '严重', high: '高危', medium: '中危', low: '低危', info: '提示' };
     const severityColors = { critical: 'text-red-600', high: 'text-orange-600', medium: 'text-yellow-600', low: 'text-blue-600', info: 'text-gray-500' };
     const categoryLabels = { security: '安全', performance: '性能', code_quality: '代码质量', readability: '可读性', maintainability: '可维护性', test_coverage: '测试覆盖', common: '通用' };
-    const statusLabels = { pending: '待处理', accepted: '已采纳', rejected: '已拒绝' };
-    const statusColors = { pending: 'text-gray-500', accepted: 'text-green-600', rejected: 'text-red-600' };
+    const statusLabels = { pending: '待处理', accepted: '已采纳', rejected: '已拒绝', auto_filtered: '已过滤' };
+    const statusColors = { pending: 'text-gray-500', accepted: 'text-green-600', rejected: 'text-red-600', auto_filtered: 'text-blue-500' };
+
+    // 统计摘要
+    const allIssues = data.issues;
+    const totalCount = allIssues.length;
+    const pendingCount = allIssues.filter(i => i.status === 'pending').length;
+    const acceptedCount = allIssues.filter(i => i.status === 'accepted').length;
+    const rejectedCount = allIssues.filter(i => i.status === 'rejected').length;
+    const filteredCount = allIssues.filter(i => i.status === 'auto_filtered').length;
+    let summaryHtml = `<div class="flex flex-wrap items-center gap-3 mb-4 text-sm">
+        <span class="text-gray-700 font-medium">本次共 <span class="font-bold text-blue-600">${totalCount}</span> 条 Issue</span>`;
+    if (pendingCount > 0) summaryHtml += `<span class="text-gray-500">· <span class="font-bold ${statusColors.pending}">${pendingCount}</span> 待处理</span>`;
+    if (acceptedCount > 0) summaryHtml += `<span class="text-gray-500">· <span class="font-bold ${statusColors.accepted}">${acceptedCount}</span> 已采纳</span>`;
+    if (rejectedCount > 0) summaryHtml += `<span class="text-gray-500">· <span class="font-bold ${statusColors.rejected}">${rejectedCount}</span> 已拒绝</span>`;
+    if (filteredCount > 0) summaryHtml += `<span class="text-blue-500 bg-blue-50 px-2 py-0.5 rounded text-xs border border-blue-100">· ${filteredCount} 条历史误报已自动过滤</span>`;
+    summaryHtml += `</div>`;
+
     issues.sort((a, b) => severityOrder[b.severity] - severityOrder[a.severity] || (b.deduct_score || 0) - (a.deduct_score || 0));
-    document.getElementById('issuesListArea').innerHTML = issues.map(issue => {
+    document.getElementById('issuesListArea').innerHTML = summaryHtml + issues.map(issue => {
         const sevClass = 'severity-' + issue.severity;
         const sevLabel = severityLabels[issue.severity] || issue.severity;
         const catLabel = categoryLabels[issue.category] || issue.category;
