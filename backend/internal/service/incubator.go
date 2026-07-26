@@ -1532,7 +1532,13 @@ Please output in the following JSON format (do not include markdown code block):
 		updates["name"] = refineResult.Name
 	}
 	if refineResult.Description != "" {
-		updates["description"] = refineResult.Description
+		// Trim description to max 80 runes for conciseness
+		desc := refineResult.Description
+		if utf8.RuneCountInString(desc) > 80 {
+			rs := []rune(desc)
+			desc = string(rs[:77]) + "..."
+		}
+		updates["description"] = desc
 	}
 	if refineResult.Prompt != "" {
 		updates["prompt"] = refineResult.Prompt

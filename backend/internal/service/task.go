@@ -33,12 +33,13 @@ func NewTaskService() *TaskService {
 	}
 }
 
-func (s *TaskService) List(user model.User, projectID uint, status string, startTime, endTime time.Time, author, mrIID string, page, pageSize int) ([]model.Task, int64, error) {
+func (s *TaskService) List(user model.User, projectID uint, status string, startTime, endTime time.Time, author, mrIID string, hasPendingIssues bool, page, pageSize int) ([]model.Task, int64, error) {
 	zap.L().Debug("TaskService.List called",
 		zap.Uint("project_id", projectID),
 		zap.String("status", status),
 		zap.String("user", user.Username),
-		zap.String("role", user.Role))
+		zap.String("role", user.Role),
+		zap.Bool("has_pending_issues", hasPendingIssues))
 
 	var tasks []model.Task
 	var total int64
@@ -66,22 +67,24 @@ func (s *TaskService) List(user model.User, projectID uint, status string, start
 		query = query.Where("mr_merge_id = ?", mrIID)
 	}
 
+	// 子查询：统计每个任务的 pending issue 数量
+	pendingSubquery := model.DB.Table("review_issues").
+		Select("task_id, COUNT(*) as cnt").
+		Where("status = ? AND deleted_at IS NULL", "pending").
+		Group("task_id")
+
+	query = query.Joins("LEFT JOIN (?) AS pending_counts ON pending_counts.task_id = tasks.id", pendingSubquery).
+		Select("tasks.*, COALESCE(pending_counts.cnt, 0) as pending_issue_count")
+
+	if hasPendingIssues {
+		query = query.Where("COALESCE(pending_counts.cnt, 0) > 0")
+	}
+
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
 	query = query.Order("created_at DESC").Scopes(model.Paginate(page, pageSize))
-
-	// 列表页裁剪大字段：不返回 ai_prompt / ai_response / error_msg / diff_summary
-	// 这些长文本字段只在详情页 (Get) 中获取
-	query = query.Select(
-		"id", "project_id", "mr_merge_id", "mr_author", "mr_author_display_name",
-		"mr_title", "mr_url", "trigger_type", "trigger_source", "task_type",
-		"status", "source_branch", "target_branch", "pool_id",
-		"model_id", "gitlab_token_id", "opencode_session_id",
-		"started_at", "completed_at", "duration_sec", "score_value",
-		"retry_count", "created_at", "updated_at",
-	)
 
 	if err := query.Preload("Project").Preload("Pool").Preload("UsedModel").Find(&tasks).Error; err != nil {
 		return nil, 0, err

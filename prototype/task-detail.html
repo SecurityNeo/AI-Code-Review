@@ -1815,7 +1815,13 @@ function copyReviewMarkdown() {
 
 window.addEventListener('DOMContentLoaded', async () => {
     await loadReviewCategories();
-    loadTask();
+    await loadTask();
+    // URL 参数 tab 控制：支持 ?tab=report 自动切换到评审报告
+    const urlParams = new URLSearchParams(window.location.search);
+    const tabParam = urlParams.get('tab');
+    if (tabParam && ['diff', 'report', 'raw', 'token'].includes(tabParam)) {
+        switchTab(tabParam);
+    }
 });
 </script>
     <!-- 推送给 GitLab 的评审报告弹窗 -->

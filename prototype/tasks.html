@@ -145,6 +145,10 @@
                         <input type="text" id="authorFilter" placeholder="开发人员" class="w-32 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
                         <input type="text" id="mrFilter" placeholder="MR ID" class="w-28 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
                     </div>
+                    <label class="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer select-none">
+                        <input type="checkbox" id="pendingIssuesFilter" class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500">
+                        <span>有待处理Issue</span>
+                    </label>
                     <button onclick="filterTasks()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700">
                         <i class="fas fa-search mr-1"></i>查询
                     </button>
@@ -409,6 +413,7 @@ const API_BASE = '/api/v1';
             const timeFilter = document.getElementById('timeFilter').value;
             const authorFilter = document.getElementById('authorFilter').value.trim();
             const mrFilter = document.getElementById('mrFilter').value.trim();
+            const pendingIssuesFilter = document.getElementById('pendingIssuesFilter').checked;
             
             let url = `/api/v1/tasks?page=${currentPage}&page_size=${pageSize}`;
             if (statusFilter) url += `&status=${statusFilter}`;
@@ -416,13 +421,11 @@ const API_BASE = '/api/v1';
             if (timeFilter) url += `&time_filter=${timeFilter}`;
             if (authorFilter) url += `&author=${encodeURIComponent(authorFilter)}`;
             if (mrFilter) url += `&mr_iid=${encodeURIComponent(mrFilter)}`;
+            if (pendingIssuesFilter) url += `&has_pending_issues=true`;
 
-            console.log('Loading tasks from:', url);
             try {
                 const res = await apiFetch(url);
-                console.log('Response status:', res.status);
                 const data = await res.json();
-                console.log('Tasks data:', data);
                 tasksData = data.data || [];
                 totalCount = data.total || 0;
                 totalPages = Math.ceil(totalCount / pageSize) || 1;
@@ -517,6 +520,9 @@ function renderTasks(tasks) {
 
             tbody.innerHTML = tasks.map(t => {
                 const isReview = t.task_type === 'review';
+                const pendingBadge = (isReview && t.status === 'success' && t.pending_issue_count > 0)
+                    ? `<span class="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 cursor-pointer hover:bg-amber-100" onclick="event.stopPropagation(); openTaskDetail(${t.id}, 'report')" title="该任务还有 ${t.pending_issue_count} 条 Issue 待审核">待审 ${t.pending_issue_count}</span>`
+                    : '';
                 return `<tr class="hover:bg-gray-50">
                     <td class="px-4 py-3 text-sm font-mono text-gray-600 cursor-pointer" onclick="openTaskDetail(${t.id})">#${t.id}</td>
                     <td class="px-4 py-3 text-center cursor-pointer" onclick="openTaskDetail(${t.id})"><span class="task-type-badge ${isReview ? 'review' : 'chat'}">${getTaskTypeText(t.task_type)}</span></td>
@@ -530,7 +536,7 @@ function renderTasks(tasks) {
                         : (t.pool?.name || '-')}</td>
                     <td class="px-4 py-3 text-sm cursor-pointer" onclick="openTaskDetail(${t.id})">${formatDuration(t.duration_sec)}</td>
                     <td class="px-4 py-3 text-sm text-gray-500 cursor-pointer" onclick="openTaskDetail(${t.id})">${formatDate(t.created_at)}</td>
-                    <td class="px-4 py-3 text-center cursor-pointer" onclick="openTaskDetail(${t.id})"><span class="status-badge status-${t.status}">${getStatusText(t.status)}</span></td>
+                    <td class="px-4 py-3 text-center cursor-pointer" onclick="openTaskDetail(${t.id})"><span class="status-badge status-${t.status}">${getStatusText(t.status)}</span>${pendingBadge}</td>
                     <td class="px-4 py-3 text-center space-x-1">
                         ${!isReview && t.opencode_session_id ? `<button onclick="deleteTaskSession(${t.id}); event.stopPropagation();" class="text-red-500 hover:text-red-600 text-sm">删除会话</button>` : ''}
                         ${t.status === 'running' ? `<button onclick="stopTask(${t.id}); event.stopPropagation();" class="text-red-600 hover:text-red-700 text-sm">停止</button>` : ''}
@@ -593,8 +599,10 @@ function renderTasks(tasks) {
         function showModal(id) { document.getElementById(id).classList.add('active'); }
         function hideModal(id) { document.getElementById(id).classList.remove('active'); }
 
-        function openTaskDetail(id) {
-            window.location.href = `task-detail.html?id=${id}`;
+        function openTaskDetail(id, tab) {
+            let url = `task-detail.html?id=${id}`;
+            if (tab) url += `&tab=${tab}`;
+            window.location.href = url;
         }
 
         async function viewLogs(id) {
@@ -1961,9 +1969,9 @@ function renderTasks(tasks) {
         }
 
         function showToast(message, type = 'info') {
-            const colors = { success: 'bg-green-500', error: 'bg-red-500', info: 'bg-blue-500' };
+            const colors = { success: 'bg-green-500', error: 'bg-red-500', info: 'bg-blue-500', warning: 'bg-amber-500' };
             const toast = document.createElement('div');
-            toast.className = `fixed top-4 right-4 ${colors[type] || colors.info} text-white px-4 py-2 rounded-lg shadow-lg z-50 transition-opacity duration-300`;
+            toast.className = `fixed top-4 right-4 ${colors[type] || colors.info} text-white px-4 py-2 rounded-lg shadow-lg z-50 transition-opacity duration-300 max-w-sm whitespace-normal break-words`;
             toast.textContent = message;
             document.body.appendChild(toast);
             setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 3000);

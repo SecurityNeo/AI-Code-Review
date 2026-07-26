@@ -31,6 +31,7 @@ func (h *TaskHandler) List(c *gin.Context) {
 	timeFilter := c.Query("time_filter")
 	author := c.Query("author")
 	mrIID := c.Query("mr_iid")
+	hasPendingIssues := c.Query("has_pending_issues") == "true"
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 
@@ -48,7 +49,7 @@ func (h *TaskHandler) List(c *gin.Context) {
 		endTime = now
 	}
 
-	tasks, total, err := service.NewTaskService().List(user, uint(projectID), status, startTime, endTime, author, mrIID, page, pageSize)
+	tasks, total, err := service.NewTaskService().List(user, uint(projectID), status, startTime, endTime, author, mrIID, hasPendingIssues, page, pageSize)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return

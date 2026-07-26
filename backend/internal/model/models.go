@@ -86,6 +86,7 @@ type Task struct {
 	Project             Project             `gorm:"foreignKey:ProjectID" json:"project,omitempty"`
 	Pool                ResourcePool        `gorm:"foreignKey:PoolID" json:"pool,omitempty"`
 	UsedModel           LLMModel            `gorm:"foreignKey:UsedModelID;references:ID" json:"used_model,omitempty"`
+	PendingIssueCount   int                 `gorm:"default:0;column:pending_issue_count" json:"pending_issue_count"` // 待处理Issue数量（列表页由子查询填充）
 }
 
 // BeforeCreate GORM hook: 确保 JSON 字段有合法默认值
