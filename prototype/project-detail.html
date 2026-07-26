@@ -142,6 +142,9 @@
                 <div class="tab-btn" onclick="switchTab('rules')">
                     <i class="fas fa-shield-alt mr-1"></i>评审规则配置
                 </div>
+                <div class="tab-btn" onclick="switchTab('stewards')">
+                    <i class="fas fa-user-shield mr-1"></i>环节负责人
+                </div>
             </div>
 
             <!-- 任务历史 Tab -->
@@ -328,8 +331,39 @@
         <div class="flex justify-end gap-2">
             <button onclick="hideBatchConfirmDialog()" class="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">取消</button>
             <button onclick="executeBatchAction()" id="batchConfirmBtn" class="px-4 py-2 rounded-lg text-sm text-white bg-blue-600 hover:bg-blue-700">确认启用</button>
+            </div>
+
+            <!-- 环节负责人 Tab -->
+            <div id="tab-stewards" class="tab-content">
+                <div class="bg-white rounded-xl border p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <h3 class="font-bold text-gray-800">环节负责人配置</h3>
+                            <p class="text-sm text-gray-500 mt-1">配置该项目的升级通知接收人。支持按规则分类、语言或默认层级设置。</p>
+                        </div>
+                        <button onclick="showAddStewardModal()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
+                            <i class="fas fa-plus mr-1"></i>添加负责人
+                        </button>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-50 border-b">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">匹配类型</th>
+                                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">匹配值</th>
+                                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">GitLab 用户名</th>
+                                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">通知渠道</th>
+                                    <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 w-24">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="stewardsBody" class="divide-y">
+                                <tr><td colspan="5" class="px-4 py-8 text-center text-gray-500">加载中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
         </div>
-    </div>
 </div>
 
 <script>
@@ -355,12 +389,13 @@
         return params.get('id');
     }
 
-    function switchTab(tab) {
+            function switchTab(tab) {
         document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
         document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-        document.querySelector(`.tab-btn[onclick*="switchTab('${tab}'"]`).classList.add('active');
+        document.querySelector(`.tab-btn[onclick*="switchTab('${tab}'"`).classList.add('active');
         document.getElementById(`tab-${tab}`).classList.add('active');
         if (tab === 'rules') loadProjectRules();
+        if (tab === 'stewards') loadProjectStewards();
     }
 
     // ========== 项目信息加载 ==========
@@ -997,9 +1032,154 @@ let ruleTotalPages = 1;
         const urlParams = new URLSearchParams(window.location.search);
         if (urlParams.get('tab') === 'rules') {
             switchTab('rules');
+        } else if (urlParams.get('tab') === 'stewards') {
+            switchTab('stewards');
         }
     });
+
+    // ========== 环节负责人配置 ==========
+    async function loadProjectStewards() {
+        const projectId = getProjectId();
+        if (!projectId) return;
+        try {
+            const res = await apiFetch(`${API_BASE}/project-stewards?project_id=${projectId}`);
+            const json = await res.json();
+            const stewards = json.data || [];
+            renderProjectStewards(stewards);
+        } catch (e) { console.error('加载环节负责人失败:', e); }
+    }
+
+    function renderProjectStewards(stewards) {
+        const tbody = document.getElementById('stewardsBody');
+        if (!tbody) return;
+        if (stewards.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">暂无配置，点击右上角添加</td></tr>';
+            return;
+        }
+        const typeLabels = { rule_category: '规则分类', language: '语言', 'default': '默认' };
+        tbody.innerHTML = stewards.map(s => `
+            <tr class="hover:bg-gray-50">
+                <td class="px-4 py-3 text-sm text-gray-800">${typeLabels[s.match_type] || s.match_type}</td>
+                <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(s.match_value || '-')} <span class="text-xs text-gray-400">(${s.priority || 0})</span></td>
+                <td class="px-4 py-3 text-sm font-mono text-gray-700">${escapeHtml(s.gitlab_username)}</td>
+                <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(s.im_platform || '-')} / ${escapeHtml(s.im_user_id || '-')}</td>
+                <td class="px-4 py-3 text-center">
+                    <button onclick="deleteProjectSteward(${s.id})" class="text-red-500 hover:text-red-700 text-sm px-2 py-1 rounded hover:bg-red-50">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    function showAddStewardModal() {
+        const modal = document.getElementById('addStewardModal');
+        if (modal) {
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            document.getElementById('stewardType').value = 'default';
+            document.getElementById('stewardValue').value = '';
+            document.getElementById('stewardGitlabUser').value = '';
+            document.getElementById('stewardIMPlatform').value = 'wecom';
+            document.getElementById('stewardIMUserID').value = '';
+            toggleStewardValueInput();
+        }
+    }
+
+    function hideAddStewardModal() {
+        const modal = document.getElementById('addStewardModal');
+        if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+    }
+
+    function toggleStewardValueInput() {
+        const type = document.getElementById('stewardType').value;
+        const wrap = document.getElementById('stewardValueWrap');
+        if (type === 'default') {
+            wrap.classList.add('hidden');
+        } else {
+            wrap.classList.remove('hidden');
+            document.getElementById('stewardValue').placeholder = type === 'rule_category' ? '如 security, performance' : '如 golang, python';
+        }
+    }
+
+    async function addProjectSteward() {
+        const projectId = getProjectId();
+        if (!projectId) return;
+        const payload = {
+            project_id: parseInt(projectId),
+            match_type: document.getElementById('stewardType').value,
+            match_value: document.getElementById('stewardValue').value.trim() || null,
+            gitlab_username: document.getElementById('stewardGitlabUser').value.trim(),
+            im_platform: document.getElementById('stewardIMPlatform').value.trim(),
+            im_user_id: document.getElementById('stewardIMUserID').value.trim()
+        };
+        if (!payload.gitlab_username) { alert('请填写 GitLab 用户名'); return; }
+        try {
+            const res = await apiFetch(`${API_BASE}/project-stewards`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            showToast('添加成功');
+            hideAddStewardModal();
+            loadProjectStewards();
+        } catch (e) { showToast('添加失败: ' + e.message, 'error'); }
+    }
+
+    async function deleteProjectSteward(id) {
+        if (!confirm('确定删除此环节负责人配置？')) return;
+        try {
+            const res = await apiFetch(`${API_BASE}/project-stewards/${id}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            showToast('已删除');
+            loadProjectStewards();
+        } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
+    }
 </script>
+</script>
+<!-- 添加环节负责人弹框 -->
+<div id="addStewardModal" class="fixed inset-0 bg-black/50 z-50 hidden items-center justify-center">
+    <div class="bg-white rounded-xl shadow-xl p-6 w-[480px] max-w-[90%]">
+        <div class="flex items-center justify-between mb-5">
+            <h3 class="font-bold text-gray-900 text-lg">添加环节负责人</h3>
+            <button onclick="hideAddStewardModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">匹配类型</label>
+                <select id="stewardType" onchange="toggleStewardValueInput()" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                    <option value="default">默认（全部）</option>
+                    <option value="rule_category">规则分类</option>
+                    <option value="language">语言</option>
+                </select>
+            </div>
+            <div id="stewardValueWrap" class="hidden">
+                <label class="block text-sm font-medium text-gray-700 mb-1">匹配值</label>
+                <input type="text" id="stewardValue" placeholder="如 security, golang" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">GitLab 用户名</label>
+                    <input type="text" id="stewardGitlabUser" placeholder="gitlab 用户名" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">IM 平台</label>
+                    <input type="text" id="stewardIMPlatform" value="wecom" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">IM 用户 ID</label>
+                <input type="text" id="stewardIMUserID" placeholder="企微 user_id" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+            </div>
+        </div>
+        <div class="flex justify-end gap-2 mt-6">
+            <button onclick="hideAddStewardModal()" class="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">取消</button>
+            <button onclick="addProjectSteward()" class="px-4 py-2 rounded-lg text-sm text-white bg-blue-600 hover:bg-blue-700">确认添加</button>
+        </div>
+    </div>
+</div>
+
 <script defer src="/static/js/tailwindcss.min.js"></script>
 </body>
 </html>

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script src="js/theme.js?v=1"></script>
+    <style>html{background-color:#1e293b;}</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全局大盘 - CodeGuard</title>
+    <script src="js/auth.js?v=5"></script>
+    <script src="js/menu-config.js?v=2"></script>
+    <script src="js/sidebar.js?v=2"></script>
+    <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="css/theme.css?v=1">
+    <style>
+        .sidebar-item:hover { background-color: rgba(255,255,255,0.1); }
+        .sidebar-item.active { background-color: rgba(255,255,255,0.15); border-left: 3px solid #3b82f6; }
+        .kpi-card { background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; }
+        .alert-badge { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans">
+
+<div id="page-transition" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#1e293b;z-index:99999;transition:opacity .25s ease;"></div>
+<script>
+(function(){
+  function hide(){var el=document.getElementById('page-transition');if(el){el.style.opacity='0';setTimeout(function(){el.remove();},250);}}
+  if(document.readyState==='complete'){hide();}else{window.addEventListener('load',hide);}
+})();
+</script>
+
+<div class="flex h-screen">
+    <aside id="sidebar" class="w-64 bg-slate-900 text-white flex-shrink-0 flex flex-col">
+        <nav style="padding: 20px; text-align: center; color: var(--cg-text-tertiary); font-size: 13px;">加载中...</nav>
+    </aside>
+
+    <main class="flex-1 overflow-y-auto">
+        <header class="bg-white border-b px-8 py-4 flex items-center justify-between sticky top-0 z-10">
+            <div>
+                <h2 class="text-xl font-bold text-gray-800">🌐 全局大盘</h2>
+                <p class="text-sm text-gray-500 mt-1">Issue 治理与通知系统全局监控</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <button onclick="loadAdminDashboard(true)" class="text-sm text-blue-600 hover:text-blue-800 px-3 py-1.5 rounded hover:bg-blue-50">
+                    <i class="fas fa-sync-alt mr-1"></i>刷新
+                </button>
+            </div>
+        </header>
+
+        <div class="px-8 py-6 space-y-6" id="dashboardContent">
+            <!-- KPI 卡片 -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="kpi-card">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500">今日新增 Issue</p>
+                            <p class="text-3xl font-bold text-gray-800 mt-1" id="kpiTodayNew">-</p>
+                        </div>
+                        <div class="w-12 h-12 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center">
+                            <i class="fas fa-plus text-xl"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="kpi-card">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500">当前待处理</p>
+                            <p class="text-3xl font-bold text-amber-600 mt-1" id="kpiTotalPending">-</p>
+                        </div>
+                        <div class="w-12 h-12 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center">
+                            <i class="fas fa-hourglass-half text-xl"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="kpi-card">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500">超期未处理</p>
+                            <p class="text-3xl font-bold text-red-600 mt-1" id="kpiOverdue">-</p>
+                        </div>
+                        <div class="w-12 h-12 rounded-lg bg-red-100 text-red-600 flex items-center justify-center">
+                            <i class="fas fa-exclamation-triangle text-xl"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="kpi-card cursor-pointer hover:shadow-md transition-shadow" onclick="window.location.href='notifiers.html'">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500">IM 推送失败</p>
+                            <p class="text-3xl font-bold text-purple-600 mt-1" id="kpiIMFailed">-</p>
+                        </div>
+                        <div class="w-12 h-12 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center">
+                            <i class="fas fa-paper-plane text-xl"></i>
+                        </div>
+                    </div>
+                    <p class="text-xs text-gray-400 mt-2">今日 · 点击查看详情</p>
+                </div>
+            </div>
+
+            <!-- 项目积压 TOP5 -->
+            <div class="bg-white rounded-xl border p-6">
+                <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                    <i class="fas fa-chart-bar text-blue-600"></i>项目积压排行 TOP5
+                </h3>
+                <div id="projectRanking" class="space-y-3">
+                    <!-- 动态填充 -->
+                </div>
+            </div>
+
+            <!-- 最新归档记录 -->
+            <div class="bg-white rounded-xl border p-6">
+                <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                    <i class="fas fa-archive text-gray-600"></i>最近自动归档
+                </h3>
+                <div id="archivedList" class="space-y-2">
+                    <!-- 动态填充 -->
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script>
+async function loadAdminDashboard(force = false) {
+    try {
+        const res = await apiFetch(API_BASE + '/dashboard/admin');
+        const data = await res.json();
+        if (data.error) {
+            document.getElementById('dashboardContent').innerHTML = `<div class="text-center py-12 text-red-500">${data.error}</div>`;
+            return;
+        }
+        const d = data.data || {};
+        document.getElementById('kpiTodayNew').textContent = d.today_new || 0;
+        document.getElementById('kpiTotalPending').textContent = d.total_pending || 0;
+        document.getElementById('kpiOverdue').textContent = d.overdue || 0;
+        document.getElementById('kpiIMFailed').textContent = d.im_failed || 0;
+
+        // 加载项目积压排行
+        loadProjectRanking();
+        // 加载最新归档
+        loadArchivedIssues();
+    } catch (err) {
+        document.getElementById('dashboardContent').innerHTML = `<div class="text-center py-12 text-red-500">加载失败: ${err.message}</div>`;
+    }
+}
+
+async function loadProjectRanking() {
+    try {
+        // 使用 rule-stats/overview 的已有接口聚合，或模拟
+        const res = await apiFetch(API_BASE + '/rule-stats/overview?days=7');
+        const data = await res.json();
+        const projects = (data.data?.project_distribution || []).slice(0, 5);
+        const container = document.getElementById('projectRanking');
+        if (projects.length === 0) {
+            container.innerHTML = '<div class="text-gray-400 text-sm">暂无数据</div>';
+            return;
+        }
+        const maxCount = Math.max(...projects.map(p => p.count || 0), 1);
+        container.innerHTML = projects.map((p, idx) => {
+            const pct = Math.round((p.count / maxCount) * 100);
+            return `
+                <div class="flex items-center gap-3">
+                    <span class="text-sm font-bold text-gray-500 w-6">${idx + 1}</span>
+                    <div class="flex-1">
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="text-sm text-gray-800 font-medium">${escapeHtml(p.project_name || '未知项目')}</span>
+                            <span class="text-sm font-bold text-gray-700">${p.count || 0} 条</span>
+                        </div>
+                        <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div class="h-full bg-gradient-to-r from-blue-500 to-blue-400 rounded-full" style="width:${pct}%"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } catch (err) {
+        document.getElementById('projectRanking').innerHTML = '<div class="text-gray-400 text-sm">加载失败</div>';
+    }
+}
+
+async function loadArchivedIssues() {
+    try {
+        // 查询最近 10 条 auto_archived 的 Issue（需要后端支持，这里模拟）
+        const container = document.getElementById('archivedList');
+        container.innerHTML = '<div class="text-gray-400 text-sm">加载中...</div>';
+        // 暂时展示静态提示，待后端 API 完善
+        container.innerHTML = `
+            <div class="text-sm text-gray-500 bg-gray-50 rounded-lg p-3">
+                <i class="fas fa-info-circle mr-1 text-gray-400"></i>
+                自动归档记录需通过后端 "rule-stats/recent-issues?status=auto_archived" 查询，当前展示占位。
+            </div>
+        `;
+    } catch (err) {
+        document.getElementById('archivedList').innerHTML = '<div class="text-gray-400 text-sm">加载失败</div>';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadAdminDashboard();
+});
+</script>
+
+</body>
+</html>

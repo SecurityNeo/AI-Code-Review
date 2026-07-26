@@ -1,14 +1,14 @@
 // js/menu-config.js
 // 菜单配置 v2：6 个折叠组，admin/user 差异化
-// 顶层 admin: 首页 / 任务列表 / 数据洞察 / AI 评审 / 通知管理 / 系统管理
-// 顶层 user: 首页 / 任务列表 / 数据洞察
+// 顶层 admin: 工作台 / 全局大盘 / 任务列表 / 数据洞察 / AI 评审 / 通知管理 / 系统管理
+// 顶层 user: 工作台 / 任务列表 / 数据洞察
 const MENU_CONFIG = [
     // ========== 公共菜单 ==========
     {
-        id: 'dashboard',
-        name: '首页',
-        href: 'statistics.html',
-        icon: 'fa-chart-line',
+        id: 'developer-dashboard',
+        name: '工作台',
+        href: 'developer-dashboard.html',
+        icon: 'fa-briefcase',
         role: ['admin', 'user']
     },
     {
@@ -18,8 +18,7 @@ const MENU_CONFIG = [
         icon: 'fa-tasks',
         role: ['admin', 'user']
     },
-
-        { id: 'notifications', name: '消息中心', href: 'notifications.html', icon: 'fa-bell', role: ['admin', 'user'] },
+    { id: 'notifications', name: '消息中心', href: 'notifications.html', icon: 'fa-bell', role: ['admin', 'user'] },
 
         // ========== 数据洞察 ==========
     {
@@ -60,7 +59,17 @@ const MENU_CONFIG = [
             { id: 'mail',      name: '邮件',         href: 'mail.html',            icon: 'fa-envelope' },
             { id: 'mappings',  name: '成员映射',     href: 'member-mappings.html', icon: 'fa-users' },
             { id: 'report',    name: '报告管理',     href: 'report.html',          icon: 'fa-file-alt' },
+            { id: 'project-stewards', name: '环节负责人', href: 'project-stewards.html', icon: 'fa-user-shield' },
         ]
+    },
+
+    // ========== 管理员专用（admin only） ==========
+    {
+        id: 'admin-dashboard',
+        name: '全局大盘',
+        href: 'admin-dashboard.html',
+        icon: 'fa-globe',
+        role: ['admin']
     },
 
     // ========== 系统管理（admin only） ==========

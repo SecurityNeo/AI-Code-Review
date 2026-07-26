@@ -164,6 +164,35 @@
         // 给外层 aside 容器加 cg-sidebar 类，让 theme.css 的样式生效
         sidebar.classList.add('cg-sidebar');
         sidebar.classList.remove('bg-slate-900', 'text-white');
+
+        // 注入消息中心未读徽标
+        refreshNotificationBadge();
+    };
+
+    window.refreshNotificationBadge = async function() {
+        try {
+            const res = await apiFetch('/api/v1/notifications/unread-count');
+            if (!res.ok) return;
+            const json = await res.json();
+            const count = json.data?.count || 0;
+            // 查找消息中心菜单项（href 为 notifications.html）
+            const sidebar = document.getElementById('sidebar');
+            if (!sidebar) return;
+            const links = sidebar.querySelectorAll('a[href="notifications.html"]');
+            links.forEach(link => {
+                let badge = link.querySelector('.notif-badge');
+                if (!badge) {
+                    badge = document.createElement('span');
+                    badge.className = 'notif-badge';
+                    badge.style.cssText = 'margin-left:auto;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;background:#ef4444;color:#fff;padding:0 5px;';
+                    link.style.display = 'flex';
+                    link.style.alignItems = 'center';
+                    link.appendChild(badge);
+                }
+                badge.textContent = count > 99 ? '99+' : count;
+                badge.style.display = count > 0 ? 'inline-flex' : 'none';
+            });
+        } catch (e) { /* ignore */ }
     };
 
     function escapeHtml(s) {
@@ -210,5 +239,8 @@
         }
 
         renderSidebar(activeId);
+
+        // 启动通知徽标轮询（每 60 秒）
+        setInterval(refreshNotificationBadge, 60000);
     });
 })();

@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script src="js/theme.js?v=1"></script>
+    <style>html{background-color:#1e293b;}</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工作台 - CodeGuard</title>
+    <script src="js/auth.js?v=5"></script>
+    <script src="js/menu-config.js?v=2"></script>
+    <script src="js/sidebar.js?v=2"></script>
+    <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="css/theme.css?v=1">
+    <style>
+        .sidebar-item:hover { background-color: rgba(255,255,255,0.1); }
+        .sidebar-item.active { background-color: rgba(255,255,255,0.15); border-left: 3px solid #3b82f6; }
+        .issue-card { border-left: 4px solid #e5e7eb; transition: all 0.15s ease; }
+        .issue-card.severity-critical { border-left-color: #ef4444; }
+        .issue-card.severity-high { border-left-color: #f97316; }
+        .issue-card.severity-medium { border-left-color: #eab308; }
+        .issue-card.severity-low { border-left-color: #3b82f6; }
+        .stat-card { background: linear-gradient(135deg, #fff 0%, #f8fafc 100%); }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans">
+
+<div id="page-transition" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#1e293b;z-index:99999;transition:opacity .25s ease;"></div>
+<script>
+(function(){
+  function hide(){var el=document.getElementById('page-transition');if(el){el.style.opacity='0';setTimeout(function(){el.remove();},250);}}
+  if(document.readyState==='complete'){hide();}else{window.addEventListener('load',hide);}
+})();
+</script>
+
+<div class="flex h-screen">
+    <aside id="sidebar" class="w-64 bg-slate-900 text-white flex-shrink-0 flex flex-col">
+        <nav style="padding: 20px; text-align: center; color: var(--cg-text-tertiary); font-size: 13px;">加载中...</nav>
+    </aside>
+
+    <main class="flex-1 overflow-y-auto">
+        <header class="bg-white border-b px-8 py-4 flex items-center justify-between sticky top-0 z-10">
+            <div>
+                <h2 class="text-xl font-bold text-gray-800">👋 工作台</h2>
+                <p class="text-sm text-gray-500 mt-1">处理你名下待审的 Issue，保持代码质量闭环</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <button onclick="loadDashboard(true)" class="text-sm text-blue-600 hover:text-blue-800 px-3 py-1.5 rounded hover:bg-blue-50">
+                    <i class="fas fa-sync-alt mr-1"></i>刷新
+                </button>
+            </div>
+        </header>
+
+        <div class="px-8 py-6 space-y-6">
+            <!-- 统计卡片 -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="stat-card rounded-xl border p-5">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500">待处理 Issue</p>
+                            <p class="text-3xl font-bold text-gray-800 mt-1" id="statPending">-</p>
+                        </div>
+                        <div class="w-12 h-12 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center">
+                            <i class="fas fa-exclamation-circle text-xl"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="stat-card rounded-xl border p-5">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500">严重告警</p>
+                            <p class="text-3xl font-bold text-red-600 mt-1" id="statCritical">-</p>
+                        </div>
+                        <div class="w-12 h-12 rounded-lg bg-red-100 text-red-600 flex items-center justify-center">
+                            <i class="fas fa-fire text-xl"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="stat-card rounded-xl border p-5">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500">本周新增</p>
+                            <p class="text-3xl font-bold text-gray-800 mt-1" id="statWeekReceived">-</p>
+                        </div>
+                        <div class="w-12 h-12 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center">
+                            <i class="fas fa-plus-circle text-xl"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="stat-card rounded-xl border p-5">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500">本周已闭环</p>
+                            <p class="text-3xl font-bold text-green-600 mt-1" id="statWeekResolved">-</p>
+                        </div>
+                        <div class="w-12 h-12 rounded-lg bg-green-100 text-green-600 flex items-center justify-center">
+                            <i class="fas fa-check-double text-xl"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 待处理 Issue 列表 -->
+            <div class="bg-white rounded-xl border overflow-hidden">
+                <div class="px-6 py-4 border-b flex items-center justify-between">
+                    <h3 class="font-bold text-gray-800">
+                        <i class="fas fa-list-check text-blue-600 mr-2"></i>待处理 Issue
+                        <span id="issueCountBadge" class="ml-2 text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">0</span>
+                    </h3>
+                    <div class="flex items-center gap-2">
+                        <button onclick="loadDashboard(true)" class="text-xs text-gray-500 hover:text-blue-600"><i class="fas fa-sync-alt mr-1"></i>刷新</button>
+                    </div>
+                </div>
+                <div id="issueList" class="divide-y">
+                    <!-- 动态填充 -->
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script>
+const SEVERITY_LABELS = { critical: '严重', high: '高危', medium: '中危', low: '低危', info: '提示' };
+const SEVERITY_COLORS = { critical: 'text-red-600', high: 'text-orange-600', medium: 'text-yellow-600', low: 'text-blue-600', info: 'text-gray-500' };
+const CATEGORY_LABELS = { security: '安全', performance: '性能', code_quality: '代码质量', readability: '可读性', maintainability: '可维护性', test_coverage: '测试覆盖', common: '通用' };
+
+async function loadDashboard(force = false) {
+    // 加载统计
+    try {
+        const res = await apiFetch(API_BASE + '/dashboard/developer');
+        const data = await res.json();
+        const d = data.data || {};
+        document.getElementById('statPending').textContent = d.pending_count || 0;
+        document.getElementById('statCritical').textContent = d.critical_count || 0;
+        document.getElementById('statWeekReceived').textContent = d.week_received || 0;
+        document.getElementById('statWeekResolved').textContent = d.week_resolved || 0;
+
+        // Issue 列表
+        const issues = d.issues || [];
+        document.getElementById('issueCountBadge').textContent = issues.length;
+        const container = document.getElementById('issueList');
+        if (issues.length === 0) {
+            container.innerHTML = '<div class="text-center py-12 text-gray-400">🎉 太棒了，当前没有待处理的 Issue</div>';
+        } else {
+            container.innerHTML = issues.map(issue => renderIssueCard(issue)).join('');
+        }
+    } catch (err) {
+        console.error('load dashboard failed', err);
+        document.getElementById('issueList').innerHTML = `<div class="text-center py-8 text-red-500">加载失败: ${err.message}</div>`;
+    }
+}
+
+function renderIssueCard(issue) {
+    const sevClass = 'severity-' + issue.severity;
+    const sevLabel = SEVERITY_LABELS[issue.severity] || issue.severity;
+    const sevColor = SEVERITY_COLORS[issue.severity] || 'text-gray-500';
+    const catLabel = CATEGORY_LABELS[issue.category] || issue.category;
+    const lineInfo = issue.line_start > 0 ? ':' + issue.line_start + (issue.line_end > issue.line_start ? '-' + issue.line_end : '') : '';
+    const summary = escapeHtml(issue.message).substring(0, 100) + (issue.message.length > 100 ? '...' : '');
+
+    return `
+        <div class="issue-card ${sevClass} p-4 hover:bg-gray-50 group">
+            <div class="flex items-start justify-between gap-3">
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap mb-1.5">
+                        <span class="text-xs font-bold ${sevColor} bg-gray-50 px-1.5 py-0.5 rounded">${sevLabel}</span>
+                        <span class="text-xs text-gray-400">[${catLabel}]</span>
+                        <span class="text-[11px] font-mono text-gray-500 bg-gray-100 px-1 py-0.5 rounded border border-gray-200">#${issue.id}</span>
+                        <span class="text-xs font-mono text-gray-400">${issue.rule_code || '-'}</span>
+                        ${issue.inherited_from_issue_id ? '<span class="text-[10px] text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100" title="历史曾标记处理">复现</span>' : ''}
+                    </div>
+                    <div class="text-sm text-gray-800 font-medium mb-1">${summary}</div>
+                    <div class="flex items-center gap-3 text-xs text-gray-500">
+                        <span><i class="fas fa-file-code mr-1 text-gray-400"></i>${escapeHtml(issue.file || '-')}${lineInfo}</span>
+                        <span><i class="fas fa-clock mr-1 text-gray-400"></i>${formatAge(issue.original_created_at || issue.created_at)}</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 flex-shrink-0">
+                    <button onclick="resolveIssue(${issue.id}, 'accepted')" class="text-xs px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-1">
+                        <i class="fas fa-check"></i>已处理
+                    </button>
+                    <button onclick="resolveIssue(${issue.id}, 'rejected')" class="text-xs px-3 py-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200 flex items-center gap-1">
+                        <i class="fas fa-times"></i>误报
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function formatAge(ts) {
+    if (!ts) return '';
+    const t = new Date(ts);
+    const now = new Date();
+    const h = Math.floor((now - t) / 3600000);
+    if (h < 1) return '刚刚';
+    if (h < 24) return h + ' 小时前';
+    const d = Math.floor(h / 24);
+    if (d < 30) return d + ' 天前';
+    return '30+ 天前';
+}
+
+async function resolveIssue(issueId, status) {
+    try {
+        const res = await apiFetch(`${API_BASE}/tasks/review-issues/batch-resolve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ issues: [{ id: issueId, status: status }] })
+        });
+        const data = await res.json();
+        if (data.message === 'updated') {
+            showToast(status === 'accepted' ? '已标记为已处理' : '已标记为误报', 'success');
+            loadDashboard(true);
+        } else {
+            showToast('操作失败: ' + (data.error || '未知错误'), 'error');
+        }
+    } catch (err) {
+        showToast('操作失败: ' + err.message, 'error');
+    }
+}
+
+function showToast(message, type = 'info') {
+    // 简单 toast 实现，如果已有则不重复创建
+    let toast = document.getElementById('global-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'global-toast';
+        toast.style.cssText = 'position:fixed;top:20px;right:20px;z-index:99999;padding:12px 20px;border-radius:8px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,0.15);transition:all 0.3s;transform:translateY(-20px);opacity:0;';
+        document.body.appendChild(toast);
+    }
+    const colors = {
+        success: 'background:#dcfce7;color:#166534;border:1px solid #bbf7d0;',
+        error: 'background:#fee2e2;color:#991b1b;border:1px solid #fecaca;',
+        info: 'background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;'
+    };
+    toast.style.cssText += colors[type] || colors.info;
+    toast.textContent = message;
+    toast.style.transform = 'translateY(0)';
+    toast.style.opacity = '1';
+    setTimeout(() => {
+        toast.style.transform = 'translateY(-20px)';
+        toast.style.opacity = '0';
+    }, 2500);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadDashboard();
+});
+</script>
+
+</body>
+</html>
