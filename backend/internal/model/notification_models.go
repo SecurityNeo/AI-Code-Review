@@ -59,11 +59,25 @@ const (
 )
 
 const (
-	NotificationTypeTaskCompleted      = "task_completed"
-	NotificationTypeIssueEscalation    = "issue_escalation"
-	NotificationTypeDeadlineDigest     = "deadline_digest"
-	NotificationTypeDailyDigest        = "daily_digest"
-	NotificationTypeWeeklyDigest       = "weekly_digest"
-	NotificationTypeAutoArchived       = "auto_archived"
-	NotificationTypeBatchAlert         = "batch_alert"
+	NotificationTypeTaskCompleted        = "task_completed"
+	NotificationTypeTaskCompletedNoIssue = "task_completed_no_issue"
+	NotificationTypeIssueEscalation      = "issue_escalation"
+	NotificationTypeDeadlineDigest       = "deadline_digest"
+	NotificationTypeDailyDigest          = "daily_digest"
+	NotificationTypeWeeklyDigest         = "weekly_digest"
+	NotificationTypeAutoArchived         = "auto_archived"
+	NotificationTypeBatchAlert           = "batch_alert"
 )
+
+// NotificationRule 通知规则模板（后台管理）
+type NotificationRule struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	Name         string    `gorm:"size:100;not null" json:"name"`
+	Trigger      string    `gorm:"size:50;not null" json:"trigger"` // task.completed / issue.escalation / daily.digest 等
+	Condition    string    `gorm:"type:json" json:"condition"`      // JSON 条件
+	Actions      string    `gorm:"type:json" json:"actions"`        // JSON 动作列表
+	DelayMinutes int       `gorm:"default:0" json:"delay_minutes"`
+	Enabled      bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}

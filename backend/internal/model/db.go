@@ -167,6 +167,7 @@ func autoMigrate() error {
 		&NotificationDeliveryLog{},
 		&ProjectSteward{},
 		&Holiday{},
+		&NotificationRule{},
 	); err != nil {
 		return err
 	}

@@ -364,6 +364,7 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 		common.GET("/notifications/unread-count", notifH.UnreadCount)
 		common.POST("/notifications/:id/read", notifH.MarkRead)
 		common.POST("/notifications/read-all", notifH.MarkAllRead)
+		common.POST("/notifications/delete-old-read", notifH.DeleteOldRead)
 		common.GET("/dashboard/developer", notifH.DeveloperDashboard)
 	}
 
@@ -373,6 +374,13 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 	{
 		// 管理员大盘
 		adminOnly.GET("/dashboard/admin", notifH.AdminDashboard)
+
+		// 通知规则模板管理
+		adminOnly.GET("/notification-rules", notifH.ListRules)
+		adminOnly.POST("/notification-rules", notifH.CreateRule)
+		adminOnly.PUT("/notification-rules/:id", notifH.UpdateRule)
+		adminOnly.DELETE("/notification-rules/:id", notifH.DeleteRule)
+
 		// 任务管理 - 写操作（仅限管理员）
 		adminTask := adminOnly.Group("/tasks")
 		{

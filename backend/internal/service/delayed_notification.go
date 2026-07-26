@@ -163,11 +163,13 @@ func (q *DelayedNotificationQueue) executeJob(taskID uint, job *pendingNotifyJob
 	if link == "" {
 		link = fmt.Sprintf("/tasks.html?id=%d", taskID)
 	}
-	notifSvc.SendInbox(ownerID, model.NotificationTypeTaskCompleted,
-		fmt.Sprintf("MR !%s 评审已完成（第 %d 次）", payload.MRTitle, payload.ExecutionCount),
-		buildInboxContent(payload),
-		link,
-	)
+	notifType := model.NotificationTypeTaskCompleted
+	notifTitle := fmt.Sprintf("MR !%s 评审已完成（第 %d 次）", payload.MRTitle, payload.ExecutionCount)
+	if payload.Total == 0 {
+		notifType = model.NotificationTypeTaskCompletedNoIssue
+		notifTitle = fmt.Sprintf("MR !%s 评审完成：未发现问题", payload.MRTitle)
+	}
+	notifSvc.SendInbox(ownerID, notifType, notifTitle, buildInboxContent(payload), link)
 
 	// 2. 企微群 IM 推送（仅推送任务所属项目 + 全局的 notifier）
 	var task model.Task
@@ -209,6 +211,9 @@ func (q *DelayedNotificationQueue) executeJob(taskID uint, job *pendingNotifyJob
 }
 
 func buildInboxContent(payload notifyPayload) string {
+	if payload.Total == 0 {
+		return fmt.Sprintf("项目：%s\nMR：%s\n本次评审未发现问题，历史 Issue 已自动清除。", payload.ProjectName, payload.MRTitle)
+	}
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("项目：%s\n", payload.ProjectName))
 	sb.WriteString(fmt.Sprintf("MR：%s\n", payload.MRTitle))
@@ -236,6 +241,19 @@ func buildIMMarkdown(payload notifyPayload, mentionUserID string) string {
 	}
 
 	var sb strings.Builder
+	if payload.Total == 0 {
+		sb.WriteString("**✅ AI 代码评审任务完成**\n\n")
+		sb.WriteString(fmt.Sprintf("**项目：** %s\n", payload.ProjectName))
+		sb.WriteString(fmt.Sprintf("**MR：** !%s\n", payload.MRTitle))
+		sb.WriteString(fmt.Sprintf("**提交者：** %s\n", payload.DeveloperName))
+		sb.WriteString(fmt.Sprintf("**运行次数：** 第 %d 次\n\n", payload.ExecutionCount))
+		sb.WriteString("本次评审未发现问题，历史 Issue 已自动清除。\n")
+		if mentionUserID != "" {
+			sb.WriteString(fmt.Sprintf("\n<@%s>", mentionUserID))
+		}
+		return sb.String()
+	}
+
 	sb.WriteString(fmt.Sprintf("**🔍 AI 代码评审任务完成**\n\n"))
 	sb.WriteString(fmt.Sprintf("**项目：** %s\n", payload.ProjectName))
 	sb.WriteString(fmt.Sprintf("**MR：** !%s\n", payload.MRTitle))

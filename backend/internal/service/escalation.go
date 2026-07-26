@@ -104,11 +104,20 @@ const (
 	EscalationLevel360hArchive = 5 // T+360h 自动归档
 )
 
+type escalationAlert struct {
+	userID uint
+	level  int
+	typ    string
+	title  string
+	items  []string
+}
+
 // EscalationService 升级路由服务
 type EscalationService struct {
-	calc       *WorkdayCalculator
-	notifSvc   *NotificationService
-	notifierSvc *NotifierService
+	calc           *WorkdayCalculator
+	notifSvc       *NotificationService
+	notifierSvc    *NotifierService
+	alertCollector map[string]*escalationAlert // key = "userID:level"
 }
 
 func NewEscalationService() *EscalationService {
@@ -117,6 +126,32 @@ func NewEscalationService() *EscalationService {
 		notifSvc:    NewNotificationService(),
 		notifierSvc: NewNotifierService(),
 	}
+}
+
+func (s *EscalationService) collectAlert(userID uint, level int, typ, title, item string) {
+	key := fmt.Sprintf("%d:%d", userID, level)
+	if s.alertCollector == nil {
+		s.alertCollector = make(map[string]*escalationAlert)
+	}
+	batch, ok := s.alertCollector[key]
+	if !ok {
+		batch = &escalationAlert{userID: userID, level: level, typ: typ, title: title, items: make([]string, 0)}
+		s.alertCollector[key] = batch
+	}
+	batch.items = append(batch.items, item)
+}
+
+func (s *EscalationService) flushAlerts() {
+	for _, batch := range s.alertCollector {
+		var content string
+		if len(batch.items) == 1 {
+			content = batch.items[0]
+		} else {
+			content = fmt.Sprintf("您有 %d 条 Issue 同时达到该升级节点：\n\n%s", len(batch.items), strings.Join(batch.items, "\n---\n"))
+		}
+		s.notifSvc.SendInbox(batch.userID, batch.typ, batch.title, content, "")
+	}
+	s.alertCollector = nil
 }
 
 // RunDailyEscalation 每日定时运行升级检查（建议每小时执行一次）
@@ -140,8 +175,8 @@ func (s *EscalationService) RunDailyEscalation() {
 			if issue.OriginalCreatedAt == nil || issue.OriginalCreatedAt.IsZero() {
 				model.DB.Model(issue).UpdateColumn("original_created_at", issue.CreatedAt)
 				issue.OriginalCreatedAt = &issue.CreatedAt
-	}
-}
+			}
+		}
 
 		// 预加载关联 Task 和 Project，避免 N+1
 		taskMap, projectMap := s.preloadTaskProjects(issues)
@@ -152,6 +187,9 @@ func (s *EscalationService) RunDailyEscalation() {
 			s.processEscalation(issue, ageH, taskMap, projectMap)
 		}
 
+		// 每批处理完后 flush 聚合通知（避免单页内重复刷屏）
+		s.flushAlerts()
+
 		if len(issues) < batchSize {
 			break
 		}
@@ -160,6 +198,9 @@ func (s *EscalationService) RunDailyEscalation() {
 
 	// 批量积压告警
 	s.checkBatchAlerts()
+	
+	// IM 投递失败自动管理员告警
+	s.checkDeliveryFailures()
 }
 
 // preloadTaskProjects 批量预加载 Issue 列表关联的 Task 和 Project
@@ -228,84 +269,62 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 
 	switch nextLevel {
 	case EscalationLevel24h:
-		// 提醒开发者
 		if issue.OwnerID != nil {
-			s.notifSvc.SendInbox(*issue.OwnerID, model.NotificationTypeIssueEscalation,
-				fmt.Sprintf("Issue #%d 已超期 1 个工作日", issue.ID),
-				fmt.Sprintf("项目：%s\nMR：%s\n问题：%s\n请尽快处理，2 天后将通知项目负责人。",
-					project.Name, task.MRTitle, issue.Message),
-				"",
-			)
+			s.collectAlert(*issue.OwnerID, nextLevel, model.NotificationTypeIssueEscalation,
+				"Issue 超期提醒（1 个工作日）",
+				fmt.Sprintf("Issue #%d 已超期 1 个工作日\n项目：%s\nMR：%s\n问题：%s\n请尽快处理，2 天后将通知项目负责人。",
+					issue.ID, project.Name, task.MRTitle, issue.Message))
 		}
 
 	case EscalationLevel72h:
-		// 强提醒开发者 + 抄送负责人（IM + 站内信）
-		if issue.OwnerID != nil {
-			s.notifSvc.SendInbox(*issue.OwnerID, model.NotificationTypeIssueEscalation,
-				fmt.Sprintf("Issue #%d 已超期 3 个工作日", issue.ID),
-				fmt.Sprintf("项目：%s\nMR：%s\n问题：%s\n已超期 3 天，请立即处理。",
-					project.Name, task.MRTitle, issue.Message),
-				"",
-			)
-		}
 		stewards := s.findStewards(task.ProjectID, issue.Category, project.Language)
-		for _, st := range stewards {
-			s.notifSvc.SendInbox(st.UserID, model.NotificationTypeIssueEscalation,
-				fmt.Sprintf("协助督促：Issue #%d", issue.ID),
-				fmt.Sprintf("开发者 %s 的 Issue 已超期 3 天未处理，请协助督促。\n项目：%s\nMR：%s\n问题：%s",
-					task.MRAuthor, project.Name, task.MRTitle, issue.Message),
-				"",
-			)
+		if issue.OwnerID != nil {
+			s.collectAlert(*issue.OwnerID, nextLevel, model.NotificationTypeIssueEscalation,
+				"Issue 超期提醒（3 个工作日）",
+				fmt.Sprintf("Issue #%d 已超期 3 个工作日\n项目：%s\nMR：%s\n问题：%s\n已超期 3 天，请立即处理。",
+					issue.ID, project.Name, task.MRTitle, issue.Message))
 		}
-		// IM 推送到项目群（含 @相关人员）
+		for _, st := range stewards {
+			s.collectAlert(st.UserID, nextLevel, model.NotificationTypeIssueEscalation,
+				"Issue 协助督促（3 个工作日）",
+				fmt.Sprintf("协助督促：Issue #%d\n开发者 %s 的 Issue 已超期 3 天未处理，请协助督促。\n项目：%s\nMR：%s\n问题：%s",
+					issue.ID, task.MRAuthor, project.Name, task.MRTitle, issue.Message))
+		}
 		s.sendEscalationIM(project, issue, task, "72h", stewards)
 
 	case EscalationLevel120hSteward:
-		// 正式升级给项目负责人，current_owner 变更，全部通知
 		stewards := s.findStewards(task.ProjectID, issue.Category, project.Language)
 		if len(stewards) > 0 {
-			// current_owner 设为优先级最高的负责人
 			model.DB.Model(issue).UpdateColumn("current_owner_id", stewards[0].UserID)
-			// 给所有匹配的负责人发站内信
 			for _, st := range stewards {
-				s.notifSvc.SendInbox(st.UserID, model.NotificationTypeIssueEscalation,
-					fmt.Sprintf("Issue #%d 已升级给您处理", issue.ID),
-					fmt.Sprintf("开发者 %s 的 Issue 已超期 5 天，现升级给您协助处理。\n项目：%s\nMR：%s\n问题：%s",
-						task.MRAuthor, project.Name, task.MRTitle, issue.Message),
-					"",
-				)
+				s.collectAlert(st.UserID, nextLevel, model.NotificationTypeIssueEscalation,
+					"Issue 正式升级（5 个工作日）",
+					fmt.Sprintf("Issue #%d 已升级给您处理\n开发者 %s 的 Issue 已超期 5 天，现升级给您协助处理。\n项目：%s\nMR：%s\n问题：%s",
+						issue.ID, task.MRAuthor, project.Name, task.MRTitle, issue.Message))
 			}
-			// IM 推送所有负责人
 			s.sendEscalationIM(project, issue, task, "120h", stewards)
 		}
 		if issue.OwnerID != nil {
-			s.notifSvc.SendInbox(*issue.OwnerID, model.NotificationTypeIssueEscalation,
-				fmt.Sprintf("Issue #%d 已升级给项目负责人", issue.ID),
-				"您的 Issue 因超期未处理，已升级给项目负责人协助推进。",
-				"",
-			)
+			s.collectAlert(*issue.OwnerID, nextLevel, model.NotificationTypeIssueEscalation,
+				"Issue 已升级给项目负责人",
+				fmt.Sprintf("Issue #%d 已升级给项目负责人\n您的 Issue 因超期未处理，已升级给项目负责人协助推进。", issue.ID))
 		}
 
 	case EscalationLevel240hAdmin:
-		// 通知管理员
 		var admins []model.User
 		model.DB.Where("role = ?", model.RoleAdmin).Find(&admins)
 		for _, admin := range admins {
-			s.notifSvc.SendInbox(admin.ID, model.NotificationTypeIssueEscalation,
-				fmt.Sprintf("【全局告警】项目 %s 有 Issue 超期 10 天", project.Name),
-				fmt.Sprintf("Issue #%d 已超期 10 天未闭环，请关注。\nMR：%s\n问题：%s",
-					issue.ID, task.MRTitle, issue.Message),
-				"",
-			)
+			s.collectAlert(admin.ID, nextLevel, model.NotificationTypeIssueEscalation,
+				"【全局告警】Issue 超期 10 天",
+				fmt.Sprintf("【全局告警】项目 %s 有 Issue 超期 10 天\nIssue #%d 已超期 10 天未闭环，请关注。\nMR：%s\n问题：%s",
+					project.Name, issue.ID, task.MRTitle, issue.Message))
 		}
 
 	case EscalationLevel360hArchive:
-		// 自动归档
 		model.DB.Model(issue).Updates(map[string]interface{}{
-			"status":          model.IssueStatusAutoArchived,
+			"status":           model.IssueStatusAutoArchived,
 			"escalation_level": EscalationLevel360hArchive,
 		})
-		// 通知相关人员
 		recipients := make(map[uint]bool)
 		if issue.OwnerID != nil {
 			recipients[*issue.OwnerID] = true
@@ -314,15 +333,13 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 			recipients[*issue.CurrentOwnerID] = true
 		}
 		for uid := range recipients {
-			s.notifSvc.SendInbox(uid, model.NotificationTypeAutoArchived,
-				fmt.Sprintf("Issue #%d 已自动归档", issue.ID),
-				fmt.Sprintf("因超期 15 个工作日未处理，系统已自动归档。\n项目：%s\nMR：%s",
-					project.Name, task.MRTitle),
-				"",
-			)
+			s.collectAlert(uid, nextLevel, model.NotificationTypeAutoArchived,
+				"Issue 已自动归档",
+				fmt.Sprintf("Issue #%d 已自动归档\n因超期 15 个工作日未处理，系统已自动归档。\n项目：%s\nMR：%s",
+					issue.ID, project.Name, task.MRTitle))
 		}
 		zap.L().Info("issue auto archived", zap.Uint("issue_id", issue.ID), zap.Int("age_hours", ageHours))
-		return // 归档后不再更新 escalation_level（已修改 status）
+		return // 归档后不再更新 escalation_level
 	}
 
 	// 更新已处理层级
@@ -481,5 +498,26 @@ func (s *EscalationService) sendEscalationIM(project model.Project, issue *model
 			}
 		}
 		model.DB.Create(&log)
+	}
+}
+
+// checkDeliveryFailures 检查当日 IM 投递失败并告警管理员
+func (s *EscalationService) checkDeliveryFailures() {
+	var failedCount int64
+	todayStart := time.Now().Truncate(24 * time.Hour)
+	model.DB.Model(&model.NotificationDeliveryLog{}).
+		Where("status = ? AND created_at >= ?", "failed", todayStart).
+		Count(&failedCount)
+	if failedCount == 0 {
+		return
+	}
+	var admins []model.User
+	model.DB.Where("role = ?", model.RoleAdmin).Find(&admins)
+	for _, admin := range admins {
+		s.notifSvc.SendInbox(admin.ID, model.NotificationTypeBatchAlert,
+			fmt.Sprintf("【系统告警】今日 IM 投递失败 %d 次", failedCount),
+			fmt.Sprintf("今日企微/IM 消息投递失败 %d 次，请检查 Webhook 配置或网络状态。", failedCount),
+			"",
+		)
 	}
 }

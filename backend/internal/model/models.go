@@ -32,8 +32,9 @@ type Project struct {
 	Tasks           []Task          `gorm:"foreignKey:ProjectID" json:"tasks,omitempty"`
 
 	// 关联统计（非表字段，仅 API 展示使用）
-	EnabledRuleCount int `gorm:"-" json:"enabled_rule_count,omitempty"`
-	TotalRuleCount   int `gorm:"-" json:"total_rule_count,omitempty"`
+	EnabledRuleCount   int `gorm:"-" json:"enabled_rule_count,omitempty"`
+	TotalRuleCount     int `gorm:"-" json:"total_rule_count,omitempty"`
+	PendingIssueCount  int `gorm:"default:0" json:"pending_issue_count"` // 项目中待处理 Issue 的快照计数
 }
 
 type TaskStatus string
@@ -179,7 +180,7 @@ type TaskReviewRule struct {
 type ReviewIssue struct {
 	ID                   uint           `gorm:"primaryKey" json:"id"`
 	TaskID               uint           `gorm:"index" json:"task_id"`
-	MRID                 int            `gorm:"column:mr_id;index" json:"mr_id"`                     // 关联 MR IID
+	MRID                 int            `gorm:"column:mr_id;index:idx_mr_fingerprint" json:"mr_id"`                     // 关联 MR IID
 	RuleID               *uint          `gorm:"index" json:"rule_id"` // NULL=AI自主发现
 	RuleCode             string         `gorm:"size:64;index:idx_rule_code_created,priority:1" json:"rule_code"`
 	Category             string         `gorm:"size:32" json:"category"`
@@ -191,13 +192,13 @@ type ReviewIssue struct {
 	CodeSnippet          string         `gorm:"type:text" json:"code_snippet"`
 	Message              string         `gorm:"type:text" json:"message"`
 	Suggestion           string         `gorm:"type:text" json:"suggestion"`
-	Status               string         `gorm:"size:20;default:'pending'" json:"status"`             // pending / accepted / rejected / dismissed / auto_filtered / auto_archived
+	Status               string         `gorm:"size:20;default:'pending'" json:"status"`             // pending / pending_inherited / resolved / false_positive / ignored / auto_filtered / auto_archived
 	ResolvedBy           uint           `gorm:"index;default:0" json:"resolved_by"`                  // 操作人ID
 	ResolvedAt           *time.Time     `json:"resolved_at"`                                         // 操作时间
 	RejectReason         string         `gorm:"type:text;column:reject_reason" json:"reject_reason"` // 拒绝/不采纳原因
 	GitlabDiscussionID   string         `gorm:"size:64;column:gitlab_discussion_id" json:"gitlab_discussion_id"`
 	IsResolved           bool           `gorm:"default:false;column:is_resolved" json:"is_resolved"`
-	Fingerprint          string         `gorm:"size:64;index:idx_fingerprint" json:"fingerprint"` // 语义指纹
+	Fingerprint          string         `gorm:"size:64;index:idx_mr_fingerprint" json:"fingerprint"` // 语义指纹
 	InheritedFromIssueID *uint          `json:"inherited_from_issue_id"`                           // 继承自历史 Issue
 	OwnerID              *uint          `gorm:"index" json:"owner_id"`                             // MR 提交者用户ID（外键至 users）
 	CurrentOwnerID       *uint          `gorm:"index" json:"current_owner_id"`                     // 当前责任人（升级后可能变更）

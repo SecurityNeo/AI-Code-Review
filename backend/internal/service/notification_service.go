@@ -121,25 +121,39 @@ func CalcIssueStats(taskID uint, mrID int) IssueStats {
 		}
 	}
 
-	// 与上次成功版本对比
+	// 与上次成功版本对比（基于指纹精确匹配）
 	if mrID > 0 {
 		var lastTask model.Task
 		if err := model.DB.Where("mr_iid = ? AND id < ? AND status = ?", mrID, taskID, model.TaskSuccess).
 			Order("id DESC").First(&lastTask).Error; err == nil {
 			var lastIssues []model.ReviewIssue
-			// 上次任务的 Issue 可能已被 soft delete（重试后），需用 Unscoped 查全量
 			model.DB.Unscoped().Where("task_id = ?", lastTask.ID).Find(&lastIssues)
-			lastTotal := len(lastIssues)
-			// "gone" = 上次有但本次没有（且非 auto_filtered）
-			// 简化：上次总数 - (本次总数 - auto_filtered) = gone
-			visibleCurrent := stats.Total - stats.AutoFiltered
-			stats.Gone = lastTotal - visibleCurrent
-			if stats.Gone < 0 {
-				stats.Gone = 0
+
+			// 建立指纹集合（排除 auto_filtered，因为它们不算"可见"Issue）
+			lastFPs := make(map[string]bool)
+			for _, iss := range lastIssues {
+				if iss.Fingerprint != "" && iss.Status != model.IssueStatusAutoFiltered {
+					lastFPs[iss.Fingerprint] = true
+				}
 			}
-			stats.New = visibleCurrent - (lastTotal - stats.Gone)
-			if stats.New < 0 {
-				stats.New = 0
+			currentFPs := make(map[string]bool)
+			for _, iss := range currentIssues {
+				if iss.Fingerprint != "" && iss.Status != model.IssueStatusAutoFiltered {
+					currentFPs[iss.Fingerprint] = true
+				}
+			}
+
+			// gone = 上次有但本次没有
+			for fp := range lastFPs {
+				if !currentFPs[fp] {
+					stats.Gone++
+				}
+			}
+			// new = 本次有但上次没有
+			for fp := range currentFPs {
+				if !lastFPs[fp] {
+					stats.New++
+				}
 			}
 		}
 	}

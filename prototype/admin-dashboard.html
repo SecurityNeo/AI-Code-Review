@@ -95,6 +95,29 @@
                     </div>
                     <p class="text-xs text-gray-400 mt-2">今日 · 点击查看详情</p>
                 </div>
+                <div class="kpi-card">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500">7 天闭环率</p>
+                            <p class="text-3xl font-bold text-teal-600 mt-1" id="kpiCloseRate">-</p>
+                        </div>
+                        <div class="w-12 h-12 rounded-lg bg-teal-100 text-teal-600 flex items-center justify-center">
+                            <i class="fas fa-check-double text-xl"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="kpi-card">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500">闭环速度中位数</p>
+                            <p class="text-3xl font-bold text-indigo-600 mt-1" id="kpiMedianDays">-</p>
+                        </div>
+                        <div class="w-12 h-12 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center">
+                            <i class="fas fa-stopwatch text-xl"></i>
+                        </div>
+                    </div>
+                    <p class="text-xs text-gray-400 mt-2">天</p>
+                </div>
             </div>
 
             <!-- 项目积压 TOP5 -->
@@ -134,6 +157,8 @@ async function loadAdminDashboard(force = false) {
         document.getElementById('kpiTotalPending').textContent = d.total_pending || 0;
         document.getElementById('kpiOverdue').textContent = d.overdue || 0;
         document.getElementById('kpiIMFailed').textContent = d.im_failed || 0;
+        document.getElementById('kpiCloseRate').textContent = d.week_close_rate || '-';
+        document.getElementById('kpiMedianDays').textContent = d.median_resolve_days || '-';
 
         // 加载项目积压排行
         loadProjectRanking();
