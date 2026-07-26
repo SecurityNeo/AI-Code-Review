@@ -169,9 +169,17 @@ func (q *DelayedNotificationQueue) executeJob(taskID uint, job *pendingNotifyJob
 		link,
 	)
 
-	// 2. 企微群 IM 推送
+	// 2. 企微群 IM 推送（仅推送任务所属项目 + 全局的 notifier）
+	var task model.Task
+	model.DB.First(&task, taskID)
 	var notifiers []model.WeComNotifier
-	model.DB.Where("enabled = ?", true).Find(&notifiers)
+	db := model.DB.Where("enabled = ?", true)
+	if task.ProjectID > 0 {
+		db = db.Where("project_id IS NULL OR project_id = ?", task.ProjectID)
+	} else {
+		db = db.Where("project_id IS NULL")
+	}
+	db.Find(&notifiers)
 	for _, notifier := range notifiers {
 		msg := buildIMMarkdown(payload, mentionUserID)
 		notifierSvc := NewNotifierService()

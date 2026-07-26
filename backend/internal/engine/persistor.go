@@ -17,13 +17,15 @@ import (
 func PersistStructuredReview(taskID uint, result *llm.AIReviewResult) error {
 	// 事务开始前：加载 task 信息和 MR 历史 Issue（用于指纹匹配）
 	var task model.Task
-	model.DB.First(&task, taskID)
+	if err := model.DB.First(&task, taskID).Error; err != nil {
+		return fmt.Errorf("task not found: %w", err)
+	}
 
 	// 解析 MR 提交者对应的平台用户ID
 	ownerID := uint(0)
 	if task.MRAuthor != "" {
 		var user model.User
-		if err := model.DB.Where("gitlab_username = ? OR gitlab_username = ?", task.MRAuthor, task.MRAuthor).First(&user).Error; err == nil {
+		if err := model.DB.Where("gitlab_username = ?", task.MRAuthor).First(&user).Error; err == nil {
 			ownerID = user.ID
 		}
 	}

@@ -124,10 +124,11 @@ func CalcIssueStats(taskID uint, mrID int) IssueStats {
 	// 与上次成功版本对比
 	if mrID > 0 {
 		var lastTask model.Task
-		if err := model.DB.Where("mr_iid = ? AND id < ? AND status = ?", mrID, taskID, "completed").
+		if err := model.DB.Where("mr_iid = ? AND id < ? AND status = ?", mrID, taskID, model.TaskSuccess).
 			Order("id DESC").First(&lastTask).Error; err == nil {
 			var lastIssues []model.ReviewIssue
-			model.DB.Where("task_id = ? AND deleted_at IS NULL", lastTask.ID).Find(&lastIssues)
+			// 上次任务的 Issue 可能已被 soft delete（重试后），需用 Unscoped 查全量
+			model.DB.Unscoped().Where("task_id = ?", lastTask.ID).Find(&lastIssues)
 			lastTotal := len(lastIssues)
 			// "gone" = 上次有但本次没有（且非 auto_filtered）
 			// 简化：上次总数 - (本次总数 - auto_filtered) = gone

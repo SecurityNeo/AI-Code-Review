@@ -117,25 +117,86 @@ func NewEscalationService() *EscalationService {
 }
 
 // RunDailyEscalation 每日定时运行升级检查（建议每小时执行一次）
+// 分页处理，避免 OOM
 func (s *EscalationService) RunDailyEscalation() {
 	now := time.Now()
-	var issues []model.ReviewIssue
-	model.DB.Where("deleted_at IS NULL AND status = ?", model.IssueStatusPending).Find(&issues)
+	batchSize := 500
+	offset := 0
 
-	for i := range issues {
-		issue := &issues[i]
-		if issue.OriginalCreatedAt == nil {
-			continue
+	for {
+		var issues []model.ReviewIssue
+		model.DB.Where("deleted_at IS NULL AND status = ?", model.IssueStatusPending).
+			Order("id ASC").Limit(batchSize).Offset(offset).Find(&issues)
+		if len(issues) == 0 {
+			break
 		}
-		ageH := s.calc.WorkHoursBetween(*issue.OriginalCreatedAt, now)
-		s.processEscalation(issue, ageH)
+
+		for i := range issues {
+			issue := &issues[i]
+			// 老数据兜底：OriginalCreatedAt 为空时用 CreatedAt 填充
+			if issue.OriginalCreatedAt == nil || issue.OriginalCreatedAt.IsZero() {
+				model.DB.Model(issue).UpdateColumn("original_created_at", issue.CreatedAt)
+				issue.OriginalCreatedAt = &issue.CreatedAt
+			}
+		}
+
+		// 预加载关联 Task 和 Project，避免 N+1
+		taskMap, projectMap := s.preloadTaskProjects(issues)
+
+		for i := range issues {
+			issue := &issues[i]
+			ageH := s.calc.WorkHoursBetween(*issue.OriginalCreatedAt, now)
+			s.processEscalation(issue, ageH, taskMap, projectMap)
+		}
+
+		if len(issues) < batchSize {
+			break
+		}
+		offset += batchSize
 	}
 
 	// 批量积压告警
 	s.checkBatchAlerts()
 }
 
-func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours int) {
+// preloadTaskProjects 批量预加载 Issue 列表关联的 Task 和 Project
+func (s *EscalationService) preloadTaskProjects(issues []model.ReviewIssue) (map[uint]model.Task, map[uint]model.Project) {
+	taskIDs := make(map[uint]struct{})
+	projectIDs := make(map[uint]struct{})
+	for _, issue := range issues {
+		taskIDs[issue.TaskID] = struct{}{}
+	}
+	var tasks []model.Task
+	if len(taskIDs) > 0 {
+		ids := make([]uint, 0, len(taskIDs))
+		for id := range taskIDs {
+			ids = append(ids, id)
+		}
+		model.DB.Where("id IN ?", ids).Find(&tasks)
+		for _, t := range tasks {
+			projectIDs[t.ProjectID] = struct{}{}
+		}
+	}
+	var projects []model.Project
+	if len(projectIDs) > 0 {
+		ids := make([]uint, 0, len(projectIDs))
+		for id := range projectIDs {
+			ids = append(ids, id)
+		}
+		model.DB.Where("id IN ?", ids).Find(&projects)
+	}
+	taskMap := make(map[uint]model.Task, len(tasks))
+	for _, t := range tasks {
+		taskMap[t.ID] = t
+	}
+	projectMap := make(map[uint]model.Project, len(projects))
+	for _, p := range projects {
+		projectMap[p.ID] = p
+	}
+	return taskMap, projectMap
+}
+
+func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours int, taskMap map[uint]model.Task, projectMap map[uint]model.Project) {
 	var nextLevel int
 	switch {
 	case ageHours >= 360:
@@ -156,11 +217,11 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 		return // 已处理过该层级
 	}
 
-	// 加载关联信息
-	var task model.Task
-	model.DB.First(&task, issue.TaskID)
-	var project model.Project
-	model.DB.First(&project, task.ProjectID)
+	task, ok1 := taskMap[issue.TaskID]
+	project, ok2 := projectMap[task.ProjectID]
+	if !ok1 || !ok2 {
+		return // 关联数据缺失，跳过
+	}
 
 	switch nextLevel {
 	case EscalationLevel24h:
