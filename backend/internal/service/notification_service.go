@@ -110,14 +110,9 @@ func CalcIssueStats(taskID uint, mrID int) IssueStats {
 		if issue.Status == model.IssueStatusAutoFiltered {
 			stats.AutoFiltered++
 		}
-		if issue.Status == model.IssueStatusPending && issue.InheritedFromIssueID != nil {
-			// 曾 resolved 又出现的
-			var parent model.ReviewIssue
-			if model.DB.Unscoped().Where("id = ?", *issue.InheritedFromIssueID).First(&parent).Error == nil {
-				if parent.Status == model.IssueStatusResolved {
-					stats.ResolvedReappeared++
-				}
-			}
+		if issue.Status == model.IssueStatusPendingInherited {
+			// 历史 resolved 问题复现
+			stats.ResolvedReappeared++
 		}
 	}
 
