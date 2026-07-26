@@ -84,6 +84,17 @@ func main() {
 		}
 	})
 
+	// 5.3.6. Issue 治理系统初始化
+	service.InitWorkdayCalculator()
+	service.GetDelayedNotificationQueue() // 启动后台扫描器
+	escalationSvc := service.NewEscalationService()
+	_, _ = cronRunner.AddFunc("0 * * * *", func() { // 每小时执行一次升级检查
+		escalationSvc.RunDailyEscalation()
+	})
+	_, _ = cronRunner.AddFunc("0 9 * * 1-5", func() { // 工作日 09:00 发送每日摘要
+		escalationSvc.SendDailyDigest()
+	})
+
 	// 5.4. 启动 LLM 调用日志后台 worker（依赖 model.DB，必须在 InitDB 之后调用）
 	llmcall.Start()
 
@@ -268,6 +279,7 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 	api.POST("/tasks/callback", handler.NewTaskHandler().Callback)
 
 	// 公共需要认证的API（数据在handler/service层按user过滤）
+	notifH := handler.NewNotificationHandler()
 	common := api.Group("")
 	common.Use(middleware.Auth())
 	{
@@ -346,12 +358,21 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 
 		// 项目选项（任务列表/通知配置等下拉框使用，不含敏感字段）
 		common.GET("/projects/options", handler.NewProjectHandler().Options)
+
+		// 站内信中心（通知中心）+ 工作台 / 开发者 Dashboard
+		common.GET("/notifications", notifH.List)
+		common.GET("/notifications/unread-count", notifH.UnreadCount)
+		common.POST("/notifications/:id/read", notifH.MarkRead)
+		common.POST("/notifications/read-all", notifH.MarkAllRead)
+		common.GET("/dashboard/developer", notifH.DeveloperDashboard)
 	}
 
 	// 管理员专属API
 	adminOnly := api.Group("")
 	adminOnly.Use(middleware.Auth(), middleware.AdminOnly())
 	{
+		// 管理员大盘
+		adminOnly.GET("/dashboard/admin", notifH.AdminDashboard)
 		// 任务管理 - 写操作（仅限管理员）
 		adminTask := adminOnly.Group("/tasks")
 		{
@@ -474,6 +495,16 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 			memberMapping.PUT("/:id", h.Update)
 			memberMapping.DELETE("/:id", h.Delete)
 			memberMapping.GET("/check", h.CheckMapping)
+		}
+
+		// 项目环节负责人
+		steward := adminOnly.Group("/project-stewards")
+		{
+			h := handler.NewProjectStewardHandler()
+			steward.GET("/projects/:project_id", h.ListByProject)
+			steward.POST("", h.Create)
+			steward.PUT("/:id", h.Update)
+			steward.DELETE("/:id", h.Delete)
 		}
 
 		// 用户管理（管理员）

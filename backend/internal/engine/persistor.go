@@ -15,6 +15,22 @@ import (
 // 注意：ReviewIssue 已加 gorm.DeletedAt 字段，这里的 Delete 实际执行 soft delete
 //（UPDATE deleted_at = NOW()），保证历史命中数据可用于规则命中统计。
 func PersistStructuredReview(taskID uint, result *llm.AIReviewResult) error {
+	// 事务开始前：加载 task 信息和 MR 历史 Issue（用于指纹匹配）
+	var task model.Task
+	model.DB.First(&task, taskID)
+
+	// 解析 MR 提交者对应的平台用户ID
+	ownerID := uint(0)
+	if task.MRAuthor != "" {
+		var user model.User
+		if err := model.DB.Where("gitlab_username = ? OR gitlab_username = ?", task.MRAuthor, task.MRAuthor).First(&user).Error; err == nil {
+			ownerID = user.ID
+		}
+	}
+
+	// 构建历史 Issue 指纹映射（必须在 soft delete 之前查，且跨事务）
+	historyMap := BuildIssueHistoryMap(model.DB, task.MRMergeID, taskID)
+
 	return model.DB.Transaction(func(tx *gorm.DB) error {
 		// 1. 更新 Task 表
 		taskUpdates := map[string]interface{}{
@@ -23,6 +39,7 @@ func PersistStructuredReview(taskID uint, result *llm.AIReviewResult) error {
 			"issue_count":      len(result.Issues),
 			"score_value":      result.TotalScore,         // 后置校验后的最终评分
 			"raw_ai_score":     result.OriginalTotalScore, // LLM 原始评分（用于对比）
+			"execution_count":  gorm.Expr("execution_count + 1"),
 		}
 
 		if err := tx.Model(&model.Task{}).Where("id = ?", taskID).Updates(taskUpdates).Error; err != nil {
@@ -39,7 +56,7 @@ func PersistStructuredReview(taskID uint, result *llm.AIReviewResult) error {
 		//    AI 自助发现的 Issue（RuleCode 为空）不参与；规则已删除时静默忽略（RuleID 留空即可）
 		ruleByCode := loadReviewRulesByCode(tx, result.Issues)
 
-		// 4. 插入最新 Issue
+		// 4. 插入最新 Issue（含指纹计算与状态继承）
 		for _, issue := range result.Issues {
 			reviewIssue := model.ReviewIssue{
 				TaskID:      taskID,
@@ -53,10 +70,14 @@ func PersistStructuredReview(taskID uint, result *llm.AIReviewResult) error {
 				CodeSnippet: issue.CodeSnippet,
 				Message:     issue.Message,
 				Suggestion:  issue.Suggestion,
+				MRID:        task.MRMergeID,
 			}
 			if rule, ok := ruleByCode[issue.RuleCode]; ok {
 				reviewIssue.RuleID = &rule.ID
 			}
+
+			// 指纹计算 + 状态继承
+			ApplyFingerprintAndInheritance(&reviewIssue, historyMap, ownerID)
 
 			if err := tx.Create(&reviewIssue).Error; err != nil {
 				zap.L().Warn("create review issue failed",
@@ -67,7 +88,7 @@ func PersistStructuredReview(taskID uint, result *llm.AIReviewResult) error {
 			}
 		}
 
-		// 4. 更新 task_review_rules.IssueCount（只更新本次命中的规则）
+		// 5. 更新 task_review_rules.IssueCount（只更新本次命中的规则）
 		// 先清零该任务所有规则的 issue_count，再写入新计数
 		if err := tx.Model(&model.TaskReviewRule{}).
 			Where("task_id = ?", taskID).

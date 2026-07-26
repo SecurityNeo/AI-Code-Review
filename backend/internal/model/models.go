@@ -87,6 +87,7 @@ type Task struct {
 	Pool                ResourcePool        `gorm:"foreignKey:PoolID" json:"pool,omitempty"`
 	UsedModel           LLMModel            `gorm:"foreignKey:UsedModelID;references:ID" json:"used_model,omitempty"`
 	PendingIssueCount   int                 `gorm:"default:0;column:pending_issue_count" json:"pending_issue_count"` // 待处理Issue数量（列表页由子查询填充）
+	ExecutionCount      int                 `gorm:"default:1;column:execution_count" json:"execution_count"` // 同一任务第几次运行
 }
 
 // BeforeCreate GORM hook: 确保 JSON 字段有合法默认值
@@ -176,27 +177,34 @@ type TaskReviewRule struct {
 // --- ReviewIssue --- 结构化评审结果明细
 
 type ReviewIssue struct {
-	ID                 uint           `gorm:"primaryKey" json:"id"`
-	TaskID             uint           `gorm:"index" json:"task_id"`
-	RuleID             *uint          `gorm:"index" json:"rule_id"` // NULL=AI自主发现
-	RuleCode           string         `gorm:"size:64;index:idx_rule_code_created,priority:1" json:"rule_code"`
-	Category           string         `gorm:"size:32" json:"category"`
-	Severity           string         `gorm:"size:16" json:"severity"`
-	DeductScore        int            `gorm:"default:0;column:deduct_score" json:"deduct_score"` // 该 Issue 扣多少分
-	File               string         `gorm:"size:255" json:"file"`
-	LineStart          int            `gorm:"default:0" json:"line_start"`
-	LineEnd            int            `gorm:"default:0" json:"line_end"`
-	CodeSnippet        string         `gorm:"type:text" json:"code_snippet"`
-	Message            string         `gorm:"type:text" json:"message"`
-	Suggestion         string         `gorm:"type:text" json:"suggestion"`
-	Status             string         `gorm:"size:20;default:'pending'" json:"status"`             // pending / accepted / rejected / dismissed
-	ResolvedBy         uint           `gorm:"index;default:0" json:"resolved_by"`                  // 操作人ID
-	ResolvedAt         *time.Time     `json:"resolved_at"`                                         // 操作时间
-	RejectReason       string         `gorm:"type:text;column:reject_reason" json:"reject_reason"` // 拒绝/不采纳原因
-	GitlabDiscussionID string         `gorm:"size:64;column:gitlab_discussion_id" json:"gitlab_discussion_id"`
-	IsResolved         bool           `gorm:"default:false;column:is_resolved" json:"is_resolved"`
-	CreatedAt          time.Time      `gorm:"index:idx_rule_code_created,priority:2" json:"created_at"`
-	DeletedAt          gorm.DeletedAt `gorm:"index" json:"-"`
+	ID                   uint           `gorm:"primaryKey" json:"id"`
+	TaskID               uint           `gorm:"index" json:"task_id"`
+	MRID                 int            `gorm:"column:mr_id;index" json:"mr_id"`                     // 关联 MR IID
+	RuleID               *uint          `gorm:"index" json:"rule_id"` // NULL=AI自主发现
+	RuleCode             string         `gorm:"size:64;index:idx_rule_code_created,priority:1" json:"rule_code"`
+	Category             string         `gorm:"size:32" json:"category"`
+	Severity             string         `gorm:"size:16" json:"severity"`
+	DeductScore          int            `gorm:"default:0;column:deduct_score" json:"deduct_score"` // 该 Issue 扣多少分
+	File                 string         `gorm:"size:255" json:"file"`
+	LineStart            int            `gorm:"default:0" json:"line_start"`
+	LineEnd              int            `gorm:"default:0" json:"line_end"`
+	CodeSnippet          string         `gorm:"type:text" json:"code_snippet"`
+	Message              string         `gorm:"type:text" json:"message"`
+	Suggestion           string         `gorm:"type:text" json:"suggestion"`
+	Status               string         `gorm:"size:20;default:'pending'" json:"status"`             // pending / accepted / rejected / dismissed / auto_filtered / auto_archived
+	ResolvedBy           uint           `gorm:"index;default:0" json:"resolved_by"`                  // 操作人ID
+	ResolvedAt           *time.Time     `json:"resolved_at"`                                         // 操作时间
+	RejectReason         string         `gorm:"type:text;column:reject_reason" json:"reject_reason"` // 拒绝/不采纳原因
+	GitlabDiscussionID   string         `gorm:"size:64;column:gitlab_discussion_id" json:"gitlab_discussion_id"`
+	IsResolved           bool           `gorm:"default:false;column:is_resolved" json:"is_resolved"`
+	Fingerprint          string         `gorm:"size:64;index:idx_fingerprint" json:"fingerprint"` // 语义指纹
+	InheritedFromIssueID *uint          `json:"inherited_from_issue_id"`                           // 继承自历史 Issue
+	OwnerID              *uint          `gorm:"index" json:"owner_id"`                             // MR 提交者用户ID（外键至 users）
+	CurrentOwnerID       *uint          `gorm:"index" json:"current_owner_id"`                     // 当前责任人（升级后可能变更）
+	OriginalCreatedAt    *time.Time     `json:"original_created_at"`                               // 首次发现时间（用于升级计时）
+	EscalationLevel      int            `gorm:"default:0" json:"escalation_level"`                 // 当前升级层级
+	CreatedAt            time.Time      `gorm:"index:idx_rule_code_created,priority:2" json:"created_at"`
+	DeletedAt            gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 // --- TaskReviewComment 任务人工复核意见 ---

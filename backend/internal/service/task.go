@@ -898,12 +898,13 @@ func (s *TaskService) ExecuteAIReviewTaskWithComment(taskID uint, commentOverrid
 	// 发布评论
 	go s.postReviewComment(task, reviewReport)
 
-	// 发送 AI 评审完成通知
+	// 发送 AI 评审完成通知（新：延迟合并队列）
 	go func() {
 		// 重新加载 task 含 Project 关联，用于通知模板渲染
 		var notifyTask model.Task
 		if err := model.DB.Preload("Project").First(&notifyTask, task.ID).Error; err == nil {
-			NewNotifierService().NotifyAIReviewCompleted(notifyTask)
+			stats := CalcIssueStats(notifyTask.ID, notifyTask.MRMergeID)
+			GetDelayedNotificationQueue().Enqueue(notifyTask, stats)
 		}
 	}()
 

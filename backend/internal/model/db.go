@@ -161,6 +161,16 @@ func autoMigrate() error {
 		return err
 	}
 
+	// Issue 治理与通知系统相关表
+	if err := DB.AutoMigrate(
+		&Notification{},
+		&NotificationDeliveryLog{},
+		&ProjectSteward{},
+		&Holiday{},
+	); err != nil {
+		return err
+	}
+
 	if err := DB.AutoMigrate(
 		&Project{},
 	); err != nil {
