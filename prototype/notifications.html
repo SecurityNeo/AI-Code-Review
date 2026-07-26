@@ -257,6 +257,23 @@ function openNotif(id, link) {
 document.addEventListener('DOMContentLoaded', () => {
     loadNotifications();
 });
+
+// ====== 通用分页组件 ======
+function renderPagination(containerId, page, pages, callback) {
+    const el = document.getElementById(containerId);
+    if (!el || pages <= 1) { if (el) el.innerHTML = ''; return; }
+    let html = '';
+    html += `<button onclick="${callback.name}(${page - 1})" class="px-3 py-1 border rounded text-sm ${page <= 1 ? 'text-gray-300' : 'text-gray-500 hover:bg-gray-50'}" ${page <= 1 ? 'disabled' : ''}>上一页</button>`;
+    for (let i = 1; i <= pages; i++) {
+        if (i === 1 || i === pages || Math.abs(i - page) <= 2) {
+            html += `<button onclick="${callback.name}(${i})" class="px-3 py-1 border rounded text-sm ${i === page ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}">${i}</button>`;
+        } else if (Math.abs(i - page) === 3) {
+            html += `<span class="px-2 text-gray-400">...</span>`;
+        }
+    }
+    html += `<button onclick="${callback.name}(${page + 1})" class="px-3 py-1 border rounded text-sm ${page >= pages ? 'text-gray-300' : 'text-gray-500 hover:bg-gray-50'}" ${page >= pages ? 'disabled' : ''}>下一页</button>`;
+    el.innerHTML = html;
+}
 </script>
 <script defer src="/static/js/tailwindcss.min.js"></script>
 

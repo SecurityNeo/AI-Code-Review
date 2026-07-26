@@ -38,6 +38,9 @@ type ProjectSteward struct {
 	Priority  int       `gorm:"default:0" json:"priority"` // 同类型下优先级，越小越优先
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// 关联模型
+	User      User      `gorm:"foreignKey:UserID;references:ID" json:"user,omitempty"`
+	Project   Project   `gorm:"foreignKey:ProjectID;references:ID" json:"project,omitempty"`
 }
 
 // Holiday 节假日配置
