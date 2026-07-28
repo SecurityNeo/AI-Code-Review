@@ -29,27 +29,24 @@ type NotificationDeliveryLog struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
-// ProjectSteward 项目环节负责人（按规则类型/语言维度）
-type ProjectSteward struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	ProjectID uint      `gorm:"not null;index:idx_project_role;uniqueIndex:uk_project_role_user,priority:1" json:"project_id"`
-	UserID    uint      `gorm:"not null;uniqueIndex:uk_project_role_user,priority:2" json:"user_id"`
-	RoleType  string    `gorm:"size:32;not null;default:'default';index:idx_project_role;uniqueIndex:uk_project_role_user,priority:3" json:"role_type"` // default / security / performance / golang / java / ...
-	Priority  int       `gorm:"default:0" json:"priority"` // 同类型下优先级，越小越优先
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	// 关联模型
-	User      User      `gorm:"foreignKey:UserID;references:ID" json:"user,omitempty"`
-	Project   Project   `gorm:"foreignKey:ProjectID;references:ID" json:"project,omitempty"`
-}
-
 // Holiday 节假日配置
 type Holiday struct {
-	ID       uint      `gorm:"primaryKey" json:"id"`
-	Date     string    `gorm:"size:10;not null;uniqueIndex" json:"date"` // YYYY-MM-DD
-	Name     string    `gorm:"size:100" json:"name"`
-	IsWorkday bool     `gorm:"default:false" json:"is_workday"`          // 如果为 true，表示调休上班的周末
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	Date        string    `gorm:"size:10;not null;uniqueIndex:idx_date_type" json:"date"` // YYYY-MM-DD
+	Name        string    `gorm:"size:100" json:"name"`
+	Type        string    `gorm:"size:20;default:'national';uniqueIndex:idx_date_type" json:"type"` // national / company / makeup
+	IsRecurring bool      `gorm:"default:false" json:"is_recurring"`                                // 是否每年重复（如国庆、元旦）
+	Year        int       `gorm:"default:0" json:"year"`                                            // 所属年份，0 表示每年重复
+	IsWorkday   bool      `gorm:"default:false" json:"is_workday"`                                  // true=调休上班（补班）
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
+
+const (
+	HolidayTypeNational = "national"
+	HolidayTypeCompany  = "company"
+	HolidayTypeMakeup   = "makeup"
+)
 
 const (
 	IssueStatusPending          = "pending"
@@ -74,13 +71,20 @@ const (
 
 // NotificationRule 通知规则模板（后台管理）
 type NotificationRule struct {
-	ID           uint      `gorm:"primaryKey" json:"id"`
-	Name         string    `gorm:"size:100;not null" json:"name"`
-	Trigger      string    `gorm:"size:50;not null" json:"trigger"` // task.completed / issue.escalation / daily.digest 等
-	Condition    string    `gorm:"type:json" json:"condition"`      // JSON 条件
-	Actions      string    `gorm:"type:json" json:"actions"`        // JSON 动作列表
-	DelayMinutes int       `gorm:"default:0" json:"delay_minutes"`
-	Enabled      bool      `gorm:"default:true" json:"enabled"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID                 uint      `gorm:"primaryKey" json:"id"`
+	Name               string    `gorm:"size:100;not null" json:"name"`
+	Trigger            string    `gorm:"size:50;not null" json:"trigger"` // task.completed / issue.escalation / daily.digest 等
+	Provider           string    `gorm:"size:32;default:'wecom'" json:"provider"`          // 供应商：wecom / dingtalk / lark
+	NotifierID         *uint     `gorm:"index" json:"notifier_id"`                       // 关联的通知机器人/配置ID
+	Condition          string    `gorm:"type:json" json:"condition"`                     // JSON 条件
+	Actions            string    `gorm:"type:json" json:"actions"`                       // JSON 动作列表
+	Template           string    `gorm:"type:text" json:"template"`                      // 消息模板（Markdown）
+	DelayMinutes       int       `gorm:"default:0" json:"delay_minutes"`
+	QuietHoursStart    string    `gorm:"size:5;default:'22:00'" json:"quiet_hours_start"`  // 如 "22:00"
+	QuietHoursEnd      string    `gorm:"size:5;default:'09:00'" json:"quiet_hours_end"`    // 如 "09:00"
+	DedupWindowMinutes int       `gorm:"default:0" json:"dedup_window_minutes"`            // 0=不合并
+	EscalationConfig   string    `gorm:"type:json" json:"escalation_config"`               // 升级策略 JSON（阶段/阈值小时/收件人）
+	Enabled            bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }

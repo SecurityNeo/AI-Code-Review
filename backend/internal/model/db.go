@@ -142,7 +142,7 @@ func autoMigrate() error {
 		&ResourcePool{},
 		&LLMModel{},
 		&WeComNotifier{},
-		&MemberMapping{},
+		&TeamMember{},      // 人员管理主表
 	); err != nil {
 		return err
 	}
@@ -165,7 +165,7 @@ func autoMigrate() error {
 	if err := DB.AutoMigrate(
 		&Notification{},
 		&NotificationDeliveryLog{},
-		&ProjectSteward{},
+		&ProjectResponsibility{},   // 项目职责分配
 		&Holiday{},
 		&NotificationRule{},
 	); err != nil {

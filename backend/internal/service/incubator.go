@@ -283,7 +283,7 @@ func (s *IncubatorService) CreateCandidate(req CreateCandidateRequest, userID ui
 		catCount[iss.Category]++
 		sevCount[iss.Severity]++
 		langCount[inferLanguage(iss.File)]++
-		if iss.Status == "accepted" {
+		if iss.Status == "resolved" {
 			accepted++
 		}
 
@@ -2134,7 +2134,7 @@ func (s *IncubatorService) runHealthCheck() error {
 		// Get reject rate
 		var totalIssues, rejectedIssues int64
 		model.DB.Model(&model.ReviewIssue{}).Where("rule_id = ?", rule.ID).Count(&totalIssues)
-		model.DB.Model(&model.ReviewIssue{}).Where("rule_id = ? AND status = ?", rule.ID, "rejected").Count(&rejectedIssues)
+		model.DB.Model(&model.ReviewIssue{}).Where("rule_id = ? AND status = ?", rule.ID, "false_positive").Count(&rejectedIssues)
 
 		rejectRate := float64(0)
 		if totalIssues > 0 {

@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script src="js/theme.js?v=1"></script>
+    <style>html{background-color:#1e293b;}</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>节假日管理 - CodeGuard</title>
+    <script src="js/auth.js?v=6"></script>
+    <script src="js/menu-config.js?v=6"></script>
+    <script src="js/sidebar.js?v=6"></script>
+    <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="css/theme.css?v=1">
+    <style>
+        :root { --bg-page:#f8fafc; --card-bg:#fff; --text-primary:#1e293b; --text-secondary:#475569; --text-tertiary:#94a3b8; --border:#e2e8f0; }
+        html { background-color: var(--bg-page); font-size: 16px; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; color: var(--text-primary); background: var(--bg-page); }
+
+        .page-container { padding: 1.25rem 1.75rem; }
+        .page-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.25rem; }
+        .page-title { font-size:1.1rem; font-weight:700; }
+        .page-subtitle { font-size:0.8125rem; color:var(--text-secondary); margin-top:0.15rem; }
+
+        .toolbar { display:flex; align-items:center; gap:0.625rem; margin-bottom:1rem; background:var(--card-bg); padding:0.5rem 0.75rem; border-radius:0.625rem; border:1px solid var(--border); box-shadow:0 1px 2px rgba(0,0,0,0.03); flex-wrap:wrap; }
+        .btn { display:inline-flex; align-items:center; gap:0.35rem; padding:0.4rem 0.75rem; border-radius:0.5rem; font-size:0.8125rem; font-weight:500; border:1px solid transparent; cursor:pointer; transition:all .15s; }
+        .btn-primary { background:#3b82f6; color:#fff; border-color:#3b82f6; }
+        .btn-primary:hover { background:#2563eb; }
+        .btn-outline { background:#fff; color:#475569; border-color:#e2e8f0; }
+        .btn-outline:hover { background:#f8fafc; border-color:#cbd5e1; }
+        .btn-danger { background:#fff; color:#ef4444; border-color:#fecaca; }
+        .btn-danger:hover { background:#fef2f2; }
+        .btn-sm { padding:0.3rem 0.55rem; font-size:0.75rem; }
+
+        .year-selector { display:flex; align-items:center; gap:0.25rem; }
+        .year-selector button { width:1.75rem; height:1.75rem; display:flex; align-items:center; justify-content:center; border:1px solid var(--border); background:#fff; border-radius:0.375rem; cursor:pointer; color:#475569; font-size:0.75rem; }
+        .year-selector button:hover { background:#f1f5f9; }
+        .year-selector span { font-size:0.875rem; font-weight:700; min-width:3.5rem; text-align:center; }
+
+        /* Year calendar grid */
+        .year-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:1rem; }
+        @media (max-width:1280px) { .year-grid { grid-template-columns:repeat(3, 1fr); } }
+        @media (max-width:900px) { .year-grid { grid-template-columns:repeat(2, 1fr); } }
+        @media (max-width:600px) { .year-grid { grid-template-columns:1fr; } }
+
+        .month-card { background:var(--card-bg); border:1px solid var(--border); border-radius:0.625rem; overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,0.03); }
+        .month-header { padding:0.5rem 0.75rem; background:#f8fafc; border-bottom:1px solid #f1f5f9; font-weight:600; font-size:0.8125rem; color:#334155; display:flex; justify-content:space-between; align-items:center; }
+        .month-header .count { font-size:0.7rem; color:#94a3b8; font-weight:500; }
+
+        .mini-calendar { display:grid; grid-template-columns:repeat(7, 1fr); gap:1px; background:#f1f5f9; padding:0.5rem; }
+        .mini-calendar .dow { text-align:center; font-size:0.65rem; color:#94a3b8; font-weight:600; padding:0.15rem 0; text-transform:uppercase; }
+        .day-cell { background:#fff; min-height:2.75rem; padding:0.3rem 0.25rem; position:relative; cursor:pointer; transition:background .1s; display:flex; flex-direction:column; align-items:center; gap:0.15rem; }
+        .day-cell:hover { background:#f8fafc; }
+        .day-cell.other-month { background:#fafafa; }
+        .day-cell.empty { background:transparent; cursor:default; }
+        .day-cell.empty:hover { background:transparent; }
+        .day-cell.weekend { background:#f8fafc; }
+        .day-cell.today { outline:2px solid #3b82f6; outline-offset:-2px; border-radius:0.25rem; z-index:1; }
+        .day-cell .dnum { font-size:0.75rem; color:#475569; font-weight:500; line-height:1; }
+        .day-cell.other-month .dnum { color:#cbd5e1; }
+        .day-cell.today .dnum { color:#3b82f6; font-weight:700; }
+
+        .day-tag { font-size:0.6rem; padding:0.05rem 0.25rem; border-radius:0.2rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+        .day-tag.national { background:#d1fae5; color:#047857; }
+        .day-tag.company { background:#dbeafe; color:#1d4ed8; }
+        .day-tag.makeup { background:#ffedd5; color:#c2410c; }
+
+        .legend { display:flex; align-items:center; gap:0.75rem; margin-top:0.75rem; padding:0.5rem 0.75rem; background:var(--card-bg); border-radius:0.5rem; border:1px solid var(--border); font-size:0.75rem; }
+        .legend-item { display:flex; align-items:center; gap:0.3rem; }
+        .legend-dot { width:8px; height:8px; border-radius:2px; }
+
+        /* List view */
+        .data-table { width:100%; border-collapse:separate; border-spacing:0; background:var(--card-bg); border-radius:0.625rem; border:1px solid var(--border); overflow:hidden; }
+        .data-table thead tr { background:#f8fafc; }
+        .data-table th { padding:0.55rem 0.75rem; font-size:0.75rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:#64748b; text-align:left; border-bottom:1px solid var(--border); }
+        .data-table td { padding:0.5rem 0.75rem; font-size:0.8125rem; color:var(--text-secondary); border-bottom:1px solid #f1f5f9; }
+        .data-table tbody tr:hover { background:#f8fafc; }
+        .data-table tbody tr:last-child td { border-bottom:none; }
+        .row-actions { display:flex; gap:0.25rem; opacity:0; transition:opacity .15s; }
+        .data-table tbody tr:hover .row-actions { opacity:1; }
+        .btn-icon-sm { width:1.5rem; height:1.5rem; border-radius:0.375rem; display:flex; align-items:center; justify-content:center; border:none; background:transparent; cursor:pointer; color:#94a3b8; font-size:0.7rem; }
+        .btn-icon-sm:hover { background:#f1f5f9; color:#3b82f6; }
+        .btn-icon-sm.danger:hover { background:#fef2f2; color:#ef4444; }
+
+        .type-pill { display:inline-flex; align-items:center; gap:0.25rem; padding:0.15rem 0.45rem; border-radius:9999px; font-size:0.7rem; font-weight:600; }
+        .type-pill.national { background:#d1fae5; color:#047857; }
+        .type-pill.company { background:#dbeafe; color:#1d4ed8; }
+        .type-pill.makeup { background:#ffedd5; color:#c2410c; }
+
+        /* Modal */
+        .modal-overlay { display:none; position:fixed; inset:0; background:rgba(15,23,42,0.45); backdrop-filter:blur(3px); z-index:50; align-items:center; justify-content:center; }
+        .modal-overlay.active { display:flex; animation:fadeIn .15s; }
+        @keyframes fadeIn { from{opacity:0;} to{opacity:1;} }
+        .modal-box { background:#fff; border-radius:0.75rem; box-shadow:0 20px 50px rgba(0,0,0,0.12); width:420px; max-width:92vw; max-height:85vh; display:flex; flex-direction:column; overflow:hidden; animation:modalUp .2s cubic-bezier(.16,1,.3,1); }
+        @keyframes modalUp { from{opacity:0;transform:translateY(12px);} to{opacity:1;transform:translateY(0);} }
+        .modal-header { padding:0.875rem 1.25rem; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+        .modal-header h3 { font-size:1rem; font-weight:700; }
+        .modal-close { width:1.75rem; height:1.75rem; border-radius:0.375rem; display:flex; align-items:center; justify-content:center; border:none; background:transparent; color:#94a3b8; cursor:pointer; }
+        .modal-close:hover { background:#f1f5f9; color:#334155; }
+        .modal-body { padding:1rem 1.25rem; overflow-y:auto; }
+        .modal-footer { padding:0.75rem 1.25rem; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:0.5rem; }
+
+        .form-group { margin-bottom:0.75rem; }
+        .form-label { display:block; font-size:0.8125rem; font-weight:500; color:var(--text-secondary); margin-bottom:0.25rem; }
+        .form-input, .form-select, .form-textarea { width:100%; padding:0.45rem 0.625rem; border:1px solid var(--border); border-radius:0.5rem; font-size:0.8125rem; background:#f8fafc; color:var(--text-primary); outline:none; box-sizing:border-box; transition:all .15s; }
+        .form-input:focus, .form-select:focus, .form-textarea:focus { border-color:#3b82f6; background:#fff; box-shadow:0 0 0 3px rgba(59,130,246,0.1); }
+        .form-textarea { min-height:6rem; resize:vertical; font-family:monospace; }
+        .form-check { display:flex; align-items:center; gap:0.4rem; font-size:0.8125rem; color:var(--text-secondary); cursor:pointer; }
+        .form-check input { cursor:pointer; }
+
+        .sidebar-item:hover { background-color: rgba(255,255,255,0.1); }
+        .sidebar-item.active { background-color: rgba(255,255,255,0.15); border-left: 3px solid #3b82f6; }
+
+        .empty-box { text-align:center; padding:2rem 1rem; }
+        .empty-box .icon { width:3rem; height:3rem; background:#f1f5f9; border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 0.5rem; font-size:1rem; color:#cbd5e1; }
+        .empty-box p { font-size:0.8125rem; color:var(--text-secondary); }
+    </style>
+</head>
+<body>
+
+<div id="page-transition" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#1e293b;z-index:99999;transition:opacity .25s ease;"></div>
+<script>
+(function(){function hide(){var el=document.getElementById('page-transition');if(el){el.style.opacity='0';setTimeout(function(){el.remove();},250);}} if(document.readyState==='complete')hide();else window.addEventListener('load',hide);})();
+</script>
+
+<div class="flex h-screen">
+    <aside id="sidebar" class="w-64 bg-slate-900 text-white flex-shrink-0 flex flex-col">
+        <nav style="padding:20px;text-align:center;color:#94a3b8;font-size:13px;">加载中...</nav>
+    </aside>
+
+    <main class="flex-1 overflow-y-auto bg-slate-50">
+        <div class="page-container">
+            <div class="page-header">
+                <div>
+                    <h2 class="page-title"><i class="fas fa-calendar-day text-blue-600 mr-2"></i>节假日管理</h2>
+                    <p class="page-subtitle">法定节假日、公司假期与调休补班配置</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="switchView('calendar')" id="btnViewCal" class="btn btn-outline active"><i class="fas fa-calendar-alt mr-1"></i>日历</button>
+                    <button onclick="switchView('list')" id="btnViewList" class="btn btn-outline"><i class="fas fa-list mr-1"></i>列表</button>
+                    <button onclick="openSyncModal()" class="btn btn-outline"><i class="fas fa-sync-alt mr-1"></i>同步</button>
+                    <button onclick="openImportModal()" class="btn btn-outline"><i class="fas fa-file-import mr-1"></i>导入</button>
+                    <button onclick="openHolidayModal()" class="btn btn-primary"><i class="fas fa-plus mr-1"></i>添加</button>
+                </div>
+            </div>
+
+            <div class="toolbar">
+                <div class="year-selector">
+                    <button onclick="changeYear(-1)"><i class="fas fa-chevron-left"></i></button>
+                    <span id="yearLabel">2026</span>
+                    <button onclick="changeYear(1)"><i class="fas fa-chevron-right"></i></button>
+                </div>
+                <select id="typeFilter" onchange="loadHolidays()" class="form-select" style="width:140px;">
+                    <option value="">全部类型</option>
+                    <option value="national">法定假日</option>
+                    <option value="company">公司假期</option>
+                    <option value="makeup">调休补班</option>
+                </select>
+                <div style="flex:1;"></div>
+                <div class="legend">
+                    <div class="legend-item"><div class="legend-dot" style="background:#047857;"></div>法定假日</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#1d4ed8;"></div>公司假期</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#c2410c;"></div>调休补班</div>
+                </div>
+            </div>
+
+            <!-- Calendar View -->
+            <div id="calendarView">
+                <div id="yearCalendar" class="year-grid"></div>
+            </div>
+
+            <!-- List View -->
+            <div id="listView" class="hidden">
+                <div id="listContainer"></div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- 添加/编辑弹层 -->
+<div id="holidayModal" class="modal-overlay">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3 id="holidayModalTitle">添加节假日</h3>
+            <button onclick="closeModal('holidayModal')" class="modal-close"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="hId">
+            <div class="form-group">
+                <label class="form-label">日期</label>
+                <input type="date" id="hDate" class="form-input">
+            </div>
+            <div class="form-group">
+                <label class="form-label">名称</label>
+                <input type="text" id="hName" placeholder="例如：国庆节" class="form-input">
+            </div>
+            <div class="form-group">
+                <label class="form-label">类型</label>
+                <select id="hType" class="form-select" onchange="onTypeChange()">
+                    <option value="national">法定假日</option>
+                    <option value="company">公司假期</option>
+                    <option value="makeup">调休补班</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-check"><input type="checkbox" id="hRecurring"> 每年重复（忽略年份）</label>
+            </div>
+            <div class="form-group" id="workdayWrap">
+                <label class="form-check"><input type="checkbox" id="hWorkday"> 标记为工作日（调休补班）</label>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeModal('holidayModal')" class="btn btn-outline">取消</button>
+            <button onclick="saveHoliday()" class="btn btn-primary">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- 导入弹层 -->
+<div id="importModal" class="modal-overlay">
+    <div class="modal-box">
+        <div class="modal-header"><h3>批量导入</h3><button onclick="closeModal('importModal')" class="modal-close"><i class="fas fa-times"></i></button></div>
+        <div class="modal-body">
+            <p class="text-xs text-slate-500 mb-2">粘贴 JSON 数组，每项包含 date、name、type（可选 national/company/makeup）。</p>
+            <textarea id="importJson" class="form-textarea" placeholder='[{"date":"2026-01-01","name":"元旦","type":"national"}]'></textarea>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeModal('importModal')" class="btn btn-outline">取消</button>
+            <button onclick="doImport()" class="btn btn-primary">导入</button>
+        </div>
+    </div>
+</div>
+
+<!-- 同步弹层 -->
+<div id="syncModal" class="modal-overlay">
+    <div class="modal-box">
+        <div class="modal-header"><h3>同步国家节假日</h3><button onclick="closeModal('syncModal')" class="modal-close"><i class="fas fa-times"></i></button></div>
+        <div class="modal-body">
+            <p class="text-xs text-slate-500 mb-3">将从 date.nager.at 同步中国法定节假日数据。</p>
+            <div class="form-group">
+                <label class="form-label">年份</label>
+                <input type="number" id="syncYear" class="form-input" value="2026">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeModal('syncModal')" class="btn btn-outline">取消</button>
+            <button onclick="doSync()" class="btn btn-primary"><i class="fas fa-sync-alt mr-1"></i>开始同步</button>
+        </div>
+    </div>
+</div>
+
+<!-- 删除确认 -->
+<div id="deleteModal" class="modal-overlay">
+    <div class="modal-box" style="width:340px;text-align:center;padding:1.5rem 1.25rem;">
+        <div style="width:3rem;height:3rem;border-radius:50%;background:#fef2f2;color:#ef4444;display:flex;align-items:center;justify-content:center;margin:0 auto 0.75rem;font-size:1rem;"><i class="fas fa-exclamation-triangle"></i></div>
+        <h4 style="font-size:1rem;font-weight:700;">确认删除</h4>
+        <p style="font-size:0.8125rem;color:#475569;margin-top:0.4rem;">确定删除此节假日配置？</p>
+        <div style="display:flex;justify-content:center;gap:0.625rem;margin-top:1.25rem;">
+            <button onclick="closeModal('deleteModal')" class="btn btn-outline">取消</button>
+            <button onclick="confirmDelete()" class="btn btn-danger">确认删除</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const API_BASE = '/api/v1';
+let currentYear = new Date().getFullYear();
+let currentView = 'calendar';
+let holidays = [];
+let deleteId = null;
+
+function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+function showModal(id) { document.getElementById(id).classList.add('active'); }
+
+function openImportModal() { showModal('importModal'); }
+function openSyncModal() { showModal('syncModal'); }
+
+function switchView(view) {
+    currentView = view;
+    document.getElementById('calendarView').classList.toggle('hidden', view !== 'calendar');
+    document.getElementById('listView').classList.toggle('hidden', view !== 'list');
+    document.getElementById('btnViewCal').classList.toggle('active', view === 'calendar');
+    document.getElementById('btnViewList').classList.toggle('active', view === 'list');
+    if (view === 'list') renderListView();
+}
+
+async function loadHolidays() {
+    const typeFilter = document.getElementById('typeFilter').value;
+    let url = `${API_BASE}/holidays?year=${currentYear}`;
+    if (typeFilter) url += `&type=${typeFilter}`;
+    try {
+        const res = await apiFetch(url);
+        const json = await res.json();
+        holidays = json.data || [];
+        if (currentView === 'calendar') renderYearCalendar();
+        else renderListView();
+    } catch (e) {
+        console.error(e);
+        showToast('加载失败', 'error');
+    }
+}
+
+function changeYear(delta) {
+    currentYear += delta;
+    document.getElementById('yearLabel').textContent = currentYear;
+    loadHolidays();
+}
+
+function getHolidayMap() {
+    const map = {};
+    holidays.forEach(h => {
+        if (!map[h.date]) map[h.date] = [];
+        map[h.date].push(h);
+    });
+    return map;
+}
+
+function renderYearCalendar() {
+    const container = document.getElementById('yearCalendar');
+    const hMap = getHolidayMap();
+    let html = '';
+    for (let m = 0; m < 12; m++) {
+        html += renderMonthCard(currentYear, m, hMap);
+    }
+    container.innerHTML = html;
+}
+
+function renderMonthCard(year, month, hMap) {
+    const monthNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const startOffset = firstDay.getDay(); // 0=Sunday
+    const daysInMonth = lastDay.getDate();
+    const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
+
+    // 统计当月节假日数
+    const monthCount = holidays.filter(h => {
+        const d = new Date(h.date);
+        return d.getFullYear() === year && d.getMonth() === month;
+    }).length;
+
+    let cells = '';
+    for (let i = 0; i < totalCells; i++) {
+        const dayNum = i - startOffset + 1;
+        if (dayNum < 1 || dayNum > daysInMonth) {
+            cells += '<div class="day-cell empty"></div>';
+            continue;
+        }
+        const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(dayNum).padStart(2,'0')}`;
+        const list = hMap[dateStr] || [];
+        const hasHoliday = list.length > 0;
+        const isWeekend = (i % 7 === 0 || i % 7 === 6);
+        const isToday = dateStr === formatDateLocal(new Date());
+        let cls = 'day-cell';
+        if (isWeekend && !hasHoliday) cls += ' weekend';
+        if (isToday) cls += ' today';
+
+        let tag = '';
+        if (hasHoliday) {
+            const primary = list[0];
+            const extra = list.length > 1 ? ` (+${list.length - 1})` : '';
+            tag = `<span class="day-tag ${primary.type}" title="${escapeHtml(list.map(x => x.name).join(', '))}">${escapeHtml(primary.name)}${extra}</span>`;
+        }
+        cells += `<div class="${cls}" onclick="onDayClick('${dateStr}', ${hasHoliday ? JSON.stringify(list.map(x => x.id)) : '[]'})">
+            <span class="dnum">${dayNum}</span>${tag}
+        </div>`;
+    }
+
+    return `<div class="month-card">
+        <div class="month-header">
+            <span>${monthNames[month]}</span>
+            <span class="count">${monthCount ? monthCount + ' 个' : ''}</span>
+        </div>
+        <div class="mini-calendar">
+            <div class="dow">日</div><div class="dow">一</div><div class="dow">二</div><div class="dow">三</div><div class="dow">四</div><div class="dow">五</div><div class="dow">六</div>
+            ${cells}
+        </div>
+    </div>`;
+}
+
+function renderListView() {
+    const container = document.getElementById('listContainer');
+    if (holidays.length === 0) {
+        container.innerHTML = `<div class="empty-box"><div class="icon"><i class="fas fa-calendar-times"></i></div><p>暂无节假日数据</p></div>`;
+        return;
+    }
+    let html = `<table class="data-table"><thead><tr>
+        <th style="width:14%">日期</th><th style="width:22%">名称</th><th style="width:14%">类型</th>
+        <th style="width:12%">年份</th><th style="width:12%">重复</th><th style="width:10%">补班</th><th style="width:16%;text-align:right;">操作</th>
+    </tr></thead><tbody>`;
+    holidays.forEach(h => {
+        const typeInfo = { national: { label:'法定假日', cls:'national' }, company: { label:'公司假期', cls:'company' }, makeup: { label:'调休补班', cls:'makeup' } }[h.type] || { label:h.type, cls:'national' };
+        html += `<tr>
+            <td style="font-family:monospace;font-size:0.8125rem;">${h.date}</td>
+            <td>${escapeHtml(h.name || '—')}</td>
+            <td><span class="type-pill ${typeInfo.cls}">${typeInfo.label}</span></td>
+            <td>${h.year || '每年'}</td>
+            <td>${h.is_recurring ? '<i class="fas fa-check text-emerald-500"></i>' : '—'}</td>
+            <td>${h.is_workday ? '<i class="fas fa-check text-orange-500"></i>' : '—'}</td>
+            <td style="text-align:right;">
+                <div class="row-actions">
+                    <button class="btn-icon-sm" title="编辑" onclick="openEditHoliday(${h.id})"><i class="fas fa-pen"></i></button>
+                    <button class="btn-icon-sm danger" title="删除" onclick="openDeleteHoliday(${h.id})"><i class="fas fa-trash-alt"></i></button>
+                </div>
+            </td>
+        </tr>`;
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+}
+
+function onDayClick(dateStr, ids) {
+    if (ids && ids.length > 0) {
+        if (ids.length === 1) openEditHoliday(ids[0]);
+        else {
+            // 同一天多个节假日，默认打开第一个
+            openEditHoliday(ids[0]);
+        }
+    } else {
+        openHolidayModal(dateStr);
+    }
+}
+
+function openHolidayModal(prefillDate) {
+    document.getElementById('holidayModalTitle').textContent = '添加节假日';
+    document.getElementById('hId').value = '';
+    document.getElementById('hDate').value = prefillDate || '';
+    document.getElementById('hName').value = '';
+    document.getElementById('hType').value = 'national';
+    document.getElementById('hRecurring').checked = false;
+    document.getElementById('hWorkday').checked = false;
+    onTypeChange();
+    showModal('holidayModal');
+}
+
+async function openEditHoliday(id) {
+    try {
+        // 从本地 holidays 数组查找（避免重复请求）
+        const h = holidays.find(x => x.id === id);
+        if (!h) { showToast('未找到记录', 'error'); return; }
+        document.getElementById('holidayModalTitle').textContent = '编辑节假日';
+        document.getElementById('hId').value = h.id;
+        document.getElementById('hDate').value = h.date;
+        document.getElementById('hName').value = h.name || '';
+        document.getElementById('hType').value = h.type || 'national';
+        document.getElementById('hRecurring').checked = h.is_recurring;
+        document.getElementById('hWorkday').checked = h.is_workday;
+        onTypeChange();
+        showModal('holidayModal');
+    } catch (e) { showToast('加载失败', 'error'); }
+}
+
+function onTypeChange() {
+    const typeVal = document.getElementById('hType').value;
+    const workdayWrap = document.getElementById('workdayWrap');
+    if (typeVal === 'makeup') {
+        document.getElementById('hWorkday').checked = true;
+        workdayWrap.style.display = 'none';
+    } else {
+        workdayWrap.style.display = '';
+    }
+}
+
+async function saveHoliday() {
+    const id = document.getElementById('hId').value;
+    const data = {
+        date: document.getElementById('hDate').value,
+        name: document.getElementById('hName').value.trim(),
+        type: document.getElementById('hType').value,
+        is_recurring: document.getElementById('hRecurring').checked,
+        is_workday: document.getElementById('hWorkday').checked,
+    };
+    if (!data.date) { alert('请选择日期'); return; }
+    if (!data.name) { alert('请输入名称'); return; }
+
+    try {
+        const url = id ? `${API_BASE}/holidays/${id}` : `${API_BASE}/holidays`;
+        const method = id ? 'PUT' : 'POST';
+        const res = await apiFetch(url, { method, body: JSON.stringify(data) });
+        if (!res.ok) { const err = await res.json(); alert(err.error || '保存失败'); return; }
+        closeModal('holidayModal');
+        loadHolidays();
+        showToast(id ? '更新成功' : '创建成功', 'success');
+    } catch (e) { alert('保存失败: ' + e.message); }
+}
+
+function openDeleteHoliday(id) { deleteId = id; showModal('deleteModal'); }
+
+async function confirmDelete() {
+    if (!deleteId) return;
+    try {
+        const res = await apiFetch(`${API_BASE}/holidays/${deleteId}`, { method: 'DELETE' });
+        if (res.ok) { closeModal('deleteModal'); loadHolidays(); showToast('删除成功', 'success'); }
+        else alert('删除失败');
+    } catch (e) { alert('删除失败: ' + e.message); }
+    deleteId = null;
+}
+
+async function doImport() {
+    const raw = document.getElementById('importJson').value.trim();
+    if (!raw) { alert('请输入 JSON'); return; }
+    let list;
+    try { list = JSON.parse(raw); } catch (e) { alert('JSON 格式错误'); return; }
+    if (!Array.isArray(list)) { alert('请提供 JSON 数组'); return; }
+    try {
+        const res = await apiFetch(`${API_BASE}/holidays/import`, { method: 'POST', body: JSON.stringify(list) });
+        const json = await res.json();
+        if (res.ok) { closeModal('importModal'); loadHolidays(); showToast(`成功导入 ${json.count} 条`, 'success'); }
+        else alert(json.error || '导入失败');
+    } catch (e) { alert('导入失败: ' + e.message); }
+}
+
+async function doSync() {
+    const year = document.getElementById('syncYear').value;
+    try {
+        const res = await apiFetch(`${API_BASE}/holidays/sync-api?year=${year}`, { method: 'POST' });
+        const json = await res.json();
+        if (res.ok) { closeModal('syncModal'); loadHolidays(); showToast(`同步成功 ${json.count} 条`, 'success'); }
+        else alert(json.error || '同步失败');
+    } catch (e) { alert('同步失败: ' + e.message); }
+}
+
+function formatDateLocal(d) {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function escapeHtml(str) { if (!str) return ''; return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
+
+function showToast(message, type='info') {
+    const colors = { success:['#10b981','#d1fae5'], error:['#ef4444','#fee2e2'], info:['#3b82f6','#dbeafe'] };
+    const c = colors[type] || colors.info;
+    const toast = document.createElement('div');
+    toast.style.cssText = `position:fixed;top:1rem;right:1rem;background:#fff;color:#334155;padding:0.625rem 1rem;border-radius:0.625rem;box-shadow:0 8px 24px rgba(0,0,0,0.08);z-index:60;font-size:0.8125rem;font-weight:500;display:flex;align-items:center;gap:0.4rem;animation:fadeIn .25s;border-left:3px solid ${c[0]};`;
+    toast.innerHTML = `<span style="width:5px;height:5px;border-radius:50%;background:${c[0]};"></span>${escapeHtml(message)}`;
+    document.body.appendChild(toast);
+    setTimeout(()=>{toast.style.transition='all .25s';toast.style.opacity='0';toast.style.transform='translateY(-4px)';setTimeout(()=>toast.remove(),250);},3000);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    renderSidebar('settings-holiday');
+    document.getElementById('yearLabel').textContent = currentYear;
+    document.getElementById('syncYear').value = currentYear;
+    loadHolidays();
+});
+</script>
+<script defer src="/static/js/tailwindcss.min.js"></script>
+</body>
+</html>

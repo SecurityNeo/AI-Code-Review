@@ -218,27 +218,6 @@ type TaskReviewComment struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
-// --- MemberMapping 成员映射（Git用户名 <-> IM用户ID）---
-
-type IMPlatform string
-
-const (
-	IMPlatformWeCom IMPlatform = "wecom" // 企业微信
-)
-
-type MemberMapping struct {
-	ID          uint       `gorm:"primaryKey" json:"id"`
-	GitUsername string     `gorm:"size:100;not null;index:idx_git_im,unique" json:"git_username"`
-	IMPlatform  IMPlatform `gorm:"size:20;not null;index:idx_git_im,unique" json:"im_platform"`
-	IMUserID    string     `gorm:"size:100;not null" json:"im_user_id"`
-	DisplayName string     `gorm:"size:100" json:"display_name"`
-	Enabled     bool       `gorm:"default:true" json:"enabled"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-}
-
-// --- ProjectTemplate ---
-
 type ProjectTemplate struct {
 	ID                    uint      `gorm:"primaryKey" json:"id"`
 	Name                  string    `gorm:"size:100;uniqueIndex;not null" json:"name"`

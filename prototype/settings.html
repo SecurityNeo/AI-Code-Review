@@ -6,9 +6,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>系统管理 - CodeGuard</title>
-        <script src="js/auth.js?v=5"></script>
-    <script src="js/menu-config.js?v=2"></script>
-    <script src="js/sidebar.js?v=2"></script>
+        <script src="js/auth.js?v=6"></script>
+    <script src="js/menu-config.js?v=6"></script>
+    <script src="js/sidebar.js?v=6"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <style>
@@ -57,6 +57,7 @@
                     <div class="tab-btn" onclick="switchTab('users')">用户管理</div>
                     <div class="tab-btn" onclick="switchTab('logs')">操作日志</div>
                     <div class="tab-btn" onclick="switchTab('info')">系统信息</div>
+                    <div class="tab-btn" onclick="switchTab('holiday')">节假日</div>
                 </div>
 
                 <!-- 系统配置 -->
@@ -664,6 +665,31 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- 节假日管理 -->
+                <div id="tab-holiday" class="tab-content bg-white rounded-b-xl border border-t-0 p-6 space-y-5">
+                    <div class="flex items-center justify-between">
+                        <h4 class="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                            <i class="fas fa-calendar-day text-blue-500"></i>节假日列表
+                        </h4>
+                        <button onclick="showHolidayModal()" class="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
+                            <i class="fas fa-plus mr-1"></i>新增节假日
+                        </button>
+                    </div>
+                    <table class="w-full text-sm border">
+                        <thead class="bg-gray-50 border-b">
+                            <tr>
+                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">日期</th>
+                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">名称</th>
+                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">类型</th>
+                                <th class="px-4 py-2 text-right text-xs font-semibold text-gray-500 w-24">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="holidayTableBody" class="divide-y">
+                            <tr><td colspan="4" class="px-4 py-6 text-center text-gray-400">加载中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </main>
     </div>
@@ -771,13 +797,13 @@
 
         async function loadAlertMentionUsers(selectedIds) {
             try {
-                const res = await apiFetch(`${API_BASE}/member-mappings?page=1&page_size=100`);
+                const res = await apiFetch(`${API_BASE}/team-members?page=1&page_size=100`);
                 const json = await res.json();
                 const container = document.getElementById('alertMentionUsers');
                 if (!container) return;
                 const list = json.data || [];
                 if (list.length === 0) {
-                    container.innerHTML = '<span class="text-gray-400 text-xs">暂无成员映射数据</span>';
+                    container.innerHTML = '<span class="text-gray-400 text-xs">暂无人员数据</span>';
                     return;
                 }
                 var selected = {};
@@ -788,7 +814,7 @@
                     var checked = selected[m.im_user_id] ? 'checked' : '';
                     return '<label class="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 rounded hover:bg-gray-200 cursor-pointer text-xs">' +
                         '<input type="checkbox" value="' + m.im_user_id + '" ' + checked + ' class="w-3.5 h-3.5 text-blue-600 rounded">' +
-                        '<span>' + (m.display_name || m.git_username) + '</span></label>';
+                        '<span>' + (m.display_name || m.gitlab_username) + '</span></label>';
                 }).join('');
             } catch (e) { console.error('加载艾特人员失败:', e); }
         }
@@ -1445,7 +1471,7 @@ function previewTemplate() {
         function initTabFromHash() {
             const urlParams = new URLSearchParams(window.location.search);
             const tabParam = urlParams.get('tab');
-            const validTabs = ['config', 'aitemplate', 'reviewtemplate', 'users', 'logs', 'info'];
+            const validTabs = ['config', 'aitemplate', 'reviewtemplate', 'users', 'logs', 'info', 'holiday'];
             const tab = validTabs.includes(tabParam) ? tabParam : 'config';
             const isSidebarMode = tabParam && validTabs.includes(tabParam);
 
@@ -1456,7 +1482,8 @@ function previewTemplate() {
                 reviewtemplate:{ title: '代码审查模板', desc: '代码审查报告模板管理' },
                 users:         { title: '用户管理',     desc: '系统用户账号管理' },
                 logs:          { title: '操作日志',     desc: '系统操作日志查询' },
-                info:          { title: '系统信息',     desc: '系统版本与状态信息' }
+                info:          { title: '系统信息',     desc: '系统版本与状态信息' },
+                holiday:       { title: '节假日管理',   desc: '节假日与调休配置' }
             };
 
             // 更新页面标题和描述
@@ -1477,7 +1504,7 @@ function previewTemplate() {
             if (!isSidebarMode) {
                 document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
                 const tabButtons = document.querySelectorAll('.tab-btn');
-                const tabIndexMap = { config: 0, aitemplate: 1, reviewtemplate: 2, users: 3, logs: 4, info: 5 };
+                const tabIndexMap = { config: 0, aitemplate: 1, reviewtemplate: 2, users: 3, logs: 4, info: 5, holiday: 6 };
                 const idx = tabIndexMap[tab];
                 if (idx !== undefined && tabButtons[idx]) {
                     tabButtons[idx].classList.add('active');
@@ -1496,6 +1523,7 @@ function previewTemplate() {
             if (tab === 'users') loadUsers();
             if (tab === 'logs') loadOperationLogs();
             if (tab === 'info') loadSystemInfo();
+            if (tab === 'holiday') loadHoliday();
         }
 
         // 根据 URL query 参数确定 sidebar 高亮 ID
@@ -1511,6 +1539,57 @@ function previewTemplate() {
                 info: 'settings-info'
             };
             return map[tab] || 'settings-config';
+        }
+
+        // ========== 节假日管理 ==========
+        async function loadHoliday() {
+            try {
+                const res = await apiFetch(`${API_BASE}/holidays`);
+                const json = await res.json();
+                const list = json.data || [];
+                const tbody = document.getElementById('holidayTableBody');
+                if (list.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-6 text-center text-gray-400">暂无节假日配置</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = list.map(h => `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-2 text-sm text-gray-800">${h.date}</td>
+                        <td class="px-4 py-2 text-sm text-gray-600">${escapeHtml(h.name || '')}</td>
+                        <td class="px-4 py-2"><span class="px-2 py-0.5 rounded text-xs ${h.is_workday ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}">${h.is_workday ? '调休上班' : '节假日'}</span></td>
+                        <td class="px-4 py-2 text-right">
+                            <button onclick="deleteHoliday(${h.id})" class="text-red-500 hover:text-red-700 text-xs">删除</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (e) { console.error(e); }
+        }
+
+        async function showHolidayModal() {
+            const date = prompt('请输入日期（YYYY-MM-DD）：');
+            if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) { alert('日期格式不正确'); return; }
+            const name = prompt('请输入名称：') || '';
+            const isWork = confirm('是否为调休上班日？（确定=调休上班，取消=节假日）');
+            try {
+                const res = await apiFetch(`${API_BASE}/holidays`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ date, name, is_workday: isWork })
+                });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                showToast('添加成功', 'success');
+                loadHoliday();
+            } catch (e) { alert('添加失败: ' + e.message); }
+        }
+
+        async function deleteHoliday(id) {
+            if (!confirm('确定删除该节假日？')) return;
+            try {
+                const res = await apiFetch(`${API_BASE}/holidays/${id}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                showToast('已删除', 'success');
+                loadHoliday();
+            } catch (e) { alert('删除失败: ' + e.message); }
         }
 
         // 页面加载时根据 query 参数初始化

@@ -182,12 +182,12 @@ func (h *ProjectReviewHandler) QueryStructuredReview(c *gin.Context) {
 	})
 }
 
-// BatchResolveIssues 批量处理 Issue 状态（接纳/拒绝/恢复待处理）
+// BatchResolveIssues 批量处理 Issue 状态（已处理/误报/忽略/恢复待处理）
 func (h *ProjectReviewHandler) BatchResolveIssues(c *gin.Context) {
 	var req struct {
 		Issues []struct {
 			ID           uint   `json:"id"`
-			Status       string `json:"status" binding:"required"` // accepted / rejected / pending
+			Status       string `json:"status" binding:"required"` // resolved / false_positive / ignored / pending
 			RejectReason string `json:"reject_reason"`
 		} `json:"issues" binding:"required,min=1"`
 	}
@@ -204,10 +204,15 @@ func (h *ProjectReviewHandler) BatchResolveIssues(c *gin.Context) {
 	operatorID := userID.(uint)
 	now := time.Now()
 
-	statusLabels := map[string]string{"accepted": "接纳", "rejected": "拒绝", "pending": "恢复待处理", "dismissed": "忽略"}
+	statusLabels := map[string]string{
+		"resolved":       "已处理",
+		"false_positive": "误报",
+		"ignored":        "忽略",
+		"pending":        "恢复待处理",
+	}
 
 	for _, item := range req.Issues {
-		if item.Status != "accepted" && item.Status != "rejected" && item.Status != "pending" && item.Status != "dismissed" {
+		if item.Status != "resolved" && item.Status != "false_positive" && item.Status != "ignored" && item.Status != "pending" {
 			c.JSON(400, gin.H{"error": fmt.Sprintf("invalid status for issue %d", item.ID)})
 			return
 		}
@@ -225,10 +230,10 @@ func (h *ProjectReviewHandler) BatchResolveIssues(c *gin.Context) {
 			"status":       item.Status,
 			"resolved_by":  operatorID,
 			"resolved_at":  now,
-			"is_resolved":  item.Status == "accepted" || item.Status == "rejected",
+			"is_resolved":  item.Status == "resolved" || item.Status == "false_positive" || item.Status == "ignored",
 		}
-		// 仅拒绝/不采纳时记录原因
-		if item.Status == "rejected" || item.Status == "dismissed" {
+		// 误报/忽略时记录原因
+		if item.Status == "false_positive" || item.Status == "ignored" {
 			updates["reject_reason"] = item.RejectReason
 		}
 

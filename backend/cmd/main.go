@@ -239,8 +239,8 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 	r.GET("/report.html", func(c *gin.Context) {
 		c.File(frontendPath + "/report.html")
 	})
-	r.GET("/member-mappings.html", func(c *gin.Context) {
-		c.File(frontendPath + "/member-mappings.html")
+	r.GET("/staff-management.html", func(c *gin.Context) {
+		c.File(frontendPath + "/staff-management.html")
 	})
 	r.GET("/review-rules.html", func(c *gin.Context) {
 		c.File(frontendPath + "/review-rules.html")
@@ -259,7 +259,9 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 	r.StaticFile("/developer-dashboard.html", frontendPath+"/developer-dashboard.html")
 	r.StaticFile("/notifications.html", frontendPath+"/notifications.html")
 	r.StaticFile("/admin-dashboard.html", frontendPath+"/admin-dashboard.html")
-	r.StaticFile("/project-stewards.html", frontendPath+"/project-stewards.html")
+	r.StaticFile("/notification-rules.html", frontendPath+"/notification-rules.html")
+	r.StaticFile("/project-dashboard.html", frontendPath+"/project-dashboard.html")
+	r.StaticFile("/holiday-management.html", frontendPath+"/holiday-management.html")
 
 	// 健康检查
 	r.GET("/health", func(c *gin.Context) {
@@ -370,6 +372,7 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 		common.POST("/notifications/read-all", notifH.MarkAllRead)
 		common.POST("/notifications/delete-old-read", notifH.DeleteOldRead)
 		common.GET("/dashboard/developer", notifH.DeveloperDashboard)
+		common.GET("/dashboard/project-owner", notifH.ProjectOwnerDashboard)
 	}
 
 	// 管理员专属API
@@ -381,9 +384,20 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 
 		// 通知规则模板管理
 		adminOnly.GET("/notification-rules", notifH.ListRules)
+		adminOnly.GET("/notification-rules/:id", notifH.GetRule)
+		adminOnly.POST("/notification-rules/:id/test", notifH.TestRule)
 		adminOnly.POST("/notification-rules", notifH.CreateRule)
 		adminOnly.PUT("/notification-rules/:id", notifH.UpdateRule)
 		adminOnly.DELETE("/notification-rules/:id", notifH.DeleteRule)
+
+		// 节假日管理
+		adminOnly.GET("/holidays", notifH.ListHolidays)
+		adminOnly.POST("/holidays", notifH.CreateHoliday)
+		adminOnly.PUT("/holidays/:id", notifH.UpdateHoliday)
+		adminOnly.DELETE("/holidays/:id", notifH.DeleteHoliday)
+		adminOnly.POST("/holidays/batch-delete", notifH.BatchDeleteHolidays)
+		adminOnly.POST("/holidays/import", notifH.ImportHolidays)
+		adminOnly.POST("/holidays/sync-api", notifH.SyncHolidaysFromAPI)
 
 		// 任务管理 - 写操作（仅限管理员）
 		adminTask := adminOnly.Group("/tasks")
@@ -496,29 +510,31 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 			notifier.PUT("/:id/toggle", h.Toggle)
 		}
 
-		// 成员映射管理
-		memberMapping := adminOnly.Group("/member-mappings")
+		// 成员映射管理（即将废弃，保留兼容）
+		// memberMapping handler 已移除，请使用 /team-members API
+
+		// 项目负责人（即将废弃，保留兼容）
+		// steward handler 已移除，请使用 /team-members API
+
+		// 人员管理（融合成员映射 + 项目负责人）
+		teamMember := adminOnly.Group("/team-members")
 		{
-			h := handler.NewMemberMappingHandler()
-			memberMapping.GET("", h.List)
-			memberMapping.GET("/git-users", h.GitUsers)
-			memberMapping.GET("/:id", h.Get)
-			memberMapping.POST("", h.Create)
-			memberMapping.PUT("/:id", h.Update)
-			memberMapping.DELETE("/:id", h.Delete)
-			memberMapping.GET("/check", h.CheckMapping)
+			h := handler.NewTeamMemberHandler()
+			teamMember.GET("", h.List)
+			teamMember.GET("/git-users", h.GitUsers)
+			teamMember.GET("/:id", h.Get)
+			teamMember.POST("", h.Create)
+			teamMember.PUT("/:id", h.Update)
+			teamMember.DELETE("/:id", h.Delete)
+			// 职责管理
+			teamMember.GET("/:id/responsibilities", h.ListResponsibilitiesByMember)
+			teamMember.POST("/:id/responsibilities", h.AddResponsibility)
+			teamMember.PUT("/responsibilities/:rid", h.UpdateResponsibility)
+			teamMember.DELETE("/responsibilities/:rid", h.DeleteResponsibility)
 		}
 
-		// 项目环节负责人
-		steward := adminOnly.Group("/project-stewards")
-		{
-			h := handler.NewProjectStewardHandler()
-			steward.GET("", h.ListByProject)
-			steward.GET("/projects/:project_id", h.ListByProject)
-			steward.POST("", h.Create)
-			steward.PUT("/:id", h.Update)
-			steward.DELETE("/:id", h.Delete)
-		}
+		// 项目维度职责查询（公共查询，用于项目详情页）
+		api.GET("/projects/:id/responsibilities", handler.NewTeamMemberHandler().ListResponsibilitiesByProject)
 
 		// 用户管理（管理员）
 		users := adminOnly.Group("/users")

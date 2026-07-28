@@ -334,11 +334,22 @@
             const info = JSON.parse(localStorage.getItem(USER_KEY) || '{}');
             const el = document.getElementById('currentUser');
             if (el) el.textContent = info.display_name || info.username || '管理员';
+
+            // 角色与页面权限控制：admin 默认进入管理员控制台，user 不能访问管理员控制台
+            const path = window.location.pathname;
+            if (info.role === 'admin' && (path === '/developer-dashboard.html' || path === '/' || path === '/index.html')) {
+                window.location.href = '/admin-dashboard.html';
+                return;
+            }
+            if (info.role === 'user' && path === '/admin-dashboard.html') {
+                window.location.href = '/developer-dashboard.html';
+                return;
+            }
         } catch(e) {}
         createChangePasswordModal();
         // 若当前在通知管理子页面，自动展开通知管理菜单
         const path = window.location.pathname;
-        if (path === '/notifiers.html' || path === '/mail.html' || path === '/member-mappings.html' || path === '/report.html') {
+        if (path === '/notifiers.html' || path === '/mail.html' || path === '/staff-management.html' || path === '/report.html') {
             const menu = document.getElementById('notifyMenu');
             const icon = document.getElementById('notifyMenuIcon');
             if (menu) menu.classList.remove('hidden');
@@ -365,4 +376,19 @@ function toggleNotifyMenu() {
         menu.classList.add('hidden');
         if (icon) icon.style.transform = '';
     }
+}
+
+// ========== 全局工具函数 ==========
+/**
+ * 将文本转义为安全的 HTML，防止 XSS
+ */
+function escapeHtml(text) {
+    if (text == null) return '';
+    const str = String(text);
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }

@@ -1,4 +1,6 @@
 ai-optimizer
+ai-optimizer.log
+backend/ai-optimizer.log
 .git
 backend/main
-
+.vscode

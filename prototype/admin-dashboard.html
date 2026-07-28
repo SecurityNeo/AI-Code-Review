@@ -5,19 +5,12 @@
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>全局大盘 - CodeGuard</title>
-    <script src="js/auth.js?v=5"></script>
-    <script src="js/menu-config.js?v=2"></script>
-    <script src="js/sidebar.js?v=2"></script>
+    <title>管理员控制台 - CodeGuard</title>
+    <script src="js/auth.js?v=6"></script>
+    <script src="js/menu-config.js?v=6"></script>
+    <script src="js/sidebar.js?v=6"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
-    <style>
-        .sidebar-item:hover { background-color: rgba(255,255,255,0.1); }
-        .sidebar-item.active { background-color: rgba(255,255,255,0.15); border-left: 3px solid #3b82f6; }
-        .kpi-card { background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; }
-        .alert-badge { animation: pulse 2s infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
-    </style>
 </head>
 <body class="bg-gray-50 font-sans">
 
@@ -37,195 +30,208 @@
     <main class="flex-1 overflow-y-auto">
         <header class="bg-white border-b px-8 py-4 flex items-center justify-between sticky top-0 z-10">
             <div>
-                <h2 class="text-xl font-bold text-gray-800">🌐 全局大盘</h2>
-                <p class="text-sm text-gray-500 mt-1">Issue 治理与通知系统全局监控</p>
+                <h2 class="text-xl font-bold text-gray-800">🛡️ 管理员控制台</h2>
+                <p class="text-sm text-gray-500 mt-1">全局 Issue 治理与通知监控</p>
             </div>
-            <div class="flex items-center gap-3">
-                <button onclick="loadAdminDashboard(true)" class="text-sm text-blue-600 hover:text-blue-800 px-3 py-1.5 rounded hover:bg-blue-50">
-                    <i class="fas fa-sync-alt mr-1"></i>刷新
-                </button>
-            </div>
+            <button onclick="loadData(true)" class="text-sm text-blue-600 hover:text-blue-800 px-3 py-1.5 rounded hover:bg-blue-50">
+                <i class="fas fa-sync-alt mr-1"></i>刷新
+            </button>
         </header>
 
-        <div class="px-8 py-6 space-y-6" id="dashboardContent">
-            <!-- KPI 卡片 -->
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div class="kpi-card">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-sm text-gray-500">今日新增 Issue</p>
-                            <p class="text-3xl font-bold text-gray-800 mt-1" id="kpiTodayNew">-</p>
-                        </div>
-                        <div class="w-12 h-12 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center">
-                            <i class="fas fa-plus text-xl"></i>
-                        </div>
-                    </div>
+        <div class="px-8 py-6 space-y-6">
+            <!-- 核心指标卡片 -->
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                <div class="bg-white rounded-xl border p-4 text-center">
+                    <div class="text-2xl font-bold text-gray-800" id="kpiTodayNew">-</div>
+                    <div class="text-xs text-gray-500 mt-1">今日新增</div>
                 </div>
-                <div class="kpi-card">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-sm text-gray-500">当前待处理</p>
-                            <p class="text-3xl font-bold text-amber-600 mt-1" id="kpiTotalPending">-</p>
-                        </div>
-                        <div class="w-12 h-12 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center">
-                            <i class="fas fa-hourglass-half text-xl"></i>
-                        </div>
-                    </div>
+                <div class="bg-white rounded-xl border p-4 text-center">
+                    <div class="text-2xl font-bold text-gray-800" id="kpiTotalPending">-</div>
+                    <div class="text-xs text-gray-500 mt-1">总待处理</div>
                 </div>
-                <div class="kpi-card">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-sm text-gray-500">超期未处理</p>
-                            <p class="text-3xl font-bold text-red-600 mt-1" id="kpiOverdue">-</p>
-                        </div>
-                        <div class="w-12 h-12 rounded-lg bg-red-100 text-red-600 flex items-center justify-center">
-                            <i class="fas fa-exclamation-triangle text-xl"></i>
-                        </div>
-                    </div>
+                <div class="bg-white rounded-xl border p-4 text-center">
+                    <div class="text-2xl font-bold text-red-600" id="kpiOverdue">-</div>
+                    <div class="text-xs text-gray-500 mt-1">积压超期</div>
                 </div>
-                <div class="kpi-card cursor-pointer hover:shadow-md transition-shadow" onclick="window.location.href='notifiers.html'">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-sm text-gray-500">IM 推送失败</p>
-                            <p class="text-3xl font-bold text-purple-600 mt-1" id="kpiIMFailed">-</p>
-                        </div>
-                        <div class="w-12 h-12 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center">
-                            <i class="fas fa-paper-plane text-xl"></i>
-                        </div>
-                    </div>
-                    <p class="text-xs text-gray-400 mt-2">今日 · 点击查看详情</p>
+                <div class="bg-white rounded-xl border p-4 text-center">
+                    <div class="text-2xl font-bold text-orange-600" id="kpiImFailed">-</div>
+                    <div class="text-xs text-gray-500 mt-1">IM 投递失败</div>
                 </div>
-                <div class="kpi-card">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-sm text-gray-500">7 天闭环率</p>
-                            <p class="text-3xl font-bold text-teal-600 mt-1" id="kpiCloseRate">-</p>
-                        </div>
-                        <div class="w-12 h-12 rounded-lg bg-teal-100 text-teal-600 flex items-center justify-center">
-                            <i class="fas fa-check-double text-xl"></i>
-                        </div>
-                    </div>
+                <div class="bg-white rounded-xl border p-4 text-center">
+                    <div class="text-2xl font-bold text-blue-600" id="kpiCloseRate">-</div>
+                    <div class="text-xs text-gray-500 mt-1">7 天闭环率</div>
                 </div>
-                <div class="kpi-card">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-sm text-gray-500">闭环速度中位数</p>
-                            <p class="text-3xl font-bold text-indigo-600 mt-1" id="kpiMedianDays">-</p>
-                        </div>
-                        <div class="w-12 h-12 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center">
-                            <i class="fas fa-stopwatch text-xl"></i>
-                        </div>
-                    </div>
-                    <p class="text-xs text-gray-400 mt-2">天</p>
+                <div class="bg-white rounded-xl border p-4 text-center">
+                    <div class="text-2xl font-bold text-green-600" id="kpiMedianDays">-</div>
+                    <div class="text-xs text-gray-500 mt-1">中位闭环天数</div>
                 </div>
             </div>
 
-            <!-- 项目积压 TOP5 -->
-            <div class="bg-white rounded-xl border p-6">
-                <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2">
-                    <i class="fas fa-chart-bar text-blue-600"></i>项目积压排行 TOP5
-                </h3>
-                <div id="projectRanking" class="space-y-3">
-                    <!-- 动态填充 -->
+            <!-- 第二行：IM 投递成功率 + 积压项目告警 -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-white rounded-xl border p-6">
+                    <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <i class="fas fa-paper-plane text-blue-600"></i>IM 投递统计（今日）
+                    </h3>
+                    <div class="grid grid-cols-3 gap-4 text-center">
+                        <div>
+                            <div class="text-2xl font-bold text-gray-800" id="imTotal">-</div>
+                            <div class="text-xs text-gray-500 mt-1">总投递</div>
+                        </div>
+                        <div>
+                            <div class="text-2xl font-bold text-green-600" id="imSuccess">-</div>
+                            <div class="text-xs text-gray-500 mt-1">成功</div>
+                        </div>
+                        <div>
+                            <div class="text-2xl font-bold text-red-600" id="imFailedRate">-</div>
+                            <div class="text-xs text-gray-500 mt-1">失败率</div>
+                        </div>
+                    </div>
+                    <div class="mt-4 h-4 bg-gray-100 rounded-full overflow-hidden">
+                        <div id="imProgressBar" class="h-full bg-green-500 rounded-full" style="width:0%"></div>
+                    </div>
+                    <div class="mt-2 text-xs text-gray-500 text-right">成功率 <span id="imSuccessRate">-</span></div>
+                </div>
+
+                <div class="bg-white rounded-xl border p-6">
+                    <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <i class="fas fa-exclamation-triangle text-orange-500"></i>积压项目告警
+                    </h3>
+                    <div id="alertList" class="space-y-2 text-sm">
+                        <div class="text-gray-400 text-center py-4">加载中...</div>
+                    </div>
                 </div>
             </div>
 
-            <!-- 最新归档记录 -->
-            <div class="bg-white rounded-xl border p-6">
-                <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2">
-                    <i class="fas fa-archive text-gray-600"></i>最近自动归档
-                </h3>
-                <div id="archivedList" class="space-y-2">
-                    <!-- 动态填充 -->
+            <!-- Issue 状态分布 -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="lg:col-span-2 bg-white rounded-xl border p-6">
+                    <h3 class="font-bold text-gray-800 mb-4"><i class="fas fa-chart-pie text-blue-600 mr-2"></i>Issue 状态分布</h3>
+                    <div id="statusChart" style="height:260px"></div>
+                </div>
+                <div class="bg-white rounded-xl border p-6">
+                    <h3 class="font-bold text-gray-800 mb-4"><i class="fas fa-list-ol text-blue-600 mr-2"></i>待处理最多的项目</h3>
+                    <div id="topPendingProjects" class="space-y-2 text-sm"></div>
                 </div>
             </div>
         </div>
     </main>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 <script>
 const API_BASE = '/api/v1';
-async function loadAdminDashboard(force = false) {
+
+async function loadData(force = false) {
     try {
         const res = await apiFetch(API_BASE + '/dashboard/admin');
         const data = await res.json();
-        if (data.error) {
-            document.getElementById('dashboardContent').innerHTML = `<div class="text-center py-12 text-red-500">${data.error}</div>`;
-            return;
-        }
         const d = data.data || {};
-        document.getElementById('kpiTodayNew').textContent = d.today_new || 0;
-        document.getElementById('kpiTotalPending').textContent = d.total_pending || 0;
-        document.getElementById('kpiOverdue').textContent = d.overdue || 0;
-        document.getElementById('kpiIMFailed').textContent = d.im_failed || 0;
-        document.getElementById('kpiCloseRate').textContent = d.week_close_rate || '-';
-        document.getElementById('kpiMedianDays').textContent = d.median_resolve_days || '-';
 
-        // 加载项目积压排行
-        loadProjectRanking();
-        // 加载最新归档
-        loadArchivedIssues();
+        document.getElementById('kpiTodayNew').textContent = d.today_new ?? '-';
+        document.getElementById('kpiTotalPending').textContent = d.total_pending ?? '-';
+        document.getElementById('kpiOverdue').textContent = d.overdue ?? '-';
+        document.getElementById('kpiImFailed').textContent = d.im_failed ?? '-';
+        document.getElementById('kpiCloseRate').textContent = d.week_close_rate ?? '-';
+        document.getElementById('kpiMedianDays').textContent = d.median_resolve_days ?? '-';
+
+        // IM 统计
+        const imTotal = d.im_total || 0;
+        const imSuccess = d.im_success || 0;
+        const imFailed = d.im_failed || 0;
+        document.getElementById('imTotal').textContent = imTotal;
+        document.getElementById('imSuccess').textContent = imSuccess;
+        const failRate = imTotal > 0 ? ((imFailed / imTotal) * 100).toFixed(1) + '%' : '-';
+        const successRate = imTotal > 0 ? ((imSuccess / imTotal) * 100).toFixed(1) + '%' : '-';
+        document.getElementById('imFailedRate').textContent = failRate;
+        document.getElementById('imSuccessRate').textContent = successRate;
+        document.getElementById('imProgressBar').style.width = successRate;
+
+        // 积压告警
+        renderAlerts(d.alerts || []);
+
+        // 图表
+        renderStatusChart(d.status_distribution || {});
+
+        // 待处理最多项目
+        renderTopProjects(d.top_pending_projects || []);
     } catch (err) {
-        document.getElementById('dashboardContent').innerHTML = `<div class="text-center py-12 text-red-500">加载失败: ${err.message}</div>`;
+        console.error('load admin dashboard failed', err);
     }
 }
 
-async function loadProjectRanking() {
-    try {
-        // 使用 rule-stats/overview 的已有接口聚合，或模拟
-        const res = await apiFetch(API_BASE + '/rule-stats/overview?days=7');
-        const data = await res.json();
-        const projects = (data.data?.project_distribution || []).slice(0, 5);
-        const container = document.getElementById('projectRanking');
-        if (projects.length === 0) {
-            container.innerHTML = '<div class="text-gray-400 text-sm">暂无数据</div>';
-            return;
-        }
-        const maxCount = Math.max(...projects.map(p => p.count || 0), 1);
-        container.innerHTML = projects.map((p, idx) => {
-            const pct = Math.round((p.count / maxCount) * 100);
-            return `
-                <div class="flex items-center gap-3">
-                    <span class="text-sm font-bold text-gray-500 w-6">${idx + 1}</span>
-                    <div class="flex-1">
-                        <div class="flex items-center justify-between mb-1">
-                            <span class="text-sm text-gray-800 font-medium">${escapeHtml(p.project_name || '未知项目')}</span>
-                            <span class="text-sm font-bold text-gray-700">${p.count || 0} 条</span>
-                        </div>
-                        <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
-                            <div class="h-full bg-gradient-to-r from-blue-500 to-blue-400 rounded-full" style="width:${pct}%"></div>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }).join('');
-    } catch (err) {
-        document.getElementById('projectRanking').innerHTML = '<div class="text-gray-400 text-sm">加载失败</div>';
+function renderAlerts(alerts) {
+    const container = document.getElementById('alertList');
+    if (alerts.length === 0) {
+        container.innerHTML = '<div class="text-gray-400 text-center py-4">🎉 当前无积压告警</div>';
+        return;
     }
-}
-
-async function loadArchivedIssues() {
-    try {
-        // 查询最近 10 条 auto_archived 的 Issue（需要后端支持，这里模拟）
-        const container = document.getElementById('archivedList');
-        container.innerHTML = '<div class="text-gray-400 text-sm">加载中...</div>';
-        // 暂时展示静态提示，待后端 API 完善
-        container.innerHTML = `
-            <div class="text-sm text-gray-500 bg-gray-50 rounded-lg p-3">
-                <i class="fas fa-info-circle mr-1 text-gray-400"></i>
-                自动归档记录需通过后端 "rule-stats/recent-issues?status=auto_archived" 查询，当前展示占位。
+    container.innerHTML = alerts.map(a => `
+        <div class="flex items-center justify-between p-2 bg-red-50 rounded border border-red-100">
+            <div class="flex items-center gap-2">
+                <i class="fas fa-exclamation-circle text-red-500"></i>
+                <span class="font-medium text-gray-800">${escapeHtml(a.project_name)}</span>
+                <span class="text-xs text-gray-500">待处理 ${a.pending_count} / 超期 ${a.overdue_count}</span>
             </div>
-        `;
-    } catch (err) {
-        document.getElementById('archivedList').innerHTML = '<div class="text-gray-400 text-sm">加载失败</div>';
+            <a href="project-dashboard.html?project_id=${a.project_id}" class="text-xs text-blue-600 hover:underline">查看</a>
+        </div>
+    `).join('');
+}
+
+function renderStatusChart(dist) {
+    const dom = document.getElementById('statusChart');
+    if (!dom) return;
+    const chart = echarts.init(dom);
+    const option = {
+        tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+        legend: { orient: 'vertical', left: 'left', textStyle: { fontSize: 11 } },
+        series: [{
+            type: 'pie',
+            radius: ['40%', '70%'],
+            avoidLabelOverlap: false,
+            itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+            label: { show: false },
+            emphasis: { label: { show: true, fontSize: 14, fontWeight: 'bold' } },
+            data: [
+                { value: dist.pending || 0, name: '待处理', itemStyle: { color: '#f59e0b' } },
+                { value: dist.pending_inherited || 0, name: '待处理(复现)', itemStyle: { color: '#f97316' } },
+                { value: dist.resolved || 0, name: '已处理', itemStyle: { color: '#22c55e' } },
+                { value: dist.false_positive || 0, name: '误报', itemStyle: { color: '#ef4444' } },
+                { value: dist.ignored || 0, name: '已忽略', itemStyle: { color: '#94a3b8' } },
+                { value: dist.auto_filtered || 0, name: '自动过滤', itemStyle: { color: '#e2e8f0' } },
+            ]
+        }]
+    };
+    chart.setOption(option);
+    window.addEventListener('resize', () => chart.resize());
+}
+
+function renderTopProjects(list) {
+    const container = document.getElementById('topPendingProjects');
+    if (list.length === 0) {
+        container.innerHTML = '<div class="text-gray-400 text-center py-4">暂无数据</div>';
+        return;
     }
+    container.innerHTML = list.map((p, i) => `
+        <div class="flex items-center justify-between py-2 border-b last:border-0">
+            <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-gray-400 w-4">${i + 1}</span>
+                <span class="text-sm text-gray-800">${escapeHtml(p.name)}</span>
+            </div>
+            <span class="text-sm font-bold text-orange-600">${p.pending_count}</span>
+        </div>
+    `).join('');
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    loadAdminDashboard();
+    loadData();
 });
 </script>
 <script defer src="/static/js/tailwindcss.min.js"></script>
-
 </body>
 </html>

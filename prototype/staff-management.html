@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script src="js/theme.js?v=1"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>人员管理 - CodeGuard</title>
+    <script src="js/auth.js?v=6"></script>
+    <script src="js/menu-config.js?v=6"></script>
+    <script src="js/sidebar.js?v=6"></script>
+    <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="css/theme.css?v=1">
+    <style>
+        :root {
+            --bg-page: #f8fafc; --card-bg: #fff; --text-primary: #1e293b; --text-secondary: #475569;
+            --text-tertiary: #94a3b8; --border-color: #e2e8f0; --accent: #3b82f6; --accent-hover: #2563eb;
+            --success: #10b981; --danger: #ef4444; --warning: #f59e0b;
+        }
+        html { background-color: var(--bg-page); font-size: 16px; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; color: var(--text-primary); background: var(--bg-page); }
+
+        .page-container { padding: 1.25rem 1.75rem; }
+        .page-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.25rem; }
+        .page-title { font-size:1.1rem; font-weight:700; color: var(--text-primary); letter-spacing:-0.01em; }
+        .page-subtitle { font-size:0.8125rem; color: var(--text-secondary); margin-top:0.15rem; }
+
+        /* Toolbar */
+        .toolbar { display:flex; align-items:center; gap:0.625rem; margin-bottom:1rem; background:var(--card-bg); padding:0.5rem 0.75rem; border-radius:0.625rem; border:1px solid var(--border-color); box-shadow:0 1px 2px rgba(0,0,0,0.03); }
+        .search-box { position:relative; flex:1; max-width:360px; }
+        .search-box input { width:100%; padding:0.45rem 2.5rem; border:1px solid var(--border-color); border-radius:0.5rem; font-size:0.875rem; background:#f8fafc; outline:none; color:var(--text-primary); transition:all .15s; }
+        .search-box input:focus { background:#fff; border-color:var(--accent); box-shadow:0 0 0 3px rgba(59,130,246,0.1); }
+        .search-box i { position:absolute; left:0.75rem; top:50%; transform:translateY(-50%); color:var(--text-tertiary); font-size:0.8rem; pointer-events:none; }
+        .search-box button { position:absolute; right:0.25rem; top:50%; transform:translateY(-50%); background:var(--accent); color:#fff; border:none; border-radius:0.375rem; padding:0.25rem 0.625rem; font-size:0.8125rem; cursor:pointer; }
+        .search-box button:hover { background:var(--accent-hover); }
+
+        .view-switcher { display:flex; background:#f1f5f9; border-radius:0.5rem; padding:0.2rem; }
+        .view-switcher button { padding:0.4rem 0.875rem; border:none; border-radius:0.375rem; font-size:0.8125rem; font-weight:500; color:var(--text-secondary); background:transparent; cursor:pointer; transition:all .15s; }
+        .view-switcher button.active { background:#fff; color:var(--text-primary); box-shadow:0 1px 2px rgba(0,0,0,0.06); font-weight:600; }
+        .view-switcher button:hover:not(.active) { color:var(--text-primary); }
+
+        .btn-primary { display:inline-flex; align-items:center; gap:0.4rem; background:var(--accent); color:#fff; padding:0.45rem 0.875rem; border-radius:0.5rem; font-size:0.8125rem; font-weight:500; border:none; cursor:pointer; transition:all .15s; }
+        .btn-primary:hover { background:var(--accent-hover); }
+
+        /* ==================== 人员视图 - 紧凑型表格 ==================== */
+        .data-table { width:100%; border-collapse:separate; border-spacing:0; background:var(--card-bg); border-radius:0.625rem; border:1px solid var(--border-color); overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,0.03); }
+        .data-table thead tr { background:#f8fafc; }
+        .data-table th { padding:0.55rem 0.875rem; font-size:0.75rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:#64748b; text-align:left; border-bottom:1px solid var(--border-color); white-space:nowrap; }
+        .data-table td { padding:0.65rem 0.875rem; font-size:0.875rem; color:var(--text-secondary); border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+        .data-table tbody tr { transition:background .1s; cursor:pointer; }
+        .data-table tbody tr:hover { background:#f8fafc; }
+        .data-table tbody tr:last-child td { border-bottom:none; }
+
+        .name-cell { display:flex; align-items:center; gap:0.625rem; }
+        .name-initial { width:1.75rem; height:1.75rem; border-radius:0.375rem; display:flex; align-items:center; justify-content:center; font-size:0.7rem; font-weight:700; color:#fff; background:linear-gradient(135deg,#94a3b8,#64748b); flex-shrink:0; }
+        .name-main { font-weight:600; color:var(--text-primary); font-size:0.875rem; }
+        .name-sub { font-size:0.75rem; color:var(--text-tertiary); font-family:monospace; }
+
+        .git-label { font-size:0.8125rem; color:var(--text-secondary); }
+        .git-label i { color:var(--text-tertiary); font-size:0.7rem; margin-right:0.25rem; }
+
+        .im-info { display:flex; align-items:center; gap:0.25rem; font-size:0.8125rem; }
+        .im-info i { font-size:0.65rem; color:#10b981; }
+        .im-info .id { font-family:monospace; font-size:0.75rem; color:var(--text-tertiary); }
+
+        .status-pill {
+            display:inline-flex; align-items:center; gap:0.3rem; padding:0.15rem 0.5rem; border-radius:9999px;
+            font-size:0.75rem; font-weight:500;
+        }
+        .status-pill.on { background:#d1fae5; color:#047857; }
+        .status-pill.off { background:#f1f5f9; color:#94a3b8; }
+        .status-dot-sm { width:5px; height:5px; border-radius:50%; }
+        .status-dot-sm.on { background:#10b981; }
+        .status-dot-sm.off { background:#cbd5e1; }
+
+        .count-badge { background:#eff6ff; color:#2563eb; padding:0.15rem 0.5rem; border-radius:0.375rem; font-size:0.75rem; font-weight:600; font-family:monospace; }
+        .count-badge.empty { background:#f1f5f9; color:#94a3b8; }
+
+        .row-actions { display:flex; align-items:center; gap:0.25rem; opacity:0; transition:opacity .15s; }
+        .data-table tbody tr:hover .row-actions { opacity:1; }
+        .btn-icon-sm { width:1.5rem; height:1.5rem; border-radius:0.375rem; display:flex; align-items:center; justify-content:center; border:none; background:transparent; cursor:pointer; color:var(--text-tertiary); font-size:0.75rem; }
+        .btn-icon-sm:hover { background:#f1f5f9; color:var(--accent); }
+        .btn-icon-sm.danger:hover { background:#fef2f2; color:var(--danger); }
+
+        .expand-arrow { color:var(--text-tertiary); transition:transform .2s; font-size:0.75rem; }
+        .expanded .expand-arrow { transform:rotate(180deg); }
+
+        /* 展开详情行 */
+        .detail-row td { padding:0; border-bottom:1px solid var(--border-color); background:linear-gradient(180deg,#f8fafc 0%,#fff 100%); }
+        .detail-inner { padding:0.75rem 1.25rem; animation:slideDown .2s ease-out; }
+        @keyframes slideDown { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
+        .detail-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:0.5rem; }
+
+        .scope-chip {
+            display:inline-flex; align-items:center; gap:0.35rem;
+            padding:0.35rem 0.625rem; border-radius:0.375rem; font-size:0.8125rem;
+            background:#fff; border:1px solid #e2e8f0; color:#334155;
+        }
+        .scope-chip .pname { font-weight:600; color:#1e293b; }
+        .scope-chip .tag { font-size:0.65rem; padding:0.1rem 0.3rem; border-radius:0.25rem; font-weight:600; }
+        .scope-chip .tag.def { background:#ecfdf5; color:#047857; }
+        .scope-chip .tag.lang { background:#dbeafe; color:#1d4ed8; }
+        .scope-chip .tag.cat { background:#fef3c7; color:#b45309; }
+        .scope-chip .del { width:1.1rem; height:1.1rem; border-radius:0.25rem; display:none; align-items:center; justify-content:center; border:none; background:transparent; color:#94a3b8; cursor:pointer; font-size:0.6rem; margin-left:0.15rem; }
+        .scope-chip:hover .del { display:flex; }
+        .scope-chip .del:hover { background:#fef2f2; color:#ef4444; }
+
+        .detail-empty { font-size:0.875rem; color:var(--text-tertiary); display:flex; align-items:center; gap:0.4rem; }
+        .detail-empty i { font-size:0.8rem; opacity:0.5; }
+
+        /* ==================== 项目视图 - 紧凑分组卡片 ==================== */
+        .project-group { background:var(--card-bg); border-radius:0.625rem; border:1px solid var(--border-color); overflow:hidden; margin-bottom:0.5rem; box-shadow:0 1px 2px rgba(0,0,0,0.03); }
+        .project-group-header { display:flex; align-items:center; gap:0.625rem; padding:0.55rem 0.875rem; background:#f8fafc; border-bottom:1px solid #f1f5f9; }
+        .project-group-header i { color:#3b82f6; font-size:0.75rem; width:1.25rem; height:1.25rem; display:flex; align-items:center; justify-content:center; background:#eff6ff; border-radius:0.3rem; }
+        .project-group-header .pname { font-weight:600; font-size:0.875rem; color:var(--text-primary); }
+        .project-group-header .pid { font-size:0.75rem; color:var(--text-tertiary); font-family:monospace; }
+        .project-group-body { padding:0.5rem 0.875rem; display:flex; flex-wrap:wrap; gap:0.4rem; align-items:center; }
+
+        .steward-chip {
+            display:inline-flex; align-items:center; gap:0.35rem;
+            padding:0.3rem 0.55rem; border-radius:0.375rem; font-size:0.8125rem;
+            background:#fff; border:1px solid #e2e8f0; color:#334155;
+        }
+        .steward-chip:hover { border-color:#cbd5e1; background:#f8fafc; }
+        .steward-chip .name { font-weight:500; }
+        .steward-chip .tag { font-size:0.65rem; padding:0.08rem 0.3rem; border-radius:0.25rem; font-weight:600; }
+        .steward-chip .tag.def { background:#ecfdf5; color:#047857; }
+        .steward-chip .tag.lang { background:#dbeafe; color:#1d4ed8; }
+        .steward-chip .tag.cat { background:#fef3c7; color:#b45309; }
+        .steward-chip .del { width:1rem; height:1rem; border-radius:0.2rem; display:none; align-items:center; justify-content:center; border:none; background:transparent; color:#94a3b8; cursor:pointer; font-size:0.55rem; margin-left:0.1rem; }
+        .steward-chip:hover .del { display:flex; }
+        .steward-chip .del:hover { background:#fef2f2; color:#ef4444; }
+
+        /* ==================== Modal ==================== */
+        .modal-overlay { display:none; position:fixed; inset:0; background:rgba(15,23,42,0.5); backdrop-filter:blur(4px); z-index:50; align-items:center; justify-content:center; }
+        .modal-overlay.active { display:flex; animation:fadeIn .15s; }
+        @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+        .modal-box { background:#fff; border-radius:0.875rem; box-shadow:0 20px 50px rgba(0,0,0,0.12); width:520px; max-width:92vw; max-height:88vh; display:flex; flex-direction:column; overflow:hidden; animation:modalUp .2s cubic-bezier(.16,1,.3,1); }
+        @keyframes modalUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+        .modal-header { padding:1rem 1.25rem; border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; }
+        .modal-header h3 { font-size:1rem; font-weight:700; }
+        .modal-close { width:1.75rem; height:1.75rem; border-radius:0.375rem; display:flex; align-items:center; justify-content:center; border:none; background:transparent; color:var(--text-tertiary); cursor:pointer; }
+        .modal-close:hover { background:#f1f5f9; color:var(--text-primary); }
+        .modal-body { padding:1rem 1.25rem; overflow-y:auto; }
+        .modal-footer { padding:0.875rem 1.25rem; border-top:1px solid var(--border-color); display:flex; justify-content:flex-end; gap:0.5rem; }
+
+        .form-label { display:block; font-size:0.8125rem; font-weight:500; color:var(--text-secondary); margin-bottom:0.3rem; }
+        .form-label .req { color:var(--danger); margin-left:0.1rem; }
+        .form-input, .form-select { width:100%; padding:0.45rem 0.75rem; border:1px solid var(--border-color); border-radius:0.5rem; font-size:0.8125rem; background:#f8fafc; color:var(--text-primary); outline:none; box-sizing:border-box; transition:all .15s; }
+        .form-input:focus, .form-select:focus { border-color:var(--accent); background:#fff; box-shadow:0 0 0 3px rgba(59,130,246,0.1); }
+        .form-group { margin-bottom:0.875rem; }
+
+        .form-section-title { font-size:0.75rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-tertiary); margin:1rem 0 0.625rem; display:flex; align-items:center; gap:0.4rem; }
+        .form-section-title::before { content:''; width:3px; height:12px; background:var(--accent); border-radius:2px; }
+
+        .duty-row-input { display:flex; align-items:center; gap:0.4rem; margin-bottom:0.4rem; background:#f8fafc; padding:0.4rem; border-radius:0.4rem; border:1px dashed #cbd5e1; }
+        .duty-row-input select, .duty-row-input input { flex:1; }
+        .duty-row-input .btn-remove { width:1.5rem; height:1.5rem; border-radius:0.375rem; display:flex; align-items:center; justify-content:center; border:none; background:transparent; color:var(--text-tertiary); cursor:pointer; }
+        .duty-row-input .btn-remove:hover { background:#fef2f2; color:var(--danger); }
+
+        .modal-confirm { width:360px; max-width:92vw; text-align:center; padding:1.5rem 1.25rem; }
+        .modal-confirm .icon { width:3rem; height:3rem; border-radius:50%; background:#fef2f2; color:var(--danger); display:flex; align-items:center; justify-content:center; margin:0 auto 0.75rem; font-size:1rem; }
+        .modal-confirm h4 { font-size:1rem; font-weight:700; }
+        .modal-confirm p { font-size:0.8125rem; color:var(--text-secondary); margin-top:0.4rem; }
+        .modal-confirm .actions { display:flex; justify-content:center; gap:0.625rem; margin-top:1.25rem; }
+
+        /* ==================== Pagination ==================== */
+        .pagination-bar { display:flex; justify-content:space-between; align-items:center; padding:0.625rem 0.875rem; background:var(--card-bg); border-radius:0.625rem; border:1px solid var(--border-color); margin-top:0.75rem; box-shadow:0 1px 2px rgba(0,0,0,0.03); }
+        .pg-info { font-size:0.8125rem; color:var(--text-secondary); }
+        .pg-ctrl { display:flex; align-items:center; gap:0.15rem; }
+        .pg-ctrl button { min-width:1.75rem; height:1.75rem; display:flex; align-items:center; justify-content:center; border-radius:0.375rem; border:1px solid transparent; background:transparent; color:var(--text-secondary); font-size:0.8125rem; cursor:pointer; transition:all .1s; font-weight:500; }
+        .pg-ctrl button:hover:not(:disabled) { background:#f1f5f9; color:var(--text-primary); }
+        .pg-ctrl button:disabled { color:var(--text-tertiary); cursor:default; }
+        .pg-ctrl button.active { background:var(--accent); color:#fff; box-shadow:0 1px 3px rgba(59,130,246,0.2); }
+
+        /* Empty */
+        .empty-box { text-align:center; padding:2.5rem 1rem; }
+        .empty-box .icon { width:3.5rem; height:3.5rem; background:#f1f5f9; border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 0.75rem; font-size:1.25rem; color:#cbd5e1; }
+        .empty-box p { font-size:0.8125rem; color:var(--text-secondary); }
+
+        .sidebar-item:hover { background-color: rgba(255,255,255,0.1); }
+        .sidebar-item.active { background-color: rgba(255,255,255,0.15); border-left: 3px solid #3b82f6; }
+    </style>
+</head>
+<body>
+
+<div id="page-transition" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#1e293b;z-index:99999;transition:opacity .25s ease;"></div>
+<script>
+(function(){ function hide(){var el=document.getElementById('page-transition');if(el){el.style.opacity='0';setTimeout(function(){el.remove();},250);}} if(document.readyState==='complete')hide();else window.addEventListener('load',hide); })();
+</script>
+
+<div class="flex h-screen">
+    <aside id="sidebar" class="w-64 bg-slate-900 text-white flex-shrink-0 flex flex-col">
+        <nav style="padding: 20px; text-align: center; color: #94a3b8; font-size: 13px;">加载中...</nav>
+    </aside>
+
+    <main class="flex-1 overflow-y-auto bg-slate-50">
+        <div class="page-container">
+            <div class="page-header">
+                <div>
+                    <h2 class="page-title"><i class="fas fa-users text-blue-600 mr-2"></i>人员管理</h2>
+                    <p class="page-subtitle">团队成员与项目职责配置</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <div class="view-switcher">
+                        <button id="viewMembers" onclick="switchView('members')" class="active"><i class="fas fa-user mr-1"></i>人员视图</button>
+                        <button id="viewProjects" onclick="switchView('projects')"><i class="fas fa-building mr-1"></i>项目视图</button>
+                    </div>
+                    <button data-admin-only onclick="openMemberModal()" class="btn-primary"><i class="fas fa-plus"></i>添加人员</button>
+                </div>
+            </div>
+
+            <div class="toolbar">
+                <div class="search-box">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="searchInput" placeholder="搜索 Git 用户名、姓名或 IM ID..." onkeypress="if(event.key==='Enter')loadData()">
+                    <button onclick="loadData()">搜索</button>
+                </div>
+                <select id="projectFilter" onchange="onProjectFilterChange()" class="form-select" style="width:180px; display:none;">
+                    <option value="">所有项目</option>
+                </select>
+                <div style="flex:1;"></div>
+                <span id="summaryCount" class="text-xs text-slate-500 font-medium"></span>
+            </div>
+
+            <!-- 人员视图 -->
+            <div id="membersView">
+                <div id="membersBody"></div>
+                <div id="paginationBar"></div>
+            </div>
+
+            <!-- 项目视图 -->
+            <div id="projectsView" class="hidden">
+                <div id="projectsBody"></div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- 添加/编辑人员弹框 -->
+<div id="memberModal" class="modal-overlay">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3 id="memberModalTitle">添加人员</h3>
+            <button onclick="closeModal('memberModal')" class="modal-close"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+            <div class="form-section-title">基本信息</div>
+            <div class="form-group">
+                <label class="form-label">GitLab 用户名<span class="req">*</span></label>
+                <input type="text" id="mGitlabUsername" list="gitlabUserList" placeholder="输入或选择 GitLab 用户名" class="form-input">
+                <datalist id="gitlabUserList"></datalist>
+            </div>
+            <div class="form-group">
+                <label class="form-label">展示名</label>
+                <input type="text" id="mDisplayName" placeholder="例如：张三" class="form-input">
+            </div>
+            <div class="form-group">
+                <label class="form-label">系统用户名<span class="req">*</span></label>
+                <input type="text" id="mUsername" placeholder="系统用户名" class="form-input">
+            </div>
+
+            <div class="form-section-title">联系方式</div>
+            <div class="grid grid-cols-2 gap-3">
+                <div class="form-group">
+                    <label class="form-label">IM 平台</label>
+                    <select id="mIMPlatform" class="form-select"><option value="wecom" selected>企业微信</option></select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">IM 用户 ID<span class="req">*</span></label>
+                    <input type="text" id="mIMUserID" placeholder="例如：ZhangSan" class="form-input">
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">邮箱</label>
+                <input type="text" id="mEmail" placeholder="例如：zhangsan@company.com" class="form-input">
+            </div>
+
+            <div class="form-section-title">项目职责（可选）</div>
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-xs text-slate-400">创建时可快速添加 1~3 项职责</span>
+                <button onclick="addDutyRow()" class="btn-primary" style="padding:0.3rem 0.625rem; font-size:0.75rem;"><i class="fas fa-plus mr-1"></i>添加一条</button>
+            </div>
+            <div id="dutyList" class="space-y-2"></div>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeModal('memberModal')" class="px-3 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition">取消</button>
+            <button onclick="saveMember()" class="btn-primary"><i class="fas fa-check mr-1"></i>保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- 删除确认 -->
+<div id="deleteModal" class="modal-overlay">
+    <div class="modal-box modal-confirm">
+        <div class="icon"><i class="fas fa-exclamation-triangle"></i></div>
+        <h4>确认删除</h4>
+        <p>删除人员将同时移除其所有项目职责，不可撤销。</p>
+        <div class="actions">
+            <button onclick="closeModal('deleteModal')" class="px-3 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition">取消</button>
+            <button onclick="confirmDeleteMember()" class="px-4 py-2 rounded-lg text-sm text-white font-medium" style="background:var(--danger);">确认删除</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const API_BASE = '/api/v1';
+let currentView = 'members';
+let currentPage = 1;
+let pageSize = 10;
+let allProjects = [];
+let allMembers = [];
+let editingMemberId = null;
+let deleteMemberId = null;
+let expandedMemberId = null;
+
+function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+function showModal(id) { document.getElementById(id).classList.add('active'); }
+
+function switchView(view) {
+    currentView = view;
+    expandedMemberId = null;
+    document.getElementById('membersView').classList.toggle('hidden', view !== 'members');
+    document.getElementById('projectsView').classList.toggle('hidden', view !== 'projects');
+    document.getElementById('viewMembers').classList.toggle('active', view === 'members');
+    document.getElementById('viewProjects').classList.toggle('active', view === 'projects');
+    document.querySelector('.search-box').style.display = view === 'members' ? '' : 'none';
+    document.getElementById('projectFilter').style.display = view === 'projects' ? '' : 'none';
+    loadData();
+}
+
+async function loadProjects() {
+    try {
+        const res = await apiFetch(`${API_BASE}/projects?page=1&page_size=1000`);
+        const json = await res.json();
+        allProjects = json.data || [];
+        document.getElementById('projectFilter').innerHTML = '<option value="">所有项目</option>' + allProjects.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+    } catch (e) { console.error(e); }
+}
+
+async function loadGitUsers() {
+    try {
+        const res = await apiFetch(`${API_BASE}/team-members/git-users`);
+        const data = await res.json();
+        document.getElementById('gitlabUserList').innerHTML = (data.data || []).map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
+    } catch (e) { console.error(e); }
+}
+
+async function loadData() {
+    if (currentView === 'members') await loadMembersView();
+    else await loadProjectsView();
+}
+
+async function loadMembersView() {
+    try {
+        const search = document.getElementById('searchInput').value;
+        const params = new URLSearchParams({ page: currentPage, page_size: pageSize });
+        if (search) params.append('search', search);
+        const res = await apiFetch(`${API_BASE}/team-members?${params}`);
+        const json = await res.json();
+        allMembers = json.data || [];
+        renderMembersTable(allMembers);
+        renderPagination(json.total || 0);
+        document.getElementById('summaryCount').textContent = `共 ${json.total || 0} 人`;
+    } catch (e) {
+        console.error(e);
+        document.getElementById('membersBody').innerHTML = `<div class="empty-box"><div class="icon"><i class="fas fa-exclamation-circle"></i></div><p>加载失败，请刷新重试</p></div>`;
+    }
+}
+
+function renderMembersTable(members) {
+    const container = document.getElementById('membersBody');
+    if (members.length === 0) {
+        container.innerHTML = `<div class="empty-box"><div class="icon"><i class="fas fa-users-slash"></i></div><p>暂无人员数据，点击右上角「添加人员」开始配置</p></div>`;
+        return;
+    }
+    let html = `<table class="data-table"><thead><tr>
+        <th style="width:28%;">姓名 / 信息</th>
+        <th style="width:18%;">GitLab</th>
+        <th style="width:22%;">IM</th>
+        <th style="width:10%;">职责数</th>
+        <th style="width:12%;">状态</th>
+        <th style="width:10%; text-align:right;">操作</th>
+    </tr></thead><tbody>`;
+
+    members.forEach(m => {
+        const respCount = (m.responsibilities || []).length;
+        const displayName = m.display_name || m.username;
+        const disabled = !m.enabled;
+        const initial = (displayName || '?').charAt(0).toUpperCase();
+        const isExpanded = expandedMemberId === m.id;
+        const imIcon = { wecom: 'fa-building', dingtalk: 'fa-bell', email: 'fa-envelope', feishu: 'fa-paper-plane' }[m.im_platform] || 'fa-comment-dots';
+        const imName = { wecom: '企业微信', dingtalk: '钉钉', email: '邮件', feishu: '飞书' }[m.im_platform] || m.im_platform;
+
+        html += `<tr class="${isExpanded ? 'expanded' : ''}" onclick="toggleExpand(${m.id})">
+            <td>
+                <div class="name-cell">
+                    <div class="name-initial">${initial}</div>
+                    <div>
+                        <div class="name-main">${escapeHtml(displayName || m.username)}</div>
+                        <div class="name-sub">${escapeHtml(m.username)}</div>
+                    </div>
+                </div>
+            </td>
+            <td><span class="git-label"><i class="fab fa-gitlab"></i>${escapeHtml(m.gitlab_username || '—')}</span></td>
+            <td>
+                ${m.im_platform ? `<div class="im-info"><i class="fas ${imIcon}"></i><span>${imName}</span><span class="dot" style="width:3px;height:3px;border-radius:50%;background:#cbd5e1;"></span><span class="id">${escapeHtml(m.im_user_id)}</span></div>` : '<span style="color:#94a3b8;font-size:0.8125rem;">—</span>'}
+            </td>
+            <td><span class="count-badge ${respCount ? '' : 'empty'}">${respCount}</span></td>
+            <td><span class="status-pill ${disabled ? 'off' : 'on'}"><span class="status-dot-sm ${disabled ? 'off' : 'on'}"></span>${disabled ? '已停用' : '已启用'}</span></td>
+            <td style="text-align:right;">
+                <div class="row-actions">
+                    <button class="btn-icon-sm" title="编辑" onclick="event.stopPropagation();openEditMember(${m.id})"><i class="fas fa-pen"></i></button>
+                    <button class="btn-icon-sm danger" title="删除" onclick="event.stopPropagation();openDeleteMember(${m.id})"><i class="fas fa-trash-alt"></i></button>
+                    <i class="fas fa-chevron-down expand-arrow" style="margin-left:0.25rem;"></i>
+                </div>
+            </td>
+        </tr>`;
+
+        if (isExpanded) {
+            html += `<tr class="detail-row"><td colspan="6">${renderMemberDetail(m)}</td></tr>`;
+        }
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+}
+
+function renderMemberDetail(m) {
+    const resp = m.responsibilities || [];
+    if (resp.length === 0) {
+        return `<div class="detail-inner"><div class="detail-empty"><i class="fas fa-clipboard-list"></i>暂未分配项目职责</div></div>`;
+    }
+    return `<div class="detail-inner">
+        <div style="font-size:0.75rem; font-weight:700; color:#94a3b8; margin-bottom:0.5rem; text-transform:uppercase; letter-spacing:0.03em;">负责的 ${resp.length} 个项目</div>
+        <div class="detail-grid">
+            ${resp.map(r => {
+                const project = allProjects.find(p => p.id == r.project_id);
+                const pName = escapeHtml(project?.name || '项目#' + r.project_id);
+                let scopeCls = 'def', scopeLabel = '默认';
+                if (r.scope_type === 'language') { scopeCls = 'lang'; scopeLabel = '语言'; }
+                else if (r.scope_type === 'rule_category') { scopeCls = 'cat'; scopeLabel = '规则'; }
+                const scopeVal = r.scope_value ? ` / ${escapeHtml(r.scope_value)}` : '';
+                return `<div class="scope-chip">
+                    <i class="fas fa-folder-open text-slate-300 text-[0.6rem]"></i>
+                    <span class="pname">${pName}</span>
+                    <span class="tag ${scopeCls}">${scopeLabel}${scopeVal}</span>
+                    <button class="del" onclick="event.stopPropagation();deleteResponsibility(${r.id})" title="移除"><i class="fas fa-times"></i></button>
+                </div>`;
+            }).join('')}
+        </div>
+    </div>`;
+}
+
+async function toggleExpand(memberId) {
+    if (expandedMemberId === memberId) {
+        expandedMemberId = null;
+        renderMembersTable(allMembers);
+        return;
+    }
+    try {
+        const res = await apiFetch(`${API_BASE}/team-members/${memberId}`);
+        const json = await res.json();
+        const member = json.data;
+        const idx = allMembers.findIndex(m => m.id === memberId);
+        if (idx >= 0) allMembers[idx] = member;
+        expandedMemberId = memberId;
+        renderMembersTable(allMembers);
+    } catch (e) { console.error(e); }
+}
+
+async function loadProjectsView() {
+    try {
+        const projectId = document.getElementById('projectFilter').value;
+        let url;
+        if (projectId) url = `${API_BASE}/projects/${projectId}/responsibilities`;
+        else url = `${API_BASE}/team-members?page=1&page_size=1000`;
+
+        if (!projectId) {
+            const res = await apiFetch(url);
+            const json = await res.json();
+            const members = json.data || [];
+            let allResp = [];
+            for (const m of members) {
+                if (m.responsibilities) {
+                    for (const r of m.responsibilities) allResp.push({ ...r, member: m });
+                }
+            }
+            renderProjectsGroups(allResp);
+            document.getElementById('summaryCount').textContent = `共 ${Object.keys(groupByProject(allResp)).length} 个项目`;
+            return;
+        }
+        const res = await apiFetch(url);
+        const json = await res.json();
+        renderProjectsGroups(json.data || []);
+        document.getElementById('summaryCount').textContent = '';
+    } catch (e) {
+        console.error(e);
+        document.getElementById('projectsBody').innerHTML = `<div class="empty-box"><div class="icon"><i class="fas fa-exclamation-circle"></i></div><p>加载失败，请刷新重试</p></div>`;
+    }
+}
+
+function groupByProject(resp) {
+    const grouped = {};
+    resp.forEach(r => {
+        const pid = r.project_id;
+        if (!grouped[pid]) grouped[pid] = { project: r.project || allProjects.find(p => p.id == pid), items: [] };
+        grouped[pid].items.push(r);
+    });
+    return grouped;
+}
+
+function renderProjectsGroups(responsibilities) {
+    const container = document.getElementById('projectsBody');
+    if (responsibilities.length === 0) {
+        container.innerHTML = `<div class="empty-box"><div class="icon"><i class="fas fa-folder-open"></i></div><p>该项目暂无人员职责配置</p></div>`;
+        return;
+    }
+    const grouped = groupByProject(responsibilities);
+    container.innerHTML = Object.values(grouped).map(g => {
+        const project = g.project;
+        const chips = g.items.map(r => {
+            const member = r.member || {};
+            let tagCls = 'def', tagLabel = '默认';
+            if (r.scope_type === 'language') { tagCls = 'lang'; tagLabel = r.scope_value || '语言'; }
+            else if (r.scope_type === 'rule_category') { tagCls = 'cat'; tagLabel = r.scope_value || '规则'; }
+            return `<div class="steward-chip" title="${escapeHtml(member.gitlab_username || '')}">
+                <span class="name">${escapeHtml(member.display_name || member.username || '—')}</span>
+                <span class="tag ${tagCls}">${escapeHtml(tagLabel)}</span>
+                <button class="del" onclick="deleteResponsibility(${r.id})" title="移除"><i class="fas fa-times"></i></button>
+            </div>`;
+        }).join('');
+        return `<div class="project-group">
+            <div class="project-group-header">
+                <i class="fas fa-folder"></i>
+                <span class="pname">${escapeHtml(project?.name || '项目#' + g.items[0].project_id)}</span>
+                <span class="pid">#${g.items[0].project_id}</span>
+            </div>
+            <div class="project-group-body">${chips}</div>
+        </div>`;
+    }).join('');
+}
+
+function renderPagination(total) {
+    const pagination = document.getElementById('paginationBar');
+    if (!pagination) return;
+    const pages = Math.ceil(total / pageSize) || 1;
+    if (pages <= 1) { pagination.innerHTML = ''; return; }
+    const page = currentPage;
+    let html = '';
+    html += `<button ${page <= 1 ? 'disabled' : ''} onclick="goPage(${page - 1})"><i class="fas fa-chevron-left" style="font-size:0.7rem;"></i></button>`;
+    if (page > 3) {
+        html += `<button onclick="goPage(1)">1</button>`;
+        if (page > 4) html += `<span style="color:#94a3b8;padding:0 0.15rem;font-size:0.8125rem;">…</span>`;
+    }
+    let start = Math.max(1, page - 2);
+    let end = Math.min(pages, page + 2);
+    if (end - start < 4) {
+        if (start === 1) end = Math.min(pages, start + 4);
+        else if (end === pages) start = Math.max(1, end - 4);
+    }
+    for (let i = start; i <= end; i++) {
+        html += `<button class="${i === page ? 'active' : ''}" onclick="goPage(${i})">${i}</button>`;
+    }
+    if (page < pages - 2) {
+        if (page < pages - 3) html += `<span style="color:#94a3b8;padding:0 0.15rem;font-size:0.8125rem;">…</span>`;
+        html += `<button onclick="goPage(${pages})">${pages}</button>`;
+    }
+    html += `<button ${page >= pages ? 'disabled' : ''} onclick="goPage(${page + 1})"><i class="fas fa-chevron-right" style="font-size:0.7rem;"></i></button>`;
+
+    pagination.innerHTML = `<div class="pagination-bar"><span class="pg-info">共 ${total} 条记录</span><div class="pg-ctrl">${html}</div></div>`;
+}
+
+function goPage(page) {
+    currentPage = page;
+    loadMembersView();
+}
+
+function changePageSize() {
+    pageSize = parseInt(document.getElementById('pageSizeSelect')?.value || 10);
+    currentPage = 1;
+    loadData();
+}
+
+function onProjectFilterChange() { loadData(); }
+
+// ========== Modal ==========
+function openMemberModal() {
+    editingMemberId = null;
+    document.getElementById('memberModalTitle').textContent = '添加人员';
+    document.getElementById('mGitlabUsername').value = '';
+    document.getElementById('mGitlabUsername').disabled = false;
+    document.getElementById('mUsername').value = '';
+    document.getElementById('mDisplayName').value = '';
+    document.getElementById('mIMPlatform').value = 'wecom';
+    document.getElementById('mIMUserID').value = '';
+    document.getElementById('mEmail').value = '';
+    document.getElementById('dutyList').innerHTML = '';
+    addDutyRow();
+    showModal('memberModal');
+    loadGitUsers();
+}
+
+async function openEditMember(id) {
+    try {
+        const res = await apiFetch(`${API_BASE}/team-members/${id}`);
+        const json = await res.json();
+        const m = json.data;
+        editingMemberId = id;
+        document.getElementById('memberModalTitle').textContent = '编辑人员';
+        document.getElementById('mGitlabUsername').value = m.gitlab_username || '';
+        document.getElementById('mGitlabUsername').disabled = true;
+        document.getElementById('mUsername').value = m.username || '';
+        document.getElementById('mDisplayName').value = m.display_name || '';
+        document.getElementById('mIMPlatform').value = m.im_platform || 'wecom';
+        document.getElementById('mIMUserID').value = m.im_user_id || '';
+        document.getElementById('mEmail').value = m.email || '';
+        const dutyList = document.getElementById('dutyList');
+        if (m.responsibilities?.length > 0) {
+            dutyList.innerHTML = m.responsibilities.map(r => {
+                const project = allProjects.find(p => p.id == r.project_id);
+                return `<div class="flex items-center gap-2 text-sm text-gray-600 bg-slate-50 px-3 py-2 rounded-md">
+                    <span>${escapeHtml(project?.name || '项目#' + r.project_id)}</span>
+                    <span class="text-xs bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">${r.scope_type}${r.scope_value ? ':' + r.scope_value : ''}</span>
+                </div>`;
+            }).join('');
+        } else {
+            dutyList.innerHTML = '<p class="text-sm text-slate-400">暂无职责</p>';
+        }
+        showModal('memberModal');
+    } catch (e) { alert('加载失败: ' + e.message); }
+}
+
+function addDutyRow() {
+    const container = document.getElementById('dutyList');
+    const id = 'duty_' + Date.now();
+    const projectOptions = '<option value="">选择项目</option>' + allProjects.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+    container.insertAdjacentHTML('beforeend', `<div class="duty-row-input" id="${id}">
+        <select class="duty-project form-select" style="flex:2;">${projectOptions}</select>
+        <select class="duty-type form-select" style="flex:1;min-width:0;" onchange="onDutyTypeChange(this)">
+            <option value="default">默认</option>
+            <option value="rule_category">规则分类</option>
+            <option value="language">语言</option>
+        </select>
+        <div class="duty-val-wrap" style="flex:0 0 7rem;display:flex;flex-direction:column;gap:0.1rem;">
+            <input type="text" class="duty-value form-input" placeholder="无需填写" style="flex:1;" disabled>
+            <span class="duty-hint text-[0.6rem] text-slate-400 leading-tight">默认职责自动覆盖全部</span>
+        </div>
+        <button class="btn-remove" onclick="document.getElementById('${id}').remove()"><i class="fas fa-times"></i></button>
+    </div>`);
+}
+
+function onDutyTypeChange(sel) {
+    const row = sel.closest('.duty-row-input');
+    const valInput = row.querySelector('.duty-value');
+    const hint = row.querySelector('.duty-hint');
+    const wrap = row.querySelector('.duty-val-wrap');
+    if (sel.value === 'default') {
+        valInput.disabled = true; valInput.value = ''; valInput.placeholder = '无需填写';
+        hint.textContent = '默认职责自动覆盖全部'; wrap.style.flex = '0 0 7rem';
+    } else if (sel.value === 'rule_category') {
+        valInput.disabled = false; valInput.placeholder = '分类名';
+        hint.textContent = '如：security、performance'; wrap.style.flex = '0 0 8rem';
+    } else {
+        valInput.disabled = false; valInput.placeholder = '语言';
+        hint.textContent = '如：golang、python、java'; wrap.style.flex = '0 0 8rem';
+    }
+}
+
+async function saveMember() {
+    const gitlabUsername = document.getElementById('mGitlabUsername').value.trim();
+    const username = document.getElementById('mUsername').value.trim();
+    const displayName = document.getElementById('mDisplayName').value.trim();
+    const imUserId = document.getElementById('mIMUserID').value.trim();
+    const imPlatform = document.getElementById('mIMPlatform').value;
+    const email = document.getElementById('mEmail').value.trim();
+
+    if (!gitlabUsername) { alert('请输入 GitLab 用户名'); return; }
+    if (!username) { alert('请输入系统用户名'); return; }
+    if (!imUserId) { alert('请输入 IM 用户 ID'); return; }
+
+    const data = { gitlab_username: gitlabUsername, username, display_name: displayName, im_platform: imPlatform, im_user_id: imUserId, email };
+
+    try {
+        const url = editingMemberId ? `${API_BASE}/team-members/${editingMemberId}` : `${API_BASE}/team-members`;
+        const method = editingMemberId ? 'PUT' : 'POST';
+        const res = await apiFetch(url, { method, body: JSON.stringify(data) });
+        if (!res.ok) { const err = await res.json(); alert(err.error || '保存失败'); return; }
+        const memberId = editingMemberId || (await res.json()).data?.id;
+        if (!memberId) { alert('保存失败：未获取到人员 ID'); return; }
+
+        for (const row of document.querySelectorAll('.duty-row-input')) {
+            const projectId = row.querySelector('.duty-project').value;
+            const scopeType = row.querySelector('.duty-type').value;
+            const scopeValue = row.querySelector('.duty-value').value.trim();
+            if (!projectId) continue;
+            await apiFetch(`${API_BASE}/team-members/${memberId}/responsibilities`, {
+                method: 'POST',
+                body: JSON.stringify({ project_id: parseInt(projectId), scope_type: scopeType, scope_value: scopeType === 'default' ? '' : scopeValue, priority: 0 })
+            });
+        }
+        closeModal('memberModal');
+        loadData();
+        showToast(editingMemberId ? '更新成功' : '创建成功', 'success');
+    } catch (e) { alert('保存失败: ' + e.message); }
+}
+
+function openDeleteMember(id) { deleteMemberId = id; showModal('deleteModal'); }
+
+async function confirmDeleteMember() {
+    if (!deleteMemberId) return;
+    try {
+        const res = await apiFetch(`${API_BASE}/team-members/${deleteMemberId}`, { method: 'DELETE' });
+        if (res.ok) { closeModal('deleteModal'); loadData(); showToast('删除成功', 'success'); }
+        else alert('删除失败');
+    } catch (e) { alert('删除失败: ' + e.message); }
+    deleteMemberId = null;
+}
+
+async function deleteResponsibility(id) {
+    if (!confirm('确定删除此职责配置？')) return;
+    try {
+        const res = await apiFetch(`${API_BASE}/team-members/responsibilities/${id}`, { method: 'DELETE' });
+        if (res.ok) { loadData(); showToast('已删除', 'success'); }
+        else alert('删除失败');
+    } catch (e) { alert('删除失败: ' + e.message); }
+}
+
+function escapeHtml(str) { if (!str) return ''; return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
+
+function showToast(message, type='info') {
+    const colors = { success:['#10b981','#d1fae5'], error:['#ef4444','#fee2e2'], info:['#3b82f6','#dbeafe'] };
+    const c = colors[type] || colors.info;
+    const toast = document.createElement('div');
+    toast.style.cssText = `position:fixed;top:1rem;right:1rem;background:#fff;color:#334155;padding:0.625rem 1rem;border-radius:0.625rem;box-shadow:0 8px 24px rgba(0,0,0,0.08);z-index:60;font-size:0.8125rem;font-weight:500;display:flex;align-items:center;gap:0.4rem;animation:fadeIn .25s;border-left:3px solid ${c[0]};`;
+    toast.innerHTML = `<span style="width:5px;height:5px;border-radius:50%;background:${c[0]};"></span>${escapeHtml(message)}`;
+    document.body.appendChild(toast);
+    setTimeout(()=>{toast.style.transition='all .25s';toast.style.opacity='0';toast.style.transform='translateY(-4px)';setTimeout(()=>toast.remove(),250);},3000);
+}
+
+document.addEventListener('DOMContentLoaded', () => { renderSidebar('staff-management'); loadProjects().then(()=>loadData()); });
+</script>
+<script defer src="/static/js/tailwindcss.min.js"></script>
+</body>
+</html>

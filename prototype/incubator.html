@@ -6,9 +6,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>规则孵化台 - CodeGuard</title>
-    <script src="js/auth.js?v=5"></script>
-    <script src="js/menu-config.js?v=3"></script>
-    <script src="js/sidebar.js?v=2"></script>
+    <script src="js/auth.js?v=6"></script>
+    <script src="js/menu-config.js?v=6"></script>
+    <script src="js/sidebar.js?v=6"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <script src="https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
@@ -2221,7 +2221,7 @@ function categoryName(c) {
 }
 
 function statusBadge(s) {
-    const map = { accepted: '<span class="text-green-600 text-xs"><i class="fas fa-check mr-1"></i>已接纳</span>', rejected: '<span class="text-red-500 text-xs"><i class="fas fa-times mr-1"></i>已拒绝</span>', pending: '<span class="text-gray-400 text-xs">待处理</span>', dismissed: '<span class="text-gray-400 text-xs line-through">已忽略</span>' };
+    const map = { resolved: '<span class="text-green-600 text-xs"><i class="fas fa-check mr-1"></i>已处理</span>', false_positive: '<span class="text-red-500 text-xs"><i class="fas fa-times mr-1"></i>误报</span>', pending: '<span class="text-gray-400 text-xs">待处理</span>', pending_inherited: '<span class="text-gray-400 text-xs">待处理</span>', ignored: '<span class="text-gray-400 text-xs line-through">已忽略</span>', auto_filtered: '<span class="text-blue-400 text-xs">已过滤</span>' };
     return map[s] || map.pending;
 }
 

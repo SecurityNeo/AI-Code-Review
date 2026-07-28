@@ -6,9 +6,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>任务列表 - CodeGuard</title>
-        <script src="js/auth.js?v=5"></script>
-    <script src="js/menu-config.js?v=2"></script>
-    <script src="js/sidebar.js?v=2"></script>
+        <script src="js/auth.js?v=6"></script>
+    <script src="js/menu-config.js?v=6"></script>
+    <script src="js/sidebar.js?v=6"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <script src="/static/js/marked.min.js"></script>
@@ -305,8 +305,9 @@
                             <span class="text-xs text-gray-500">筛选：</span>
                             <button onclick="filterIssues('all')" class="issue-filter-btn active text-xs px-2 py-1 rounded bg-blue-100 text-blue-700" data-filter="all">全部</button>
                             <button onclick="filterIssues('pending')" class="issue-filter-btn text-xs px-2 py-1 rounded bg-gray-100 text-gray-600" data-filter="pending">待处理</button>
-                            <button onclick="filterIssues('accepted')" class="issue-filter-btn text-xs px-2 py-1 rounded bg-green-100 text-green-700" data-filter="accepted">已采纳</button>
-                            <button onclick="filterIssues('rejected')" class="issue-filter-btn text-xs px-2 py-1 rounded bg-red-100 text-red-700" data-filter="rejected">已拒绝</button>
+                            <button onclick="filterIssues('resolved')" class="issue-filter-btn text-xs px-2 py-1 rounded bg-green-100 text-green-700" data-filter="resolved">已处理</button>
+                            <button onclick="filterIssues('false_positive')" class="issue-filter-btn text-xs px-2 py-1 rounded bg-red-100 text-red-700" data-filter="false_positive">误报</button>
+                            <button onclick="filterIssues('ignored')" class="issue-filter-btn text-xs px-2 py-1 rounded bg-gray-100 text-gray-600" data-filter="ignored">已忽略</button>
                             <select id="issueFileFilter" onchange="renderIssues()" class="text-xs px-2 py-1 border rounded ml-auto">
                                 <option value="">所有文件</option>
                             </select>
@@ -1830,8 +1831,8 @@ function renderTasks(tasks) {
 
             const severityColors = { critical: 'border-red-500 bg-red-50', high: 'border-orange-500 bg-orange-50', medium: 'border-yellow-500 bg-yellow-50', low: 'border-blue-500 bg-blue-50', info: 'border-gray-400 bg-gray-50' };
             const severityLabels = { critical: '严重', high: '高危', medium: '中危', low: '低危', info: '提示' };
-            const statusLabels = { pending: '待处理', accepted: '已采纳', rejected: '已拒绝' };
-            const statusColors = { pending: 'text-gray-500', accepted: 'text-green-600', rejected: 'text-red-600' };
+            const statusLabels = { pending: '待处理', resolved: '已处理', false_positive: '误报', ignored: '已忽略' };
+            const statusColors = { pending: 'text-gray-500', resolved: 'text-green-600', false_positive: 'text-red-600', ignored: 'text-gray-400' };
             const categoryColors = { security: 'bg-red-50 text-red-700', performance: 'bg-orange-50 text-orange-700', code_quality: 'bg-purple-50 text-purple-700', readability: 'bg-blue-50 text-blue-700', maintainability: 'bg-green-50 text-green-700', test_coverage: 'bg-pink-50 text-pink-700', common: 'bg-gray-50 text-gray-600' };
             const categoryLabels = { security: '安全', performance: '性能', code_quality: '代码质量', readability: '可读性', maintainability: '可维护性', test_coverage: '测试覆盖', common: '通用' };
 
@@ -1850,17 +1851,18 @@ function renderTasks(tasks) {
                             ${issue.file ? `<p class="text-xs text-gray-500 mt-0.5"><i class="fas fa-file-code mr-1"></i>${issue.file}${issue.line_start > 0 ? ' (第' + issue.line_start + '行)' : ''}</p>` : ''}
                             ${issue.code_snippet ? `<pre class="text-xs bg-gray-800 text-gray-100 p-2 rounded mt-1 overflow-x-auto">${issue.code_snippet}</pre>` : ''}
                             ${issue.suggestion ? `<p class="text-xs text-gray-600 mt-1"><i class="fas fa-lightbulb mr-1 text-yellow-500"></i>${issue.suggestion}</p>` : ''}
-                            ${issue.reject_reason ? `<p class="text-xs text-red-500 mt-1"><i class="fas fa-info-circle mr-1"></i>拒绝原因：${issue.reject_reason}</p>` : ''}
+                            ${issue.reject_reason ? `<p class="text-xs text-red-500 mt-1"><i class="fas fa-info-circle mr-1"></i>处理说明：${issue.reject_reason}</p>` : ''}
                         </div>
-                        <div class="flex gap-1 ml-2 ${issue.status === 'pending' ? '' : 'hidden'}">
-                            <button onclick="resolveIssue(${issue.id}, 'accepted')" class="text-xs px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200" title="采纳"><i class="fas fa-check"></i></button>
-                            <button onclick="showRejectInput(${issue.id})" class="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200" title="拒绝"><i class="fas fa-times"></i></button>
+                        <div class="flex gap-1 ml-2 ${['pending', 'pending_inherited'].includes(issue.status) ? '' : 'hidden'}">
+                            <button onclick="resolveIssue(${issue.id}, 'resolved')" class="text-xs px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200" title="已处理"><i class="fas fa-check"></i></button>
+                            <button onclick="showRejectInput(${issue.id})" class="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200" title="误报"><i class="fas fa-times"></i></button>
+                            <button onclick="showIgnoreInput(${issue.id})" class="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200" title="忽略"><i class="fas fa-pause"></i></button>
                         </div>
                     </div>
                     <div id="rejectInput-${issue.id}" class="hidden mt-2">
                         <input type="text" placeholder="填写拒绝原因..." class="text-xs px-2 py-1 border rounded w-full mb-1" id="rejectReason-${issue.id}">
                         <div class="flex gap-1">
-                            <button onclick="resolveIssue(${issue.id}, 'rejected', document.getElementById('rejectReason-${issue.id}').value)" class="text-xs px-2 py-1 bg-red-600 text-white rounded">确认拒绝</button>
+                            <button onclick="resolveIssue(${issue.id}, 'false_positive', document.getElementById('rejectReason-${issue.id}').value)" class="text-xs px-2 py-1 bg-red-600 text-white rounded">确认拒绝</button>
                             <button onclick="hideRejectInput(${issue.id})" class="text-xs px-2 py-1 bg-gray-200 text-gray-600 rounded">取消</button>
                         </div>
                     </div>
@@ -1902,7 +1904,7 @@ function renderTasks(tasks) {
                     })
                 });
                 if (!res.ok) throw new Error('操作失败');
-                showToast(status === 'accepted' ? '已采纳' : '已拒绝', 'success');
+                const toastMap = { 'resolved': '已标记为已处理', 'false_positive': '已标记为误报', 'ignored': '已标记为忽略' }; showToast(toastMap[status] || '操作成功', 'success');
                 // 刷新
                 loadStructuredReview(currentTaskId);
             } catch (err) {
@@ -1919,7 +1921,7 @@ function renderTasks(tasks) {
 
         async function batchAcceptIssues() {
             const checked = document.querySelectorAll('.issue-checkbox:checked');
-            const issues = Array.from(checked).map(cb => ({ id: parseInt(cb.value), status: 'accepted' }));
+            const issues = Array.from(checked).map(cb => ({ id: parseInt(cb.value), status: 'resolved' }));
             await batchResolve(issues, '批量采纳成功');
         }
 
@@ -1927,7 +1929,7 @@ function renderTasks(tasks) {
             const reason = prompt('请输入批量拒绝的原因（可留空）：');
             if (reason === null) return;
             const checked = document.querySelectorAll('.issue-checkbox:checked');
-            const issues = Array.from(checked).map(cb => ({ id: parseInt(cb.value), status: 'rejected', reject_reason: reason }));
+            const issues = Array.from(checked).map(cb => ({ id: parseInt(cb.value), status: 'false_positive', reject_reason: reason }));
             await batchResolve(issues, '批量拒绝成功');
         }
 

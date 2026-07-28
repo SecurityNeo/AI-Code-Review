@@ -74,16 +74,6 @@ func (s *NotifierService) Delete(id uint) error {
 }
 
 func (s *NotifierService) Toggle(id uint, enabled bool) error {
-	// 如果启用，先检查是否配置了模板
-	if enabled {
-		var notifier model.WeComNotifier
-		if err := model.DB.First(&notifier, id).Error; err != nil {
-			return err
-		}
-		if notifier.MessageTemplate == "" {
-			return fmt.Errorf("请先配置消息模板")
-		}
-	}
 	return model.DB.Model(&model.WeComNotifier{}).Where("id = ?", id).Update("enabled", enabled).Error
 }
 
@@ -95,7 +85,7 @@ func (s *NotifierService) Test(id uint) (bool, string, error) {
 
 	message := "测试消息 - CodeGuard 通知配置成功！"
 	if notifier.MessageTemplate != "" {
-		message = buildReviewMessage(notifier.MessageTemplate, &mockTask)
+		message = buildMessageFromRule("task.completed", notifier.MessageTemplate, &mockTask, notifier.ID)
 	}
 
 	return s.SendMessage(notifier.WebhookUrl, message, "")
@@ -164,6 +154,12 @@ func (s *NotifierService) SendMessage(webhookUrl, message string, mentionUserId 
 
 // NotifyAIReviewCompleted 通知 AI 评审完成
 func (s *NotifierService) NotifyAIReviewCompleted(task model.Task) {
+	zap.L().Info("notify ai review: start",
+		zap.Uint("task_id", task.ID),
+		zap.Uint("project_id", task.ProjectID),
+		zap.String("mr_author", task.MRAuthor),
+		zap.String("project_name", task.Project.Name))
+
 	// 获取启用了通知的配置
 	var notifiers []model.WeComNotifier
 	query := model.DB.Where("enabled = ?", true)
@@ -175,40 +171,96 @@ func (s *NotifierService) NotifyAIReviewCompleted(task model.Task) {
 		return
 	}
 
+	zap.L().Info("notify ai review: notifiers query result",
+		zap.Int("count", len(notifiers)),
+		zap.Uint("project_id", task.ProjectID))
+
+	if len(notifiers) == 0 {
+		zap.L().Warn("notify ai review: no enabled notifier matched",
+			zap.Uint("project_id", task.ProjectID),
+			zap.String("hint", "请检查【通知管理 → 企业微信】中是否有启用的通知配置"))
+		return
+	}
+
 	// 查询开发人员的 IM 用户 ID（用于 @）
 	var mentionUserId string
-	var mapping model.MemberMapping
-	if err := model.DB.Where("git_username = ? AND im_platform = ? AND enabled = ?", task.MRAuthor, model.IMPlatformWeCom, true).First(&mapping).Error; err == nil {
-		mentionUserId = mapping.IMUserID
+	var member model.TeamMember
+	if err := model.DB.Where("gitlab_username = ? AND im_platform = ? AND enabled = ?", task.MRAuthor, "wecom", true).First(&member).Error; err == nil {
+		mentionUserId = member.IMUserID
+		zap.L().Info("notify ai review: found team member",
+			zap.String("gitlab_username", task.MRAuthor),
+			zap.String("im_user_id", mentionUserId))
+	} else {
+		zap.L().Warn("notify ai review: no team member for @mention",
+			zap.String("gitlab_username", task.MRAuthor))
 	}
 
 	for _, notifier := range notifiers {
-		message := buildReviewMessage(notifier.MessageTemplate, &task)
+		message := buildMessageFromRule("task.completed", notifier.MessageTemplate, &task, notifier.ID)
 
 		success, msg, err := s.SendMessage(notifier.WebhookUrl, message, mentionUserId)
+		status := "success"
+		errMsg := ""
 		if err != nil || !success {
+			status = "failed"
+			if err != nil {
+				errMsg = err.Error()
+			} else {
+				errMsg = msg
+			}
 			zap.L().Error("notify ai review: send failed",
 				zap.Uint("notifier_id", notifier.ID),
 				zap.Error(err),
 				zap.String("msg", msg))
 		} else {
-			zap.L().Info("notify ai review: sent", zap.Uint("notifier_id", notifier.ID))
+			zap.L().Info("notify ai review: sent",
+				zap.Uint("notifier_id", notifier.ID),
+				zap.String("webhook", notifier.WebhookUrl))
+		}
+
+		// 记录 IM 投递日志
+		log := model.NotificationDeliveryLog{
+			NotifierID:     &notifier.ID,
+			TaskID:         &task.ID,
+			Channel:        "wecom",
+			RecipientType:  "steward",
+			MessagePreview: truncateRune(message, 200),
+			Status:         status,
+			ErrorMsg:       errMsg,
+		}
+		if err := model.DB.Create(&log).Error; err != nil {
+			zap.L().Error("notify ai review: failed to save delivery log",
+				zap.Uint("notifier_id", notifier.ID),
+				zap.Error(err))
 		}
 	}
 }
 
-// buildReviewMessage 根据模板和任务构建消息
-func buildReviewMessage(template string, task *model.Task) string {
-	if template == "" {
-		template = defaultReviewTemplate()
+// buildMessageFromRule 优先读取通知规则模板，其次 fallback 模板，最后默认模板
+func buildMessageFromRule(trigger string, fallbackTemplate string, task *model.Task, notifierID uint) string {
+	templateStr := GetNotificationRuleTemplate(trigger)
+	source := "notification_rule"
+	if templateStr == "" {
+		templateStr = fallbackTemplate
+		source = "notifier_fallback"
 	}
+	if templateStr == "" {
+		templateStr = defaultReviewTemplate()
+		source = "default_hardcoded"
+	}
+
+	zap.L().Info("buildMessageFromRule template selected",
+		zap.String("trigger", trigger),
+		zap.Uint("notifier_id", notifierID),
+		zap.String("source", source),
+		zap.Int("template_len", len(templateStr)))
 
 	// 查询开发人员展示名映射
 	developer := task.MRAuthor
-	var mapping model.MemberMapping
-	if err := model.DB.Where("git_username = ? AND im_platform = ? AND enabled = ?", task.MRAuthor, model.IMPlatformWeCom, true).
-		First(&mapping).Error; err == nil && mapping.DisplayName != "" {
-		developer = task.MRAuthor + "(" + mapping.DisplayName + ")"
+	var tm model.TeamMember
+	if err := model.DB.Where("gitlab_username = ? AND enabled = ?", task.MRAuthor, true).
+		First(&tm).Error; err == nil && tm.DisplayName != "" {
+		developer = task.MRAuthor + "(" + tm.DisplayName + ")"
 	}
 
 	// 获取 ReviewLog 的代码变更量
@@ -224,17 +276,19 @@ func buildReviewMessage(template string, task *model.Task) string {
 		projectName = "未知项目"
 	}
 
-	// 变量替换
-	msg := template
-	msg = strings.ReplaceAll(msg, "{{PROJECT_NAME}}", projectName)
-	msg = strings.ReplaceAll(msg, "{{DEVELOPER}}", developer)
-	msg = strings.ReplaceAll(msg, "{{BRANCH}}", task.SourceBranch+" -> "+task.TargetBranch)
-	msg = strings.ReplaceAll(msg, "{{SCORE}}", fmt.Sprintf("%d", task.ScoreValue))
-	msg = strings.ReplaceAll(msg, "{{CHANGES}}", fmt.Sprintf("+%d/-%d", additions, deletions))
-	msg = strings.ReplaceAll(msg, "{{MR_TITLE}}", task.MRTitle)
-	msg = strings.ReplaceAll(msg, "{{MR_URL}}", task.MRURL)
+	stats := CalcIssueStats(task.ID, task.MRMergeID)
 
-	return msg
+	ctx := TemplateContext{
+		Task:      *task,
+		Stats:     stats,
+		Project:   task.Project,
+		Developer: developer,
+		Additions: additions,
+		Deletions: deletions,
+		DeadlineHours: 120 - stats.Pending*2,
+		AtRecipient: "",
+	}
+	return RenderMessage(templateStr, ctx)
 }
 
 func defaultReviewTemplate() string {

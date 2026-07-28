@@ -36,7 +36,7 @@ func (s *FingerprintService) MatchBest(mrID uint, fingerprint string) *model.Rev
 	}
 	var issues []model.ReviewIssue
 	// 查询该 MR 下所有历史 Issue（含已软删除），按创建时间倒序
-	model.DB.Unscoped().Where("mr_iid = ? AND fingerprint = ?", mrID, fingerprint).
+	model.DB.Unscoped().Where("mr_id = ? AND fingerprint = ?", mrID, fingerprint).
 		Order("created_at DESC").Limit(5).Find(&issues)
 	// 优先返回有明确处理状态的历史记录
 	for _, iss := range issues {

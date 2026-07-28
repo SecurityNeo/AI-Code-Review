@@ -6,9 +6,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>项目管理 - CodeGuard</title>
-        <script src="js/auth.js?v=5"></script>
-    <script src="js/menu-config.js?v=2"></script>
-    <script src="js/sidebar.js?v=2"></script>
+        <script src="js/auth.js?v=6"></script>
+    <script src="js/menu-config.js?v=6"></script>
+    <script src="js/sidebar.js?v=6"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <style>
@@ -545,6 +545,12 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 const json = await res.json();
                 projectsData = json.data || [];
+                // 按创建时间降序排序（最新的在前）
+                projectsData.sort(function(a, b) {
+                    var tA = a.created_at ? new Date(a.created_at).getTime() : 0;
+                    var tB = b.created_at ? new Date(b.created_at).getTime() : 0;
+                    return tB - tA;
+                });
                 const total = json.total || 0;
                 totalPages = Math.ceil(total / 10);
                 renderProjects(projectsData);

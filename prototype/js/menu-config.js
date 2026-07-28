@@ -1,26 +1,36 @@
 // js/menu-config.js
-// 菜单配置 v2：6 个折叠组，admin/user 差异化
-// 顶层 admin: 工作台 / 全局大盘 / 任务列表 / 数据洞察 / AI 评审 / 通知管理 / 系统管理
-// 顶层 user: 工作台 / 任务列表 / 数据洞察
+// 菜单配置 v3：admin/user 差异化，任务列表归入 AI 评审子菜单
+// admin 顺序：控制台 → 项目总览 → 数据洞察 → AI 评审 → 通知管理 → 消息中心 → 系统管理
+// user  顺序：工作台 → 项目总览 → 数据洞察 → 消息中心
 const MENU_CONFIG = [
-    // ========== 公共菜单 ==========
+    // ========== admin 置顶 ==========
+    {
+        id: 'admin-dashboard',
+        name: '控制台',
+        href: 'admin-dashboard.html',
+        icon: 'fa-globe',
+        role: ['admin']
+    },
+
+    // ========== user 置顶 ==========
     {
         id: 'developer-dashboard',
         name: '工作台',
         href: 'developer-dashboard.html',
         icon: 'fa-briefcase',
-        role: ['admin', 'user']
+        role: ['user']
     },
-    {
-        id: 'tasks',
-        name: '任务列表',
-        href: 'tasks.html',
-        icon: 'fa-tasks',
-        role: ['admin', 'user']
-    },
-    { id: 'notifications', name: '消息中心', href: 'notifications.html', icon: 'fa-bell', role: ['admin', 'user'] },
 
-        // ========== 数据洞察 ==========
+    // ========== 公共菜单（仅 user 可见；admin 有自己的控制台） ==========
+    {
+        id: 'project-dashboard',
+        name: '项目总览',
+        href: 'project-dashboard.html',
+        icon: 'fa-building',
+        role: ['user']
+    },
+
+    // ========== 数据洞察（公共） ==========
     {
         id: 'insights-group',
         name: '数据洞察',
@@ -34,18 +44,19 @@ const MENU_CONFIG = [
         ]
     },
 
-    // ========== AI 评审（admin only） ==========
+    // ========== AI 评审（admin 全面，user 仅任务列表） ==========
     {
         id: 'ai-review-group',
         name: 'AI 评审',
         icon: 'fa-robot',
-        role: ['admin'],
+        role: ['admin', 'user'],
         children: [
-            { id: 'projects',     name: '项目管理',   href: 'projects.html',     icon: 'fa-folder-open' },
-            { id: 'review-rules', name: '评审规则库', href: 'review-rules.html', icon: 'fa-shield-halved' },
-            { id: 'incubator',    name: '规则孵化台', href: 'incubator.html',    icon: 'fa-flask' },
-            { id: 'pools',        name: '任务资源池', href: 'pools.html',        icon: 'fa-server' },
-            { id: 'models',       name: '大模型管理', href: 'models.html',       icon: 'fa-microchip' },
+            { id: 'projects',     name: '项目管理',   href: 'projects.html',     icon: 'fa-folder-open',    role: ['admin'] },
+            { id: 'review-rules', name: '评审规则库', href: 'review-rules.html', icon: 'fa-shield-halved',  role: ['admin'] },
+            { id: 'incubator',    name: '规则孵化台', href: 'incubator.html',    icon: 'fa-flask',            role: ['admin'] },
+            { id: 'tasks',        name: '评审任务列表', href: 'tasks.html',        icon: 'fa-tasks',             role: ['admin', 'user'] },
+            { id: 'pools',        name: '任务资源池', href: 'pools.html',        icon: 'fa-server',            role: ['admin'] },
+            { id: 'models',       name: '大模型管理', href: 'models.html',       icon: 'fa-microchip',         role: ['admin'] },
         ]
     },
 
@@ -58,20 +69,16 @@ const MENU_CONFIG = [
         children: [
             { id: 'notifiers', name: '企业微信',     href: 'notifiers.html',       icon: 'fa-comment' },
             { id: 'mail',      name: '邮件',         href: 'mail.html',            icon: 'fa-envelope' },
-            { id: 'mappings',  name: '成员映射',     href: 'member-mappings.html', icon: 'fa-users' },
+            { id: 'staff-management', name: '人员管理', href: 'staff-management.html', icon: 'fa-users' },
+            { id: 'notification-rules', name: '通知规则', href: 'notification-rules.html', icon: 'fa-gear' },
+            { id: 'settings-holiday', name: '节假日管理',  href: 'holiday-management.html', icon: 'fa-calendar-day' },
             { id: 'report',    name: '报告管理',     href: 'report.html',          icon: 'fa-file-alt' },
-            { id: 'project-stewards', name: '环节负责人', href: 'project-stewards.html', icon: 'fa-user-shield' },
         ]
     },
 
-    // ========== 管理员专用（admin only） ==========
-    {
-        id: 'admin-dashboard',
-        name: '全局大盘',
-        href: 'admin-dashboard.html',
-        icon: 'fa-globe',
-        role: ['admin']
-    },
+    // ========== 消息中心（admin + user） ==========
+    // 位置：通知管理之后，系统管理之前
+    { id: 'notifications', name: '消息中心', href: 'notifications.html', icon: 'fa-inbox', role: ['admin', 'user'] },
 
     // ========== 系统管理（admin only） ==========
     {
@@ -90,10 +97,12 @@ const MENU_CONFIG = [
     },
 ];
 
-// 判断当前菜单项对指定角色是否可见
+// 判断当前菜单项对指定角色是否可见（大小写不敏感，兼容数字 role）
 function isMenuVisible(menuRole, userRole) {
-    if (!menuRole) return true;
-    return menuRole.includes(userRole);
+    if (!menuRole || !Array.isArray(menuRole) || menuRole.length === 0) return true;
+    const normalizedUser = String(userRole || '').trim().toLowerCase();
+    if (!normalizedUser) return true;
+    return menuRole.some(r => String(r || '').trim().toLowerCase() === normalizedUser);
 }
 
 // 判断当前路径是否匹配菜单项 href（支持 query 参数）

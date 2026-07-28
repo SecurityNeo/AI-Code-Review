@@ -6,9 +6,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>任务详情 - CodeGuard</title>
-    <script src="js/auth.js?v=5"></script>
-    <script src="js/menu-config.js?v=2"></script>
-    <script src="js/sidebar.js?v=2"></script>
+    <script src="js/auth.js?v=6"></script>
+    <script src="js/menu-config.js?v=6"></script>
+    <script src="js/sidebar.js?v=6"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <script src="/static/js/marked.min.js"></script>
@@ -397,8 +397,9 @@
                             <div id="batchActionBar" class="mt-3 pt-3 border-t hidden flex items-center justify-between">
                                 <span class="text-xs text-gray-500">已选择 <span id="selectedIssueCount" class="font-medium text-blue-600">0</span> 个问题</span>
                                 <div class="flex gap-2">
-                                    <button onclick="batchAcceptIssues()" class="text-xs px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700">批量采纳</button>
-                                    <button onclick="batchRejectIssues()" class="text-xs px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700">批量拒绝</button>
+                                    <button onclick="batchAcceptIssues()" class="text-xs px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700">批量已处理</button>
+                                    <button onclick="batchRejectIssues()" class="text-xs px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700">批量误报</button>
+                                    <button onclick="batchIgnoreIssues()" class="text-xs px-3 py-1.5 bg-gray-600 text-white rounded hover:bg-gray-700">批量忽略</button>
                                 </div>
                             </div>
                             <!-- 查看 GitLab 评审报告 -->
@@ -990,7 +991,13 @@ function renderIssues() {
     if (issueFilter !== 'auto_filtered') {
         issues = issues.filter(i => i.status !== 'auto_filtered');
     }
-    if (issueFilter !== 'all' && issueFilter !== 'auto_filtered') issues = issues.filter(i => i.status === issueFilter);
+    if (issueFilter !== 'all' && issueFilter !== 'auto_filtered') {
+        if (issueFilter === 'pending') {
+            issues = issues.filter(i => ['pending', 'pending_inherited'].includes(i.status));
+        } else {
+            issues = issues.filter(i => i.status === issueFilter);
+        }
+    }
     const fileFilter = document.getElementById('issueFileFilter').value;
     if (fileFilter) issues = issues.filter(i => i.file === fileFilter);
     if (issues.length === 0) {
@@ -1001,21 +1008,23 @@ function renderIssues() {
     const severityLabels = { critical: '严重', high: '高危', medium: '中危', low: '低危', info: '提示' };
     const severityColors = { critical: 'text-red-600', high: 'text-orange-600', medium: 'text-yellow-600', low: 'text-blue-600', info: 'text-gray-500' };
     const categoryLabels = { security: '安全', performance: '性能', code_quality: '代码质量', readability: '可读性', maintainability: '可维护性', test_coverage: '测试覆盖', common: '通用' };
-    const statusLabels = { pending: '待处理', accepted: '已采纳', rejected: '已拒绝', auto_filtered: '已过滤' };
-    const statusColors = { pending: 'text-gray-500', accepted: 'text-green-600', rejected: 'text-red-600', auto_filtered: 'text-blue-500' };
+    const statusLabels = { pending: '待处理', pending_inherited: '待处理', resolved: '已处理', false_positive: '误报', ignored: '已忽略', auto_filtered: '已过滤' };
+    const statusColors = { pending: 'text-gray-500', pending_inherited: 'text-gray-500', resolved: 'text-green-600', false_positive: 'text-red-600', ignored: 'text-gray-400', auto_filtered: 'text-blue-500' };
 
     // 统计摘要
     const allIssues = data.issues;
     const totalCount = allIssues.length;
-    const pendingCount = allIssues.filter(i => i.status === 'pending').length;
-    const acceptedCount = allIssues.filter(i => i.status === 'resolved').length;
-    const rejectedCount = allIssues.filter(i => i.status === 'false_positive').length;
+    const pendingCount = allIssues.filter(i => ['pending', 'pending_inherited'].includes(i.status)).length;
+    const resolvedCount = allIssues.filter(i => i.status === 'resolved').length;
+    const falsePositiveCount = allIssues.filter(i => i.status === 'false_positive').length;
+    const ignoredCount = allIssues.filter(i => i.status === 'ignored').length;
     const filteredCount = allIssues.filter(i => i.status === 'auto_filtered').length;
     let summaryHtml = `<div class="flex flex-wrap items-center gap-3 mb-4 text-sm">
         <span class="text-gray-700 font-medium">本次共 <span class="font-bold text-blue-600">${totalCount}</span> 条 Issue</span>`;
     if (pendingCount > 0) summaryHtml += `<span class="text-gray-500">· <span class="font-bold ${statusColors.pending}">${pendingCount}</span> 待处理</span>`;
-    if (acceptedCount > 0) summaryHtml += `<span class="text-gray-500">· <span class="font-bold ${statusColors.accepted}">${acceptedCount}</span> 已采纳</span>`;
-    if (rejectedCount > 0) summaryHtml += `<span class="text-gray-500">· <span class="font-bold ${statusColors.rejected}">${rejectedCount}</span> 已拒绝</span>`;
+    if (resolvedCount > 0) summaryHtml += `<span class="text-gray-500">· <span class="font-bold ${statusColors.resolved}">${resolvedCount}</span> 已处理</span>`;
+    if (falsePositiveCount > 0) summaryHtml += `<span class="text-gray-500">· <span class="font-bold ${statusColors.false_positive}">${falsePositiveCount}</span> 误报</span>`;
+    if (ignoredCount > 0) summaryHtml += `<span class="text-gray-500">· <span class="font-bold ${statusColors.ignored}">${ignoredCount}</span> 已忽略</span>`;
     if (filteredCount > 0) summaryHtml += `<span class="text-blue-500 bg-blue-50 px-2 py-0.5 rounded text-xs border border-blue-100">· ${filteredCount} 条历史误报已自动过滤</span>`;
     summaryHtml += `</div>`;
 
@@ -1039,6 +1048,7 @@ function renderIssues() {
                         <span class="text-xs font-mono text-gray-400 flex-shrink-0 bg-gray-50 px-1.5 py-0.5 rounded">${issue.rule_code || '-'}</span>
                         ${deductBadge}
                         <span class="text-xs ${statusColors[issue.status] || 'text-gray-500'} flex-shrink-0 ml-auto">[${statusLabels[issue.status] || issue.status}]</span>
+                        ${issue.inherited_from_issue_id ? '<span class="text-[10px] text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 flex-shrink-0" title="历史曾标记为已处理">复现</span>' : ''}
                     </div>
                     <!-- 摘要文字 -->
                     <div class="text-sm text-gray-800 font-medium leading-relaxed mt-2 cursor-pointer">${summary}</div>
@@ -1047,12 +1057,15 @@ function renderIssues() {
                 </div>
                 <div class="flex flex-col items-center gap-1.5 flex-shrink-0">
                     <i id="issue-toggle-${issue.id}" class="fas fa-chevron-down issue-toggle-icon text-gray-400 text-sm cursor-pointer p-1 hover:text-gray-600" onclick="toggleIssueDetail(${issue.id}, event)"></i>
-                    <div class="flex flex-col gap-1.5 ${issue.status === 'pending' ? '' : 'hidden'}" onclick="event.stopPropagation()">
-                        <button onclick="resolveIssue(${issue.id}, 'resolved')" class="text-[11px] px-2.5 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 flex items-center gap-1 whitespace-nowrap">
-                            <i class="fas fa-check"></i>采纳
+                    <div class="flex flex-col gap-1.5 ${['pending', 'pending_inherited'].includes(issue.status) ? '' : 'hidden'}" onclick="event.stopPropagation()">
+                        <button onclick="resolveIssue(${issue.id}, 'resolved')" class="text-[11px] px-2.5 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 flex items-center gap-1 whitespace-nowrap" title="确认这是问题，已处理">
+                            <i class="fas fa-check"></i>已处理
                         </button>
-                        <button onclick="showRejectInput(${issue.id})" class="text-[11px] px-2.5 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 flex items-center gap-1 whitespace-nowrap">
-                            <i class="fas fa-times"></i>拒绝
+                        <button onclick="showActionInput(${issue.id}, 'false_positive')" class="text-[11px] px-2.5 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 flex items-center gap-1 whitespace-nowrap" title="这是误报">
+                            <i class="fas fa-times"></i>误报
+                        </button>
+                        <button onclick="showActionInput(${issue.id}, 'ignored')" class="text-[11px] px-2.5 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 flex items-center gap-1 whitespace-nowrap" title="暂缓处理">
+                            <i class="fas fa-pause"></i>忽略
                         </button>
                     </div>
                 </div>
@@ -1107,14 +1120,16 @@ function renderIssues() {
                     </div>
                 </div>` : ''}
 
-                <!-- 拒绝原因 -->
-                ${issue.reject_reason ? `<div class="mt-3 pt-3 border-t border-dashed border-red-100"><p class="text-xs text-red-500"><i class="fas fa-info-circle mr-1"></i>拒绝原因：${escapeHtml(issue.reject_reason)}</p></div>` : ''}
+                <!-- 处理说明/原因 -->
+                ${issue.reject_reason ? `<div class="mt-3 pt-3 border-t border-dashed border-red-100"><p class="text-xs text-red-500"><i class="fas fa-info-circle mr-1"></i>处理说明：${escapeHtml(issue.reject_reason)}</p></div>` : ''}
 
-                <div id="rejectInput-${issue.id}" class="hidden mt-3" onclick="event.stopPropagation()">
-                    <input type="text" placeholder="填写拒绝原因..." class="text-xs px-2 py-1 border rounded w-full mb-1" id="rejectReason-${issue.id}">
+                <!-- 操作弹窗（已处理/误报/忽略共用一个） -->
+                <div id="actionInput-${issue.id}" class="hidden mt-3" onclick="event.stopPropagation()">
+                    <p class="text-xs text-gray-600 mb-1" id="actionLabel-${issue.id}">请填写处理说明：</p>
+                    <input type="text" placeholder="填写原因..." class="text-xs px-2 py-1 border rounded w-full mb-1" id="actionReason-${issue.id}">
                     <div class="flex gap-1">
-                        <button onclick="resolveIssue(${issue.id}, 'false_positive', document.getElementById('rejectReason-${issue.id}').value)" class="text-xs px-2 py-1 bg-red-600 text-white rounded">确认拒绝</button>
-                        <button onclick="hideRejectInput(${issue.id})" class="text-xs px-2 py-1 bg-gray-200 text-gray-600 rounded">取消</button>
+                        <button onclick="submitAction(${issue.id})" class="text-xs px-2 py-1 bg-blue-600 text-white rounded" id="actionConfirmBtn-${issue.id}">确认</button>
+                        <button onclick="hideActionInput(${issue.id})" class="text-xs px-2 py-1 bg-gray-200 text-gray-600 rounded">取消</button>
                     </div>
                 </div>
             </div>
@@ -1129,7 +1144,7 @@ function filterIssues(status) {
     renderIssues();
 }
 
-function showRejectInput(issueId) {
+function showActionInput(issueId, action) {
     // 确保详情已展开
     const detail = document.getElementById('issue-detail-' + issueId);
     const icon = document.getElementById('issue-toggle-' + issueId);
@@ -1137,11 +1152,31 @@ function showRejectInput(issueId) {
         detail.classList.add('expanded');
         if (icon) icon.classList.add('expanded');
     }
-    document.getElementById('rejectInput-' + issueId).classList.remove('hidden');
+    document.getElementById('actionInput-' + issueId).classList.remove('hidden');
+    // 设置当前action
+    document.getElementById('actionInput-' + issueId).dataset.action = action;
+    const labelMap = { 'false_positive': '请填写误报原因：', 'ignored': '请填写忽略原因：' };
+    document.getElementById('actionLabel-' + issueId).textContent = labelMap[action] || '请填写原因：';
+    const btnMap = { 'false_positive': '确认误报', 'ignored': '确认忽略' };
+    document.getElementById('actionConfirmBtn-' + issueId).textContent = btnMap[action] || '确认';
+    document.getElementById('actionReason-' + issueId).value = '';
+    document.getElementById('actionReason-' + issueId).focus();
 }
 
-function hideRejectInput(issueId) {
-    document.getElementById('rejectInput-' + issueId).classList.add('hidden');
+function hideActionInput(issueId) {
+    document.getElementById('actionInput-' + issueId).classList.add('hidden');
+}
+
+function submitAction(issueId) {
+    const container = document.getElementById('actionInput-' + issueId);
+    const action = container.dataset.action;
+    const reason = document.getElementById('actionReason-' + issueId).value.trim();
+    if (!reason) {
+        showToast('请填写原因', 'error');
+        return;
+    }
+    resolveIssue(issueId, action, reason);
+    hideActionInput(issueId);
 }
 
 function toggleIssueDetail(issueId, event) {
@@ -1175,7 +1210,12 @@ async function resolveIssue(issueId, status, rejectReason) {
             })
         });
         if (!res.ok) throw new Error('操作失败');
-        showToast(status === 'resolved' ? '已采纳' : '已拒绝', 'success');
+        const toastMap = {
+            'resolved': '已标记为已处理',
+            'false_positive': '已标记为误报',
+            'ignored': '已标记为忽略'
+        };
+        showToast(toastMap[status] || '操作成功', 'success');
         loadStructuredReview(taskId);
     } catch (err) {
         showToast('操作失败: ' + err.message, 'error');
@@ -1194,15 +1234,29 @@ function updateBatchActionBar() {
 async function batchAcceptIssues() {
     const checked = document.querySelectorAll('.issue-checkbox:checked');
     const issues = Array.from(checked).map(cb => ({ id: parseInt(cb.value), status: 'resolved' }));
-    await batchResolve(issues, '批量采纳成功');
+    await batchResolve(issues, '批量已处理成功');
 }
 
 async function batchRejectIssues() {
-    const reason = prompt('请输入批量拒绝的原因（可留空）：');
-    if (reason === null) return;
+    const reason = prompt('请输入批量误报的原因（必填）：');
+    if (reason === null || reason.trim() === '') {
+        showToast('原因不能为空', 'error');
+        return;
+    }
     const checked = document.querySelectorAll('.issue-checkbox:checked');
     const issues = Array.from(checked).map(cb => ({ id: parseInt(cb.value), status: 'false_positive', reject_reason: reason }));
-    await batchResolve(issues, '批量拒绝成功');
+    await batchResolve(issues, '批量误报标记成功');
+}
+
+async function batchIgnoreIssues() {
+    const reason = prompt('请输入批量忽略的原因（必填）：');
+    if (reason === null || reason.trim() === '') {
+        showToast('原因不能为空', 'error');
+        return;
+    }
+    const checked = document.querySelectorAll('.issue-checkbox:checked');
+    const issues = Array.from(checked).map(cb => ({ id: parseInt(cb.value), status: 'ignored', reject_reason: reason }));
+    await batchResolve(issues, '批量忽略成功');
 }
 
 async function batchResolve(issues, successMsg) {

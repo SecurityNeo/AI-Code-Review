@@ -122,7 +122,7 @@ func PersistStructuredReview(taskID uint, result *llm.AIReviewResult) error {
 		// Step 6: 刷新项目 pending issue 快照计数（方案设计 Step 4）
 		var pendingCount int64
 		if err := tx.Model(&model.ReviewIssue{}).
-			Where("deleted_at IS NULL AND status IN (?) AND task_id IN (SELECT id FROM review_tasks WHERE project_id = ?)",
+			Where("deleted_at IS NULL AND status IN (?) AND task_id IN (SELECT id FROM tasks WHERE project_id = ?)",
 				[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, task.ProjectID).
 			Count(&pendingCount).Error; err == nil {
 			tx.Model(&model.Project{}).Where("id = ?", task.ProjectID).UpdateColumn("pending_issue_count", pendingCount)

@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script src="js/theme.js?v=1"></script>
+    <style>html{background-color:#1e293b;}</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>通知规则管理 - CodeGuard</title>
+    <script src="js/auth.js?v=6"></script>
+    <script src="js/menu-config.js?v=6"></script>
+    <script src="js/sidebar.js?v=6"></script>
+    <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="css/theme.css?v=1">
+    <style>
+        .sidebar-item:hover { background-color: rgba(255,255,255,0.1); }
+        .sidebar-item.active { background-color: rgba(255,255,255,0.15); border-left: 3px solid #3b82f6; }
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .stage-row { display:flex; align-items:center; gap:8px; padding:10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans">
+
+<div id="page-transition" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#1e293b;z-index:99999;transition:opacity .25s ease;"></div>
+<script>
+(function(){
+  function hide(){var el=document.getElementById('page-transition');if(el){el.style.opacity='0';setTimeout(function(){el.remove();},250);}}
+  if(document.readyState==='complete'){hide();}else{window.addEventListener('load',hide);}
+})();
+</script>
+
+<div class="flex h-screen">
+    <aside id="sidebar" class="w-64 bg-slate-900 text-white flex-shrink-0 flex flex-col">
+        <nav style="padding: 20px; text-align: center; color: var(--cg-text-tertiary); font-size: 13px;">加载中...</nav>
+    </aside>
+
+    <main class="flex-1 overflow-y-auto">
+        <header class="bg-white border-b px-8 py-4 flex items-center justify-between sticky top-0 z-10">
+            <div>
+                <h2 class="text-xl font-bold text-gray-800">🔔 通知规则管理</h2>
+                <p class="text-sm text-gray-500 mt-1">规则模板优先级高于企业微信通知模板中的通知模板配置</p>
+            </div>
+            <button onclick="showAddModal()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
+                <i class="fas fa-plus mr-1"></i>新建规则
+            </button>
+        </header>
+
+        <div class="px-8 py-6">
+            <div class="bg-white rounded-xl border overflow-hidden">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 border-b">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">规则名称</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">触发器</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">供应商</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">通知机器人</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">延迟</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">状态</th>
+                            <th class="px-4 py-3 text-right text-xs font-semibold text-gray-500 w-36">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ruleTableBody" class="divide-y">
+                        <tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- 新建/编辑弹框 -->
+<div id="ruleModal" class="fixed inset-0 bg-black/50 z-50 hidden items-center justify-center">
+    <div class="bg-white rounded-xl shadow-xl w-[900px] max-w-[96%] h-[92vh] max-h-[800px] flex flex-col">
+        <!-- Header -->
+        <div class="px-6 py-4 border-b flex-shrink-0 flex items-center justify-between">
+            <h3 class="font-bold text-gray-900 text-lg" id="modalTitle">新建规则</h3>
+            <button onclick="hideAddModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-lg"></i></button>
+        </div>
+
+        <!-- Body：左右分栏可独立滚动 -->
+        <div class="flex-1 overflow-hidden flex min-h-0">
+            <!-- 左侧：表单 -->
+            <div class="flex-1 overflow-y-auto custom-scroll p-6 space-y-5 min-w-0">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">规则名称</label>
+                        <input type="text" id="rName" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="如：任务完成通知">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">触发器 <span class="text-xs text-gray-400 font-normal">（决定哪些字段需要配置）</span></label>
+                        <select id="rTrigger" onchange="onTriggerChange()" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                            <option value="task.completed">任务完成</option>
+                            <option value="task.failed">任务失败</option>
+                            <option value="issue.escalation">Issue 升级</option>
+                            <option value="daily.digest">每日摘要</option>
+                            <option value="auto.archived">自动归档</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">通知供应商</label>
+                        <select id="rProvider" onchange="onProviderChange()" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                            <option value="wecom">企业微信</option>
+                        </select>
+                        <p class="text-[10px] text-gray-400 mt-0.5">目前仅支持企业微信，后续将支持钉钉、飞书</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">通知机器人 <span class="text-xs text-gray-400 font-normal">（选择已配置的企业微信机器人）</span></label>
+                        <select id="rNotifierId" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                            <option value="">请选择机器人</option>
+                        </select>
+                        <p class="text-[10px] text-gray-400 mt-0.5">未配置机器人时，请先去<a href="notifiers.html" target="_blank" class="text-blue-600 hover:underline">企业微信通知</a>页面添加</p>
+                    </div>
+                </div>
+                <div>
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="block text-sm font-medium text-gray-700">通知模板（Markdown）</label>
+                        <button onclick="resetToDefaultTemplate()" class="text-xs text-blue-600 hover:text-blue-800"><i class="fas fa-undo mr-1"></i>重置为默认模板</button>
+                    </div>
+                    <textarea id="rTemplate" rows="12" class="w-full px-3 py-2 border rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50" placeholder="支持 Mustache 条件语法：{{#if ISSUE_CRITICAL}}...{{/if ISSUE_CRITICAL}}"></textarea>
+                    <p class="text-xs text-gray-500 mt-1">切换触发器时，若当前未填写内容或仍为默认模板，会自动填充该触发器的默认模板。点击右侧变量可直接插入。</p>
+                </div>
+
+                <!-- 延迟：通用 -->
+                <div class="bg-gray-50 rounded-lg border p-4 space-y-3">
+                    <div class="flex items-center gap-2 text-sm font-medium text-gray-700">
+                        <i class="fas fa-clock text-blue-500"></i>通用配置
+                        <span class="text-xs text-gray-400 font-normal">（所有触发器均适用）</span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs text-gray-600 mb-1">延迟（分钟）</label>
+                            <input type="number" id="rDelay" value="0" min="0" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                            <p class="text-[10px] text-gray-400 mt-0.5">触发后等待多久再发送通知</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- IM 相关配置：仅 task.completed / issue.escalation 显示 -->
+                <div id="imConfigSection" class="bg-gray-50 rounded-lg border p-4 space-y-3">
+                    <div class="flex items-center gap-2 text-sm font-medium text-gray-700">
+                        <i class="fas fa-paper-plane text-blue-500"></i>IM 通知配置
+                        <span class="text-xs text-gray-400 font-normal">（仅任务完成 / Issue 升级触发器涉及）</span>
+                    </div>
+                    <div class="grid grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-xs text-gray-600 mb-1">静默开始时间</label>
+                            <input type="time" id="rQuietStart" value="22:00" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-600 mb-1">静默结束时间</label>
+                            <input type="time" id="rQuietEnd" value="09:00" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-600 mb-1">合并窗口（分钟）</label>
+                            <input type="number" id="rDedup" value="15" min="0" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                            <p class="text-[10px] text-gray-400 mt-0.5">同一任务多次触发合并为一条</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 升级策略：仅 issue.escalation 显示 -->
+                <div id="escalationSection" class="bg-gray-50 rounded-lg border p-4 space-y-3">
+                    <div class="flex items-center gap-2 text-sm font-medium text-gray-700">
+                        <i class="fas fa-layer-group text-blue-500"></i>升级策略配置
+                        <span class="text-xs text-gray-400 font-normal">（仅 Issue 升级触发器涉及）</span>
+                    </div>
+                    <div id="escalationStages" class="space-y-2"></div>
+                    <button type="button" onclick="addStage()" class="mt-2 text-xs text-blue-600 hover:text-blue-800 font-medium"><i class="fas fa-plus mr-1"></i>添加阶段</button>
+                    <div class="text-[10px] text-gray-500 bg-white rounded p-2 border mt-1">
+                        <strong>升级阶段含义：</strong><br>
+                        第1级 = 首次提醒（开发者本人）｜ 第2级 = 协助督促（抄送负责人）｜ 第3级 = 正式升级（通知负责人）｜ 第4级 = 通知管理员 ｜ 第5级 = 自动归档<br>
+                        每个阶段的<strong>阈值小时</strong>指从 Issue 首次发现起经过的工作小时数。
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2 pt-1">
+                    <input type="checkbox" id="rEnabled" checked class="rounded">
+                    <label for="rEnabled" class="text-sm text-gray-700">启用该规则</label>
+                </div>
+            </div>
+
+            <!-- 右侧：模板变量参考 -->
+            <div class="w-60 border-l bg-gray-50 overflow-y-auto custom-scroll p-4 flex-shrink-0">
+                <h4 class="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm sticky top-0 bg-gray-50 pb-2 z-10">
+                    <i class="fas fa-code text-blue-600"></i>模板变量参考
+                </h4>
+                <div class="text-[11px] text-gray-500 mb-2">点击变量即可填充至左侧模板。</div>
+                <div class="grid grid-cols-1 gap-1" id="varList"></div>
+            </div>
+        </div>
+
+        <!-- Footer：固定按钮 -->
+        <div class="px-6 py-3 border-t flex-shrink-0 flex justify-end gap-2 bg-white">
+            <button onclick="hideAddModal()" class="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">取消</button>
+            <button onclick="testRule()" class="px-4 py-2 border rounded-lg text-sm text-blue-600 hover:bg-blue-50"><i class="fas fa-paper-plane mr-1"></i>测试渲染</button>
+            <button onclick="doSave()" class="px-4 py-2 rounded-lg text-sm text-white bg-blue-600 hover:bg-blue-700">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- 预览弹框 -->
+<div id="previewModal" class="fixed inset-0 bg-black/50 z-50 hidden items-center justify-center">
+    <div class="bg-white rounded-xl shadow-xl p-6 w-[520px] max-w-[90%]">
+        <h4 class="font-bold text-gray-800 mb-3">模板渲染预览</h4>
+        <div id="previewContent" class="prose prose-sm max-w-none bg-gray-50 p-4 rounded-lg text-sm whitespace-pre-wrap border max-h-[400px] overflow-y-auto custom-scroll"></div>
+        <div class="flex justify-end mt-4">
+            <button onclick="document.getElementById('previewModal').classList.add('hidden')" class="px-4 py-2 rounded-lg text-sm text-white bg-blue-600 hover:bg-blue-700">关闭</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const API_BASE = '/api/v1';
+let editingId = null;
+let stages = [];
+
+const templateVars = [
+    { name: '{{PROJECT_NAME}}', desc: '项目名称' },
+    { name: '{{TASK_ID}}', desc: '任务 ID' },
+    { name: '{{EXECUTION_COUNT}}', desc: '第几次运行' },
+    { name: '{{MR_IID}}', desc: 'MR 编号' },
+    { name: '{{MR_TITLE}}', desc: 'MR 标题' },
+    { name: '{{MR_AUTHOR}}', desc: 'MR 提交者' },
+    { name: '{{DEVELOPER}}', desc: '提交者展示名' },
+    { name: '{{BRANCH}}', desc: '源分支→目标分支' },
+    { name: '{{SCORE}}', desc: '评审分数' },
+    { name: '{{CHANGES}}', desc: '代码变更量' },
+    { name: '{{MR_URL}}', desc: 'MR 链接' },
+    { name: '{{ISSUE_TOTAL}}', desc: 'Issue 总数' },
+    { name: '{{ISSUE_PENDING}}', desc: '待处理数' },
+    { name: '{{ISSUE_CRITICAL}}', desc: '严重 Issue 数' },
+    { name: '{{ISSUE_HIGH}}', desc: '高危 Issue 数' },
+    { name: '{{ISSUE_MEDIUM}}', desc: '中危 Issue 数' },
+    { name: '{{ISSUE_LOW}}', desc: '低危 Issue 数' },
+    { name: '{{ISSUE_AUTO_FILTERED}}', desc: '自动过滤数' },
+    { name: '{{ISSUE_GONE}}', desc: '上次有本次未复现数' },
+    { name: '{{ISSUE_NEW}}', desc: '本次全新 Issue 数' },
+    { name: '{{ISSUE_RESOLVED_REAPPEARED}}', desc: '历史已修复复现数' },
+    { name: '{{STEWARD_NAME}}', desc: '负责人名' },
+    { name: '{{DEADLINE_HOURS}}', desc: '距升级截止工作小时' },
+    { name: '{{AT_RECIPIENT}}', desc: '自动替换为 IM @' },
+];
+
+const DEFAULT_TEMPLATES = {
+    'task.completed': '**🔍 AI 代码评审完成**\n\n**项目：**{{PROJECT_NAME}}\n**开发人员：**{{DEVELOPER}}\n**分支：**{{BRANCH}}\n**分数：**{{SCORE}}\n**变更：**{{CHANGES}}\n**MR：**{{MR_TITLE}}\n**MR 链接：**{{MR_URL}}\n{{#if ISSUE_TOTAL}}\n**Issue 统计：**\n- 总计：{{ISSUE_TOTAL}}\n- 严重：{{ISSUE_CRITICAL}}\n- 高危：{{ISSUE_HIGH}}\n- 中危：{{ISSUE_MEDIUM}}\n- 低危：{{ISSUE_LOW}}\n- 待处理：{{ISSUE_PENDING}}\n{{/if ISSUE_TOTAL}}',
+    'issue.escalation': '**⚠️ Issue 升级告警**\n\n**项目：**{{PROJECT_NAME}}\n**MR：**!{{MR_IID}} {{MR_TITLE}}\n**开发人员：**{{DEVELOPER}}\n**待处理：**{{ISSUE_PENDING}}\n**距升级截止：**{{DEADLINE_HOURS}} 工作小时\n请尽快处理。',
+    'daily.digest': '📊 {{PROJECT_NAME}} 每日摘要\n\n今日发现 Issue：{{ISSUE_TOTAL}} 条\n待处理：{{ISSUE_PENDING}} 条\n{{#if ISSUE_CRITICAL}}⚠️ 包含 {{ISSUE_CRITICAL}} 条严重 Issue，请关注！{{/if ISSUE_CRITICAL}}',
+    'task.failed': '❌ **任务执行失败**\n\n**项目：**{{PROJECT_NAME}}\n**MR：**{{MR_TITLE}}\n**开发人员：**{{DEVELOPER}}\n任务执行失败，请检查配置或重试。',
+    'auto.archived': '📦 **Issue 自动归档通知**\n\n**项目：**{{PROJECT_NAME}}\n部分 Issue 已超期 {{DEADLINE_HOURS}} 工作小时，系统已自动归档。'
+};
+
+const triggerLabels = {
+    'task.completed': '任务完成',
+    'task.failed': '任务失败',
+    'issue.escalation': 'Issue 升级',
+    'daily.digest': '每日摘要',
+    'auto.archived': '自动归档'
+};
+
+const providerLabels = {
+    'wecom': '企业微信',
+    'dingtalk': '钉钉',
+    'lark': '飞书'
+};
+
+let wecomNotifiers = [];
+
+const STAGE_MEANINGS = [
+    '首次提醒（开发者本人）',
+    '协助督促（抄送负责人）',
+    '正式升级（通知负责人）',
+    '通知管理员',
+    '自动归档'
+];
+
+const STAGE_DEFAULTS = [
+    { threshold_hours: 24, recipient: 'owner', notify_im: false },
+    { threshold_hours: 72, recipient: 'owner+steward', notify_im: true },
+    { threshold_hours: 120, recipient: 'steward', notify_im: true },
+    { threshold_hours: 240, recipient: 'admin', notify_im: true },
+    { threshold_hours: 360, recipient: 'auto_archive', notify_im: false }
+];
+
+function renderVarList() {
+    document.getElementById('varList').innerHTML = templateVars.map(v => `
+        <div onclick="insertVar('${escapeHtml(v.name)}')" class="group cursor-pointer hover:bg-blue-100 rounded px-2 py-1.5 transition border border-transparent hover:border-blue-200">
+            <code class="text-[11px] bg-white text-blue-700 px-1 rounded border border-blue-100">${escapeHtml(v.name)}</code>
+            <div class="text-[11px] text-gray-500 mt-0.5">${escapeHtml(v.desc)}</div>
+        </div>
+    `).join('');
+}
+
+function insertVar(name) {
+    const ta = document.getElementById('rTemplate');
+    const start = ta.selectionStart || 0;
+    const end = ta.selectionEnd || 0;
+    const text = ta.value;
+    ta.value = text.substring(0, start) + name + text.substring(end);
+    ta.focus();
+    ta.setSelectionRange(start + name.length, start + name.length);
+}
+
+function resetToDefaultTemplate() {
+    const trigger = document.getElementById('rTrigger').value;
+    document.getElementById('rTemplate').value = DEFAULT_TEMPLATES[trigger] || '';
+}
+
+// ========== 触发器切换：控制字段显隐 ==========
+function onTriggerChange() {
+    const trigger = document.getElementById('rTrigger').value;
+
+    // IM 相关配置：仅 task.completed / issue.escalation 显示
+    const showIM = (trigger === 'task.completed' || trigger === 'issue.escalation');
+    document.getElementById('imConfigSection').style.display = showIM ? 'block' : 'none';
+
+    // 升级策略：仅 issue.escalation 显示
+    const showEscalation = (trigger === 'issue.escalation');
+    document.getElementById('escalationSection').style.display = showEscalation ? 'block' : 'none';
+
+    // 自动填充默认模板（若当前为空或仍是旧默认）
+    const ta = document.getElementById('rTemplate');
+    const val = ta.value.trim();
+    const knownTemplates = Object.values(DEFAULT_TEMPLATES);
+    if (!val || knownTemplates.includes(val)) {
+        ta.value = DEFAULT_TEMPLATES[trigger] || '';
+    }
+}
+
+// ========== 升级策略表单 ==========
+function renderStages() {
+    const container = document.getElementById('escalationStages');
+    if (stages.length === 0) {
+        container.innerHTML = '<div class="text-xs text-gray-400 py-2">暂无升级阶段，请点击下方按钮添加</div>';
+        return;
+    }
+    container.innerHTML = stages.map((s, i) => `
+        <div class="stage-row">
+            <div class="flex-shrink-0 w-28">
+                <span class="text-xs font-bold text-blue-700">第${i+1}级升级</span>
+                <div class="text-[10px] text-gray-400">${STAGE_MEANINGS[i] || ''}</div>
+            </div>
+            <div>
+                <label class="block text-[10px] text-gray-400 mb-0.5">阈值（工作小时）</label>
+                <input type="number" value="${s.threshold_hours}" min="1"
+                    class="w-20 text-xs border rounded px-2 py-1" onchange="updateStage(${i},'threshold_hours',this.value)">
+            </div>
+            <div class="flex-1">
+                <label class="block text-[10px] text-gray-400 mb-0.5">通知对象</label>
+                <select class="text-xs border rounded px-2 py-1 w-full max-w-[140px]" onchange="updateStage(${i},'recipient',this.value)">
+                    <option value="owner" ${s.recipient==='owner'?'selected':''}>开发者</option>
+                    <option value="owner+steward" ${s.recipient==='owner+steward'?'selected':''}>开发者+负责人</option>
+                    <option value="steward" ${s.recipient==='steward'?'selected':''}>负责人</option>
+                    <option value="admin" ${s.recipient==='admin'?'selected':''}>管理员</option>
+                </select>
+            </div>
+            <label class="flex items-center gap-1.5 text-[12px] text-gray-500 px-2 cursor-pointer">
+                <input type="checkbox" ${s.notify_im?'checked':''} onchange="updateStage(${i},'notify_im',this.checked)"> IM
+            </label>
+            <button onclick="removeStage(${i})" class="text-red-400 hover:text-red-600 text-xs px-2" title="删除"><i class="fas fa-trash-alt"></i></button>
+        </div>
+    `).join('');
+}
+
+function addStage() {
+    const tpl = STAGE_DEFAULTS[Math.min(stages.length, STAGE_DEFAULTS.length-1)];
+    stages.push({ ...tpl });
+    renderStages();
+}
+
+function removeStage(idx) {
+    stages.splice(idx, 1);
+    stages.forEach((s, i) => s.level = i + 1);
+    renderStages();
+}
+
+function updateStage(idx, field, value) {
+    if (field === 'notify_im') stages[idx][field] = !!value;
+    else if (field === 'threshold_hours') stages[idx][field] = parseInt(value) || 0;
+    else stages[idx][field] = value;
+}
+
+function getEscalationJSON() {
+    if (stages.length === 0) return '';
+    return JSON.stringify(stages);
+}
+
+// ========== 弹框 ==========
+function showAddModal() {
+    editingId = null;
+    document.getElementById('modalTitle').textContent = '新建规则';
+    document.getElementById('rName').value = '';
+    document.getElementById('rTrigger').value = 'task.completed';
+    document.getElementById('rProvider').value = 'wecom';
+    document.getElementById('rNotifierId').value = '';
+    document.getElementById('rTemplate').value = DEFAULT_TEMPLATES['task.completed'];
+    document.getElementById('rDelay').value = '0';
+    document.getElementById('rQuietStart').value = '22:00';
+    document.getElementById('rQuietEnd').value = '09:00';
+    document.getElementById('rDedup').value = '15';
+    stages = [];
+    renderStages();
+    onTriggerChange();
+    document.getElementById('rEnabled').checked = true;
+    document.getElementById('ruleModal').classList.remove('hidden');
+    document.getElementById('ruleModal').classList.add('flex');
+}
+
+function hideAddModal() {
+    document.getElementById('ruleModal').classList.add('hidden');
+    document.getElementById('ruleModal').classList.remove('flex');
+}
+
+async function editRule(id) {
+    try {
+        const res = await apiFetch(`${API_BASE}/notification-rules/${id}`);
+        if (!res.ok) {
+            const errText = await res.text();
+            console.error('editRule API failed:', res.status, errText);
+            showToast('加载失败: HTTP ' + res.status, 'error');
+            return;
+        }
+        const json = await res.json();
+        const r = (json && json.data) || null;
+        if (!r || !r.id) {
+            showToast('规则不存在或数据无效', 'error');
+            return;
+        }
+        editingId = id;
+        document.getElementById('modalTitle').textContent = '编辑规则';
+        document.getElementById('rName').value = String(r.name || '');
+        document.getElementById('rTrigger').value = String(r.trigger || 'task.completed');
+        document.getElementById('rProvider').value = String(r.provider || 'wecom');
+        document.getElementById('rNotifierId').value = String(r.notifier_id || '');
+        document.getElementById('rTemplate').value = String(r.template || '');
+        document.getElementById('rDelay').value = String(r.delay_minutes !== undefined ? r.delay_minutes : 0);
+        document.getElementById('rQuietStart').value = String(r.quiet_hours_start || '22:00');
+        document.getElementById('rQuietEnd').value = String(r.quiet_hours_end || '09:00');
+        document.getElementById('rDedup').value = String(r.dedup_window_minutes !== undefined ? r.dedup_window_minutes : 15);
+        document.getElementById('rEnabled').checked = !!r.enabled;
+        stages = [];
+        if (r.escalation_config) {
+            try {
+                const parsed = JSON.parse(r.escalation_config);
+                if (Array.isArray(parsed)) stages = parsed;
+            } catch(e) {
+                console.error('escalation_config parse failed:', e, r.escalation_config);
+            }
+        }
+        renderStages();
+        onTriggerChange();
+        const modal = document.getElementById('ruleModal');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    } catch (e) {
+        console.error('editRule exception:', e);
+        showToast('加载失败: ' + (e && e.message ? e.message : '未知错误'), 'error');
+    }
+}
+
+async function doSave() {
+    const notifierIdVal = document.getElementById('rNotifierId').value;
+    const payload = {
+        name: document.getElementById('rName').value.trim(),
+        trigger: document.getElementById('rTrigger').value,
+        provider: document.getElementById('rProvider').value,
+        notifier_id: notifierIdVal ? parseInt(notifierIdVal) : null,
+        template: document.getElementById('rTemplate').value,
+        delay_minutes: parseInt(document.getElementById('rDelay').value) || 0,
+        quiet_hours_start: document.getElementById('rQuietStart').value,
+        quiet_hours_end: document.getElementById('rQuietEnd').value,
+        dedup_window_minutes: parseInt(document.getElementById('rDedup').value) || 0,
+        escalation_config: getEscalationJSON(),
+        enabled: document.getElementById('rEnabled').checked
+    };
+    if (!payload.name) { showToast('请填写规则名称', 'error'); return; }
+    if (!payload.notifier_id) { showToast('请选择通知机器人', 'error'); return; }
+    try {
+        const url = editingId ? `${API_BASE}/notification-rules/${editingId}` : `${API_BASE}/notification-rules`;
+        const method = editingId ? 'PUT' : 'POST';
+        const res = await apiFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        showToast(editingId ? '更新成功' : '创建成功', 'success');
+        hideAddModal();
+        loadRules();
+    } catch (e) { showToast('保存失败: ' + e.message, 'error'); }
+}
+
+async function testRule() {
+    const template = document.getElementById('rTemplate').value;
+    if (!template.trim()) { showToast('请先输入模板内容', 'error'); return; }
+    try {
+        const res = await apiFetch(`${API_BASE}/notification-rules/0/test`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ template })
+        });
+        const json = await res.json();
+        document.getElementById('previewContent').textContent = json.data || '渲染失败';
+        document.getElementById('previewModal').classList.remove('hidden');
+        document.getElementById('previewModal').classList.add('flex');
+    } catch (e) { showToast('测试失败: ' + e.message, 'error'); }
+}
+
+async function testRuleById(id) {
+    try {
+        const res = await apiFetch(`${API_BASE}/notification-rules/${id}/test`, { method: 'POST' });
+        const json = await res.json();
+        document.getElementById('previewContent').textContent = json.data || '渲染失败';
+        document.getElementById('previewModal').classList.remove('hidden');
+        document.getElementById('previewModal').classList.add('flex');
+    } catch (e) { showToast('测试失败: ' + e.message, 'error'); }
+}
+
+async function deleteRule(id) {
+    if (!confirm('确定删除该规则？')) return;
+    try {
+        const res = await apiFetch(`${API_BASE}/notification-rules/${id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        showToast('已删除', 'success');
+        loadRules();
+    } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
+}
+
+async function loadRules() {
+    try {
+        const res = await apiFetch(`${API_BASE}/notification-rules`);
+        const json = await res.json();
+        const rules = json.data || [];
+        // 为每个规则填充 notifier_name
+        rules.forEach(r => {
+            if (r.notifier_id) {
+                const found = wecomNotifiers.find(n => n.id === r.notifier_id);
+                r.notifier_name = found ? found.name : null;
+            }
+        });
+        const tbody = document.getElementById('ruleTableBody');
+        if (rules.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">暂无规则</td></tr>';
+            return;
+        }
+        tbody.innerHTML = rules.map(r => `
+            <tr class="hover:bg-gray-50">
+                <td class="px-4 py-3 text-sm font-medium text-gray-800">${escapeHtml(r.name)}</td>
+                <td class="px-4 py-3 text-sm text-gray-600">${triggerLabels[r.trigger] || r.trigger}</td>
+                <td class="px-4 py-3 text-sm text-gray-600">${providerLabels[r.provider] || r.provider || '-'}</td>
+                <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(r.notifier_name || (r.notifier_id ? '机器人 #' + r.notifier_id : '未指定'))}</td>
+                <td class="px-4 py-3 text-sm text-gray-600">${r.delay_minutes} min</td>
+                <td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-xs ${r.enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}">${r.enabled ? '启用' : '禁用'}</span></td>
+                <td class="px-4 py-3 text-right space-x-2">
+                    <button onclick="editRule(${r.id})" class="text-blue-600 hover:text-blue-800 text-xs">编辑</button>
+                    <button onclick="testRuleById(${r.id})" class="text-green-600 hover:text-green-800 text-xs">测试</button>
+                    <button onclick="deleteRule(${r.id})" class="text-red-500 hover:text-red-700 text-xs">删除</button>
+                </td>
+            </tr>`).join('');
+    } catch (e) { console.error(e); }
+}
+
+async function loadWeComNotifiers() {
+    try {
+        const res = await apiFetch(`${API_BASE}/notifiers?enabled=true`);
+        const json = await res.json();
+        wecomNotifiers = json.data || [];
+        const select = document.getElementById('rNotifierId');
+        if (!select) return;
+        select.innerHTML = '<option value="">请选择机器人</option>' +
+            wecomNotifiers.map(n => `<option value="${n.id}">${escapeHtml(n.name)}</option>`).join('');
+    } catch (e) {
+        console.error('loadWeComNotifiers failed:', e);
+    }
+}
+
+function showToast(message, type = 'info') {
+    let toast = document.getElementById('global-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'global-toast';
+        toast.style.cssText = 'position:fixed;top:20px;right:20px;z-index:99999;padding:12px 20px;border-radius:8px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,0.15);transition:all 0.3s;';
+        document.body.appendChild(toast);
+    }
+    const colors = { success: 'background:#dcfce7;color:#166534;border:1px solid #bbf7d0;', error: 'background:#fee2e2;color:#991b1b;border:1px solid #fecaca;', info: 'background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;' };
+    toast.style.cssText = colors[type] || colors.info;
+    toast.textContent = message;
+    setTimeout(() => toast.remove(), 2500);
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    renderVarList();
+    loadWeComNotifiers();
+    loadRules();
+});
+</script>
+<script defer src="/static/js/tailwindcss.min.js"></script>
+</body>
+</html>

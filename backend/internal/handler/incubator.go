@@ -606,7 +606,7 @@ func (h *IncubatorHandler) RuleHealth(c *gin.Context) {
 
 		var totalIssues, rejectedIssues int64
 		model.DB.Model(&model.ReviewIssue{}).Where("rule_id = ?", rule.ID).Count(&totalIssues)
-		model.DB.Model(&model.ReviewIssue{}).Where("rule_id = ? AND status = ?", rule.ID, "rejected").Count(&rejectedIssues)
+		model.DB.Model(&model.ReviewIssue{}).Where("rule_id = ? AND status = ?", rule.ID, "false_positive").Count(&rejectedIssues)
 
 		rejectRate := float64(0)
 		if totalIssues > 0 {

@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ai-optimizer/backend/internal/model"
 	"go.uber.org/zap"
@@ -20,6 +21,8 @@ func (s *NotificationService) SendInbox(userID uint, notifType string, title str
 	if userID == 0 {
 		return
 	}
+	// Title 截断：数据库字段 size=200，预留安全余量
+	title = truncateRune(title, 190)
 	n := model.Notification{
 		UserID:  userID,
 		Type:    notifType,
@@ -39,14 +42,14 @@ func (s *NotificationService) SendInbox(userID uint, notifType string, title str
 func (s *NotificationService) MarkRead(userID uint, notifID uint) error {
 	return model.DB.Model(&model.Notification{}).
 		Where("id = ? AND user_id = ?", notifID, userID).
-		Updates(map[string]interface{}{"is_read": true, "read_at": "NOW()"}).Error
+		Updates(map[string]interface{}{"is_read": true, "read_at": time.Now()}).Error
 }
 
 // MarkAllRead 全部已读
 func (s *NotificationService) MarkAllRead(userID uint) error {
 	return model.DB.Model(&model.Notification{}).
 		Where("user_id = ? AND is_read = ?", userID, false).
-		Updates(map[string]interface{}{"is_read": true, "read_at": "NOW()"}).Error
+		Updates(map[string]interface{}{"is_read": true, "read_at": time.Now()}).Error
 }
 
 // List 站内信列表
@@ -119,7 +122,7 @@ func CalcIssueStats(taskID uint, mrID int) IssueStats {
 	// 与上次成功版本对比（基于指纹精确匹配）
 	if mrID > 0 {
 		var lastTask model.Task
-		if err := model.DB.Where("mr_iid = ? AND id < ? AND status = ?", mrID, taskID, model.TaskSuccess).
+		if err := model.DB.Where("mr_merge_id = ? AND id < ? AND status = ?", mrID, taskID, model.TaskSuccess).
 			Order("id DESC").First(&lastTask).Error; err == nil {
 			var lastIssues []model.ReviewIssue
 			model.DB.Unscoped().Where("task_id = ?", lastTask.ID).Find(&lastIssues)
@@ -163,9 +166,13 @@ type TemplateContext struct {
 	Project   model.Project
 	Developer string // MR 提交者含 DisplayName
 	Steward   string
+	Additions int
+	Deletions int
+	DeadlineHours int
+	AtRecipient string
 }
 
-// RenderMessage 根据模板和上下文渲染消息
+// RenderMessage 根据模板和上下文渲染消息（支持 Mustache 条件语法）
 func RenderMessage(template string, ctx TemplateContext) string {
 	task := ctx.Task
 	stats := ctx.Stats
@@ -180,6 +187,8 @@ func RenderMessage(template string, ctx TemplateContext) string {
 	msg = strings.ReplaceAll(msg, "{{DEVELOPER}}", ctx.Developer)
 	msg = strings.ReplaceAll(msg, "{{BRANCH}}", task.SourceBranch+" -> "+task.TargetBranch)
 	msg = strings.ReplaceAll(msg, "{{SCORE}}", fmt.Sprintf("%d", task.ScoreValue))
+	msg = strings.ReplaceAll(msg, "{{CHANGES}}", fmt.Sprintf("+%d/-%d", ctx.Additions, ctx.Deletions))
+	msg = strings.ReplaceAll(msg, "{{MR_URL}}", task.MRURL)
 
 	// Issue 统计
 	msg = strings.ReplaceAll(msg, "{{ISSUE_TOTAL}}", fmt.Sprintf("%d", stats.Total))
@@ -191,6 +200,92 @@ func RenderMessage(template string, ctx TemplateContext) string {
 	msg = strings.ReplaceAll(msg, "{{ISSUE_AUTO_FILTERED}}", fmt.Sprintf("%d", stats.AutoFiltered))
 	msg = strings.ReplaceAll(msg, "{{ISSUE_GONE}}", fmt.Sprintf("%d", stats.Gone))
 	msg = strings.ReplaceAll(msg, "{{ISSUE_NEW}}", fmt.Sprintf("%d", stats.New))
+	msg = strings.ReplaceAll(msg, "{{ISSUE_RESOLVED_REAPPEARED}}", fmt.Sprintf("%d", stats.ResolvedReappeared))
+	msg = strings.ReplaceAll(msg, "{{STEWARD_NAME}}", ctx.Steward)
+	msg = strings.ReplaceAll(msg, "{{DEADLINE_HOURS}}", fmt.Sprintf("%d", ctx.DeadlineHours))
+	msg = strings.ReplaceAll(msg, "{{AT_RECIPIENT}}", ctx.AtRecipient)
+
+	// Mustache 条件语法 {{#if VAR}}...{{/if}}
+	variables := map[string]interface{}{
+		"ISSUE_TOTAL":              stats.Total, "ISSUE_PENDING": stats.Pending,
+		"ISSUE_CRITICAL": stats.Critical, "ISSUE_HIGH": stats.High,
+		"ISSUE_MEDIUM":   stats.Medium, "ISSUE_LOW": stats.Low,
+		"ISSUE_AUTO_FILTERED": stats.AutoFiltered, "ISSUE_GONE": stats.Gone,
+		"ISSUE_NEW":           stats.New, "ISSUE_RESOLVED_REAPPEARED": stats.ResolvedReappeared,
+		"EXECUTION_COUNT":     task.ExecutionCount,
+	}
+	for name, val := range variables {
+		startTag := "{{#if " + name + "}}"
+		endTag := "{{/if " + name + "}}"
+		keep := false
+		if v, ok := val.(int); ok && v > 0 {
+			keep = true
+		}
+		msg = renderMustacheBlock(msg, startTag, endTag, keep)
+	}
 
 	return msg
+}
+
+func renderMustacheBlock(msg, startTag, namedEndTag string, keep bool) string {
+	for {
+		startIdx := strings.Index(msg, startTag)
+		if startIdx == -1 {
+			break
+		}
+		rest := msg[startIdx+len(startTag):]
+		// 优先匹配带变量名的闭合标签 {{/if VAR}}
+		endIdx := strings.Index(rest, namedEndTag)
+		actualEndTag := namedEndTag
+		if endIdx == -1 {
+			// 兜底：匹配不带变量名的闭合标签 {{/if}}
+			genericEnd := "{{/if}}"
+			endIdx = strings.Index(rest, genericEnd)
+			if endIdx == -1 {
+				break
+			}
+			actualEndTag = genericEnd
+		}
+		if keep {
+			msg = msg[:startIdx] + rest[:endIdx] + rest[endIdx+len(actualEndTag):]
+		} else {
+			msg = msg[:startIdx] + rest[endIdx+len(actualEndTag):]
+		}
+	}
+	return msg
+}
+
+// GetNotificationRuleTemplate 按 trigger 查询启用的通知规则模板
+func GetNotificationRuleTemplate(trigger string) string {
+	var rule model.NotificationRule
+	if err := model.DB.Where("`trigger` = ? AND enabled = ?", trigger, true).Order("id DESC").First(&rule).Error; err == nil {
+		if rule.Template == "" {
+			zap.L().Warn("notification rule found but template is empty",
+				zap.String("trigger", trigger),
+				zap.Uint("rule_id", rule.ID),
+				zap.String("rule_name", rule.Name),
+				zap.String("hint", "请在通知规则中填写消息模板，否则将 fallback 到企业微信机器人中的旧模板"))
+		} else {
+			zap.L().Info("notification rule template found",
+				zap.String("trigger", trigger),
+				zap.Uint("rule_id", rule.ID),
+				zap.String("rule_name", rule.Name),
+				zap.Int("template_len", len(rule.Template)))
+		}
+	return rule.Template
+} else {
+		zap.L().Warn("notification rule template not found",
+			zap.String("trigger", trigger),
+			zap.Error(err))
+	}
+	return ""
+}
+
+// truncateRune 按 Unicode 字符截断字符串，避免截断多字节字符
+func truncateRune(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "..."
 }

@@ -7,9 +7,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>规则命中统计 - CodeGuard</title>
     <script defer src="/vendor/echarts.min.js"></script>
-    <script src="js/auth.js?v=5"></script>
-    <script src="js/menu-config.js?v=2"></script>
-    <script src="js/sidebar.js?v=2"></script>
+    <script src="js/auth.js?v=6"></script>
+    <script src="js/menu-config.js?v=6"></script>
+    <script src="js/sidebar.js?v=6"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <script defer src="/static/js/tailwindcss.min.js"></script>
@@ -591,11 +591,9 @@ function renderDrawerIssues(issues, total) {
         const fileLoc = it.file
             ? `<span class="font-mono text-xs text-blue-600">${escapeHtml(it.file)}${it.line_start ? ':' + it.line_start : ''}</span>`
             : '<span class="text-xs text-gray-400">-</span>';
-        const statusBadge = it.status === 'accepted'
-            ? '<span class="badge-status-accepted text-xs px-2 py-0.5 rounded">已接纳</span>'
-            : it.status === 'rejected'
-                ? '<span class="badge-status-rejected text-xs px-2 py-0.5 rounded">已拒绝</span>'
-                : '<span class="badge-status-pending text-xs px-2 py-0.5 rounded">待处理</span>';
+        const statusMap = { 'resolved': '已处理', 'false_positive': '误报', 'ignored': '已忽略', 'pending': '待处理', 'pending_inherited': '待处理' };
+        const statusClsMap = { 'resolved': 'badge-status-accepted', 'false_positive': 'badge-status-rejected', 'ignored': 'badge-status-pending', 'pending': 'badge-status-pending', 'pending_inherited': 'badge-status-pending' };
+        const statusBadge = `<span class="${statusClsMap[it.status] || 'badge-status-pending'} text-xs px-2 py-0.5 rounded">${statusMap[it.status] || '待处理'}</span>`;
         const projectMr = it.project_name
             ? `<span class="text-xs text-gray-500">${escapeHtml(it.project_name)} · MR#${it.mr_merge_id || '-'} · ${escapeHtml(it.mr_author || '-')}</span>`
             : '';

@@ -102,7 +102,11 @@ func Auth() gin.HandlerFunc {
 
 		userID, ok := ValidateToken(token)
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "登录已过期，请重新登录", "token_debug": token[:8] + "...", "now": time.Now().Format(time.RFC3339)})
+			tokenDebug := token
+			if len(tokenDebug) > 8 {
+				tokenDebug = tokenDebug[:8] + "..."
+			}
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "登录已过期，请重新登录", "token_debug": tokenDebug, "now": time.Now().Format(time.RFC3339)})
 			c.Abort()
 			return
 		}

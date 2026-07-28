@@ -26,6 +26,7 @@ type pendingNotifyJob struct {
 
 type notifyPayload struct {
 	ProjectName       string
+	MRMergeID         int
 	MRAuthor          string
 	MRTitle           string
 	MRURL             string
@@ -60,16 +61,21 @@ func GetDelayedNotificationQueue() *DelayedNotificationQueue {
 }
 
 // Enqueue 任务完成时调用，合并重试通知
+// 读取 NotificationRule.delay_minutes 配置：
+//   delay=0：立即执行（不进入队列）
+//   delay>0：按配置延迟执行
+//   无规则：默认 2min（首次）/15min（重试）
 func (q *DelayedNotificationQueue) Enqueue(task model.Task, stats IssueStats) {
 	// 尝试根据 MRAuthor 查找 DisplayName
 	devName := task.MRAuthor
-	var mapping model.MemberMapping
-	if err := model.DB.Where("git_username = ? AND im_platform = ? AND enabled = ?", task.MRAuthor, model.IMPlatformWeCom, true).First(&mapping).Error; err == nil && mapping.DisplayName != "" {
-		devName = mapping.DisplayName
+	var tm model.TeamMember
+	if err := model.DB.Where("gitlab_username = ? AND enabled = ?", task.MRAuthor, true).First(&tm).Error; err == nil && tm.DisplayName != "" {
+		devName = tm.DisplayName
 	}
 
 	payload := notifyPayload{
 		ProjectName:       task.Project.Name,
+		MRMergeID:         task.MRMergeID,
 		MRAuthor:          task.MRAuthor,
 		MRTitle:           task.MRTitle,
 		MRURL:             task.MRURL,
@@ -87,6 +93,43 @@ func (q *DelayedNotificationQueue) Enqueue(task model.Task, stats IssueStats) {
 		DeveloperName:     devName,
 	}
 
+	// 读取 NotificationRule 确定延迟策略
+	var delay time.Duration
+	var rule model.NotificationRule
+	ruleFound := false
+	if err := model.DB.Where("`trigger` = ? AND enabled = ?", "task.completed", true).Order("id DESC").First(&rule).Error; err == nil {
+		ruleFound = true
+		delay = time.Duration(rule.DelayMinutes) * time.Minute
+		zap.L().Info("notification rule found for delay",
+			zap.Uint("task_id", task.ID),
+			zap.Int("delay_minutes", rule.DelayMinutes),
+			zap.String("rule_name", rule.Name))
+	} else {
+		zap.L().Info("no task.completed notification rule, using default delay",
+			zap.Uint("task_id", task.ID),
+			zap.Error(err))
+	}
+
+	// 无规则时使用默认延迟
+	if !ruleFound {
+		delay = 15 * time.Minute
+		if task.ExecutionCount <= 1 {
+			delay = 2 * time.Minute
+		}
+	}
+
+	// delay=0：立即执行，不进入延迟队列
+	if delay == 0 {
+		zap.L().Info("delay=0, execute notify immediately", zap.Uint("task_id", task.ID))
+		go q.executeJob(task.ID, &pendingNotifyJob{
+			TaskID:         task.ID,
+			FirstEnqueueAt: time.Now(),
+			FireAt:         time.Now(),
+			Payload:        payload,
+		})
+		return
+	}
+
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -98,11 +141,6 @@ func (q *DelayedNotificationQueue) Enqueue(task model.Task, stats IssueStats) {
 	}
 
 	// 首次入队
-	delay := 15 * time.Minute
-	if task.ExecutionCount <= 1 {
-		delay = 2 * time.Minute // 首次运行快速通知
-	}
-
 	now := time.Now()
 	q.jobs[task.ID] = &pendingNotifyJob{
 		TaskID:         task.ID,
@@ -112,7 +150,8 @@ func (q *DelayedNotificationQueue) Enqueue(task model.Task, stats IssueStats) {
 	}
 	zap.L().Info("delayed notify enqueued",
 		zap.Uint("task_id", task.ID),
-		zap.Duration("delay", delay))
+		zap.Duration("delay", delay),
+		zap.Bool("rule_found", ruleFound))
 }
 
 // backgroundScanner 后台扫描器，每分钟检查到期任务
@@ -142,12 +181,9 @@ func (q *DelayedNotificationQueue) fireDueJobs() {
 func (q *DelayedNotificationQueue) executeJob(taskID uint, job *pendingNotifyJob) {
 	payload := job.Payload
 
-	// 1. 站内信通知开发者（MR 提交者）
-	var mapping model.MemberMapping
-	var mentionUserID string
-	if err := model.DB.Where("git_username = ? AND im_platform = ? AND enabled = ?", payload.MRAuthor, model.IMPlatformWeCom, true).First(&mapping).Error; err == nil {
-		mentionUserID = mapping.IMUserID
-	}
+	// 加载 task 信息
+	var task model.Task
+	model.DB.First(&task, taskID)
 
 	// 查找用户 ID 用于站内信
 	var user model.User
@@ -164,46 +200,15 @@ func (q *DelayedNotificationQueue) executeJob(taskID uint, job *pendingNotifyJob
 		link = fmt.Sprintf("/tasks.html?id=%d", taskID)
 	}
 	notifType := model.NotificationTypeTaskCompleted
-	notifTitle := fmt.Sprintf("MR !%s 评审已完成（第 %d 次）", payload.MRTitle, payload.ExecutionCount)
+	notifTitle := fmt.Sprintf("MR !%d 评审已完成（第 %d 次）", task.MRMergeID, payload.ExecutionCount)
 	if payload.Total == 0 {
 		notifType = model.NotificationTypeTaskCompletedNoIssue
-		notifTitle = fmt.Sprintf("MR !%s 评审完成：未发现问题", payload.MRTitle)
+		notifTitle = fmt.Sprintf("MR !%d 评审完成：未发现问题", task.MRMergeID)
 	}
 	notifSvc.SendInbox(ownerID, notifType, notifTitle, buildInboxContent(payload), link)
 
-	// 2. 企微群 IM 推送（仅推送任务所属项目 + 全局的 notifier）
-	var task model.Task
-	model.DB.First(&task, taskID)
-	var notifiers []model.WeComNotifier
-	db := model.DB.Where("enabled = ?", true)
-	if task.ProjectID > 0 {
-		db = db.Where("project_id IS NULL OR project_id = ?", task.ProjectID)
-	} else {
-		db = db.Where("project_id IS NULL")
-	}
-	db.Find(&notifiers)
-	for _, notifier := range notifiers {
-		msg := buildIMMarkdown(payload, mentionUserID)
-		notifierSvc := NewNotifierService()
-		ok, detail, err := notifierSvc.SendMessage(notifier.WebhookUrl, msg, "")
-		// 记录投递日志
-		log := model.NotificationDeliveryLog{
-			NotifierID:     &notifier.ID,
-			TaskID:         &taskID,
-			Channel:        "wecom",
-			RecipientType:  "mr_author",
-			MessagePreview: truncate(msg, 200),
-			Status:         "success",
-		}
-		if !ok || err != nil {
-			log.Status = "failed"
-			log.ErrorMsg = detail
-			if err != nil {
-				log.ErrorMsg = err.Error()
-			}
-		}
-		model.DB.Create(&log)
-	}
+	// 注：企微群 IM 推送由 NotifyAIReviewCompleted 负责（使用通知规则模板渲染），
+	// 延迟队列不再发送 IM，避免 delay=0 时与即时通知重复。
 
 	zap.L().Info("delayed notify fired",
 		zap.Uint("task_id", taskID),
@@ -296,10 +301,11 @@ func buildIMMarkdown(payload notifyPayload, mentionUserID string) string {
 }
 
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	return string(runes[:maxLen]) + "..."
 }
 
 // isQuietHours 判断当前是否处于静默时段（22:00-09:00）

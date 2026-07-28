@@ -203,9 +203,9 @@ func (h *RuleStatsHandler) Overview(c *gin.Context) {
 		`COUNT(DISTINCT CASE WHEN review_issues.rule_code != '' THEN review_issues.rule_code END) AS hit_rules_count,
 		COUNT(*) AS total_hits,
 		COUNT(DISTINCT CASE WHEN t.mr_author != '' THEN t.mr_author END) AS unique_authors,
-		COUNT(CASE WHEN review_issues.status = 'accepted' THEN 1 END) AS accepted_count,
-		COUNT(CASE WHEN review_issues.status = 'rejected' THEN 1 END) AS rejected_count,
-		COUNT(CASE WHEN review_issues.status NOT IN ('accepted', 'rejected') OR review_issues.status IS NULL THEN 1 END) AS pending_count`,
+		COUNT(CASE WHEN review_issues.status = 'resolved' THEN 1 END) AS accepted_count,
+		COUNT(CASE WHEN review_issues.status = 'false_positive' THEN 1 END) AS rejected_count,
+		COUNT(CASE WHEN review_issues.status NOT IN ('resolved', 'false_positive') OR review_issues.status IS NULL THEN 1 END) AS pending_count`,
 	).Scan(&k).Error; err != nil {
 		zap.L().Error("rule stats overview kpi failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -262,12 +262,12 @@ func (h *RuleStatsHandler) Overview(c *gin.Context) {
 		COALESCE(MAX(review_rules.name), review_issues.rule_code) AS rule_name,
 		review_issues.category AS category,
 		COALESCE(MAX(review_categories.name), 'AI自主发现') AS category_name,
-		review_issues.severity AS severity,
+			review_issues.severity AS severity,
 		COUNT(*) AS hit_count,
 		COUNT(DISTINCT t.project_id) AS project_count,
 		COUNT(DISTINCT t.mr_author) AS author_count,
-		COUNT(CASE WHEN review_issues.status = 'accepted' THEN 1 END) AS accepted,
-		COUNT(CASE WHEN review_issues.status = 'rejected' THEN 1 END) AS rejected`,
+		COUNT(CASE WHEN review_issues.status = 'resolved' THEN 1 END) AS accepted,
+		COUNT(CASE WHEN review_issues.status = 'false_positive' THEN 1 END) AS rejected`,
 	).
 		Joins("LEFT JOIN review_rules ON review_rules.code = review_issues.rule_code").
 		Joins("LEFT JOIN review_categories ON review_categories.code = review_issues.category").
@@ -431,9 +431,9 @@ func (h *RuleStatsHandler) ByRule(c *gin.Context) {
 		`COUNT(*) AS total_hits,
 		COUNT(DISTINCT t.project_id) AS project_count,
 		COUNT(DISTINCT t.mr_author) AS author_count,
-		COUNT(CASE WHEN review_issues.status = 'accepted' THEN 1 END) AS accepted,
-		COUNT(CASE WHEN review_issues.status = 'rejected' THEN 1 END) AS rejected,
-		COUNT(CASE WHEN review_issues.status IN ('pending', '') OR review_issues.status IS NULL THEN 1 END) AS pending`,
+		COUNT(CASE WHEN review_issues.status = 'resolved' THEN 1 END) AS accepted,
+		COUNT(CASE WHEN review_issues.status = 'false_positive' THEN 1 END) AS rejected,
+		COUNT(CASE WHEN review_issues.status NOT IN ('resolved', 'false_positive') OR review_issues.status IS NULL THEN 1 END) AS pending`,
 	).Scan(&k).Error; err != nil {
 		zap.L().Error("rule stats by-rule kpi failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})

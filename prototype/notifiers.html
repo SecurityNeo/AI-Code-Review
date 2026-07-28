@@ -7,9 +7,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>企业微信通知 - CodeGuard</title>
         <script src="/static/js/marked.min.js"></script>
-    <script src="js/auth.js?v=5"></script>
-    <script src="js/menu-config.js?v=2"></script>
-    <script src="js/sidebar.js?v=2"></script>
+    <script src="js/auth.js?v=6"></script>
+    <script src="js/menu-config.js?v=6"></script>
+    <script src="js/sidebar.js?v=6"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <style>
@@ -69,13 +69,12 @@
                             <tr>
                                 <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">配置名称</th>
                                 <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">Webhook Url</th>
-                                <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">通知模板</th>
                                 <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">启用状态</th>
                                 <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">操作</th>
                             </tr>
                         </thead>
                         <tbody id="notifierTable" class="divide-y divide-gray-100">
-                            <tr><td colspan="5" class="px-6 py-8 text-center text-gray-400">加载中...</td></tr>
+                            <tr><td colspan="4" class="px-6 py-8 text-center text-gray-400">加载中...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -120,45 +119,6 @@
         </div>
     </div>
 
-    <!-- 通知模板弹窗 -->
-    <div id="templateModal" class="modal fixed inset-0 bg-black/50 items-center justify-center z-50">
-        <div class="bg-white rounded-xl w-[600px] flex flex-col" style="max-height: 85vh;">
-            <div class="px-6 py-4 border-b flex items-center justify-between flex-shrink-0">
-                <h3 class="font-bold text-lg">通知模板</h3>
-                <button onclick="hideModal('templateModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
-            </div>
-            <div class="p-6 space-y-4 overflow-y-auto flex-1">
-                <input type="hidden" id="templateNotifierId">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">消息模板</label>
-                    <textarea id="messageTemplate" rows="10" placeholder="在下方编辑消息模板..." 
-                              class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none font-mono leading-relaxed"></textarea>
-                    <div class="text-xs text-gray-500 mt-2 space-y-1">
-                        <p class="font-medium text-gray-700">支持变量：</p>
-                        <div class="flex flex-wrap gap-2">
-                            <code class="bg-gray-100 px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-blue-100" onclick="insertVariable('{{PROJECT_NAME}}')">{{PROJECT_NAME}}</code>
-                            <code class="bg-gray-100 px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-blue-100" onclick="insertVariable('{{DEVELOPER}}')">{{DEVELOPER}}</code>
-                            <code class="bg-gray-100 px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-blue-100" onclick="insertVariable('{{BRANCH}}')">{{BRANCH}}</code>
-                            <code class="bg-gray-100 px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-blue-100" onclick="insertVariable('{{SCORE}}')">{{SCORE}}</code>
-                            <code class="bg-gray-100 px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-blue-100" onclick="insertVariable('{{CHANGES}}')">{{CHANGES}}</code>
-                            <code class="bg-gray-100 px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-blue-100" onclick="insertVariable('{{MR_TITLE}}')">{{MR_TITLE}}</code>
-                            <code class="bg-gray-100 px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-blue-100" onclick="insertVariable('{{MR_URL}}')">{{MR_URL}}</code>
-                        </div>
-                        <p class="text-gray-400 mt-1">点击变量可插入到光标位置</p>
-                    </div>
-                </div>
-                <div class="bg-gray-50 rounded-lg p-4 border">
-                    <div class="text-xs text-gray-500 font-medium mb-2">预览</div>
-                    <div id="templatePreview" class="md-preview"></div>
-                </div>
-            </div>
-            <div class="px-6 py-4 border-t flex justify-end gap-3 flex-shrink-0">
-                <button onclick="hideModal('templateModal')" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">取消</button>
-                <button onclick="saveTemplate()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">保存模板</button>
-            </div>
-        </div>
-    </div>
-
     <!-- 删除确认弹窗 -->
     <div id="deleteModal" class="modal fixed inset-0 bg-black/50 items-center justify-center z-50">
         <div class="bg-white rounded-xl p-6 w-[400px]">
@@ -174,7 +134,6 @@
     <script>
         let isEdit = false;
         let deleteId = null;
-        let templateNotifierId = null;
 
         function toggleUrlVisibility() {
             var input = document.getElementById('notifierUrl');
@@ -204,14 +163,6 @@
                 }
 
                 tbody.innerHTML = data.map(n => {
-                    const templateBadge = n.has_template 
-                        ? '<span class="bg-green-50 text-green-600 px-2 py-0.5 rounded text-xs"><i class="fas fa-check mr-1"></i>已配置</span>'
-                        : '<span class="bg-red-50 text-red-600 px-2 py-0.5 rounded text-xs"><i class="fas fa-times mr-1"></i>未配置</span>';
-                    
-                    // 无模板时禁用启用开关
-                    const toggleDisabled = !n.has_template;
-                    const toggleTitle = toggleDisabled ? '请先配置通知模板' : '';
-                    
                     // Webhook URL 脱敏：key= 后面的内容用 **** 替代
                     const displayUrl = n.webhook_url ? n.webhook_url.replace(/key=[\w-]+/, 'key=****') : '-';
                     
@@ -219,17 +170,13 @@
                         <tr class="hover:bg-gray-50">
                             <td class="px-6 py-4 text-sm font-medium">${n.name}</td>
                             <td class="px-6 py-4 text-sm font-mono text-gray-600">${displayUrl}</td>
-                            <td class="px-6 py-4 text-center">${templateBadge}</td>
                             <td class="px-6 py-4 text-center">
-                                <label class="switch ${toggleDisabled ? 'switch-disabled' : ''}" title="${toggleTitle}">
-                                    <input type="checkbox" ${n.enabled ? 'checked' : ''} ${toggleDisabled ? 'disabled' : ''} onchange="toggleNotifier(${n.id}, this.checked)">
+                                <label class="switch">
+                                    <input type="checkbox" ${n.enabled ? 'checked' : ''} onchange="toggleNotifier(${n.id}, this.checked)">
                                     <span class="slider"></span>
                                 </label>
                             </td>
                             <td class="px-6 py-4 text-center">
-                                <button onclick="editTemplate(${n.id})" class="text-purple-600 hover:text-purple-700 text-sm mr-3">
-                                    <i class="fas fa-file-alt mr-1"></i>通知模板
-                                </button>
                                 <button onclick="editNotifier(${n.id})" class="text-gray-600 hover:text-gray-800 text-sm mr-3">编辑</button>
                                 <button onclick="testNotifier(${n.id})" class="text-green-600 hover:text-green-700 text-sm mr-3">测试</button>
                                 <button onclick="openDeleteModal(${n.id})" class="text-red-600 hover:text-red-700 text-sm">删除</button>
@@ -239,7 +186,7 @@
                 }).join('');
             } catch (e) {
                 console.error('loadNotifiers failed:', e);
-                document.getElementById('notifierTable').innerHTML = '<tr><td colspan="5" class="px-6 py-8 text-center text-red-400">加载失败</td></tr>';
+                document.getElementById('notifierTable').innerHTML = '<tr><td colspan="4" class="px-6 py-8 text-center text-red-400">加载失败</td></tr>';
             }
         }
 
@@ -329,79 +276,6 @@
                     hideModal('notifierModal');
                     loadNotifiers();
                     showToast(isEdit ? '更新成功' : '创建成功', 'success');
-                } else {
-                    const err = await resp.json();
-                    alert('保存失败: ' + (err.error || '未知错误'));
-                }
-            } catch (e) {
-                alert('保存失败: ' + e.message);
-            }
-        }
-
-        async function editTemplate(id) {
-            templateNotifierId = id;
-            try {
-                const resp = await apiFetch(`/api/v1/notifiers/${id}`);
-                const result = await resp.json();
-                const n = result.data;
-                if (!n) return;
-
-                document.getElementById('templateNotifierId').value = id;
-                document.getElementById('messageTemplate').value = n.message_template || '';
-                updatePreview();
-                showModal('templateModal');
-            } catch (e) {
-                alert('加载失败: ' + e.message);
-            }
-        }
-
-        function insertVariable(variable) {
-            const textarea = document.getElementById('messageTemplate');
-            const start = textarea.selectionStart;
-            const end = textarea.selectionEnd;
-            const text = textarea.value;
-            textarea.value = text.substring(0, start) + variable + text.substring(end);
-            textarea.selectionStart = textarea.selectionEnd = start + variable.length;
-            textarea.focus();
-            updatePreview();
-        }
-
-        function updatePreview() {
-            const template = document.getElementById('messageTemplate').value || '';
-            let preview = template
-                .replace(/{{PROJECT_NAME}}/g, 'Kube-CC')
-                .replace(/{{DEVELOPER}}/g, 'johndoe(张三)')
-                .replace(/{{BRANCH}}/g, 'feature/login -> main')
-                .replace(/{{SCORE}}/g, '85')
-                .replace(/{{CHANGES}}/g, '+120/-45')
-                .replace(/{{MR_TITLE}}/g, 'feat: 新增登录功能')
-                .replace(/{{MR_URL}}/g, 'https://gitlab.example.com/project/-/merge_requests/123');
-            
-            if (preview === '') {
-                preview = '**🔍 AI 代码评审完成**\n\n**项目：** Kube-CC\n**开发人员：** johndoe(张三)\n**分支：** feature/login -> main\n**分数：** **85** 分\n**变更：** +120/-45\n**MR：** feat: 新增登录功能\n**MR 链接：** https://gitlab.example.com/project/-/merge_requests/123';
-            }
-            
-            document.getElementById('templatePreview').innerHTML = marked.parse(preview, { breaks: true, gfm: true });
-        }
-
-        document.getElementById('messageTemplate').addEventListener('input', updatePreview);
-
-        async function saveTemplate() {
-            if (!templateNotifierId) return;
-            
-            const template = document.getElementById('messageTemplate').value;
-            
-            try {
-                const resp = await apiFetch(`/api/v1/notifiers/${templateNotifierId}/template`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message_template: template })
-                });
-
-                if (resp.ok) {
-                    hideModal('templateModal');
-                    loadNotifiers();
-                    showToast('模板保存成功', 'success');
                 } else {
                     const err = await resp.json();
                     alert('保存失败: ' + (err.error || '未知错误'));

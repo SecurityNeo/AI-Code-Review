@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script src="js/theme.js?v=1"></script>
+    <style>html{background-color:#1e293b;}</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>项目总览 - CodeGuard</title>
+    <script src="js/auth.js?v=6"></script>
+    <script src="js/menu-config.js?v=6"></script>
+    <script src="js/sidebar.js?v=6"></script>
+    <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="css/theme.css?v=1">
+</head>
+<body class="bg-gray-50 font-sans">
+
+<div id="page-transition" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#1e293b;z-index:99999;transition:opacity .25s ease;"></div>
+<script>
+(function(){
+  function hide(){var el=document.getElementById('page-transition');if(el){el.style.opacity='0';setTimeout(function(){el.remove();},250);}}
+  if(document.readyState==='complete'){hide();}else{window.addEventListener('load',hide);}
+})();
+</script>
+
+<div class="flex h-screen">
+    <aside id="sidebar" class="w-64 bg-slate-900 text-white flex-shrink-0 flex flex-col">
+        <nav style="padding: 20px; text-align: center; color: var(--cg-text-tertiary); font-size: 13px;">加载中...</nav>
+    </aside>
+
+    <main class="flex-1 overflow-y-auto">
+        <header class="bg-white border-b px-8 py-4 flex items-center justify-between sticky top-0 z-10">
+            <div>
+                <h2 class="text-xl font-bold text-gray-800">🏢 项目总览</h2>
+                <p class="text-sm text-gray-500 mt-1">我负责的项目质量健康度与 Issue 俯瞰</p>
+            </div>
+            <button onclick="loadData(true)" class="text-sm text-blue-600 hover:text-blue-800 px-3 py-1.5 rounded hover:bg-blue-50">
+                <i class="fas fa-sync-alt mr-1"></i>刷新
+            </button>
+        </header>
+
+        <div class="px-8 py-6 space-y-6">
+            <div id="projectsContainer" class="space-y-5">
+                <div class="text-center py-12 text-gray-400">加载中...</div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script>
+const API_BASE = '/api/v1';
+
+const LANG_LABELS = {
+    common: '通用', golang: 'Go', go: 'Go', python: 'Python', frontend: '前端',
+    java: 'Java', sql: 'SQL', shell: 'Shell', php: 'PHP', ruby: 'Ruby',
+    rust: 'Rust', cpp: 'C++', c: 'C', javascript: '前端', typescript: '前端',
+    vue: '前端', react: '前端', angular: '前端', nodejs: '前端',
+    swift: 'Swift', kotlin: 'Kotlin', scala: 'Scala', perl: 'Perl', dart: 'Dart',
+    lua: 'Lua', html: '前端', css: '前端', '': '未知'
+};
+
+function getLangLabel(lang) {
+    if (!lang) return '未知';
+    return LANG_LABELS[lang.toLowerCase()] || lang;
+}
+
+function formatStewards(names) {
+    if (!Array.isArray(names) || names.length === 0) return '<span class="text-xs text-gray-400">暂无负责人</span>';
+    const maxShow = 3;
+    const shown = names.slice(0, maxShow).map(n => '<span class="text-[11px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-100">' + n + '</span>').join('');
+    const more = names.length > maxShow ? '<span class="text-[11px] text-gray-400">+' + (names.length - maxShow) + '人</span>' : '';
+    return shown + more;
+}
+
+function getHealthInfo(p) {
+    const pending = p.pending_count || 0;
+    const critical = p.critical_count || 0;
+    const high = p.high_count || 0;
+    const overdue = p.overdue_count || 0;
+
+    if (pending === 0 && critical === 0 && high === 0) {
+        return { color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-200', label: '健康', icon: 'fa-check-circle' };
+    }
+    if (critical > 0 || overdue > 0) {
+        return { color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200', label: '需关注', icon: 'fa-exclamation-circle' };
+    }
+    if (high > 0) {
+        return { color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-200', label: '一般', icon: 'fa-info-circle' };
+    }
+    return { color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-200', label: '健康', icon: 'fa-check-circle' };
+}
+
+async function loadData(force = false) {
+    try {
+        const res = await apiFetch(API_BASE + '/dashboard/project-owner');
+        const data = await res.json();
+        if (data.debug) console.log('[ProjectOwnerDashboard Debug]', data.debug);
+
+        let projectList = (data.data || {}).projects;
+        if (!Array.isArray(projectList)) projectList = [];
+        const projects = projectList;
+        const container = document.getElementById('projectsContainer');
+
+        if (projects.length === 0) {
+            let msg = '您当前不负责任何项目。';
+            if (data.debug) {
+                const d = data.debug;
+                if (d.steward_records_found === 0) {
+                    msg += '<br><br><span class="text-xs text-gray-400">排查：在项目负责人表未找到当前用户记录。</span>';
+                } else if ((d.project_ids || []).length > 0 && d.projects_returned === 0) {
+                    msg += `<br><br><span class="text-xs text-gray-400">排查：找到 ${d.steward_records_found} 条负责人记录，对应项目ID ${d.project_ids.join(',')}，但 projects 表未找到对应项目。</span>`;
+                }
+            }
+            container.innerHTML = `<div class="bg-white rounded-xl border p-12 text-center text-gray-500">${msg}</div>`;
+            return;
+        }
+        container.innerHTML = projects.map(p => renderProjectCard(p)).join('');
+    } catch (err) {
+        console.error('load project dashboard failed', err);
+        document.getElementById('projectsContainer').innerHTML = `<div class="bg-white rounded-xl border p-8 text-center text-red-500">加载失败: ${err.message}</div>`;
+    }
+}
+
+function renderProjectCard(p) {
+    const health = getHealthInfo(p);
+    const lang = getLangLabel(p.language);
+    const hasOverdue = (p.overdue_count || 0) > 0;
+
+    return `
+        <div class="bg-white rounded-xl border overflow-hidden hover:shadow-md transition-shadow">
+            <!-- 头部：项目名称 + 质量标签 -->
+            <div class="px-6 py-4 border-b flex items-center justify-between bg-white">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0">
+                        <i class="fas fa-folder text-lg"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <h4 class="text-base font-bold text-gray-800">${escapeHtml(p.name || '未知项目')}</h4>
+                            <span class="text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">${lang}</span>
+                        </div>
+                        <div class="flex items-center gap-3 text-xs text-gray-500 mt-1">
+                            <span><i class="fas fa-user-shield mr-1 text-gray-400"></i>${formatStewards(p.stewards || [])}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold ${health.bg} ${health.color} border ${health.border}">
+                        <i class="fas ${health.icon}"></i>${health.label}
+                    </span>
+                    ${hasOverdue ? `<span class="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-bold bg-red-100 text-red-600 border border-red-200"><i class="fas fa-clock"></i>${p.overdue_count} 条超期</span>` : ''}
+                </div>
+            </div>
+
+            <!-- 核心指标横排 -->
+            <div class="px-6 py-4 flex items-center gap-6">
+                <div class="flex items-center gap-3 flex-1">
+                    <div class="w-12 h-12 rounded-full ${p.pending_count > 0 ? 'bg-amber-50 text-amber-600' : 'bg-green-50 text-green-600'} flex items-center justify-center font-bold text-sm border ${p.pending_count > 0 ? 'border-amber-100' : 'border-green-100'}">
+                        ${p.pending_count || 0}
+                    </div>
+                    <div>
+                        <div class="text-xs text-gray-500">待处理</div>
+                        <div class="text-xs ${p.pending_count > 0 ? 'text-amber-600 font-medium' : 'text-gray-400'}">${p.pending_count > 0 ? '需跟进' : '暂无'}</div>
+                    </div>
+                </div>
+                <div class="w-px h-10 bg-gray-100"></div>
+                <div class="flex items-center gap-3 flex-1">
+                    <div class="w-12 h-12 rounded-full ${p.critical_count > 0 ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'} flex items-center justify-center font-bold text-sm border ${p.critical_count > 0 ? 'border-red-100' : 'border-green-100'}">
+                        ${p.critical_count || 0}
+                    </div>
+                    <div>
+                        <div class="text-xs text-gray-500">严重</div>
+                        <div class="text-xs ${p.critical_count > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}">${p.critical_count > 0 ? '紧急' : '暂无'}</div>
+                    </div>
+                </div>
+                <div class="w-px h-10 bg-gray-100"></div>
+                <div class="flex items-center gap-3 flex-1">
+                    <div class="w-12 h-12 rounded-full ${p.high_count > 0 ? 'bg-orange-50 text-orange-600' : 'bg-green-50 text-green-600'} flex items-center justify-center font-bold text-sm border ${p.high_count > 0 ? 'border-orange-100' : 'border-green-100'}">
+                        ${p.high_count || 0}
+                    </div>
+                    <div>
+                        <div class="text-xs text-gray-500">高危</div>
+                        <div class="text-xs ${p.high_count > 0 ? 'text-orange-600 font-medium' : 'text-gray-400'}">${p.high_count > 0 ? '关注' : '暂无'}</div>
+                    </div>
+                </div>
+                <div class="w-px h-10 bg-gray-100"></div>
+                <div class="flex-1 min-w-[120px]">
+                    <div class="flex items-center justify-between text-xs text-gray-500 mb-1">
+                        <span>7天闭环率</span>
+                        <strong class="text-gray-700">${p.week_close_rate ? p.week_close_rate.toFixed(1) + '%' : '-'}</strong>
+                    </div>
+                    <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div class="h-full rounded-full ${getHealthInfo(p).color.replace('text-', 'bg-')}" style="width: ${Math.min(p.week_close_rate || 0, 100)}%"></div>
+                    </div>
+                </div>
+                <div class="w-px h-10 bg-gray-100"></div>
+                <div class="text-center min-w-[80px]">
+                    <div class="text-xs text-gray-500">平均闭环</div>
+                    <div class="text-sm font-bold text-gray-700 mt-0.5">${p.avg_resolve_days ? p.avg_resolve_days.toFixed(1) + ' 天' : '-'}</div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadData();
+});
+</script>
+<script defer src="/static/js/tailwindcss.min.js"></script>
+</body>
+</html>

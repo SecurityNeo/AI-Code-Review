@@ -898,14 +898,31 @@ func (s *TaskService) ExecuteAIReviewTaskWithComment(taskID uint, commentOverrid
 	// 发布评论
 	go s.postReviewComment(task, reviewReport)
 
-	// 发送 AI 评审完成通知（新：延迟合并队列）
+	// 发送 AI 评审完成通知（即时企微 + 延迟合并队列）
 	go func() {
+		zap.L().Info("notify goroutine started", zap.Uint("task_id", task.ID))
 		// 重新加载 task 含 Project 关联，用于通知模板渲染
 		var notifyTask model.Task
-		if err := model.DB.Preload("Project").First(&notifyTask, task.ID).Error; err == nil {
-			stats := CalcIssueStats(notifyTask.ID, notifyTask.MRMergeID)
-			GetDelayedNotificationQueue().Enqueue(notifyTask, stats)
+		if err := model.DB.Preload("Project").First(&notifyTask, task.ID).Error; err != nil {
+			zap.L().Error("notify preload task failed", zap.Uint("task_id", task.ID), zap.Error(err))
+			return
 		}
+		zap.L().Info("notify task preloaded",
+			zap.Uint("task_id", notifyTask.ID),
+			zap.Uint("project_id", notifyTask.ProjectID),
+			zap.String("project_name", notifyTask.Project.Name))
+
+		stats := CalcIssueStats(notifyTask.ID, notifyTask.MRMergeID)
+		zap.L().Info("notify stats calculated",
+			zap.Uint("task_id", notifyTask.ID),
+			zap.Int("total", stats.Total),
+			zap.Int("pending", stats.Pending),
+			zap.Int("critical", stats.Critical))
+
+		// 1. 即时企业微信通知（模板渲染）
+		NewNotifierService().NotifyAIReviewCompleted(notifyTask)
+		// 2. 延迟队列（站内信 + 合并重试，delay=0 时立即执行）
+		GetDelayedNotificationQueue().Enqueue(notifyTask, stats)
 	}()
 
 	// 阈值检查
