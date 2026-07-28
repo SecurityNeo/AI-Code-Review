@@ -56,6 +56,10 @@
         .day-cell.weekend { background:#f8fafc; }
         .day-cell.today { outline:2px solid #3b82f6; outline-offset:-2px; border-radius:0.25rem; z-index:1; }
         .day-cell .dnum { font-size:0.75rem; color:#475569; font-weight:500; line-height:1; }
+        .day-cell .day-icon { position:absolute; top:2px; right:2px; font-size:0.5rem; line-height:1; z-index:2; }
+        .day-cell .day-icon.national { color:#047857; }
+        .day-cell .day-icon.company { color:#1d4ed8; }
+        .day-cell .day-icon.makeup { color:#c2410c; }
         .day-cell.other-month .dnum { color:#cbd5e1; }
         .day-cell.today .dnum { color:#3b82f6; font-weight:700; }
 
@@ -63,6 +67,8 @@
         .day-tag.national { background:#d1fae5; color:#047857; }
         .day-tag.company { background:#dbeafe; color:#1d4ed8; }
         .day-tag.makeup { background:#ffedd5; color:#c2410c; }
+
+        .day-tag-continue { position:absolute; top:2px; right:2px; font-size:0.55rem; padding:0.05rem 0.2rem; border-radius:0.15rem; font-weight:700; background:#047857; color:#fff; line-height:1; z-index:2; }
 
         .legend { display:flex; align-items:center; gap:0.75rem; margin-top:0.75rem; padding:0.5rem 0.75rem; background:var(--card-bg); border-radius:0.5rem; border:1px solid var(--border); font-size:0.75rem; }
         .legend-item { display:flex; align-items:center; gap:0.3rem; }
@@ -235,10 +241,11 @@
     <div class="modal-box">
         <div class="modal-header"><h3>同步国家节假日</h3><button onclick="closeModal('syncModal')" class="modal-close"><i class="fas fa-times"></i></button></div>
         <div class="modal-body">
-            <p class="text-xs text-slate-500 mb-3">将从 date.nager.at 同步中国法定节假日数据。</p>
+            <p class="text-xs text-slate-500 mb-3">系统将从以下接口拉取法定节假日与调休数据并导入：</p>
+            <div class="text-xs font-mono bg-slate-50 border rounded px-2 py-1.5 mb-3 break-all" id="syncApiUrl">https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/2026.json</div>
             <div class="form-group">
                 <label class="form-label">年份</label>
-                <input type="number" id="syncYear" class="form-input" value="2026">
+                <input type="number" id="syncYear" class="form-input" value="2026" onchange="document.getElementById('syncApiUrl').textContent='https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/'+this.value+'.json'">
             </div>
         </div>
         <div class="modal-footer">
@@ -355,13 +362,33 @@ function renderMonthCard(year, month, hMap) {
         if (isToday) cls += ' today';
 
         let tag = '';
+        let icon = '';
         if (hasHoliday) {
             const primary = list[0];
+            const iconMap = { national: 'fa-umbrella-beach', company: 'fa-star', makeup: 'fa-briefcase' };
+            const iconClass = iconMap[primary.type] || 'fa-circle';
+            icon = `<i class="fas ${iconClass} day-icon ${primary.type}"></i>`;
             const extra = list.length > 1 ? ` (+${list.length - 1})` : '';
-            tag = `<span class="day-tag ${primary.type}" title="${escapeHtml(list.map(x => x.name).join(', '))}">${escapeHtml(primary.name)}${extra}</span>`;
+
+            if (primary.type === 'makeup') {
+                // 调休补班日 → 右上角显示“班”
+                tag = `<span class="day-tag-continue" style="background:#c2410c;" title="${escapeHtml(primary.name)} 调休补班">班</span>`;
+            } else {
+                // 放假休日 → 第一天显示名称，后续天右上角“休”
+                const prevDate = new Date(dateStr);
+                prevDate.setDate(prevDate.getDate() - 1);
+                const prevDateStr = formatDateLocal(prevDate);
+                const prevList = hMap[prevDateStr] || [];
+                const isContinuation = prevList.some(h => h.name === primary.name && h.type !== 'makeup');
+                if (isContinuation) {
+                    tag = `<span class="day-tag-continue" title="${escapeHtml(primary.name)} 延续">休</span>`;
+                } else {
+                    tag = `<span class="day-tag ${primary.type}" title="${escapeHtml(list.map(x => x.name).join(', '))}">${escapeHtml(primary.name)}${extra}</span>`;
+                }
+            }
         }
         cells += `<div class="${cls}" onclick="onDayClick('${dateStr}', ${hasHoliday ? JSON.stringify(list.map(x => x.id)) : '[]'})">
-            <span class="dnum">${dayNum}</span>${tag}
+            ${icon}<span class="dnum">${dayNum}</span>${tag}
         </div>`;
     }
 

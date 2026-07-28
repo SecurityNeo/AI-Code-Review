@@ -949,13 +949,13 @@ func (h *NotificationHandler) ImportHolidays(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "ok", "count": count})
 }
 
-// SyncHolidaysFromAPI 从 date.nager.at 同步中国法定节假日
+// SyncHolidaysFromAPI 从 holiday-cn 同步中国法定节假日与调休数据
 func (h *NotificationHandler) SyncHolidaysFromAPI(c *gin.Context) {
 	year := c.Query("year")
 	if year == "" {
 		year = strconv.Itoa(time.Now().Year())
 	}
-	apiURL := fmt.Sprintf("https://date.nager.at/api/v3/publicholidays/%s/CN", year)
+	apiURL := fmt.Sprintf("https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/%s.json", year)
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Get(apiURL)
 	if err != nil {
@@ -972,30 +972,42 @@ func (h *NotificationHandler) SyncHolidaysFromAPI(c *gin.Context) {
 		return
 	}
 
-	type apiHoliday struct {
-		Date string `json:"date"`
-		Name string `json:"name"`
+	type apiDay struct {
+		Name     string `json:"name"`
+		Date     string `json:"date"`
+		IsOffDay bool   `json:"isOffDay"`
 	}
-	var apiList []apiHoliday
-	if err := json.NewDecoder(resp.Body).Decode(&apiList); err != nil {
+	type apiResp struct {
+		Year int      `json:"year"`
+		Days []apiDay `json:"days"`
+	}
+	var data apiResp
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode API response: " + err.Error()})
 		return
 	}
 
 	yearInt, _ := strconv.Atoi(year)
 	var toCreate []model.Holiday
-	for _, item := range apiList {
+	for _, item := range data.Days {
 		var existing model.Holiday
-		if err := model.DB.Where("date = ? AND type = ?", item.Date, model.HolidayTypeNational).First(&existing).Error; err == nil {
+		if err := model.DB.Where("date = ? AND type IN ?", item.Date, []string{model.HolidayTypeNational, model.HolidayTypeMakeup}).First(&existing).Error; err == nil {
 			continue // 已存在则跳过
+		}
+		// isOffDay=true: 放假 (national); isOffDay=false: 调休补班 (makeup)
+		holidayType := model.HolidayTypeNational
+		isWorkday := false
+		if !item.IsOffDay {
+			holidayType = model.HolidayTypeMakeup
+			isWorkday = true
 		}
 		toCreate = append(toCreate, model.Holiday{
 			Date:        item.Date,
 			Name:        item.Name,
-			Type:        model.HolidayTypeNational,
+			Type:        holidayType,
 			IsRecurring: false,
 			Year:        yearInt,
-			IsWorkday:   false,
+			IsWorkday:   isWorkday,
 		})
 	}
 	count := len(toCreate)
