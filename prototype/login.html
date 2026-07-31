@@ -114,30 +114,49 @@
         }
         .brand-side .slogan {
             font-size: 15px; color: rgba(255,255,255,0.45);
-            letter-spacing: 0.06em; margin-bottom: 24px;
+            letter-spacing: 0.06em; margin-bottom: 32px;
         }
-        .brand-side .desc {
-            font-size: 13px; color: rgba(255,255,255,0.35);
-            line-height: 1.8; max-width: 440px; margin-bottom: 36px;
+
+        /* ===== 功能卡片网格 ===== */
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            width: 100%;
         }
-        .brand-side .tag-row {
-            display: flex; flex-wrap: wrap; justify-content: center; gap: 8px;
+        .feature-card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
+            padding: 16px;
+            text-align: left;
+            transition: all 0.25s;
         }
-        .tag-row .tag {
-            background: rgba(255,255,255,0.04);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 999px;
-            padding: 5px 14px;
-            font-size: 11px;
-            color: rgba(255,255,255,0.50);
-            display: flex; align-items: center; gap: 5px;
-            transition: all 0.2s;
+        .feature-card:hover {
+            background: rgba(255,255,255,0.055);
+            border-color: rgba(255,255,255,0.12);
+            transform: translateY(-2px);
         }
-        .tag-row .tag:hover {
-            background: rgba(255,255,255,0.08);
-            border-color: rgba(255,255,255,0.15);
-            color: rgba(255,255,255,0.70);
+        .feature-card .card-icon {
+            width: 32px; height: 32px; border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 13px; margin-bottom: 10px;
         }
+        .feature-card .card-title {
+            font-size: 12px; font-weight: 600;
+            color: rgba(255,255,255,0.90);
+            margin-bottom: 4px;
+        }
+        .feature-card .card-desc {
+            font-size: 11px; color: rgba(255,255,255,0.40);
+            line-height: 1.5;
+        }
+        .feat-review .card-icon { color: #60a5fa; background: rgba(59,130,246,0.12); }
+        .feat-rules .card-icon { color: #a78bfa; background: rgba(139,92,246,0.12); }
+        .feat-issue .card-icon { color: #fb923c; background: rgba(249,115,22,0.12); }
+        .feat-metrics .card-icon { color: #4ade80; background: rgba(34,197,94,0.12); }
+        .feat-team .card-icon { color: #22d3ee; background: rgba(6,182,212,0.12); }
+        .feat-shield .card-icon { color: #f87171; background: rgba(248,113,113,0.12); }
 
         /* ---- 右侧登录卡片 ---- */
         .form-card {
@@ -263,15 +282,38 @@
             <div class="logo"><i class="fas fa-robot"></i></div>
             <h1>AI Code Guard</h1>
             <div class="slogan">智能代码门禁与质量治理平台</div>
-            <div class="desc">
-                基于 LLM 大模型为团队提供自动化代码审查、智能规则引擎与 Issue 全生命周期治理能力，持续提升代码质量与研发效率。
-            </div>
-            <div class="tag-row">
-                <div class="tag"><i class="fas fa-microscope" style="font-size:9px;"></i> 智能评审</div>
-                <div class="tag"><i class="fas fa-cogs" style="font-size:9px;"></i> 规则引擎</div>
-                <div class="tag"><i class="fas fa-tasks" style="font-size:9px;"></i> Issue 治理</div>
-                <div class="tag"><i class="fas fa-chart-pie" style="font-size:9px;"></i> 质量度量</div>
-                <div class="tag"><i class="fas fa-users" style="font-size:9px;"></i> 团队协同</div>
+
+            <div class="feature-grid">
+                <div class="feature-card feat-review">
+                    <div class="card-icon"><i class="fas fa-microscope"></i></div>
+                    <div class="card-title">AI 智能评审</div>
+                    <div class="card-desc">多模型 MR 逐行分析</div>
+                </div>
+                <div class="feature-card feat-rules">
+                    <div class="card-icon"><i class="fas fa-cogs"></i></div>
+                    <div class="card-title">规则引擎</div>
+                    <div class="card-desc">规则库 + 孵化台智能挖掘</div>
+                </div>
+                <div class="feature-card feat-issue">
+                    <div class="card-icon"><i class="fas fa-tasks"></i></div>
+                    <div class="card-title">Issue 治理</div>
+                    <div class="card-desc">多级升级，免打扰冻结</div>
+                </div>
+                <div class="feature-card feat-metrics">
+                    <div class="card-icon"><i class="fas fa-chart-pie"></i></div>
+                    <div class="card-title">质量度量</div>
+                    <div class="card-desc">开发者画像，命中统计</div>
+                </div>
+                <div class="feature-card feat-team">
+                    <div class="card-icon"><i class="fas fa-users"></i></div>
+                    <div class="card-title">团队协同</div>
+                    <div class="card-desc">职责分配，即时通知</div>
+                </div>
+                <div class="feature-card feat-shield">
+                    <div class="card-icon"><i class="fas fa-shield-alt"></i></div>
+                    <div class="card-title">风险拦截</div>
+                    <div class="card-desc">低质量代码自动拦截</div>
+                </div>
             </div>
         </div>
 
