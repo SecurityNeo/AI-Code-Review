@@ -45,8 +45,62 @@ func (s *TaskService) List(user model.User, projectID uint, status string, start
 	var total int64
 
 	query := model.DB.Model(&model.Task{})
-	// 按用户角色过滤：admin不过滤，user只能看自己的
-	query = model.FilterByUser(query, user, "mr_author")
+	// 可见性：admin 不过滤，普通用户只能查看自己提交的任务和自己负责项目的任务
+	if user.Role != model.RoleAdmin {
+		var conditions []string
+		var args []interface{}
+
+		// 1. 自己提交的任务
+		if user.GitlabUsername != "" {
+			conditions = append(conditions, "mr_author = ?")
+			args = append(args, user.GitlabUsername)
+		}
+		if user.Username != "" {
+			conditions = append(conditions, "mr_author = ?")
+			args = append(args, user.Username)
+		}
+
+		// 2. 查找当前用户对应的 TeamMember ID
+		var whereClauses []string
+		var whereArgs []interface{}
+		if user.GitlabUsername != "" {
+			whereClauses = append(whereClauses, "gitlab_username = ?")
+			whereArgs = append(whereArgs, user.GitlabUsername)
+		}
+		if user.Username != "" {
+			whereClauses = append(whereClauses, "username = ?")
+			whereArgs = append(whereArgs, user.Username)
+		}
+
+		var memberIDs []uint
+		if len(whereClauses) > 0 {
+			model.DB.Model(&model.TeamMember{}).
+				Where(strings.Join(whereClauses, " OR "), whereArgs...).
+				Pluck("id", &memberIDs)
+		}
+
+		// 3. 查找这些 TeamMember 负责的项目
+		var projectIDs []uint
+		if len(memberIDs) > 0 {
+			model.DB.Model(&model.ProjectResponsibility{}).
+				Distinct("project_id").
+				Where("member_id IN ?", memberIDs).
+				Pluck("project_id", &projectIDs)
+		}
+
+		// 4. 添加负责项目的条件
+		if len(projectIDs) > 0 {
+			conditions = append(conditions, "project_id IN ?")
+			args = append(args, projectIDs)
+		}
+
+		// 5. OR 合并
+		if len(conditions) > 0 {
+			query = query.Where("("+strings.Join(conditions, " OR ")+")", args...)
+		} else {
+			query = query.Where("1 = 0") // 安全兜底：什么也看不到
+		}
+	}
 
 	if projectID > 0 {
 		query = query.Where("project_id = ?", projectID)

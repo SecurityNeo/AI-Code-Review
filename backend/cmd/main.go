@@ -78,22 +78,38 @@ func main() {
 	service.NewIncubatorJobRunner(incubSvc, embedSvc).Start()
 
 	// 5.3.5. 启动规则健康检查定时 Job（每周一次）
-	_, _ = cronRunner.AddFunc("0 2 * * 1", func() {
+	if entryID, err := cronRunner.AddFunc("0 0 2 * * 1", func() {
 		if _, err := service.QueueJob("health_check", map[string]any{}); err != nil {
 			zap.L().Warn("queue health check job failed", zap.Error(err))
 		}
-	})
+	}); err != nil {
+		zap.L().Error("register health_check cron failed", zap.Error(err))
+	} else {
+		zap.L().Sugar().Infow("health_check cron registered", "entryID", entryID, "spec", "0 0 2 * * 1")
+	}
 
 	// 5.3.6. Issue 治理系统初始化
 	service.InitWorkdayCalculator()
 	service.GetDelayedNotificationQueue() // 启动后台扫描器
+
+	// 一次性迁移：确保 issue.escalation 规则唯一，保留最新一条，其余禁用
+	migrateEscalationRules()
+
 	escalationSvc := service.NewEscalationService()
-	_, _ = cronRunner.AddFunc("0 * * * *", func() { // 每小时执行一次升级检查
+	if entryID, err := cronRunner.AddFunc("0 0 * * * *", func() { // 每小时执行一次升级检查
 		escalationSvc.RunDailyEscalation()
-	})
-	_, _ = cronRunner.AddFunc("0 9 * * 1-5", func() { // 工作日 09:00 发送每日摘要
+	}); err != nil {
+		zap.L().Error("register RunDailyEscalation cron failed", zap.Error(err))
+	} else {
+		zap.L().Sugar().Infow("RunDailyEscalation cron registered", "entryID", entryID, "spec", "0 0 * * * *")
+	}
+	if entryID, err := cronRunner.AddFunc("0 0 9 * * 1-5", func() { // 工作日 09:00 发送每日摘要
 		escalationSvc.SendDailyDigest()
-	})
+	}); err != nil {
+		zap.L().Error("register SendDailyDigest cron failed", zap.Error(err))
+	} else {
+		zap.L().Sugar().Infow("SendDailyDigest cron registered", "entryID", entryID, "spec", "0 0 9 * * 1-5")
+	}
 
 	// 5.4. 启动 LLM 调用日志后台 worker（依赖 model.DB，必须在 InitDB 之后调用）
 	llmcall.Start()
@@ -612,4 +628,25 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 	}
 
 	return r
+}
+
+// migrateEscalationRules 一次性迁移：如果存在多条启用的 issue.escalation 规则，保留最新一条，其余禁用
+func migrateEscalationRules() {
+	var latest model.NotificationRule
+	if err := model.DB.Where("`trigger` = ? AND enabled = ?", "issue.escalation", true).Order("id DESC").First(&latest).Error; err != nil {
+		zap.L().Info("migrateEscalationRules: no enabled issue.escalation rule found, nothing to migrate")
+		return
+	}
+	result := model.DB.Model(&model.NotificationRule{}).
+		Where("`trigger` = ? AND enabled = ? AND id != ?", "issue.escalation", true, latest.ID).
+		Update("enabled", false)
+	if result.Error != nil {
+		zap.L().Error("migrateEscalationRules: failed to disable duplicate rules", zap.Error(result.Error))
+	} else if result.RowsAffected > 0 {
+		zap.L().Info("migrateEscalationRules: disabled duplicate issue.escalation rules",
+			zap.Uint("kept_rule_id", latest.ID),
+			zap.Int64("disabled_count", result.RowsAffected))
+	} else {
+		zap.L().Info("migrateEscalationRules: no duplicate issue.escalation rules found")
+	}
 }

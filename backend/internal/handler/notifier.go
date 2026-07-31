@@ -29,19 +29,50 @@ func (h *NotifierHandler) List(c *gin.Context) {
 		WebhookUrl     string `json:"webhook_url"`
 		HasTemplate    bool   `json:"has_template"`
 		ProjectID      *uint  `json:"project_id"`
+		ProjectName    string `json:"project_name"`
 		Enabled        bool   `json:"enabled"`
 		LastTestStatus string `json:"last_test_status"`
 		CreatedAt      string `json:"created_at"`
 	}
 
+	// 批量查询项目名称，避免 N+1
+	projectIDs := make(map[uint]struct{})
+	for _, n := range notifiers {
+		if n.ProjectID != nil && *n.ProjectID > 0 {
+			projectIDs[*n.ProjectID] = struct{}{}
+		}
+	}
+	projectMap := make(map[uint]string)
+	if len(projectIDs) > 0 {
+		ids := make([]uint, 0, len(projectIDs))
+		for id := range projectIDs {
+			ids = append(ids, id)
+		}
+		var projects []model.Project
+		if err := model.DB.Where("id IN ?", ids).Find(&projects).Error; err == nil {
+			for _, p := range projects {
+				projectMap[p.ID] = p.Name
+			}
+		}
+	}
+
 	result := make([]NotifierResponse, 0, len(notifiers))
 	for _, n := range notifiers {
+		projectName := "全局"
+		if n.ProjectID != nil && *n.ProjectID > 0 {
+			if name, ok := projectMap[*n.ProjectID]; ok && name != "" {
+				projectName = name
+			} else {
+				projectName = "未知项目"
+			}
+		}
 		result = append(result, NotifierResponse{
 			ID:             n.ID,
 			Name:           n.Name,
 			WebhookUrl:     n.WebhookUrl,
 			HasTemplate:    n.MessageTemplate != "",
 			ProjectID:      n.ProjectID,
+			ProjectName:    projectName,
 			Enabled:        n.Enabled,
 			LastTestStatus: n.LastTestStatus,
 			CreatedAt:      n.CreatedAt.Format("2006-01-02 15:04:05"),

@@ -278,11 +278,26 @@ func buildMessageFromRule(trigger string, fallbackTemplate string, task *model.T
 
 	stats := CalcIssueStats(task.ID, task.MRMergeID)
 
+	// 查询项目默认负责人（用于 {{STEWARD_NAME}}）
+	var stewardName string
+	var resp model.ProjectResponsibility
+	if err := model.DB.Preload("Member").Where("project_id = ? AND scope_type = 'default'", task.ProjectID).
+		Order("priority ASC, created_at ASC").First(&resp).Error; err == nil && resp.MemberID > 0 && resp.Member.ID > 0 {
+		stewardName = resp.Member.DisplayName
+		if stewardName == "" {
+			stewardName = resp.Member.Username
+		}
+		if stewardName == "" {
+			stewardName = resp.Member.GitlabUsername
+		}
+	}
+
 	ctx := TemplateContext{
 		Task:      *task,
 		Stats:     stats,
 		Project:   task.Project,
 		Developer: developer,
+		Steward:   stewardName,
 		Additions: additions,
 		Deletions: deletions,
 		DeadlineHours: 120 - stats.Pending*2,

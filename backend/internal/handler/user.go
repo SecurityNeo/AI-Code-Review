@@ -128,10 +128,18 @@ func (h *UserHandler) GetCurrentUser(c *gin.Context) {
 func (h *UserHandler) ListUsers(c *gin.Context) {
 	keyword := c.Query("keyword")
 	role := c.Query("role")
+	loginType := c.Query("login_type")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 
-	users, total, err := h.service.ListUsers(keyword, role, page, pageSize)
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 200 {
+		pageSize = 20
+	}
+
+	users, total, err := h.service.ListUsers(keyword, role, loginType, page, pageSize)
 	if err != nil {
 		zap.L().Error("list users failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -177,7 +185,11 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		return
 	}
 
-	currentUserID, _ := c.Get("user_id")
+	currentUserID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
 	model.RecordOpLog("用户创建", user.Username, user.ID, currentUserID.(uint), "success", "", c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{
 		"message": "用户创建成功",
@@ -209,7 +221,11 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 		return
 	}
 
-	currentUserID, _ := c.Get("user_id")
+	currentUserID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
 	model.RecordOpLog("用户更新", "用户ID:"+c.Param("id"), uint(id), currentUserID.(uint), "success", "", c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{"message": "用户更新成功"})
 }
@@ -218,10 +234,15 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 // DELETE /api/v1/users/:id
 func (h *UserHandler) DeleteUser(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
-	currentUserID, _ := c.Get("user_id")
+	currentUserID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
 
 	if err := h.service.DeleteUser(uint(id), currentUserID.(uint)); err != nil {
 		zap.L().Error("delete user failed", zap.Error(err))
+		model.RecordOpLog("用户删除", "用户ID:"+c.Param("id"), uint(id), currentUserID.(uint), "failed", err.Error(), c.ClientIP())
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -234,6 +255,12 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 // POST /api/v1/users/:id/reset-password
 func (h *UserHandler) ResetPassword(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
+	currentUserID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+
 	var req struct {
 		NewPassword string `json:"new_password" binding:"required,min=6"`
 	}
@@ -244,11 +271,11 @@ func (h *UserHandler) ResetPassword(c *gin.Context) {
 
 	if err := h.service.ResetPassword(uint(id), req.NewPassword); err != nil {
 		zap.L().Error("reset password failed", zap.Error(err))
+		model.RecordOpLog("重置密码", "用户ID:"+c.Param("id"), uint(id), currentUserID.(uint), "failed", err.Error(), c.ClientIP())
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	currentUserID, _ := c.Get("user_id")
 	model.RecordOpLog("重置密码", "用户ID:"+c.Param("id"), uint(id), currentUserID.(uint), "success", "", c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{"message": "密码已重置"})
 }

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -171,11 +172,11 @@ func (h *TaskHandler) Stop(c *gin.Context) {
 	taskID := uint(id)
 	user, _ := middleware.GetUser(c)
 	if err := service.NewTaskService().Abort(taskID); err != nil {
-		model.RecordOpLog("停止任务", "task", taskID, user.ID, "failed", err.Error(), c.ClientIP())
+		model.RecordOpLog("停止任务", fmt.Sprintf("任务ID:%d", taskID), taskID, user.ID, "failed", err.Error(), c.ClientIP())
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	model.RecordOpLog("停止任务", "task", taskID, user.ID, "success", "", c.ClientIP())
+	model.RecordOpLog("停止任务", fmt.Sprintf("任务ID:%d", taskID), taskID, user.ID, "success", "", c.ClientIP())
 	c.JSON(200, gin.H{"message": "task stopped"})
 }
 

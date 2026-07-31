@@ -96,6 +96,44 @@ func (c *WorkdayCalculator) WorkHoursBetween(start, end time.Time) int {
 	return count
 }
 
+// EffectiveWorkHoursBetween 计算两个时间点之间的有效工作小时数
+// 在 WorkHoursBetween 的基础上额外排除每日免打扰时段
+func (c *WorkdayCalculator) EffectiveWorkHoursBetween(start, end time.Time, quietStart, quietEnd string) int {
+	if end.Before(start) || end.Equal(start) {
+		return 0
+	}
+	maxIter := 5000
+	count := 0
+	cur := start
+	for cur.Before(end) && count < maxIter {
+		if c.IsWorkTime(cur) && !isTimeInQuietHours(cur, quietStart, quietEnd) {
+			count++
+		}
+		cur = cur.Add(time.Hour)
+	}
+	return count
+}
+
+// isTimeInQuietHours 判断指定时间点是否在免打扰时段内（支持跨天，如 22:00-09:00）
+func isTimeInQuietHours(t time.Time, quietStart, quietEnd string) bool {
+	if quietStart == "" || quietEnd == "" {
+		return false
+	}
+	start, err1 := time.Parse("15:04", quietStart)
+	end, err2 := time.Parse("15:04", quietEnd)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	nowMin := t.Hour()*60 + t.Minute()
+	startMin := start.Hour()*60 + start.Minute()
+	endMin := end.Hour()*60 + end.Minute()
+
+	if startMin < endMin {
+		return nowMin >= startMin && nowMin < endMin
+	}
+	return nowMin >= startMin || nowMin < endMin
+}
+
 const (
 	EscalationLevelNone        = 0 // 刚创建
 	EscalationLevel24h         = 1 // T+24h 提醒开发者
@@ -119,8 +157,39 @@ type EscalationService struct {
 	notifSvc       *NotificationService
 	notifierSvc    *NotifierService
 	alertCollector map[string]*escalationAlert // key = "userID:level"
+	imCollector    map[string]*imBatch         // key = "taskID:stage"
+	quietStart     string                      // 免打扰开始时间 HH:MM
+	quietEnd       string                      // 免打扰结束时间 HH:MM
 }
 
+// imBatch IM 聚合批次
+type imBatch struct {
+	project        model.Project
+	task           model.Task
+	stage          string
+	level          int
+	thresholdHours int       // 当前阶段的阈值小时数，用于动态渲染时间描述
+	mentions       []string  // "<@im_user_id>" 格式
+	issues         []imIssue // 结构化 Issue 列表
+	imTemplate     string    // IM 模板（空=使用默认硬编码）
+}
+
+type imTarget struct {
+	project        model.Project
+	task           model.Task
+	stage          string
+	level          int
+	thresholdHours int
+	mentions       []string
+	imTemplate     string
+}
+
+type imIssue struct {
+	ID      uint
+	Message string
+}
+
+// NewEscalationService 创建升级服务
 func NewEscalationService() *EscalationService {
 	return &EscalationService{
 		calc:        GetWorkdayCalculator(),
@@ -129,21 +198,49 @@ func NewEscalationService() *EscalationService {
 	}
 }
 
+// formatDuration 将小时数转为中文时间描述
+func formatDuration(hours int) string {
+	if hours < 24 {
+		return fmt.Sprintf("%d 小时", hours)
+	}
+	days := hours / 24
+	rem := hours % 24
+	if rem == 0 {
+		return fmt.Sprintf("%d 天", days)
+	}
+	return fmt.Sprintf("%d 天 %d 小时", days, rem)
+}
+
 // EscalationStage 升级阶段配置
 type EscalationStage struct {
 	Level          int    `json:"level"`
 	ThresholdHours int    `json:"threshold_hours"`
 	Recipient      string `json:"recipient"`
 	NotifyIM       bool   `json:"notify_im"`
+	IMTemplate     string `json:"im_template"` // IM 消息模板（Markdown），空则使用默认文案
 }
 
 func (s *EscalationService) loadEscalationConfig() []EscalationStage {
 	var rules []model.NotificationRule
 	model.DB.Where("`trigger` = ? AND enabled = ?", "issue.escalation", true).Find(&rules)
-	for _, rule := range rules {
-		if rule.EscalationConfig != "" {
+
+	// 默认清空免打扰时段，避免旧规则禁用后 quiet hours 残留
+	s.quietStart = ""
+	s.quietEnd = ""
+
+	if len(rules) > 0 {
+		rule := rules[0]
+		s.quietStart = rule.QuietHoursStart
+		s.quietEnd = rule.QuietHoursEnd
+		if rule.EscalationConfig != "" && rule.EscalationConfig != "{}" {
 			var stages []EscalationStage
 			if err := json.Unmarshal([]byte(rule.EscalationConfig), &stages); err == nil && len(stages) > 0 {
+				// 防御：旧数据可能没有 level / im_template，使用索引+1 兜底
+				for i := range stages {
+					if stages[i].Level == 0 {
+						stages[i].Level = i + 1
+					}
+				}
 				return stages
 			}
 		}
@@ -172,6 +269,12 @@ func (s *EscalationService) collectAlert(userID uint, level int, typ, title, ite
 }
 
 func (s *EscalationService) flushAlerts() {
+	if s.isQuietHours() {
+		zap.L().Info("flushAlerts: in quiet hours, skipping alert send",
+			zap.Int("batch_count", len(s.alertCollector)))
+		s.alertCollector = nil
+		return
+	}
 	for _, batch := range s.alertCollector {
 		var content string
 		if len(batch.items) == 1 {
@@ -188,6 +291,25 @@ func (s *EscalationService) flushAlerts() {
 // 分页处理，避免 OOM
 func (s *EscalationService) RunDailyEscalation() {
 	now := time.Now()
+	zap.L().Info("RunDailyEscalation started", zap.Time("now", now))
+	defer func() {
+		if r := recover(); r != nil {
+			zap.L().Error("RunDailyEscalation panic recovered", zap.Any("recover", r))
+		}
+	}()
+
+	// 预加载升级配置，避免每个 Issue 都重复查询 DB
+	stages := s.loadEscalationConfig()
+
+	// 冻结期入口拦截：免打扰时段或节假日直接跳过
+	if s.shouldFreezeExecution() {
+		zap.L().Info("RunDailyEscalation skipped: in frozen period",
+			zap.String("quiet_start", s.quietStart),
+			zap.String("quiet_end", s.quietEnd),
+			zap.Time("now", now))
+		return
+	}
+
 	batchSize := 500
 	offset := 0
 
@@ -213,12 +335,13 @@ func (s *EscalationService) RunDailyEscalation() {
 
 		for i := range issues {
 			issue := &issues[i]
-			ageH := s.calc.WorkHoursBetween(*issue.OriginalCreatedAt, now)
-			s.processEscalation(issue, ageH, taskMap, projectMap)
+			ageH := s.calc.EffectiveWorkHoursBetween(*issue.OriginalCreatedAt, now, s.quietStart, s.quietEnd)
+			s.processEscalation(issue, ageH, stages, taskMap, projectMap)
 		}
 
 		// 每批处理完后 flush 聚合通知（避免单页内重复刷屏）
 		s.flushAlerts()
+		s.flushIMs()
 
 		if len(issues) < batchSize {
 			break
@@ -228,7 +351,7 @@ func (s *EscalationService) RunDailyEscalation() {
 
 	// 批量积压告警
 	s.checkBatchAlerts()
-	
+
 	// IM 投递失败自动管理员告警
 	s.checkDeliveryFailures()
 }
@@ -270,16 +393,18 @@ func (s *EscalationService) preloadTaskProjects(issues []model.ReviewIssue) (map
 	return taskMap, projectMap
 }
 
-func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours int, taskMap map[uint]model.Task, projectMap map[uint]model.Project) {
-	stages := s.loadEscalationConfig()
-	var nextLevel int
+func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours int, stages []EscalationStage, taskMap map[uint]model.Task, projectMap map[uint]model.Project) {
+	// 1. 计算应到达的最高 level，并构建 level→stage 映射
+	maxLevel := 0
+	stageMap := make(map[int]EscalationStage)
 	for _, st := range stages {
-		if ageHours >= st.ThresholdHours && st.Level > nextLevel {
-			nextLevel = st.Level
+		stageMap[st.Level] = st
+		if ageHours >= st.ThresholdHours && st.Level > maxLevel {
+			maxLevel = st.Level
 		}
 	}
-	if nextLevel == 0 || issue.EscalationLevel >= nextLevel {
-		return // 未达阈值或已处理过该层级
+	if maxLevel == 0 || issue.EscalationLevel >= maxLevel {
+		return // 未达阈值或已全部处理
 	}
 
 	task, ok1 := taskMap[issue.TaskID]
@@ -288,127 +413,294 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 		return // 关联数据缺失，跳过
 	}
 
-	switch nextLevel {
-	case EscalationLevel24h:
-		if issue.OwnerID != nil {
-			s.collectAlert(*issue.OwnerID, nextLevel, model.NotificationTypeIssueEscalation,
-				"Issue 超期提醒（1 个工作日）",
-				fmt.Sprintf("Issue #%d 已超期 1 个工作日\n项目：%s\nMR：%s\n问题：%s\n请尽快处理，2 天后将通知项目负责人。",
-					issue.ID, project.Name, task.MRTitle, issue.Message))
+	// DEBUG: log the stage map keys
+	var stageKeys []int
+	for k := range stageMap {
+		stageKeys = append(stageKeys, k)
+	}
+	zap.L().Info("processEscalation debug",
+		zap.Uint("issue_id", issue.ID),
+		zap.Int("age_hours", ageHours),
+		zap.Int("escalation_level", issue.EscalationLevel),
+		zap.Int("max_level", maxLevel),
+		zap.Ints("stage_keys", stageKeys))
+
+	// 2. 逐层补齐：从 issue.EscalationLevel+1 到 maxLevel，每层都执行一次
+	for level := issue.EscalationLevel + 1; level <= maxLevel; level++ {
+		stage, ok := stageMap[level]
+		if !ok {
+			zap.L().Warn("processEscalation: stage not found for level",
+				zap.Uint("issue_id", issue.ID),
+				zap.Int("level", level))
+			continue // 该 level 未配置，跳过
 		}
 
-	case EscalationLevel72h:
-		stewards := s.findStewards(task.ProjectID, issue.Category, project.Language)
-		if issue.OwnerID != nil {
-			s.collectAlert(*issue.OwnerID, nextLevel, model.NotificationTypeIssueEscalation,
-				"Issue 超期提醒（3 个工作日）",
-				fmt.Sprintf("Issue #%d 已超期 3 个工作日\n项目：%s\nMR：%s\n问题：%s\n已超期 3 天，请立即处理。",
-					issue.ID, project.Name, task.MRTitle, issue.Message))
-		}
-		for _, st := range stewards {
-			s.collectAlert(st.MemberID, nextLevel, model.NotificationTypeIssueEscalation,
-				"Issue 协助督促（3 个工作日）",
-				fmt.Sprintf("协助督促：Issue #%d\n开发者 %s 的 Issue 已超期 3 天未处理，请协助督促。\n项目：%s\nMR：%s\n问题：%s",
-					issue.ID, task.MRAuthor, project.Name, task.MRTitle, issue.Message))
-		}
-		s.sendEscalationIM(project, issue, task, "72h", stewards)
+		zap.L().Info("processEscalation: processing level",
+			zap.Uint("issue_id", issue.ID),
+			zap.Int("level", level),
+			zap.Int("threshold", stage.ThresholdHours),
+			zap.Bool("notify_im", stage.NotifyIM),
+			zap.Int("im_template_len", len(stage.IMTemplate)))
 
-	case EscalationLevel120hSteward:
-		stewards := s.findStewards(task.ProjectID, issue.Category, project.Language)
-		if len(stewards) > 0 {
-			model.DB.Model(issue).UpdateColumn("current_owner_id", stewards[0].MemberID)
-			for _, st := range stewards {
-				s.collectAlert(st.MemberID, nextLevel, model.NotificationTypeIssueEscalation,
-					"Issue 正式升级（5 个工作日）",
-					fmt.Sprintf("Issue #%d 已升级给您处理\n开发者 %s 的 Issue 已超期 5 天，现升级给您协助处理。\n项目：%s\nMR：%s\n问题：%s",
-						issue.ID, task.MRAuthor, project.Name, task.MRTitle, issue.Message))
+		switch level {
+		case EscalationLevel24h:
+			if issue.OwnerID != nil {
+				dur := formatDuration(stage.ThresholdHours)
+				s.collectAlert(*issue.OwnerID, level, model.NotificationTypeIssueEscalation,
+					"Issue 超期提醒（已超期 "+dur+"）",
+					fmt.Sprintf("Issue #%d 已超期 %s\n项目：%s\nMR：%s\n问题：%s\n请尽快处理，否则将进一步升级。",
+						issue.ID, dur, project.Name, task.MRTitle, issue.Message))
 			}
-			s.sendEscalationIM(project, issue, task, "120h", stewards)
-		}
-		if issue.OwnerID != nil {
-			s.collectAlert(*issue.OwnerID, nextLevel, model.NotificationTypeIssueEscalation,
-				"Issue 已升级给项目负责人",
-				fmt.Sprintf("Issue #%d 已升级给项目负责人\n您的 Issue 因超期未处理，已升级给项目负责人协助推进。", issue.ID))
-		}
 
-	case EscalationLevel240hAdmin:
-		var admins []model.User
-		model.DB.Where("role = ?", model.RoleAdmin).Find(&admins)
-		for _, admin := range admins {
-			s.collectAlert(admin.ID, nextLevel, model.NotificationTypeIssueEscalation,
-				"【全局告警】Issue 超期 10 天",
-				fmt.Sprintf("【全局告警】项目 %s 有 Issue 超期 10 天\nIssue #%d 已超期 10 天未闭环，请关注。\nMR：%s\n问题：%s",
-					project.Name, issue.ID, task.MRTitle, issue.Message))
-		}
+		case EscalationLevel72h:
+			stewards := s.findStewards(task.ProjectID, issue.Category, project.Language)
+			zap.L().Info("processEscalation Level2 findStewards",
+				zap.Uint("issue_id", issue.ID),
+				zap.Int("steward_count", len(stewards)))
+			if issue.OwnerID != nil {
+				dur := formatDuration(stage.ThresholdHours)
+				s.collectAlert(*issue.OwnerID, level, model.NotificationTypeIssueEscalation,
+					"Issue 超期提醒（已超期 "+dur+"）",
+					fmt.Sprintf("Issue #%d 已超期 %s\n项目：%s\nMR：%s\n问题：%s\n请立即处理，否则将进一步升级。",
+						issue.ID, dur, project.Name, task.MRTitle, issue.Message))
+			}
+			for _, st := range stewards {
+				s.collectAlert(st.MemberID, level, model.NotificationTypeIssueEscalation,
+					"Issue 协助督促（已超期 "+formatDuration(stage.ThresholdHours)+"）",
+					fmt.Sprintf("协助督促：Issue #%d\n任务ID：%d\n项目：%s\nMR：%s\n开发者：%s\n问题：%s\n请协助督促处理。",
+						issue.ID, task.ID, project.Name, task.MRTitle, task.MRAuthor, issue.Message))
+			}
+			if stage.NotifyIM {
+				mentions := buildStewardMentions(stewards)
+				zap.L().Info("processEscalation Level2 collectIM",
+					zap.Uint("issue_id", issue.ID),
+					zap.Int("mention_count", len(mentions)),
+					zap.Strings("mentions", mentions))
+				s.collectIM(imTarget{
+					project:        project,
+					task:           task,
+					stage:          "72h",
+					level:          level,
+					thresholdHours: stage.ThresholdHours,
+					mentions:       mentions,
+					imTemplate:     stage.IMTemplate,
+				}, issue.ID, issue.Message)
+			}
 
-	case EscalationLevel360hArchive:
-		model.DB.Model(issue).Updates(map[string]interface{}{
-			"status":           model.IssueStatusAutoArchived,
-			"escalation_level": EscalationLevel360hArchive,
-		})
-		recipients := make(map[uint]bool)
-		if issue.OwnerID != nil {
-			recipients[*issue.OwnerID] = true
+		case EscalationLevel120hSteward:
+			stewards := s.findStewards(task.ProjectID, issue.Category, project.Language)
+			zap.L().Info("processEscalation Level3 findStewards",
+				zap.Uint("issue_id", issue.ID),
+				zap.Int("steward_count", len(stewards)),
+				zap.String("category", issue.Category),
+				zap.String("language", project.Language))
+			if len(stewards) > 0 {
+				model.DB.Model(issue).UpdateColumn("current_owner_id", stewards[0].MemberID)
+				// 同步更新内存指针，确保后续归档通知能发给新责任人
+				issue.CurrentOwnerID = &stewards[0].MemberID
+				dur := formatDuration(stage.ThresholdHours)
+				for _, st := range stewards {
+					s.collectAlert(st.MemberID, level, model.NotificationTypeIssueEscalation,
+						"Issue 正式升级（已超期 "+dur+"）",
+						fmt.Sprintf("Issue #%d 已升级给您处理\n任务ID：%d\n项目：%s\nMR：%s\n开发者：%s\n问题：%s\n请尽快协助处理。",
+							issue.ID, task.ID, project.Name, task.MRTitle, task.MRAuthor, issue.Message))
+				}
+				if stage.NotifyIM {
+					mentions := buildStewardMentions(stewards)
+					zap.L().Info("processEscalation Level3 collectIM",
+						zap.Uint("issue_id", issue.ID),
+						zap.Int("mention_count", len(mentions)),
+						zap.Strings("mentions", mentions),
+						zap.Bool("im_template_empty", stage.IMTemplate == ""))
+					s.collectIM(imTarget{
+						project:        project,
+						task:           task,
+						stage:          "120h",
+						level:          level,
+						thresholdHours: stage.ThresholdHours,
+						mentions:       mentions,
+						imTemplate:     stage.IMTemplate,
+					}, issue.ID, issue.Message)
+				}
+			} else {
+				zap.L().Warn("processEscalation Level3: no stewards found, skipping IM",
+					zap.Uint("issue_id", issue.ID),
+					zap.Uint("project_id", task.ProjectID),
+					zap.String("category", issue.Category))
+			}
+			if issue.OwnerID != nil {
+				dur := formatDuration(stage.ThresholdHours)
+				s.collectAlert(*issue.OwnerID, level, model.NotificationTypeIssueEscalation,
+					"Issue 已升级给项目负责人",
+					fmt.Sprintf("Issue #%d 已升级给项目负责人\n您的 Issue 因超期 %s 未处理，已升级给项目负责人协助推进。", issue.ID, dur))
+			}
+
+		case EscalationLevel240hAdmin:
+			var admins []model.User
+			model.DB.Where("role = ?", model.RoleAdmin).Find(&admins)
+			dur := formatDuration(stage.ThresholdHours)
+			for _, admin := range admins {
+				s.collectAlert(admin.ID, level, model.NotificationTypeIssueEscalation,
+					"【全局告警】Issue 超期 "+dur,
+					fmt.Sprintf("【全局告警】项目 %s 有 Issue 超期 %s 未闭环，请关注。\nIssue #%d\nMR：%s\n问题：%s",
+						project.Name, dur, issue.ID, task.MRTitle, issue.Message))
+			}
+			if stage.NotifyIM {
+				mentions := s.buildAdminMentions(admins)
+				zap.L().Info("processEscalation Level4 collectIM",
+					zap.Uint("issue_id", issue.ID),
+					zap.Int("mention_count", len(mentions)),
+					zap.Strings("mentions", mentions))
+				s.collectIM(imTarget{
+					project:        project,
+					task:           task,
+					stage:          "240h",
+					level:          level,
+					thresholdHours: stage.ThresholdHours,
+					mentions:       mentions,
+					imTemplate:     stage.IMTemplate,
+				}, issue.ID, issue.Message)
+			}
+
+		case EscalationLevel360hArchive:
+			model.DB.Model(issue).Updates(map[string]interface{}{
+				"status":           model.IssueStatusAutoArchived,
+				"escalation_level": EscalationLevel360hArchive,
+			})
+			recipients := make(map[uint]bool)
+			if issue.OwnerID != nil {
+				recipients[*issue.OwnerID] = true
+			}
+			if issue.CurrentOwnerID != nil {
+				recipients[*issue.CurrentOwnerID] = true
+			}
+			dur := formatDuration(stage.ThresholdHours)
+			for uid := range recipients {
+				s.collectAlert(uid, level, model.NotificationTypeAutoArchived,
+					"Issue 已自动归档",
+					fmt.Sprintf("Issue #%d 已自动归档\n因超期 %s 未处理，系统已自动归档。\n项目：%s\nMR：%s",
+						issue.ID, dur, project.Name, task.MRTitle))
+			}
+			var admins []model.User
+			model.DB.Where("role = ?", model.RoleAdmin).Find(&admins)
+			for _, admin := range admins {
+				s.collectAlert(admin.ID, level, model.NotificationTypeAutoArchived,
+					"【全局通知】Issue 自动归档",
+					fmt.Sprintf("【全局通知】项目 %s 有 Issue 已自动归档\nIssue #%d 因超期 %s 未处理，系统已自动归档。\nMR：%s",
+						project.Name, issue.ID, dur, task.MRTitle))
+			}
+			zap.L().Info("issue auto archived", zap.Uint("issue_id", issue.ID), zap.Int("age_hours", ageHours))
+			return // 归档后直接退出，不再更新 escalation_level（已在上面 update 中设置）
 		}
-		if issue.CurrentOwnerID != nil {
-			recipients[*issue.CurrentOwnerID] = true
-		}
-		for uid := range recipients {
-			s.collectAlert(uid, nextLevel, model.NotificationTypeAutoArchived,
-				"Issue 已自动归档",
-				fmt.Sprintf("Issue #%d 已自动归档\n因超期 15 个工作日未处理，系统已自动归档。\n项目：%s\nMR：%s",
-					issue.ID, project.Name, task.MRTitle))
-		}
-		zap.L().Info("issue auto archived", zap.Uint("issue_id", issue.ID), zap.Int("age_hours", ageHours))
-		return // 归档后不再更新 escalation_level
 	}
 
-	// 更新已处理层级
-	model.DB.Model(issue).UpdateColumn("escalation_level", nextLevel)
+	// 3. 统一更新已处理层级到最高 level
+	model.DB.Model(issue).Updates(map[string]interface{}{"escalation_level": maxLevel})
 }
 
 // findStewards 查找项目指定维度的负责人（category → language → default）
+// ⚠️ 关键修复：每个 scope 查询必须使用独立的 db chain，不能复用同一个 *gorm.DB 变量，
+//    否则 GORM 的 Where 条件会叠加（如 scope_type='rc' AND scope_type='default'），导致 fallback 永远返回 0 行。
 func (s *EscalationService) findStewards(projectID uint, category, language string) []model.ProjectResponsibility {
-	var responsibilities []model.ProjectResponsibility
-	db := model.DB.Preload("Member").Where("project_id = ?", projectID)
+	zap.L().Info("findStewards called",
+		zap.Uint("project_id", projectID),
+		zap.String("category", category),
+		zap.String("language", language))
 
 	// 1. 按 category 匹配
 	if category != "" {
-		if err := db.Where("scope_type = 'rule_category' AND scope_value = ?", category).
+		var catRes []model.ProjectResponsibility
+		if err := model.DB.Preload("Member").Where("project_id = ? AND scope_type = 'rule_category' AND scope_value = ?", projectID, category).
 			Order("priority ASC, created_at ASC").
-			Find(&responsibilities).Error; err == nil && len(responsibilities) > 0 {
-			return responsibilities
+			Find(&catRes).Error; err == nil && len(catRes) > 0 {
+			zap.L().Info("findStewards: matched by category",
+				zap.Uint("project_id", projectID),
+				zap.String("category", category),
+				zap.Int("count", len(catRes)))
+			return catRes
 		}
+		zap.L().Info("findStewards: no category match",
+			zap.Uint("project_id", projectID),
+			zap.String("category", category))
 	}
 	// 2. 按 language 匹配
 	if language != "" {
-		if err := db.Where("scope_type = 'language' AND scope_value = ?", language).
+		var langRes []model.ProjectResponsibility
+		if err := model.DB.Preload("Member").Where("project_id = ? AND scope_type = 'language' AND scope_value = ?", projectID, language).
 			Order("priority ASC, created_at ASC").
-			Find(&responsibilities).Error; err == nil && len(responsibilities) > 0 {
-			return responsibilities
+			Find(&langRes).Error; err == nil && len(langRes) > 0 {
+			zap.L().Info("findStewards: matched by language",
+				zap.Uint("project_id", projectID),
+				zap.String("language", language),
+				zap.Int("count", len(langRes)))
+			return langRes
 		}
+		zap.L().Info("findStewards: no language match",
+			zap.Uint("project_id", projectID),
+			zap.String("language", language))
 	}
 	// 3. fallback 到 default
-	if err := db.Where("scope_type = 'default' AND scope_value = ''").
+	var defRes []model.ProjectResponsibility
+	if err := model.DB.Preload("Member").Where("project_id = ? AND scope_type = 'default'", projectID).
 		Order("priority ASC, created_at ASC").
-		Find(&responsibilities).Error; err != nil {
+		Find(&defRes).Error; err != nil {
 		zap.L().Error("findStewards fallback query failed", zap.Error(err))
 	}
-	return responsibilities
+	zap.L().Info("findStewards: fallback result",
+		zap.Uint("project_id", projectID),
+		zap.Int("count", len(defRes)))
+	return defRes
+}
+
+// buildStewardMentions 从 ProjectResponsibility 构建 @ 列表
+func buildStewardMentions(stewards []model.ProjectResponsibility) []string {
+	var mentions []string
+	for _, st := range stewards {
+		if st.Member.IMUserID != "" {
+			mentions = append(mentions, fmt.Sprintf("<@%s>", st.Member.IMUserID))
+		}
+	}
+	return mentions
+}
+
+// buildAdminMentions 从 User 列表构建 @ 列表
+func (s *EscalationService) buildAdminMentions(admins []model.User) []string {
+	var gitlabUsernames []string
+	for _, admin := range admins {
+		if admin.GitlabUsername != "" {
+			gitlabUsernames = append(gitlabUsernames, admin.GitlabUsername)
+		} else if admin.LoginType == "local" {
+			// 本地用户在 team_members 中以虚拟 __local_<user_id> 注册
+			gitlabUsernames = append(gitlabUsernames, fmt.Sprintf("__local_%d", admin.ID))
+		}
+	}
+	if len(gitlabUsernames) == 0 {
+		return nil
+	}
+	var members []model.TeamMember
+	model.DB.Where("gitlab_username IN ?", gitlabUsernames).Find(&members)
+	var mentions []string
+	for _, m := range members {
+		if m.IMUserID != "" {
+			mentions = append(mentions, fmt.Sprintf("<@%s>", m.IMUserID))
+		}
+	}
+	return mentions
 }
 
 // checkBatchAlerts 项目批量积压告警
 func (s *EscalationService) checkBatchAlerts() {
 	type Result struct {
-		ProjectID      uint
-		PendingCount   int64
+		ProjectID    uint
+		PendingCount int64
 	}
 	var results []Result
 	model.DB.Raw(`
-		SELECT project_id, COUNT(*) AS pending_count
-		FROM review_issues
-		WHERE deleted_at IS NULL AND status = ?
-		GROUP BY project_id
+		SELECT t.project_id, COUNT(ri.id) AS pending_count
+		FROM review_issues ri
+		INNER JOIN tasks t ON t.id = ri.task_id
+		WHERE ri.deleted_at IS NULL AND ri.status = ?
+		GROUP BY t.project_id
 		HAVING pending_count >= 50
 	`, model.IssueStatusPending).Scan(&results)
 
@@ -440,6 +732,20 @@ func (s *EscalationService) checkBatchAlerts() {
 
 // SendDailyDigest 每日摘要（09:00 执行）
 func (s *EscalationService) SendDailyDigest() {
+	zap.L().Info("SendDailyDigest started", zap.Time("now", time.Now()))
+	defer func() {
+		if r := recover(); r != nil {
+			zap.L().Error("SendDailyDigest panic recovered", zap.Any("recover", r))
+		}
+	}()
+
+	// 加载配置以获取 quiet hours，并检查是否处于冻结期
+	_ = s.loadEscalationConfig()
+	if s.shouldFreezeExecution() {
+		zap.L().Info("SendDailyDigest skipped: in frozen period")
+		return
+	}
+
 	type UserStat struct {
 		UserID       uint
 		PendingCount int64
@@ -461,78 +767,235 @@ func (s *EscalationService) SendDailyDigest() {
 	}
 }
 
-// sendEscalationIM 发送升级 IM 消息到项目群
-func (s *EscalationService) sendEscalationIM(project model.Project, issue *model.ReviewIssue, task model.Task, stage string, stewards []model.ProjectResponsibility) {
-	// 查找项目相关的 WeCom Notifier
-	var notifiers []model.WeComNotifier
-	db := model.DB.Where("enabled = ?", true)
+// findProjectNotifier 查找项目专属机器人，无专属时返回全局机器人
+func (s *EscalationService) findProjectNotifier(project model.Project) *model.WeComNotifier {
+	// 1. 优先查项目专属机器人（取第一个启用的）
 	if project.ID > 0 {
-		db = db.Where("project_id IS NULL OR project_id = ?", project.ID)
-	} else {
-		db = db.Where("project_id IS NULL")
+		var specific model.WeComNotifier
+		if err := model.DB.Where("enabled = ? AND project_id = ?", true, project.ID).
+			Order("created_at ASC").First(&specific).Error; err == nil {
+			return &specific
+		}
 	}
-	db.Find(&notifiers)
-	if len(notifiers) == 0 {
+	// 2. 无专属时，查全局机器人（取第一个启用的）
+	var global model.WeComNotifier
+	if err := model.DB.Where("enabled = ? AND project_id IS NULL", true).
+		Order("created_at ASC").First(&global).Error; err == nil {
+		return &global
+	}
+	return nil
+}
+
+// sendEscalationIMRaw 底层发送 IM（模板中已含 {{AT_RECIPIENT}}，不再追加）
+func (s *EscalationService) sendEscalationIMRaw(project model.Project, task model.Task, mentions []string, recipientType string, msg string) {
+	notifier := s.findProjectNotifier(project)
+	if notifier == nil {
+		zap.L().Warn("sendEscalationIMRaw: no notifier found",
+			zap.Uint("project_id", project.ID),
+			zap.Uint("task_id", task.ID))
 		return
 	}
 
-	// 构建 @ 列表（stewards 已预加载 Member，直接取 IMUserID）
-	var mentions []string
-	for _, st := range stewards {
-		if st.Member.IMUserID != "" {
-			mentions = append(mentions, fmt.Sprintf("<@%s>", st.Member.IMUserID))
+	// 模板中 {{AT_RECIPIENT}} 已包含 @ 语法，不再由 SendMessage 追加
+	ok, detail, err := s.notifierSvc.SendMessage(notifier.WebhookUrl, msg, "")
+	log := model.NotificationDeliveryLog{
+		NotifierID:     &notifier.ID,
+		TaskID:         &task.ID,
+		Channel:        "wecom",
+		RecipientType:  recipientType,
+		MessagePreview: truncateRune(msg, 200),
+		Status:         "success",
+	}
+	if !ok || err != nil {
+		log.Status = "failed"
+		log.ErrorMsg = detail
+		if err != nil {
+			log.ErrorMsg = err.Error()
 		}
 	}
-	mentionStr := ""
-	if len(mentions) > 0 {
-		mentionStr = "\n" + strings.Join(mentions, " ")
+	result := model.DB.Create(&log)
+	if result.Error != nil {
+		zap.L().Error("sendEscalationIMRaw: failed to create delivery log",
+			zap.Uint("task_id", task.ID),
+			zap.Error(result.Error))
+	}
+	zap.L().Info("sendEscalationIMRaw: sent",
+		zap.Uint("task_id", task.ID),
+		zap.String("recipient_type", recipientType),
+		zap.Bool("ok", ok),
+		zap.String("status", log.Status))
+}
+
+// recipientType 根据 level 返回 delivery log 的 recipient_type
+func recipientType(level int) string {
+	if level == 4 {
+		return "admin"
+	}
+	return "steward"
+}
+
+// collectIM 将单条 IM 收入聚合桶（按 taskID + stage 聚合）
+func (s *EscalationService) collectIM(target imTarget, issueID uint, issueMessage string) {
+	key := fmt.Sprintf("%d:%s", target.task.ID, target.stage)
+	if s.imCollector == nil {
+		s.imCollector = make(map[string]*imBatch)
+	}
+	batch, ok := s.imCollector[key]
+	if !ok {
+		batch = &imBatch{
+			project:        target.project,
+			task:           target.task,
+			stage:          target.stage,
+			level:          target.level,
+			thresholdHours: target.thresholdHours,
+			mentions:       target.mentions,
+			issues:         make([]imIssue, 0),
+			imTemplate:     target.imTemplate,
+		}
+		s.imCollector[key] = batch
+		zap.L().Info("collectIM: created new batch",
+			zap.String("key", key),
+			zap.Int("level", target.level),
+			zap.String("stage", target.stage),
+			zap.Int("mention_count", len(target.mentions)))
+	}
+	batch.issues = append(batch.issues, imIssue{ID: issueID, Message: issueMessage})
+	zap.L().Info("collectIM: added issue to batch",
+		zap.String("key", key),
+		zap.Uint("issue_id", issueID),
+		zap.Int("batch_size", len(batch.issues)))
+}
+
+// isQuietHours 判断当前是否处于规则配置的免打扰时段
+func (s *EscalationService) isQuietHours() bool {
+	if s.quietStart == "" || s.quietEnd == "" {
+		return false
+	}
+	start, err1 := time.Parse("15:04", s.quietStart)
+	end, err2 := time.Parse("15:04", s.quietEnd)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	now := time.Now()
+	nowMin := now.Hour()*60 + now.Minute()
+	startMin := start.Hour()*60 + start.Minute()
+	endMin := end.Hour()*60 + end.Minute()
+
+	if startMin < endMin {
+		// 不跨天，例如 09:00-18:00
+		return nowMin >= startMin && nowMin < endMin
+	}
+	// 跨天，例如 22:00-09:00 或 00:00-09:00
+	return nowMin >= startMin || nowMin < endMin
+}
+
+// shouldFreezeExecution 判断当前是否处于冻结期（免打扰时段或节假日）
+func (s *EscalationService) shouldFreezeExecution() bool {
+	if s.isQuietHours() {
+		return true
+	}
+	if !s.calc.IsWorkTime(time.Now()) {
+		return true
+	}
+	return false
+}
+
+// flushIMs 统一 flush 聚合后的 IM 消息
+func (s *EscalationService) flushIMs() {
+	if len(s.imCollector) == 0 {
+		zap.L().Info("flushIMs: no batches to flush")
+		return
+	}
+	if s.isQuietHours() {
+		zap.L().Info("flushIMs: in quiet hours, skipping IM send",
+			zap.String("quiet_start", s.quietStart),
+			zap.String("quiet_end", s.quietEnd),
+			zap.Int("batch_count", len(s.imCollector)))
+		s.imCollector = nil
+		return
+	}
+	zap.L().Info("flushIMs: flushing batches", zap.Int("batch_count", len(s.imCollector)))
+	for _, batch := range s.imCollector {
+		var msg string
+		if batch.imTemplate != "" {
+			msg = renderIMFromTemplate(batch)
+		} else {
+			msg = renderIMDefault(batch)
+		}
+		zap.L().Info("flushIMs: sending batch",
+			zap.Int("level", batch.level),
+			zap.String("stage", batch.stage),
+			zap.Int("issue_count", len(batch.issues)),
+			zap.Int("msg_len", len(msg)))
+		s.sendEscalationIMRaw(batch.project, batch.task, batch.mentions, recipientType(batch.level), msg)
+	}
+	s.imCollector = nil
+}
+
+// buildIMTemplateContext 从聚合批次构建模板渲染上下文
+func buildIMTemplateContext(batch *imBatch) IMTemplateContext {
+	var issueList []IMIssueItem
+	for _, iss := range batch.issues {
+		issueList = append(issueList, IMIssueItem{ID: iss.ID, Message: iss.Message})
+	}
+	ctx := IMTemplateContext{
+		Project:      batch.project,
+		Task:         batch.task,
+		Developer:    batch.task.MRAuthor,
+		AtRecipient:  strings.Join(batch.mentions, " "),
+		IssueCount:   len(batch.issues),
+		IssueList:    issueList,
+		IssueID:      0,
+		IssueMessage: "",
+	}
+	if len(batch.issues) > 0 {
+		ctx.IssueID = batch.issues[0].ID
+		ctx.IssueMessage = batch.issues[0].Message
+	}
+	return ctx
+}
+
+// renderIMFromTemplate 使用配置模板渲染 IM 消息
+func renderIMFromTemplate(batch *imBatch) string {
+	ctx := buildIMTemplateContext(batch)
+	return RenderIMTemplate(batch.imTemplate, ctx)
+}
+
+// renderIMDefault 使用动态阈值渲染 IM 消息
+func renderIMDefault(batch *imBatch) string {
+	var stageText string
+	switch batch.level {
+	case 2:
+		stageText = "已超期 " + formatDuration(batch.thresholdHours)
+	case 3:
+		stageText = "已超期 " + formatDuration(batch.thresholdHours) + "，正式升级"
+	case 4:
+		stageText = "已超期 " + formatDuration(batch.thresholdHours)
+	default:
+		stageText = "升级提醒"
 	}
 
-	var msg string
-	templateStr := GetNotificationRuleTemplate("issue.escalation")
-	if templateStr != "" {
-		stats := CalcIssueStats(task.ID, task.MRMergeID)
-		ctx := TemplateContext{
-			Task:        task,
-			Stats:       stats,
-			Project:     project,
-			Developer:   task.MRAuthor,
-			AtRecipient: strings.Join(mentions, " "),
+	if len(batch.issues) == 1 {
+		msg := fmt.Sprintf("**Issue #%d %s**\n问题：%s",
+			batch.issues[0].ID, stageText, batch.issues[0].Message)
+		if len(batch.mentions) > 0 {
+			msg += "\n\n" + strings.Join(batch.mentions, " ")
 		}
-		msg = RenderMessage(templateStr, ctx)
-	} else {
-		var stageText string
-		switch stage {
-		case "72h":
-			stageText = "已超期 3 个工作日"
-		case "120h":
-			stageText = "已超期 5 个工作日，正式升级"
-		default:
-			stageText = "升级提醒"
-		}
-		msg = fmt.Sprintf("**⚠️ Issue 升级告警**\n\n**项目：** %s\n**MR：** !%d %s\n**开发者：** %s\n**问题：** %s\n**状态：** %s\n\n> 请在 2 个工作日内处理，否则将自动归档。%s",
-			project.Name, task.MRMergeID, task.MRTitle, task.MRAuthor, issue.Message, stageText, mentionStr)
+		return msg
 	}
 
-	for _, notifier := range notifiers {
-		ok, detail, err := s.notifierSvc.SendMessage(notifier.WebhookUrl, msg, "")
-		log := model.NotificationDeliveryLog{
-			NotifierID:     &notifier.ID,
-			TaskID:         &task.ID,
-			Channel:        "wecom",
-			RecipientType:  "steward",
-			MessagePreview: truncate(msg, 200),
-			Status:         "success",
-		}
-		if !ok || err != nil {
-			log.Status = "failed"
-			log.ErrorMsg = detail
-			if err != nil {
-				log.ErrorMsg = err.Error()
-			}
-		}
-		model.DB.Create(&log)
+	var lines []string
+	for _, issue := range batch.issues {
+		lines = append(lines, fmt.Sprintf("**Issue #%d** %s\n问题：%s", issue.ID, stageText, issue.Message))
 	}
+	msg := fmt.Sprintf("**⚠️ Issue 升级告警（%d 条）**\n\n项目：%s\nMR：!%d %s\n\n%s",
+		len(batch.issues), batch.project.Name, batch.task.MRMergeID, batch.task.MRTitle,
+		strings.Join(lines, "\n---\n"))
+	// 如果 mentions 非空，追加到消息末尾（@ 人员）
+	if len(batch.mentions) > 0 {
+		msg += "\n\n" + strings.Join(batch.mentions, " ")
+	}
+	return msg
 }
 
 // checkDeliveryFailures 检查当日 IM 投递失败并告警管理员

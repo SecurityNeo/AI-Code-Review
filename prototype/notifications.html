@@ -97,13 +97,12 @@
         <div class="px-8 py-6 space-y-4">
             <!-- 分类筛选 -->
             <div class="flex items-center gap-2 flex-wrap bg-white rounded-xl border px-4 py-3 shadow-sm">
-                <button onclick="filterType('')" id="tab-all" class="tab-btn active">全部</button>
-                <button onclick="filterType('task_completed')" id="tab-task" class="tab-btn">任务完成</button>
-                <button onclick="filterType('issue_escalation')" id="tab-escalation" class="tab-btn">Issue 升级</button>
-                <button onclick="filterType('deadline_digest')" id="tab-deadline" class="tab-btn">截止提醒</button>
-                <button onclick="filterType('daily_digest')" id="tab-digest" class="tab-btn">日报</button>
-                <button onclick="filterType('batch_alert')" id="tab-batch" class="tab-btn">告警</button>
-                <button onclick="filterType('auto_archived')" id="tab-archived" class="tab-btn">归档</button>
+                    <button onclick="filterType('')" id="tab-all" class="tab-btn active">全部</button>
+                    <button onclick="filterType('task_completed')" id="tab-task" class="tab-btn">任务完成</button>
+                    <button onclick="filterType('issue_escalation')" id="tab-escalation" class="tab-btn">问题升级</button>
+                    <button onclick="filterType('daily_digest')" id="tab-digest" class="tab-btn">日报</button>
+                    <button onclick="filterType('batch_alert')" id="tab-batch" class="tab-btn">告警</button>
+                    <button onclick="filterType('auto_archived')" id="tab-archived" class="tab-btn">归档</button>
                 <div style="flex:1;"></div>
                 <button onclick="filterUnread()" id="tab-unread" class="tab-btn">
                     <i class="fas fa-envelope mr-1"></i>仅未读
@@ -114,7 +113,7 @@
             <div id="notifList" class="space-y-2"></div>
 
             <!-- 分页 -->
-            <div id="paginationArea" class="flex items-center justify-between pt-3">
+            <div class="flex items-center justify-between px-6 py-3 border-t bg-white">
                 <span id="totalCount" class="text-sm text-gray-500">共 0 条记录</span>
                 <div class="flex items-center gap-3">
                     <select id="pageSizeSelect" onchange="changePageSize()" class="px-2 py-1 border rounded text-sm">
@@ -122,7 +121,7 @@
                         <option value="20">20条/页</option>
                         <option value="50">50条/页</option>
                     </select>
-                    <div id="pagination" class="flex gap-1"></div>
+                    <div id="pagination" class="flex gap-2"></div>
                 </div>
             </div>
         </div>
@@ -318,9 +317,10 @@ function openNotifDetail(id) {
     document.getElementById('detailTypeBadge').textContent = info.label;
     document.getElementById('detailTitle').textContent = n.title;
     document.getElementById('detailTime').textContent = formatTime(n.created_at);
-    // 使用 marked.js 渲染 Markdown
+    // 纯文本展示（保留换行，不渲染 Markdown）
     const rawContent = n.content || '';
-    document.getElementById('detailContent').innerHTML = marked.parse(rawContent);
+    const safeHtml = escapeHtml(rawContent).replace(/\n/g, '<br>');
+    document.getElementById('detailContent').innerHTML = '<div class="whitespace-pre-wrap text-sm text-gray-700 leading-relaxed">' + safeHtml + '</div>';
     // 链接按钮
     const linkBtn = document.getElementById('detailLink');
     if (n.link) { linkBtn.href = n.link; linkBtn.classList.remove('hidden'); }

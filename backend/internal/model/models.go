@@ -203,9 +203,10 @@ type ReviewIssue struct {
 	OwnerID              *uint          `gorm:"index" json:"owner_id"`                             // MR 提交者用户ID（外键至 users）
 	CurrentOwnerID       *uint          `gorm:"index" json:"current_owner_id"`                     // 当前责任人（升级后可能变更）
 	OriginalCreatedAt    *time.Time     `json:"original_created_at"`                               // 首次发现时间（用于升级计时）
-	EscalationLevel      int            `gorm:"default:0" json:"escalation_level"`                 // 当前升级层级
-	CreatedAt            time.Time      `gorm:"index:idx_rule_code_created,priority:2" json:"created_at"`
-	DeletedAt            gorm.DeletedAt `gorm:"index" json:"-"`
+    EscalationLevel      int            `gorm:"default:0" json:"escalation_level"`                 // 当前升级层级
+    CreatedAt            time.Time      `gorm:"index:idx_rule_code_created,priority:2" json:"created_at"`
+    UpdatedAt            time.Time      `gorm:"autoUpdateTime" json:"updated_at"`
+    DeletedAt            gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 // --- TaskReviewComment 任务人工复核意见 ---

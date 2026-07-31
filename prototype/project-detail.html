@@ -1075,7 +1075,12 @@ let ruleTotalPages = 1;
             var scopeType = typeLabels[s.scope_type] || s.scope_type || '-';
             var scopeValue = (s.scope_value || '-').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
             var displayName = (s.display_name || s.gitlab_username || '-').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-            var gitlabUser = (s.gitlab_username || '-').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            var gitlabUserRaw = s.gitlab_username || '-';
+            var gitlabUser = gitlabUserRaw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            // 本地用户虚拟标识处理
+            if (gitlabUserRaw.startsWith('__local_')) {
+                gitlabUser = '<span class="inline-flex items-center gap-1 text-xs text-slate-500"><i class="fas fa-user text-slate-400"></i>本地账号</span>';
+            }
             var imPlatform = (s.im_platform || '-').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
             var imUserId = (s.im_user_id || '-').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
             var priority = s.priority !== undefined ? s.priority : 0;

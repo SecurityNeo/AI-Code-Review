@@ -1624,10 +1624,6 @@ function renderTasks(tasks) {
             const hasNewComment = comment !== '';
             const hasSelectedHistory = selectedIds.length > 0;
 
-            if (!hasNewComment && !hasSelectedHistory) {
-                showToast('未添加复核意见，将直接重新评审', 'info');
-            }
-
             try {
                 const body = {};
                 if (hasNewComment) body.user_review_comment = comment;
@@ -1639,7 +1635,10 @@ function renderTasks(tasks) {
                     body: JSON.stringify(body)
                 });
                 if (!res.ok) throw new Error('重试失败');
-                showToast('任务已补充意见并重新触发', 'success');
+                const msg = (hasNewComment || hasSelectedHistory)
+                    ? '任务已补充意见并重新触发'
+                    : '任务已重新触发';
+                showToast(msg, 'success');
                 document.getElementById('retryModal')?.remove();
                 loadTasks();
             } catch (e) {

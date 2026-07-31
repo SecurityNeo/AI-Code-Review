@@ -80,15 +80,15 @@ func (s *NotificationService) UnreadCount(userID uint) int64 {
 
 // IssueStats 任务完成时的 Issue 统计
 type IssueStats struct {
-	Total           int
-	Pending         int
-	Critical        int
-	High            int
-	Medium          int
-	Low             int
-	AutoFiltered    int
-	Gone            int
-	New             int
+	Total              int
+	Pending            int
+	Critical           int
+	High               int
+	Medium             int
+	Low                int
+	AutoFiltered       int
+	Gone               int
+	New                int
 	ResolvedReappeared int
 }
 
@@ -102,10 +102,14 @@ func CalcIssueStats(taskID uint, mrID int) IssueStats {
 	for _, issue := range currentIssues {
 		stats.Total++
 		switch issue.Severity {
-		case "critical": stats.Critical++
-		case "high": stats.High++
-		case "medium": stats.Medium++
-		case "low": stats.Low++
+		case "critical":
+			stats.Critical++
+		case "high":
+			stats.High++
+		case "medium":
+			stats.Medium++
+		case "low":
+			stats.Low++
 		}
 		if issue.Status == model.IssueStatusPending {
 			stats.Pending++
@@ -161,15 +165,15 @@ func CalcIssueStats(taskID uint, mrID int) IssueStats {
 
 // TemplateContext 模板渲染上下文
 type TemplateContext struct {
-	Task      model.Task
-	Stats     IssueStats
-	Project   model.Project
-	Developer string // MR 提交者含 DisplayName
-	Steward   string
-	Additions int
-	Deletions int
+	Task          model.Task
+	Stats         IssueStats
+	Project       model.Project
+	Developer     string // MR 提交者含 DisplayName
+	Steward       string
+	Additions     int
+	Deletions     int
 	DeadlineHours int
-	AtRecipient string
+	AtRecipient   string
 }
 
 // RenderMessage 根据模板和上下文渲染消息（支持 Mustache 条件语法）
@@ -207,12 +211,12 @@ func RenderMessage(template string, ctx TemplateContext) string {
 
 	// Mustache 条件语法 {{#if VAR}}...{{/if}}
 	variables := map[string]interface{}{
-		"ISSUE_TOTAL":              stats.Total, "ISSUE_PENDING": stats.Pending,
+		"ISSUE_TOTAL": stats.Total, "ISSUE_PENDING": stats.Pending,
 		"ISSUE_CRITICAL": stats.Critical, "ISSUE_HIGH": stats.High,
-		"ISSUE_MEDIUM":   stats.Medium, "ISSUE_LOW": stats.Low,
+		"ISSUE_MEDIUM": stats.Medium, "ISSUE_LOW": stats.Low,
 		"ISSUE_AUTO_FILTERED": stats.AutoFiltered, "ISSUE_GONE": stats.Gone,
-		"ISSUE_NEW":           stats.New, "ISSUE_RESOLVED_REAPPEARED": stats.ResolvedReappeared,
-		"EXECUTION_COUNT":     task.ExecutionCount,
+		"ISSUE_NEW": stats.New, "ISSUE_RESOLVED_REAPPEARED": stats.ResolvedReappeared,
+		"EXECUTION_COUNT": task.ExecutionCount,
 	}
 	for name, val := range variables {
 		startTag := "{{#if " + name + "}}"
@@ -255,6 +259,82 @@ func renderMustacheBlock(msg, startTag, namedEndTag string, keep bool) string {
 	return msg
 }
 
+// IMTemplateContext Issue 升级 IM 模板渲染上下文
+type IMTemplateContext struct {
+	Project      model.Project
+	Task         model.Task
+	Developer    string
+	AtRecipient  string
+	IssueCount   int
+	IssueList    []IMIssueItem
+	IssueID      uint
+	IssueMessage string
+}
+
+// IMIssueItem 聚合中的单条 Issue
+type IMIssueItem struct {
+	ID      uint
+	Message string
+}
+
+// RenderIMTemplate 渲染 IM 升级模板
+func RenderIMTemplate(template string, ctx IMTemplateContext) string {
+	if template == "" {
+		return ""
+	}
+
+	// 聚合变量前置处理（{{ISSUE_LIST}} 最长 3500 字节，逐条累加，超限截断）
+	issueListRendered := ""
+	if strings.Contains(template, "{{ISSUE_LIST}}") {
+		var lines []string
+		list := ctx.IssueList
+		if len(list) == 0 {
+			// 单条模式兜底
+			list = append(list, IMIssueItem{ID: ctx.IssueID, Message: ctx.IssueMessage})
+		}
+		const maxBytes = 3500
+		currentBytes := 0
+		for i, item := range list {
+			line := fmt.Sprintf("【%d】%s", item.ID, item.Message)
+			lineBytes := len(line)
+			if i > 0 {
+				lineBytes++ // 换行符 \n
+			}
+			if currentBytes+lineBytes > maxBytes {
+				// 加上这条会超过限制，停止组装
+				remaining := len(list) - i
+				if remaining > 0 {
+					lines = append(lines, fmt.Sprintf("（还有 %d 条...）", remaining))
+				} else {
+					lines = append(lines, "...")
+				}
+				break
+			}
+			lines = append(lines, line)
+			currentBytes += lineBytes
+		}
+		if len(lines) > 0 {
+			issueListRendered = strings.Join(lines, "\n")
+		}
+	}
+
+	replacements := []string{
+		"{{PROJECT_NAME}}", ctx.Project.Name,
+		"{{TASK_ID}}", fmt.Sprintf("%d", ctx.Task.ID),
+		"{{MR_IID}}", fmt.Sprintf("%d", ctx.Task.MRMergeID),
+		"{{MR_TITLE}}", ctx.Task.MRTitle,
+		"{{MR_AUTHOR}}", ctx.Task.MRAuthor,
+		"{{DEVELOPER}}", ctx.Developer,
+		"{{AT_RECIPIENT}}", ctx.AtRecipient,
+		"{{ISSUE_COUNT}}", fmt.Sprintf("%d", ctx.IssueCount),
+		"{{ISSUE_LIST}}", issueListRendered,
+		"{{ISSUE_ID}}", fmt.Sprintf("%d", ctx.IssueID),
+		"{{ISSUE_MESSAGE}}", ctx.IssueMessage,
+	}
+
+	return strings.NewReplacer(replacements...).Replace(template)
+}
+
 // GetNotificationRuleTemplate 按 trigger 查询启用的通知规则模板
 func GetNotificationRuleTemplate(trigger string) string {
 	var rule model.NotificationRule
@@ -272,8 +352,8 @@ func GetNotificationRuleTemplate(trigger string) string {
 				zap.String("rule_name", rule.Name),
 				zap.Int("template_len", len(rule.Template)))
 		}
-	return rule.Template
-} else {
+		return rule.Template
+	} else {
 		zap.L().Warn("notification rule template not found",
 			zap.String("trigger", trigger),
 			zap.Error(err))

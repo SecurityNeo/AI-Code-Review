@@ -42,7 +42,7 @@
         <header class="bg-white border-b px-8 py-4 flex items-center justify-between sticky top-0 z-10">
             <div>
                 <h2 class="text-xl font-bold text-gray-800">👤 我的工作台</h2>
-                <p class="text-sm text-gray-500 mt-1">开发者视角 · 待处理 Issue 与质量趋势</p>
+                <p class="text-sm text-gray-500 mt-1">开发者视角 · 待处理问题 与质量趋势</p>
             </div>
             <div class="flex items-center gap-3">
                 <button onclick="loadDashboard(true)" class="text-sm text-blue-600 hover:text-blue-800 px-3 py-1.5 rounded hover:bg-blue-50">
@@ -54,10 +54,10 @@
         <div class="px-8 py-6 space-y-6">
             <!-- 上半部分：待处理统计 + 本周统计 -->
             <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                <!-- 左侧：待处理 Issue 统计 -->
+                <!-- 左侧：待处理问题 统计 -->
                     <div class="lg:col-span-5 bg-white rounded-xl border p-6">
                         <h3 class="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
-                            <i class="fas fa-clipboard-list text-blue-600"></i>待处理 Issue
+                            <i class="fas fa-clipboard-list text-blue-600"></i>待处理问题
                         </h3>
                         <div class="grid grid-cols-2 gap-2 mb-4" id="severityStats">
                             <div class="bg-red-50 rounded-lg p-2 text-center">
@@ -79,7 +79,7 @@
                         </div>
                         <div class="bg-gray-50 rounded-lg p-3 border text-center mb-3">
                             <div class="text-2xl font-bold text-gray-800" id="statPendingTotal">0</div>
-                            <div class="text-[11px] text-gray-500 mt-0.5">总计待处理 Issue</div>
+                            <div class="text-[11px] text-gray-500 mt-0.5">总计待处理问题</div>
                         </div>
                         <div class="text-center border-t pt-4">
                             <a href="tasks.html" class="inline-block text-sm text-blue-600 hover:text-blue-800 px-4 py-2 bg-blue-50 rounded-lg hover:bg-blue-100">
@@ -95,7 +95,7 @@
                             <div class="grid grid-cols-4 gap-4">
                                 <div class="text-center">
                                     <div class="text-2xl font-bold text-gray-800" id="statWeekReceived">0</div>
-                                    <div class="text-xs text-gray-500 mt-1">收到 Issue</div>
+                                    <div class="text-xs text-gray-500 mt-1">收到问题</div>
                                 </div>
                                 <div class="text-center">
                                     <div class="text-2xl font-bold text-green-600" id="statWeekResolved">0</div>
@@ -129,11 +129,11 @@
                 </div>
             </div>
 
-            <!-- 下半部分：待处理 Issue 列表 -->
+            <!-- 下半部分：待处理问题 列表 -->
             <div class="bg-white rounded-xl border overflow-hidden">
                 <div class="px-6 py-4 border-b flex items-center justify-between">
                     <h3 class="font-bold text-gray-800">
-                        <i class="fas fa-list-check text-blue-600 mr-2"></i>待处理 Issue 列表
+                        <i class="fas fa-list-check text-blue-600 mr-2"></i>待处理问题列表
                         <span id="issueCountBadge" class="ml-2 text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">0</span>
                     </h3>
                     <div class="flex items-center gap-2">
@@ -143,12 +143,24 @@
                 <div id="issueList" class="divide-y">
                     <div class="text-center py-12 text-gray-400">加载中...</div>
                 </div>
+                <!-- 分页 -->
+                <div id="issuePagination" class="flex items-center justify-between px-6 py-3 border-t bg-white">
+                    <span id="issuePageInfo" class="text-sm text-gray-500">共 0 条记录</span>
+                    <div class="flex items-center gap-3">
+                        <select id="issuePageSize" onchange="changePageSize()" class="px-2 py-1 border rounded text-sm">
+                            <option value="10" selected>10条/页</option>
+                            <option value="20">20条/页</option>
+                            <option value="50">50条/页</option>
+                        </select>
+                        <div id="issuePageBtns" class="flex gap-1"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </main>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script src="/static/js/echarts.min.js"></script>
 <script>
 const API_BASE = '/api/v1';
 const SEVERITY_LABELS = { critical: '严重', high: '高危', medium: '中危', low: '低危', info: '提示' };
@@ -156,10 +168,16 @@ const SEVERITY_COLORS = { critical: 'text-red-600', high: 'text-orange-600', med
 const CATEGORY_LABELS = { security: '安全', performance: '性能', code_quality: '代码质量', readability: '可读性', maintainability: '可维护性', test_coverage: '测试覆盖', common: '通用' };
 
 let trendChart = null;
+let currentPage = 1;
+let pageSize = 10;
+let totalPages = 1;
 
 async function loadDashboard(force = false) {
     try {
-        const res = await apiFetch(API_BASE + '/dashboard/developer');
+        const params = new URLSearchParams();
+        params.set('page', currentPage);
+        params.set('page_size', pageSize);
+        const res = await apiFetch(API_BASE + '/dashboard/developer?' + params.toString());
         const data = await res.json();
         const d = data.data || {};
 
@@ -199,13 +217,17 @@ async function loadDashboard(force = false) {
 
         // Issue 列表
         const issues = d.issues || [];
-        document.getElementById('issueCountBadge').textContent = issues.length;
+        const total = d.total || 0;
+        totalPages = Math.ceil(total / pageSize) || 1;
+        document.getElementById('issueCountBadge').textContent = total;
+        document.getElementById('issuePageInfo').textContent = `共 ${total} 条记录`;
         const container = document.getElementById('issueList');
         if (issues.length === 0) {
-            container.innerHTML = '<div class="text-center py-12 text-gray-400">🎉 太棒了，当前没有待处理的 Issue</div>';
+            container.innerHTML = '<div class="text-center py-12 text-gray-400">🎉 太棒了，当前没有待处理的问题</div>';
         } else {
             container.innerHTML = issues.map(issue => renderIssueCard(issue)).join('');
         }
+        renderPagination();
 
         // 趋势图
         renderTrendChart(d.trends || []);
@@ -232,8 +254,8 @@ function renderIssueCard(issue) {
                     <div class="flex items-center gap-2 flex-wrap mb-1.5">
                         <span class="text-xs font-bold ${sevColor} bg-gray-50 px-1.5 py-0.5 rounded">${sevLabel}</span>
                         <span class="text-xs text-gray-400">[${catLabel}]</span>
-                        <span class="text-[11px] font-mono text-gray-500 bg-gray-100 px-1 py-0.5 rounded border border-gray-200">#${issue.id}</span>
-                        <span class="text-xs font-mono text-gray-400">${issue.rule_code || '-'}</span>
+                        <span class="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-100"><i class="fas fa-hashtag mr-0.5 text-indigo-400"></i>问题 #${issue.id}</span>
+                        <span class="text-[11px] font-mono text-gray-600 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-200"><i class="fas fa-shield-alt mr-0.5 text-gray-400"></i>${issue.rule_code || 'AI发现'}</span>
                         ${issue.inherited_from_issue_id ? '<span class="text-[10px] text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100" title="历史曾标记处理">复现</span>' : ''}
                         <span class="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-100"><i class="fas fa-folder-open mr-0.5"></i>${projectName}</span>
                         <a href="task-detail.html?id=${issue.task_id}" class="text-[11px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-100 hover:bg-blue-100"><i class="fas fa-tasks mr-0.5"></i>任务 #${issue.task_id}</a>
@@ -242,7 +264,7 @@ function renderIssueCard(issue) {
                     <div class="text-sm text-gray-800 font-medium mb-1">${summary}</div>
                     <div class="flex items-center gap-3 text-xs text-gray-500">
                         <span><i class="fas fa-file-code mr-1 text-gray-400"></i>${escapeHtml(issue.file || '-')}${lineInfo}</span>
-                        <span><i class="fas fa-clock mr-1 text-gray-400"></i>${formatAge(issue.original_created_at || issue.created_at)}</span>
+                        <span title="${escapeHtml(String(issue.original_created_at || issue.created_at || ''))}"><i class="fas fa-clock mr-1 text-gray-400"></i>${formatAge(issue.original_created_at || issue.created_at)}</span>
                     </div>
                 </div>
                 <div class="flex items-center gap-2 flex-shrink-0">
@@ -266,9 +288,22 @@ function renderIssueCard(issue) {
 function formatAge(ts) {
     if (!ts) return '';
     const t = new Date(ts);
+    // 防御：无效时间戳
+    if (isNaN(t.getTime())) {
+        console.warn('[formatAge] invalid timestamp:', ts);
+        return '';
+    }
     const now = new Date();
-    const h = Math.floor((now - t) / 3600000);
-    if (h < 1) return '刚刚';
+    const diffMs = now - t;
+    // 防御：未来时间（可能时区偏移导致）
+    if (diffMs < 0) {
+        console.warn('[formatAge] future timestamp:', ts, 'diff:', diffMs);
+        return '';
+    }
+    const m = Math.floor(diffMs / 60000);
+    if (m < 5) return '刚刚';
+    if (m < 60) return m + ' 分钟前';
+    const h = Math.floor(m / 60);
     if (h < 24) return h + ' 小时前';
     const d = Math.floor(h / 24);
     if (d < 30) return d + ' 天前';
@@ -331,6 +366,47 @@ function renderTrendChart(trends) {
         ]
     };
     trendChart.setOption(option);
+}
+
+// ====== Issue 列表分页 ======
+function renderPagination() {
+    const el = document.getElementById('issuePageBtns');
+    if (!el || totalPages <= 1) { if (el) el.innerHTML = ''; return; }
+    const page = currentPage;
+    const pages = totalPages;
+    let html = '';
+    html += `<button class="px-3 py-1 border rounded text-sm ${page <= 1 ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-50'}" ${page <= 1 ? 'disabled' : ''} onclick="goPage(${page - 1})">上一页</button>`;
+    if (page > 3) {
+        html += `<button class="px-3 py-1 border rounded text-sm text-gray-500 hover:bg-gray-50" onclick="goPage(1)">1</button>`;
+        if (page > 4) html += `<span class="px-2 py-1 text-gray-400">...</span>`;
+    }
+    let start = Math.max(1, page - 2);
+    let end = Math.min(pages, page + 2);
+    if (end - start < 4) {
+        if (start === 1) end = Math.min(pages, start + 4);
+        else if (end === pages) start = Math.max(1, end - 4);
+    }
+    for (let i = start; i <= end; i++) {
+        html += `<button class="px-3 py-1 border rounded text-sm ${i === page ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}" onclick="goPage(${i})">${i}</button>`;
+    }
+    if (page < pages - 2) {
+        if (page < pages - 3) html += `<span class="px-2 py-1 text-gray-400">...</span>`;
+        html += `<button class="px-3 py-1 border rounded text-sm text-gray-500 hover:bg-gray-50" onclick="goPage(${pages})">${pages}</button>`;
+    }
+    html += `<button class="px-3 py-1 border rounded text-sm ${page >= pages ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-50'}" ${page >= pages ? 'disabled' : ''} onclick="goPage(${page + 1})">下一页</button>`;
+    el.innerHTML = html;
+}
+
+function goPage(p) {
+    if (p < 1 || p > totalPages) return;
+    currentPage = p;
+    loadDashboard();
+}
+
+function changePageSize() {
+    pageSize = parseInt(document.getElementById('issuePageSize').value) || 10;
+    currentPage = 1;
+    loadDashboard();
 }
 
 function showToast(message, type = 'info') {

@@ -21,13 +21,13 @@ const MENU_CONFIG = [
         role: ['user']
     },
 
-    // ========== 公共菜单（仅 user 可见；admin 有自己的控制台） ==========
+    // ========== 公共菜单（admin + user 均可见） ==========
     {
         id: 'project-dashboard',
         name: '项目总览',
         href: 'project-dashboard.html',
         icon: 'fa-building',
-        role: ['user']
+        role: ['admin', 'user']
     },
 
     // ========== 数据洞察（公共） ==========

@@ -83,16 +83,14 @@ func (h *NotificationHandler) MarkAllRead(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "ok"})
 }
 
-	// TestRule 测试通知规则模板
+// TestRule 测试通知规则模板
 func (h *NotificationHandler) TestRule(c *gin.Context) {
-	var template string
-
-	// 优先读取 body 中的 template（支持 id=0 或任意测试场景）
 	var body struct {
-		Template string `json:"template"`
+		Template     string `json:"template"`
+		TemplateType string `json:"template_type"` // "im_escalation" 或空
 	}
 	_ = c.ShouldBindJSON(&body)
-	template = body.Template
+	template := body.Template
 
 	if template == "" {
 		// 回退到从数据库读取
@@ -117,15 +115,37 @@ func (h *NotificationHandler) TestRule(c *gin.Context) {
 	model.DB.Order("id DESC").First(&task)
 	model.DB.First(&task.Project, task.ProjectID)
 
-	stats := service.CalcIssueStats(task.ID, task.MRMergeID)
-	ctx := service.TemplateContext{
-		Task:          task,
-		Stats:         stats,
-		Project:       task.Project,
-		Developer:     task.MRAuthor,
-		DeadlineHours: 120,
+	var rendered string
+	if body.TemplateType == "im_escalation" {
+		// Issue 升级 IM 模板：使用 RenderIMTemplate + 模拟数据
+		ctx := service.IMTemplateContext{
+			Project:     task.Project,
+			Task:        task,
+			Developer:   task.MRAuthor,
+			AtRecipient: "<@wxid_demo_steward>",
+			IssueCount:  3,
+			IssueList: []service.IMIssueItem{
+				{ID: 72, Message: "存在信息泄露风险"},
+				{ID: 73, Message: "未处理 nil 指针"},
+				{ID: 74, Message: "SQL注入风险"},
+			},
+			IssueID:      72,
+			IssueMessage: "存在信息泄露风险",
+		}
+		rendered = service.RenderIMTemplate(template, ctx)
+	} else {
+		// 通用模板
+		stats := service.CalcIssueStats(task.ID, task.MRMergeID)
+		ctx := service.TemplateContext{
+			Task:          task,
+			Stats:         stats,
+			Project:       task.Project,
+			Developer:     task.MRAuthor,
+			DeadlineHours: 120,
+		}
+		rendered = service.RenderMessage(template, ctx)
 	}
-	rendered := service.RenderMessage(template, ctx)
+
 	c.JSON(http.StatusOK, gin.H{"data": rendered})
 }
 
@@ -141,51 +161,74 @@ func (h *NotificationHandler) GetRule(c *gin.Context) {
 }
 
 // ProjectOwnerDashboard 项目负责人工作台（项目治理视图）
+// 管理员可查看所有项目，普通用户仅查看自己负责的项目
 func (h *NotificationHandler) ProjectOwnerDashboard(c *gin.Context) {
 	user := c.MustGet("user").(model.User)
-	// 查询用户负责的项目（通过 gitlab_username 关联 team_members → project_responsibilities）
-	var responsibilities []model.ProjectResponsibility
-	if user.GitlabUsername != "" {
-		model.DB.Joins("INNER JOIN team_members ON team_members.id = project_responsibilities.member_id").
-			Where("team_members.gitlab_username = ?", user.GitlabUsername).
-			Find(&responsibilities)
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
 	}
 
-	projectIDs := make([]uint, 0, len(responsibilities))
-	for _, r := range responsibilities {
-		projectIDs = append(projectIDs, r.ProjectID)
-	}
-
-	// 调试信息（排查空列表原因）
+	var projectIDs []uint
 	debugInfo := gin.H{
 		"current_user_id":         user.ID,
 		"current_gitlab_username": user.GitlabUsername,
-		"responsibility_records":  len(responsibilities),
-		"project_ids":             projectIDs,
+		"role":                    user.Role,
 	}
+
+	if user.Role == model.RoleAdmin {
+		// 管理员：返回所有项目
+		var allProjects []model.Project
+		model.DB.Select("id").Find(&allProjects)
+		projectIDs = make([]uint, 0, len(allProjects))
+		for _, p := range allProjects {
+			projectIDs = append(projectIDs, p.ID)
+		}
+		debugInfo["mode"] = "admin_all_projects"
+	} else {
+		// 普通用户：只返回自己负责的项目
+		var responsibilities []model.ProjectResponsibility
+		if user.GitlabUsername != "" {
+			model.DB.Joins("INNER JOIN team_members ON team_members.id = project_responsibilities.member_id").
+				Where("team_members.gitlab_username = ?", user.GitlabUsername).
+				Find(&responsibilities)
+		}
+		projectIDs = make([]uint, 0, len(responsibilities))
+		for _, r := range responsibilities {
+			projectIDs = append(projectIDs, r.ProjectID)
+		}
+		debugInfo["mode"] = "user_steward_projects"
+		debugInfo["responsibility_records"] = len(responsibilities)
+	}
+	debugInfo["project_ids"] = projectIDs
 
 	if len(projectIDs) == 0 {
 		c.JSON(http.StatusOK, gin.H{
-			"data":  gin.H{"projects": []interface{}{}},
+			"data":  gin.H{"projects": []interface{}{}, "total": 0, "page": page, "page_size": pageSize},
 			"debug": debugInfo,
 		})
 		return
 	}
 
 	type projInfo struct {
-		ID              uint      `json:"id"`
-		Name            string    `json:"name"`
-		ProjectPath     string    `json:"project_path"`
-		GitlabProjectID int       `json:"gitlab_project_id"`
-		Language        string    `json:"language"`
-		StewardCount    int64     `json:"steward_count"`
-		Stewards        []string  `json:"stewards"`
-		PendingCount    int64     `json:"pending_count"`
-		CriticalCount   int64     `json:"critical_count"`
-		HighCount       int64     `json:"high_count"`
-		OverdueCount    int64     `json:"overdue_count"`
-		WeekCloseRate   float64   `json:"week_close_rate"`
-		AvgResolveDays  float64   `json:"avg_resolve_days"`
+		ID              uint     `json:"id"`
+		Name            string   `json:"name"`
+		ProjectPath     string   `json:"project_path"`
+		GitlabProjectID int      `json:"gitlab_project_id"`
+		Language        string   `json:"language"`
+		StewardCount    int64    `json:"steward_count"`
+		Stewards        []string `json:"stewards"`
+		PendingCount    int64    `json:"pending_count"`
+		CriticalCount   int64    `json:"critical_count"`
+		HighCount       int64    `json:"high_count"`
+		OverdueCount    int64    `json:"overdue_count"`
+		WeekCloseRate   float64  `json:"week_close_rate"`
+		AvgResolveDays  float64  `json:"avg_resolve_days"`
 	}
 
 	// 查询项目基础信息（用原生模型查询，避免 GORM Scan 兼容性问题）
@@ -193,13 +236,29 @@ func (h *NotificationHandler) ProjectOwnerDashboard(c *gin.Context) {
 	if err := model.DB.Where("id IN ?", projectIDs).Find(&rawProjects).Error; err != nil {
 		debugInfo["project_query_error"] = err.Error()
 		c.JSON(http.StatusOK, gin.H{
-			"data":  gin.H{"projects": []interface{}{}},
+			"data":  gin.H{"projects": []interface{}{}, "total": 0, "page": page, "page_size": pageSize},
 			"debug": debugInfo,
 		})
 		return
 	}
-	projects := make([]projInfo, 0, len(rawProjects))
-	for _, rp := range rawProjects {
+
+	total := len(rawProjects)
+	start := (page - 1) * pageSize
+	if start >= total {
+		c.JSON(http.StatusOK, gin.H{
+			"data":  gin.H{"projects": []interface{}{}, "total": total, "page": page, "page_size": pageSize},
+			"debug": debugInfo,
+		})
+		return
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	pageProjects := rawProjects[start:end]
+
+	projects := make([]projInfo, 0, len(pageProjects))
+	for _, rp := range pageProjects {
 		projects = append(projects, projInfo{
 			ID:              rp.ID,
 			Name:            rp.Name,
@@ -285,7 +344,7 @@ func (h *NotificationHandler) ProjectOwnerDashboard(c *gin.Context) {
 
 	debugInfo["projects_returned"] = len(projects)
 	c.JSON(http.StatusOK, gin.H{
-		"data":  gin.H{"projects": projects},
+		"data":  gin.H{"projects": projects, "total": total, "page": page, "page_size": pageSize},
 		"debug": debugInfo,
 	})
 }
@@ -323,7 +382,24 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 			user.ID, user.ID, since, []string{model.IssueStatusResolved, model.IssueStatusFalsePositive, model.IssueStatusIgnored}).
 		Count(&weekResolved)
 
+	// 分页参数
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	offset := (page - 1) * pageSize
+
 	// 待处理列表（增强：携带项目信息、任务MR信息）
+	var totalIssues int64
+	model.DB.Model(&model.ReviewIssue{}).
+		Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?)",
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID).
+		Count(&totalIssues)
+
 	var rawItems []struct {
 		model.ReviewIssue
 		ProjectName string `json:"project_name"`
@@ -336,39 +412,39 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 		Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?)",
 			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID).
 		Order("review_issues.escalation_level ASC, review_issues.severity DESC, review_issues.original_created_at ASC").
-		Limit(20).Scan(&rawItems)
+		Limit(pageSize).Offset(offset).Scan(&rawItems)
 
 	// 转换为前端需要的格式（避免 embedded struct 字段名冲突）
 	type issueItem struct {
-		ID                   uint           `json:"id"`
-		TaskID               uint           `json:"task_id"`
-		MRID                 int            `json:"mr_id"`
-		RuleID               *uint          `json:"rule_id"`
-		RuleCode             string         `json:"rule_code"`
-		Category             string         `json:"category"`
-		Severity             string         `json:"severity"`
-		DeductScore          int            `json:"deduct_score"`
-		File                 string         `json:"file"`
-		LineStart            int            `json:"line_start"`
-		LineEnd              int            `json:"line_end"`
-		CodeSnippet          string         `json:"code_snippet"`
-		Message              string         `json:"message"`
-		Suggestion           string         `json:"suggestion"`
-		Status               string         `json:"status"`
-		ResolvedBy           uint           `json:"resolved_by"`
-		ResolvedAt           *time.Time     `json:"resolved_at"`
-		RejectReason         string         `json:"reject_reason"`
-		GitlabDiscussionID   string         `json:"gitlab_discussion_id"`
-		IsResolved           bool           `json:"is_resolved"`
-		Fingerprint          string         `json:"fingerprint"`
-		InheritedFromIssueID *uint          `json:"inherited_from_issue_id"`
-		OwnerID              *uint          `json:"owner_id"`
-		CurrentOwnerID       *uint          `json:"current_owner_id"`
-		OriginalCreatedAt    *time.Time     `json:"original_created_at"`
-		EscalationLevel      int            `json:"escalation_level"`
-		CreatedAt            time.Time      `json:"created_at"`
-		ProjectName          string         `json:"project_name"`
-		MRTitle              string         `json:"mr_title"`
+		ID                   uint       `json:"id"`
+		TaskID               uint       `json:"task_id"`
+		MRID                 int        `json:"mr_id"`
+		RuleID               *uint      `json:"rule_id"`
+		RuleCode             string     `json:"rule_code"`
+		Category             string     `json:"category"`
+		Severity             string     `json:"severity"`
+		DeductScore          int        `json:"deduct_score"`
+		File                 string     `json:"file"`
+		LineStart            int        `json:"line_start"`
+		LineEnd              int        `json:"line_end"`
+		CodeSnippet          string     `json:"code_snippet"`
+		Message              string     `json:"message"`
+		Suggestion           string     `json:"suggestion"`
+		Status               string     `json:"status"`
+		ResolvedBy           uint       `json:"resolved_by"`
+		ResolvedAt           *time.Time `json:"resolved_at"`
+		RejectReason         string     `json:"reject_reason"`
+		GitlabDiscussionID   string     `json:"gitlab_discussion_id"`
+		IsResolved           bool       `json:"is_resolved"`
+		Fingerprint          string     `json:"fingerprint"`
+		InheritedFromIssueID *uint      `json:"inherited_from_issue_id"`
+		OwnerID              *uint      `json:"owner_id"`
+		CurrentOwnerID       *uint      `json:"current_owner_id"`
+		OriginalCreatedAt    *time.Time `json:"original_created_at"`
+		EscalationLevel      int        `json:"escalation_level"`
+		CreatedAt            time.Time  `json:"created_at"`
+		ProjectName          string     `json:"project_name"`
+		MRTitle              string     `json:"mr_title"`
 	}
 
 	issues := make([]issueItem, len(rawItems))
@@ -454,7 +530,7 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 
 	// 团队排名（基于闭环率）
 	type userRank struct {
-		UserID     uint    `json:"user_id"`
+		UserID       uint  `json:"user_id"`
 		TotalCreated int64 `json:"total_created"`
 		TotalClosed  int64 `json:"total_closed"`
 	}
@@ -484,10 +560,10 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 
 	// 近4周趋势
 	type trendItem struct {
-		Week        string `json:"week"`
-		Received    int64  `json:"received"`
-		Closed      int64  `json:"closed"`
-		StillPending int64 `json:"still_pending"`
+		Week         string `json:"week"`
+		Received     int64  `json:"received"`
+		Closed       int64  `json:"closed"`
+		StillPending int64  `json:"still_pending"`
 	}
 	var trends []trendItem
 	for i := 3; i >= 0; i-- {
@@ -522,6 +598,7 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 		"team_rank_total":        totalRankers,
 		"trends":                 trends,
 		"issues":                 issues,
+		"total":                  totalIssues,
 	}})
 }
 
@@ -545,10 +622,15 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 	model.DB.Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND status IN (?) AND original_created_at < ?", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, overdueSince).Count(&overdue)
 
-	// IM 投递失败统计
-	var imFailed int64
-	model.DB.Model(&model.NotificationDeliveryLog{}).
-		Where("status = ? AND created_at >= ?", "failed", todayStart).Count(&imFailed)
+	// 归档统计
+	var todayArchived, totalArchived, todayEscalated int64
+	model.DB.Model(&model.ReviewIssue{}).
+		Where("deleted_at IS NULL AND status = ? AND updated_at >= ?", model.IssueStatusAutoArchived, todayStart).Count(&todayArchived)
+	model.DB.Model(&model.ReviewIssue{}).
+		Where("deleted_at IS NULL AND status = ?", model.IssueStatusAutoArchived).Count(&totalArchived)
+	// 今日升级：escalation_level 今日发生变化（排除已归档）
+	model.DB.Model(&model.ReviewIssue{}).
+		Where("deleted_at IS NULL AND escalation_level > 0 AND status != ? AND updated_at >= ?", model.IssueStatusAutoArchived, todayStart).Count(&todayEscalated)
 
 	// 7 天闭环率
 	sevenDaysAgo := time.Now().AddDate(0, 0, -7)
@@ -645,15 +727,17 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 	`, []string{model.IssueStatusPending, model.IssueStatusPendingInherited}).Scan(&topPendingProjects)
 
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{
-		"today_new":             todayNew,
-		"total_pending":         totalPending,
-		"overdue":               overdue,
-		"im_failed":             imFailed,
-		"im_total":              imTotal,
-		"im_success":            imSuccess,
-		"week_close_rate":       fmt.Sprintf("%.1f%%", closeRate),
-		"median_resolve_days":   fmt.Sprintf("%.1f", medianDays),
-		"alerts":                alerts,
+		"today_new":           todayNew,
+		"total_pending":       totalPending,
+		"overdue":             overdue,
+		"today_archived":      todayArchived,
+		"total_archived":      totalArchived,
+		"today_escalated":     todayEscalated,
+		"im_total":            imTotal,
+		"im_success":          imSuccess,
+		"week_close_rate":     fmt.Sprintf("%.1f%%", closeRate),
+		"median_resolve_days": fmt.Sprintf("%.1f", medianDays),
+		"alerts":              alerts,
 		"status_distribution": gin.H{
 			"pending":           distPending,
 			"pending_inherited": distPendingInherited,
@@ -662,7 +746,7 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 			"ignored":           distIgnored,
 			"auto_filtered":     distAutoFiltered,
 		},
-		"top_pending_projects":  topPendingProjects,
+		"top_pending_projects": topPendingProjects,
 	}})
 }
 
@@ -713,10 +797,24 @@ func (h *NotificationHandler) CreateRule(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// issue.escalation 规则唯一性校验
+	if rule.Trigger == "issue.escalation" {
+		var existing model.NotificationRule
+		if err := model.DB.Where("`trigger` = ? AND enabled = ?", "issue.escalation", true).First(&existing).Error; err == nil {
+			c.JSON(http.StatusConflict, gin.H{"error": "已存在启用的 Issue 升级规则，请先禁用或删除现有规则"})
+			return
+		}
+	}
 	// MySQL JSON 列不接受空字符串，统一替换为有效 JSON
-	if rule.Condition == "" { rule.Condition = "{}" }
-	if rule.Actions == "" { rule.Actions = "{}" }
-	if rule.EscalationConfig == "" { rule.EscalationConfig = "{}" }
+	if rule.Condition == "" {
+		rule.Condition = "{}"
+	}
+	if rule.Actions == "" {
+		rule.Actions = "{}"
+	}
+	if rule.EscalationConfig == "" {
+		rule.EscalationConfig = "{}"
+	}
 	if err := model.DB.Create(&rule).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -736,6 +834,23 @@ func (h *NotificationHandler) UpdateRule(c *gin.Context) {
 	if err := c.ShouldBindJSON(&updates); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+	// issue.escalation 规则唯一性校验（排除自身）
+	trigger, _ := updates["trigger"].(string)
+	enabled, enabledOK := updates["enabled"].(bool)
+	if (trigger == "issue.escalation") || (trigger == "" && rule.Trigger == "issue.escalation") {
+		// 如果更新后仍为 issue.escalation 且 enabled=true（或未传 enabled 但原规则已启用）
+		willBeEnabled := enabled
+		if !enabledOK {
+			willBeEnabled = rule.Enabled
+		}
+		if willBeEnabled {
+			var existing model.NotificationRule
+			if err := model.DB.Where("`trigger` = ? AND enabled = ? AND id != ?", "issue.escalation", true, rule.ID).First(&existing).Error; err == nil {
+				c.JSON(http.StatusConflict, gin.H{"error": "已存在启用的 Issue 升级规则，请先禁用或删除现有规则"})
+				return
+			}
+		}
 	}
 	// 同理：空字符串 JSON 字段替换为 {}
 	for _, key := range []string{"condition", "actions", "escalation_config"} {

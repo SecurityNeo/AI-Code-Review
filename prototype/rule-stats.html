@@ -6,7 +6,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>规则命中统计 - CodeGuard</title>
-    <script defer src="/vendor/echarts.min.js"></script>
+    <script defer src="/static/js/echarts.min.js"></script>
     <script src="js/auth.js?v=6"></script>
     <script src="js/menu-config.js?v=6"></script>
     <script src="js/sidebar.js?v=6"></script>
@@ -75,7 +75,7 @@
             </button>
         </header>
 
-        <div class="p-8 space-y-6">
+        <div class="px-5 py-5 space-y-4">
             <!-- 时间筛选 -->
             <div class="bg-white rounded-xl p-4 border flex items-center gap-4 flex-wrap">
                 <div class="flex items-center gap-2">
@@ -92,37 +92,37 @@
             </div>
 
             <!-- 4 个 KPI -->
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <div class="kpi-card bg-white rounded-xl p-6 border flex items-center gap-5">
-                    <div class="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center text-2xl">🎯</div>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div class="kpi-card bg-white rounded-xl p-4 border flex items-center gap-3">
+                    <div class="w-11 h-11 bg-purple-50 rounded-xl flex items-center justify-center text-xl">🎯</div>
                     <div>
-                        <div class="text-3xl font-bold text-gray-800" id="kpiHitRules">-</div>
-                        <div class="text-sm text-gray-500 mt-1">命中规则数</div>
+                        <div class="text-2xl font-bold text-gray-800" id="kpiHitRules">-</div>
+                        <div class="text-xs text-gray-500 mt-0.5">命中规则数</div>
                     </div>
                 </div>
-                <div class="kpi-card bg-white rounded-xl p-6 border flex items-center gap-5">
-                    <div class="w-14 h-14 bg-orange-50 rounded-2xl flex items-center justify-center text-2xl">💥</div>
+                <div class="kpi-card bg-white rounded-xl p-4 border flex items-center gap-3">
+                    <div class="w-11 h-11 bg-orange-50 rounded-xl flex items-center justify-center text-xl">💥</div>
                     <div>
-                        <div class="text-3xl font-bold text-gray-800" id="kpiTotalHits">-</div>
-                        <div class="text-sm text-gray-500 mt-1">总命中次数</div>
+                        <div class="text-2xl font-bold text-gray-800" id="kpiTotalHits">-</div>
+                        <div class="text-xs text-gray-500 mt-0.5">总命中次数</div>
                     </div>
                 </div>
-                <div class="kpi-card bg-white rounded-xl p-6 border flex items-center gap-5">
-                    <div class="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center text-2xl">👥</div>
+                <div class="kpi-card bg-white rounded-xl p-4 border flex items-center gap-3">
+                    <div class="w-11 h-11 bg-blue-50 rounded-xl flex items-center justify-center text-xl">👥</div>
                     <div>
-                        <div class="text-3xl font-bold text-gray-800" id="kpiAuthors">-</div>
-                        <div class="text-sm text-gray-500 mt-1">涉及开发者</div>
+                        <div class="text-2xl font-bold text-gray-800" id="kpiAuthors">-</div>
+                        <div class="text-xs text-gray-500 mt-0.5">涉及开发者</div>
                     </div>
                 </div>
-                <div class="kpi-card bg-white rounded-xl p-6 border">
-                    <div class="flex items-center gap-5 mb-3">
-                        <div class="w-14 h-14 bg-green-50 rounded-2xl flex items-center justify-center text-2xl">📊</div>
+                <div class="kpi-card bg-white rounded-xl p-4 border">
+                    <div class="flex items-center gap-3 mb-2">
+                        <div class="w-11 h-11 bg-green-50 rounded-xl flex items-center justify-center text-xl">📊</div>
                         <div>
-                            <div class="text-3xl font-bold text-gray-800" id="kpiFixRate">-</div>
-                            <div class="text-sm text-gray-500 mt-1">修复率（占总命中）</div>
+                            <div class="text-2xl font-bold text-gray-800" id="kpiFixRate">-</div>
+                            <div class="text-xs text-gray-500 mt-0.5">修复率（占总命中）</div>
                         </div>
                     </div>
-                    <div class="flex items-center gap-4 text-xs pt-2 border-t border-gray-100">
+                    <div class="flex items-center gap-4 text-xs pt-1.5 border-t border-gray-100">
                         <div class="flex items-center gap-1">
                             <span class="w-2 h-2 rounded-full bg-red-400"></span>
                             <span class="text-gray-500">误报率</span>
@@ -138,27 +138,27 @@
             </div>
 
             <!-- 命中趋势 -->
-            <div class="chart-card bg-white rounded-xl p-6 border">
-                <h3 class="text-lg font-bold text-gray-800 mb-4">命中趋势</h3>
-                <div id="trendChart" style="height: 320px;"></div>
+            <div class="chart-card bg-white rounded-xl p-5 border">
+                <h3 class="text-base font-bold text-gray-800 mb-3">命中趋势</h3>
+                <div id="trendChart" style="height: 300px;"></div>
             </div>
 
             <!-- 命中 TOP 10 + 分类分布 -->
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div class="chart-card bg-white rounded-xl p-6 border lg:col-span-2">
-                    <h3 class="text-lg font-bold text-gray-800 mb-4">规则命中 TOP 10</h3>
-                    <div id="topRulesChart" style="height: 400px;"></div>
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div class="chart-card bg-white rounded-xl p-5 border lg:col-span-2">
+                    <h3 class="text-base font-bold text-gray-800 mb-3">规则命中 TOP 10</h3>
+                    <div id="topRulesChart" style="height: 380px;"></div>
                 </div>
-                <div class="chart-card bg-white rounded-xl p-6 border">
-                    <h3 class="text-lg font-bold text-gray-800 mb-4">按分类分布</h3>
-                    <div id="categoryChart" style="height: 400px;"></div>
+                <div class="chart-card bg-white rounded-xl p-5 border">
+                    <h3 class="text-base font-bold text-gray-800 mb-3">按分类分布</h3>
+                    <div id="categoryChart" style="height: 380px;"></div>
                 </div>
             </div>
 
             <!-- 严重级别分布 + TOP 10 表格 -->
-            <div class="chart-card bg-white rounded-xl p-6 border">
-                <div class="flex items-center justify-between mb-4">
-                    <h3 class="text-lg font-bold text-gray-800">规则命中详情 TOP 10</h3>
+            <div class="chart-card bg-white rounded-xl p-5 border">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-base font-bold text-gray-800">规则命中详情 TOP 10</h3>
                     <span class="text-xs text-gray-400">点击行查看单规则详情</span>
                 </div>
                 <div class="data-table-wrap">

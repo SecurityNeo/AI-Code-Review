@@ -104,13 +104,16 @@ func (s *UserService) GetByID(id uint) (*model.User, error) {
 }
 
 // ListUsers 用户列表（分页、搜索、角色筛选）
-func (s *UserService) ListUsers(keyword, role string, page, pageSize int) ([]model.User, int64, error) {
+func (s *UserService) ListUsers(keyword, role, loginType string, page, pageSize int) ([]model.User, int64, error) {
 	db := model.DB.Model(&model.User{})
 	if keyword != "" {
 		db = db.Where("username LIKE ? OR display_name LIKE ?", "%"+keyword+"%", "%"+keyword+"%")
 	}
 	if role != "" {
 		db = db.Where("role = ?", role)
+	}
+	if loginType != "" {
+		db = db.Where("login_type = ?", loginType)
 	}
 	var total int64
 	if err := db.Count(&total).Error; err != nil {

@@ -179,6 +179,29 @@
 
         .sidebar-item:hover { background-color: rgba(255,255,255,0.1); }
         .sidebar-item.active { background-color: rgba(255,255,255,0.15); border-left: 3px solid #3b82f6; }
+
+        /* ==================== Custom Select / Local User Mode ==================== */
+        .mode-toggle { display:flex; gap:0; margin-bottom:0.625rem; background:#f1f5f9; border-radius:0.375rem; padding:0.18rem; }
+        .mode-toggle button { flex:1; padding:0.35rem 0; font-size:0.8125rem; border:none; background:transparent; color:var(--text-secondary); border-radius:0.25rem; cursor:pointer; transition:all .15s; font-weight:500; }
+        .mode-toggle button.active { background:#fff; color:var(--accent); box-shadow:0 1px 2px rgba(0,0,0,0.06); }
+        .mode-toggle button:hover:not(.active) { color:var(--text-primary); }
+
+        .custom-select-wrap { position:relative; }
+        .custom-select-input-group { display:flex; align-items:center; border:1px solid var(--border-color); border-radius:0.5rem; background:#f8fafc; transition:all .15s; overflow:hidden; }
+        .custom-select-input-group:focus-within { border-color:var(--accent); background:#fff; box-shadow:0 0 0 3px rgba(59,130,246,0.1); }
+        .custom-select-input { flex:1; border:none; background:transparent; padding:0.45rem 0.75rem; font-size:0.8125rem; outline:none; color:var(--text-primary); }
+        .custom-select-trigger { width:2rem; height:2.1rem; display:flex; align-items:center; justify-content:center; border:none; background:transparent; color:var(--text-tertiary); cursor:pointer; transition:all .15s; border-left:1px solid #e2e8f0; }
+        .custom-select-trigger:hover { background:#f1f5f9; color:var(--text-primary); }
+        .custom-select-list { position:absolute; top:calc(100% + 2px); left:0; right:0; max-height:220px; overflow-y:auto; background:#fff; border:1px solid var(--border-color); border-radius:0.5rem; box-shadow:0 4px 12px rgba(0,0,0,0.1); z-index:50; display:none; }
+        .custom-select-list.open { display:block; }
+        .custom-select-item { padding:0.45rem 0.75rem; font-size:0.8125rem; cursor:pointer; transition:all .1s; border-bottom:1px solid #f1f5f9; }
+        .custom-select-item:last-child { border-bottom:none; }
+        .custom-select-item:hover, .custom-select-item.active { background:#eff6ff; color:var(--accent); }
+        .custom-select-item .tag { font-size:0.7rem; color:#94a3b8; margin-left:0.3rem; }
+        .custom-select-empty { padding:0.75rem; text-align:center; font-size:0.8125rem; color:#94a3b8; }
+
+        .local-user-select { width:100%; padding:0.45rem 0.75rem; border:1px solid var(--border-color); border-radius:0.5rem; font-size:0.8125rem; background:#f8fafc; color:var(--text-primary); outline:none; box-sizing:border-box; transition:all .15s; }
+        .local-user-select:focus { border-color:var(--accent); background:#fff; box-shadow:0 0 0 3px rgba(59,130,246,0.1); }
     </style>
 </head>
 <body>
@@ -246,9 +269,32 @@
         <div class="modal-body">
             <div class="form-section-title">基本信息</div>
             <div class="form-group">
-                <label class="form-label">GitLab 用户名<span class="req">*</span></label>
-                <input type="text" id="mGitlabUsername" list="gitlabUserList" placeholder="输入或选择 GitLab 用户名" class="form-input">
-                <datalist id="gitlabUserList"></datalist>
+                <label class="form-label">用户来源<span class="req">*</span></label>
+                <div class="mode-toggle" id="userModeToggle">
+                    <button type="button" class="active" onclick="toggleUserMode('gitlab')">GitLab 用户</button>
+                    <button type="button" onclick="toggleUserMode('local')">本地用户</button>
+                </div>
+                <input type="hidden" id="mUserMode" value="gitlab">
+                <input type="hidden" id="mLocalUserId" value="">
+
+                <!-- GitLab 用户模式 -->
+                <div id="gitlabUserSection">
+                    <div class="custom-select-wrap">
+                        <div class="custom-select-input-group">
+                            <input type="text" id="mGitlabUsername" class="custom-select-input" placeholder="输入或选择 GitLab 用户名" autocomplete="off">
+                            <button type="button" class="custom-select-trigger" onclick="toggleGitlabDropdown()" title="展开列表"><i class="fas fa-chevron-down" style="font-size:0.7rem;"></i></button>
+                        </div>
+                        <div class="custom-select-list" id="gitlabDropdownList"></div>
+                    </div>
+                </div>
+
+                <!-- 本地用户模式 -->
+                <div id="localUserSection" style="display:none;">
+                    <select id="mLocalUserSelect" class="local-user-select" onchange="onLocalUserChange(this.value)">
+                        <option value="">选择本地用户账号</option>
+                    </select>
+                    <p class="text-[11px] text-slate-400 mt-1">选择后系统将自动填充用户名、展示名，并生成虚拟 GitLab 标识。</p>
+                </div>
             </div>
             <div class="form-group">
                 <label class="form-label">展示名</label>
@@ -341,8 +387,137 @@ async function loadGitUsers() {
     try {
         const res = await apiFetch(`${API_BASE}/team-members/git-users`);
         const data = await res.json();
-        document.getElementById('gitlabUserList').innerHTML = (data.data || []).map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
+        window.__gitlabUsers = data.data || [];
+        renderGitlabDropdown('');
     } catch (e) { console.error(e); }
+}
+
+async function loadLocalUsers() {
+    try {
+        const res = await apiFetch(`${API_BASE}/users?login_type=local&page_size=100`);
+        const json = await res.json();
+        const users = json.data || [];
+        window.__localUsers = users;
+        const select = document.getElementById('mLocalUserSelect');
+        if (!select) return;
+        select.innerHTML = '<option value="">选择本地用户账号</option>' + users.map(u => {
+            const label = u.display_name ? `${escapeHtml(u.display_name)} (${escapeHtml(u.username)})` : escapeHtml(u.username);
+            return `<option value="${u.id}">${label}</option>`;
+        }).join('');
+    } catch (e) { console.error(e); }
+}
+
+// ========== User Mode Toggle (GitLab vs Local) ==========
+function toggleUserMode(mode) {
+    const toggle = document.getElementById('userModeToggle');
+    const btns = toggle.querySelectorAll('button');
+    btns.forEach(b => b.classList.toggle('active', b.textContent.includes(mode === 'gitlab' ? 'GitLab' : '本地')));
+    document.getElementById('mUserMode').value = mode;
+    document.getElementById('gitlabUserSection').style.display = mode === 'gitlab' ? 'block' : 'none';
+    document.getElementById('localUserSection').style.display = mode === 'local' ? 'block' : 'none';
+    if (mode === 'local') {
+        // 仅在新建时（非编辑态）清空 GitLab 输入框，避免编辑本地用户时被误清
+        if (!editingMemberId) {
+            document.getElementById('mGitlabUsername').value = '';
+        }
+    } else {
+        document.getElementById('mLocalUserSelect').value = '';
+        if (!editingMemberId) {
+            document.getElementById('mLocalUserId').value = '';
+        }
+    }
+}
+
+function onLocalUserChange(userId) {
+    document.getElementById('mLocalUserId').value = userId;
+    if (!userId) return;
+    const user = (window.__localUsers || []).find(u => String(u.id) === String(userId));
+    if (!user) return;
+    document.getElementById('mUsername').value = user.username || '';
+    document.getElementById('mDisplayName').value = user.display_name || user.username || '';
+    document.getElementById('mEmail').value = user.gitlab_email || '';
+    // GitLab username 使用虚拟标识
+    document.getElementById('mGitlabUsername').value = '__local_' + userId;
+}
+
+// ========== Custom GitLab Dropdown ==========
+let gitlabDropdownActiveIdx = -1;
+
+function renderGitlabDropdown(filter) {
+    const list = document.getElementById('gitlabDropdownList');
+    const users = (window.__gitlabUsers || []).filter(u => !filter || u.toLowerCase().includes(filter.toLowerCase()));
+    if (users.length === 0) {
+        list.innerHTML = '<div class="custom-select-empty">无匹配结果（可输入新用户名）</div>';
+        return;
+    }
+    list.innerHTML = users.map((u, i) => `<div class="custom-select-item" data-idx="${i}" data-value="${escapeHtml(u)}" onclick="selectGitlabUser('${escapeHtml(u)}')">${escapeHtml(u)}</div>`).join('');
+}
+
+function selectGitlabUser(val) {
+    document.getElementById('mGitlabUsername').value = val;
+    closeGitlabDropdown();
+}
+
+function toggleGitlabDropdown() {
+    const list = document.getElementById('gitlabDropdownList');
+    if (list.classList.contains('open')) {
+        closeGitlabDropdown();
+    } else {
+        renderGitlabDropdown(document.getElementById('mGitlabUsername').value.trim());
+        list.classList.add('open');
+        gitlabDropdownActiveIdx = -1;
+    }
+}
+
+function closeGitlabDropdown() {
+    const list = document.getElementById('gitlabDropdownList');
+    list.classList.remove('open');
+    gitlabDropdownActiveIdx = -1;
+}
+
+// GitLab 输入框事件绑定
+document.addEventListener('DOMContentLoaded', () => {
+    const input = document.getElementById('mGitlabUsername');
+    if (!input) return;
+    input.addEventListener('input', function() {
+        renderGitlabDropdown(this.value.trim());
+        const list = document.getElementById('gitlabDropdownList');
+        if (this.value.trim()) list.classList.add('open');
+    });
+    input.addEventListener('keydown', function(e) {
+        const list = document.getElementById('gitlabDropdownList');
+        if (!list.classList.contains('open')) return;
+        const items = list.querySelectorAll('.custom-select-item');
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            gitlabDropdownActiveIdx = Math.min(gitlabDropdownActiveIdx + 1, items.length - 1);
+            updateGitlabDropdownHighlight(items);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            gitlabDropdownActiveIdx = Math.max(gitlabDropdownActiveIdx - 1, 0);
+            updateGitlabDropdownHighlight(items);
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (gitlabDropdownActiveIdx >= 0 && items[gitlabDropdownActiveIdx]) {
+                selectGitlabUser(items[gitlabDropdownActiveIdx].dataset.value);
+            } else {
+                closeGitlabDropdown();
+            }
+        } else if (e.key === 'Escape') {
+            closeGitlabDropdown();
+        }
+    });
+    // 点击外部关闭
+    document.addEventListener('click', function(e) {
+        const wrap = document.querySelector('.custom-select-wrap');
+        if (wrap && !wrap.contains(e.target)) closeGitlabDropdown();
+    });
+});
+
+function updateGitlabDropdownHighlight(items) {
+    items.forEach((item, i) => item.classList.toggle('active', i === gitlabDropdownActiveIdx));
+    const active = items[gitlabDropdownActiveIdx];
+    if (active) active.scrollIntoView({ block: 'nearest' });
 }
 
 async function loadData() {
@@ -390,6 +565,15 @@ function renderMembersTable(members) {
         const isExpanded = expandedMemberId === m.id;
         const imIcon = { wecom: 'fa-building', dingtalk: 'fa-bell', email: 'fa-envelope', feishu: 'fa-paper-plane' }[m.im_platform] || 'fa-comment-dots';
         const imName = { wecom: '企业微信', dingtalk: '钉钉', email: '邮件', feishu: '飞书' }[m.im_platform] || m.im_platform;
+        // 本地用户虚拟标识展示处理
+        let gitlabDisplay = m.gitlab_username || '—';
+        let gitlabIcon = 'fab fa-gitlab';
+        let gitlabCls = 'git-label';
+        if (m.gitlab_username && m.gitlab_username.startsWith('__local_')) {
+            gitlabDisplay = '本地账号';
+            gitlabIcon = 'fas fa-user';
+            gitlabCls = 'git-label';
+        }
 
         html += `<tr class="${isExpanded ? 'expanded' : ''}" onclick="toggleExpand(${m.id})">
             <td>
@@ -401,7 +585,7 @@ function renderMembersTable(members) {
                     </div>
                 </div>
             </td>
-            <td><span class="git-label"><i class="fab fa-gitlab"></i>${escapeHtml(m.gitlab_username || '—')}</span></td>
+            <td><span class="${gitlabCls}"><i class="${gitlabIcon}"></i>${escapeHtml(gitlabDisplay)}</span></td>
             <td>
                 ${m.im_platform ? `<div class="im-info"><i class="fas ${imIcon}"></i><span>${imName}</span><span class="dot" style="width:3px;height:3px;border-radius:50%;background:#cbd5e1;"></span><span class="id">${escapeHtml(m.im_user_id)}</span></div>` : '<span style="color:#94a3b8;font-size:0.8125rem;">—</span>'}
             </td>
@@ -586,6 +770,8 @@ function onProjectFilterChange() { loadData(); }
 function openMemberModal() {
     editingMemberId = null;
     document.getElementById('memberModalTitle').textContent = '添加人员';
+    document.getElementById('mLocalUserId').value = '';
+    toggleUserMode('gitlab');
     document.getElementById('mGitlabUsername').value = '';
     document.getElementById('mGitlabUsername').disabled = false;
     document.getElementById('mUsername').value = '';
@@ -597,6 +783,7 @@ function openMemberModal() {
     addDutyRow();
     showModal('memberModal');
     loadGitUsers();
+    loadLocalUsers();
 }
 
 async function openEditMember(id) {
@@ -606,13 +793,27 @@ async function openEditMember(id) {
         const m = json.data;
         editingMemberId = id;
         document.getElementById('memberModalTitle').textContent = '编辑人员';
-        document.getElementById('mGitlabUsername').value = m.gitlab_username || '';
-        document.getElementById('mGitlabUsername').disabled = true;
         document.getElementById('mUsername').value = m.username || '';
         document.getElementById('mDisplayName').value = m.display_name || '';
         document.getElementById('mIMPlatform').value = m.im_platform || 'wecom';
         document.getElementById('mIMUserID').value = m.im_user_id || '';
         document.getElementById('mEmail').value = m.email || '';
+
+        // 判断是否为本地用户（虚拟标识 __local_<user_id>）
+        const glu = m.gitlab_username || '';
+        if (glu.startsWith('__local_')) {
+            const uid = glu.replace('__local_', '');
+            document.getElementById('mLocalUserId').value = uid;
+            await loadLocalUsers();
+            toggleUserMode('local');
+            document.getElementById('mLocalUserSelect').value = uid;
+        } else {
+            document.getElementById('mLocalUserId').value = '';
+            toggleUserMode('gitlab');
+            document.getElementById('mGitlabUsername').value = glu;
+            document.getElementById('mGitlabUsername').disabled = true;
+        }
+
         const dutyList = document.getElementById('dutyList');
         if (m.responsibilities?.length > 0) {
             dutyList.innerHTML = m.responsibilities.map(r => {
@@ -666,14 +867,22 @@ function onDutyTypeChange(sel) {
 }
 
 async function saveMember() {
-    const gitlabUsername = document.getElementById('mGitlabUsername').value.trim();
+    const mode = document.getElementById('mUserMode').value;
+    let gitlabUsername = document.getElementById('mGitlabUsername').value.trim();
+    const localUserId = document.getElementById('mLocalUserId').value;
+
+    // 本地用户模式兜底：若 GitLab 输入框被清空，使用虚拟标识重建
+    if (mode === 'local' && !gitlabUsername && localUserId) {
+        gitlabUsername = '__local_' + localUserId;
+    }
+
     const username = document.getElementById('mUsername').value.trim();
     const displayName = document.getElementById('mDisplayName').value.trim();
     const imUserId = document.getElementById('mIMUserID').value.trim();
     const imPlatform = document.getElementById('mIMPlatform').value;
     const email = document.getElementById('mEmail').value.trim();
 
-    if (!gitlabUsername) { alert('请输入 GitLab 用户名'); return; }
+    if (!gitlabUsername) { alert(mode === 'local' ? '请选择本地用户' : '请输入 GitLab 用户名'); return; }
     if (!username) { alert('请输入系统用户名'); return; }
     if (!imUserId) { alert('请输入 IM 用户 ID'); return; }
 

@@ -42,20 +42,20 @@
             <!-- 核心指标卡片 -->
             <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                 <div class="bg-white rounded-xl border p-4 text-center">
-                    <div class="text-2xl font-bold text-gray-800" id="kpiTodayNew">-</div>
-                    <div class="text-xs text-gray-500 mt-1">今日新增</div>
-                </div>
-                <div class="bg-white rounded-xl border p-4 text-center">
-                    <div class="text-2xl font-bold text-gray-800" id="kpiTotalPending">-</div>
-                    <div class="text-xs text-gray-500 mt-1">总待处理</div>
+                    <div class="text-2xl font-bold text-gray-800" id="kpiTodayNewTotalPending">-</div>
+                    <div class="text-xs text-gray-500 mt-1">今日新增 / 总待处理</div>
                 </div>
                 <div class="bg-white rounded-xl border p-4 text-center">
                     <div class="text-2xl font-bold text-red-600" id="kpiOverdue">-</div>
                     <div class="text-xs text-gray-500 mt-1">积压超期</div>
                 </div>
                 <div class="bg-white rounded-xl border p-4 text-center">
-                    <div class="text-2xl font-bold text-orange-600" id="kpiImFailed">-</div>
-                    <div class="text-xs text-gray-500 mt-1">IM 投递失败</div>
+                    <div class="text-2xl font-bold text-purple-600" id="kpiArchived">-</div>
+                    <div class="text-xs text-gray-500 mt-1">今日归档 / 总共归档</div>
+                </div>
+                <div class="bg-white rounded-xl border p-4 text-center">
+                    <div class="text-2xl font-bold text-orange-600" id="kpiEscalated">-</div>
+                    <div class="text-xs text-gray-500 mt-1">今日升级</div>
                 </div>
                 <div class="bg-white rounded-xl border p-4 text-center">
                     <div class="text-2xl font-bold text-blue-600" id="kpiCloseRate">-</div>
@@ -118,7 +118,7 @@
     </main>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script src="/static/js/echarts.min.js"></script>
 <script>
 const API_BASE = '/api/v1';
 
@@ -128,17 +128,17 @@ async function loadData(force = false) {
         const data = await res.json();
         const d = data.data || {};
 
-        document.getElementById('kpiTodayNew').textContent = d.today_new ?? '-';
-        document.getElementById('kpiTotalPending').textContent = d.total_pending ?? '-';
+        document.getElementById('kpiTodayNewTotalPending').textContent = `${d.today_new ?? 0} / ${d.total_pending ?? 0}`;
         document.getElementById('kpiOverdue').textContent = d.overdue ?? '-';
-        document.getElementById('kpiImFailed').textContent = d.im_failed ?? '-';
+        document.getElementById('kpiArchived').textContent = `${d.today_archived ?? 0} / ${d.total_archived ?? 0}`;
+        document.getElementById('kpiEscalated').textContent = d.today_escalated ?? '-';
         document.getElementById('kpiCloseRate').textContent = d.week_close_rate ?? '-';
         document.getElementById('kpiMedianDays').textContent = d.median_resolve_days ?? '-';
 
         // IM 统计
         const imTotal = d.im_total || 0;
         const imSuccess = d.im_success || 0;
-        const imFailed = d.im_failed || 0;
+        const imFailed = imTotal - imSuccess;
         document.getElementById('imTotal').textContent = imTotal;
         document.getElementById('imSuccess').textContent = imSuccess;
         const failRate = imTotal > 0 ? ((imFailed / imTotal) * 100).toFixed(1) + '%' : '-';

@@ -39,8 +39,22 @@
         </header>
 
         <div class="px-8 py-6 space-y-6">
-            <div id="projectsContainer" class="space-y-5">
-                <div class="text-center py-12 text-gray-400">加载中...</div>
+            <div class="bg-white rounded-xl border overflow-hidden">
+                <div id="projectsContainer" class="space-y-5 p-6">
+                    <div class="text-center py-12 text-gray-400">加载中...</div>
+                </div>
+                <!-- 分页 -->
+                <div class="flex items-center justify-between px-6 py-4 border-t">
+                    <span id="pageInfo" class="text-sm text-gray-500">共 0 条记录</span>
+                    <div class="flex items-center gap-4">
+                        <select id="pageSizeSelect" onchange="changePageSize()" class="px-2 py-1 border rounded text-sm">
+                            <option value="10" selected>10条/页</option>
+                            <option value="20">20条/页</option>
+                            <option value="50">50条/页</option>
+                        </select>
+                        <div id="pageBtns" class="flex gap-2"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </main>
@@ -89,31 +103,50 @@ function getHealthInfo(p) {
     return { color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-200', label: '健康', icon: 'fa-check-circle' };
 }
 
-async function loadData(force = false) {
+    let currentUserRole = 'user';
+    let currentPage = 1;
+    let pageSize = 10;
+    let totalPages = 1;
+    let totalCount = 0;
+
+    async function loadData(force = false) {
     try {
-        const res = await apiFetch(API_BASE + '/dashboard/project-owner');
+        const res = await apiFetch(API_BASE + '/dashboard/project-owner?page=' + currentPage + '&page_size=' + pageSize);
         const data = await res.json();
         if (data.debug) console.log('[ProjectOwnerDashboard Debug]', data.debug);
 
+        // 从接口 debug 字段获取当前用户角色
+        const debugRole = ((data.debug || {}).role || 'user');
+        const isAdmin = debugRole === 'admin';
+        const titleEl = document.querySelector('header h2');
+        const descEl = document.querySelector('header p');
+        if (titleEl) titleEl.textContent = isAdmin ? '🏢 项目总览（管理员）' : '🏢 项目总览';
+        if (descEl) descEl.textContent = isAdmin ? '查看所有项目质量健康度与 Issue 俯瞰' : '我负责的项目质量健康度与 Issue 俯瞰';
+
         let projectList = (data.data || {}).projects;
+        const total = data.data.total || 0;
+        totalCount = total;
+        totalPages = Math.ceil(total / pageSize) || 1;
         if (!Array.isArray(projectList)) projectList = [];
         const projects = projectList;
         const container = document.getElementById('projectsContainer');
 
         if (projects.length === 0) {
-            let msg = '您当前不负责任何项目。';
+            let msg = currentUserRole === 'admin' ? '当前系统暂无项目。' : '您当前不负责任何项目。';
             if (data.debug) {
                 const d = data.debug;
-                if (d.steward_records_found === 0) {
+                if (d.mode === 'user_steward_projects' && d.responsibility_records === 0) {
                     msg += '<br><br><span class="text-xs text-gray-400">排查：在项目负责人表未找到当前用户记录。</span>';
                 } else if ((d.project_ids || []).length > 0 && d.projects_returned === 0) {
-                    msg += `<br><br><span class="text-xs text-gray-400">排查：找到 ${d.steward_records_found} 条负责人记录，对应项目ID ${d.project_ids.join(',')}，但 projects 表未找到对应项目。</span>`;
+                    msg += `<br><br><span class="text-xs text-gray-400">排查：项目ID ${d.project_ids.join(',')} 在 projects 表未找到对应记录。</span>`;
                 }
             }
             container.innerHTML = `<div class="bg-white rounded-xl border p-12 text-center text-gray-500">${msg}</div>`;
+            renderPagination();
             return;
         }
         container.innerHTML = projects.map(p => renderProjectCard(p)).join('');
+        renderPagination();
     } catch (err) {
         console.error('load project dashboard failed', err);
         document.getElementById('projectsContainer').innerHTML = `<div class="bg-white rounded-xl border p-8 text-center text-red-500">加载失败: ${err.message}</div>`;
@@ -205,6 +238,49 @@ function renderProjectCard(p) {
 function escapeHtml(str) {
     if (!str) return '';
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ====== 分页 ======
+function renderPagination() {
+    const el = document.getElementById('pageBtns');
+    const info = document.getElementById('pageInfo');
+    if (info) info.textContent = '共 ' + totalCount + ' 条记录';
+    if (!el || totalPages <= 1) { if (el) el.innerHTML = ''; return; }
+    const page = currentPage;
+    const pages = totalPages;
+    let html = '';
+    html += `<button class="px-3 py-1 border rounded text-sm ${page <= 1 ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-50'}" ${page <= 1 ? 'disabled' : ''} onclick="goPage(${page - 1})">上一页</button>`;
+    if (page > 3) {
+        html += `<button class="px-3 py-1 border rounded text-sm text-gray-500 hover:bg-gray-50" onclick="goPage(1)">1</button>`;
+        if (page > 4) html += `<span class="px-2 py-1 text-gray-400">...</span>`;
+    }
+    let start = Math.max(1, page - 2);
+    let end = Math.min(pages, page + 2);
+    if (end - start < 4) {
+        if (start === 1) end = Math.min(pages, start + 4);
+        else if (end === pages) start = Math.max(1, end - 4);
+    }
+    for (let i = start; i <= end; i++) {
+        html += `<button class="px-3 py-1 border rounded text-sm ${i === page ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}" onclick="goPage(${i})">${i}</button>`;
+    }
+    if (page < pages - 2) {
+        if (page < pages - 3) html += `<span class="px-2 py-1 text-gray-400">...</span>`;
+        html += `<button class="px-3 py-1 border rounded text-sm text-gray-500 hover:bg-gray-50" onclick="goPage(${pages})">${pages}</button>`;
+    }
+    html += `<button class="px-3 py-1 border rounded text-sm ${page >= pages ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-50'}" ${page >= pages ? 'disabled' : ''} onclick="goPage(${page + 1})">下一页</button>`;
+    el.innerHTML = html;
+}
+
+function goPage(p) {
+    if (p < 1 || p > totalPages) return;
+    currentPage = p;
+    loadData();
+}
+
+function changePageSize() {
+    pageSize = parseInt(document.getElementById('pageSizeSelect').value);
+    currentPage = 1;
+    loadData();
 }
 
 document.addEventListener('DOMContentLoaded', () => {

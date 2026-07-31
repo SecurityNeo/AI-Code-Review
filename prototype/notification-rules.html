@@ -11,12 +11,36 @@
     <script src="js/sidebar.js?v=6"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
+    <script src="/static/js/marked.min.js"></script>
     <style>
         .sidebar-item:hover { background-color: rgba(255,255,255,0.1); }
         .sidebar-item.active { background-color: rgba(255,255,255,0.15); border-left: 3px solid #3b82f6; }
         .custom-scroll::-webkit-scrollbar { width: 6px; }
         .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-        .stage-row { display:flex; align-items:center; gap:8px; padding:10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; }
+        .stage-row { display:flex; align-items:center; gap:10px; padding:10px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; flex-wrap:wrap; }
+        .stage-row > * { flex-shrink:0; }
+        .markdown-body { line-height: 1.6; }
+        .markdown-body h1 { font-size: 1.5em; font-weight: bold; margin: 16px 0 10px; color: #1f2937; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
+        .markdown-body h2 { font-size: 1.3em; font-weight: bold; margin: 14px 0 8px; color: #1f2937; }
+        .markdown-body h3 { font-size: 1.1em; font-weight: bold; margin: 12px 0 6px; color: #1f2937; }
+        .markdown-body h4, .markdown-body h5, .markdown-body h6 { font-weight: bold; margin: 10px 0 4px; color: #4b5563; }
+        .markdown-body p { margin: 8px 0; }
+        .markdown-body ul { list-style-type: disc; padding-left: 24px; margin: 8px 0; }
+        .markdown-body ol { list-style-type: decimal; padding-left: 24px; margin: 8px 0; }
+        .markdown-body li { margin: 4px 0; }
+        .markdown-body pre { background-color: #1f2937; color: #e5e7eb; padding: 12px 16px; border-radius: 8px; overflow-x: auto; margin: 10px 0; }
+        .markdown-body pre code { background: none; padding: 0; color: #e5e7eb; }
+        .markdown-body code { background-color: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em; color: #ef4444; }
+        .markdown-body table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.9em; }
+        .markdown-body th, .markdown-body td { border: 1px solid #d1d5db; padding: 8px 12px; text-align: left; }
+        .markdown-body th { background-color: #f9fafb; font-weight: 600; }
+        .markdown-body tr:nth-child(even) { background-color: #f9fafb; }
+        .markdown-body blockquote { border-left: 4px solid #e5e7eb; padding-left: 12px; margin: 10px 0; color: #6b7280; }
+        .markdown-body hr { border: none; border-top: 1px solid #e5e7eb; margin: 16px 0; }
+        .markdown-body a { color: #2563eb; text-decoration: underline; }
+        .markdown-body strong { font-weight: 700; }
+        .markdown-body em { font-style: italic; }
+        .markdown-body img { max-width: 100%; border-radius: 6px; }
     </style>
 </head>
 <body class="bg-gray-50 font-sans">
@@ -37,8 +61,8 @@
     <main class="flex-1 overflow-y-auto">
         <header class="bg-white border-b px-8 py-4 flex items-center justify-between sticky top-0 z-10">
             <div>
-                <h2 class="text-xl font-bold text-gray-800">🔔 通知规则管理</h2>
-                <p class="text-sm text-gray-500 mt-1">规则模板优先级高于企业微信通知模板中的通知模板配置</p>
+                <h2 class="text-xl font-bold text-gray-800">通知规则管理</h2>
+                <p class="text-sm text-gray-500 mt-1">配置评审完成、Issue 升级、延迟通知等触发规则</p>
             </div>
             <button onclick="showAddModal()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
                 <i class="fas fa-plus mr-1"></i>新建规则
@@ -55,12 +79,11 @@
                             <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">供应商</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">通知机器人</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">延迟</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">状态</th>
-                            <th class="px-4 py-3 text-right text-xs font-semibold text-gray-500 w-36">操作</th>
+                            <th class="px-4 py-3 text-right text-xs font-semibold text-gray-500 w-52">操作</th>
                         </tr>
                     </thead>
                     <tbody id="ruleTableBody" class="divide-y">
-                        <tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">加载中...</td></tr>
+                        <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">加载中...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -92,9 +115,10 @@
                             <option value="task.completed">任务完成</option>
                             <option value="task.failed">任务失败</option>
                             <option value="issue.escalation">Issue 升级</option>
-                            <option value="daily.digest">每日摘要</option>
-                            <option value="auto.archived">自动归档</option>
                         </select>
+                        <div id="escalationConflictTip" class="hidden mt-1 text-xs text-amber-600">
+                            <i class="fas fa-exclamation-circle mr-0.5"></i>已存在启用的 Issue 升级规则，保存将被拒绝
+                        </div>
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-4">
@@ -113,12 +137,12 @@
                         <p class="text-[10px] text-gray-400 mt-0.5">未配置机器人时，请先去<a href="notifiers.html" target="_blank" class="text-blue-600 hover:underline">企业微信通知</a>页面添加</p>
                     </div>
                 </div>
-                <div>
+                <div id="templateSection">
                     <div class="flex items-center justify-between mb-1">
                         <label class="block text-sm font-medium text-gray-700">通知模板（Markdown）</label>
                         <button onclick="resetToDefaultTemplate()" class="text-xs text-blue-600 hover:text-blue-800"><i class="fas fa-undo mr-1"></i>重置为默认模板</button>
                     </div>
-                    <textarea id="rTemplate" rows="12" class="w-full px-3 py-2 border rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50" placeholder="支持 Mustache 条件语法：{{#if ISSUE_CRITICAL}}...{{/if ISSUE_CRITICAL}}"></textarea>
+                    <textarea id="rTemplate" rows="12" class="w-full px-3 py-2 border rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50" placeholder="支持 Mustache 条件语法：{{#if ISSUE_CRITICAL}}...{{/if ISSUE_CRITICAL}}" onfocus="setActiveTextarea(this)"></textarea>
                     <p class="text-xs text-gray-500 mt-1">切换触发器时，若当前未填写内容或仍为默认模板，会自动填充该触发器的默认模板。点击右侧变量可直接插入。</p>
                 </div>
 
@@ -168,11 +192,6 @@
                     </div>
                     <div id="escalationStages" class="space-y-2"></div>
                     <button type="button" onclick="addStage()" class="mt-2 text-xs text-blue-600 hover:text-blue-800 font-medium"><i class="fas fa-plus mr-1"></i>添加阶段</button>
-                    <div class="text-[10px] text-gray-500 bg-white rounded p-2 border mt-1">
-                        <strong>升级阶段含义：</strong><br>
-                        第1级 = 首次提醒（开发者本人）｜ 第2级 = 协助督促（抄送负责人）｜ 第3级 = 正式升级（通知负责人）｜ 第4级 = 通知管理员 ｜ 第5级 = 自动归档<br>
-                        每个阶段的<strong>阈值小时</strong>指从 Issue 首次发现起经过的工作小时数。
-                    </div>
                 </div>
 
                 <div class="flex items-center gap-2 pt-1">
@@ -186,8 +205,8 @@
                 <h4 class="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm sticky top-0 bg-gray-50 pb-2 z-10">
                     <i class="fas fa-code text-blue-600"></i>模板变量参考
                 </h4>
-                <div class="text-[11px] text-gray-500 mb-2">点击变量即可填充至左侧模板。</div>
-                <div class="grid grid-cols-1 gap-1" id="varList"></div>
+                <div class="text-[11px] text-gray-500 mb-2">点击变量即可填充至当前光标位置。</div>
+                <div id="varList"></div>
             </div>
         </div>
 
@@ -204,59 +223,133 @@
 <div id="previewModal" class="fixed inset-0 bg-black/50 z-50 hidden items-center justify-center">
     <div class="bg-white rounded-xl shadow-xl p-6 w-[520px] max-w-[90%]">
         <h4 class="font-bold text-gray-800 mb-3">模板渲染预览</h4>
-        <div id="previewContent" class="prose prose-sm max-w-none bg-gray-50 p-4 rounded-lg text-sm whitespace-pre-wrap border max-h-[400px] overflow-y-auto custom-scroll"></div>
+        <div id="previewContent" class="markdown-body prose prose-sm max-w-none bg-gray-50 p-4 rounded-lg text-sm border max-h-[400px] overflow-y-auto custom-scroll"></div>
         <div class="flex justify-end mt-4">
             <button onclick="document.getElementById('previewModal').classList.add('hidden')" class="px-4 py-2 rounded-lg text-sm text-white bg-blue-600 hover:bg-blue-700">关闭</button>
         </div>
     </div>
 </div>
 
+<!-- 删除确认弹框 -->
+<div id="deleteConfirmModal" class="fixed inset-0 bg-black/50 z-50 hidden items-center justify-center" onclick="if(event.target===this)closeDeleteModal()">
+    <div class="bg-white rounded-xl shadow-xl w-[400px] max-w-[90%] p-6 text-center">
+        <div class="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-4">
+            <i class="fas fa-exclamation-triangle text-red-500 text-xl"></i>
+        </div>
+        <h4 class="font-bold text-gray-900 text-lg mb-2">确认删除规则</h4>
+        <p class="text-gray-500 text-sm mb-6">删除后该规则将立即失效，相关场景不再触发通知。此操作不可撤销。</p>
+        <div class="flex justify-center gap-3">
+            <button onclick="closeDeleteModal()" class="px-4 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100 border transition">取消</button>
+            <button onclick="confirmDeleteRule()" class="px-4 py-2 rounded-lg text-sm text-white bg-red-600 hover:bg-red-700 transition">确认删除</button>
+        </div>
+    </div>
+</div>
+
+<!-- 规则详情弹框 -->
+<div id="detailModal" class="fixed inset-0 bg-black/50 z-50 hidden items-center justify-center" onclick="if(event.target===this)hideDetailModal()">
+    <div class="bg-white rounded-xl shadow-xl w-[720px] max-w-[96%] max-h-[90vh] flex flex-col">
+        <div class="px-6 py-4 border-b flex-shrink-0 flex items-center justify-between">
+            <h3 class="font-bold text-gray-900 text-lg">规则详情</h3>
+            <button onclick="hideDetailModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-lg"></i></button>
+        </div>
+        <div class="flex-1 overflow-y-auto custom-scroll p-6" id="detailContent">
+            <!-- 动态填充 -->
+        </div>
+        <div class="px-6 py-3 border-t flex-shrink-0 flex justify-end bg-white">
+            <button onclick="hideDetailModal()" class="px-4 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50 border">关闭</button>
+        </div>
+    </div>
+</div>
+
 <script>
+if (typeof marked !== 'undefined' && marked.setOptions) {
+    marked.setOptions({ breaks: true, gfm: true });
+}
 const API_BASE = '/api/v1';
 let editingId = null;
 let stages = [];
 
-const templateVars = [
-    { name: '{{PROJECT_NAME}}', desc: '项目名称' },
-    { name: '{{TASK_ID}}', desc: '任务 ID' },
-    { name: '{{EXECUTION_COUNT}}', desc: '第几次运行' },
-    { name: '{{MR_IID}}', desc: 'MR 编号' },
-    { name: '{{MR_TITLE}}', desc: 'MR 标题' },
-    { name: '{{MR_AUTHOR}}', desc: 'MR 提交者' },
-    { name: '{{DEVELOPER}}', desc: '提交者展示名' },
-    { name: '{{BRANCH}}', desc: '源分支→目标分支' },
-    { name: '{{SCORE}}', desc: '评审分数' },
-    { name: '{{CHANGES}}', desc: '代码变更量' },
-    { name: '{{MR_URL}}', desc: 'MR 链接' },
-    { name: '{{ISSUE_TOTAL}}', desc: 'Issue 总数' },
-    { name: '{{ISSUE_PENDING}}', desc: '待处理数' },
-    { name: '{{ISSUE_CRITICAL}}', desc: '严重 Issue 数' },
-    { name: '{{ISSUE_HIGH}}', desc: '高危 Issue 数' },
-    { name: '{{ISSUE_MEDIUM}}', desc: '中危 Issue 数' },
-    { name: '{{ISSUE_LOW}}', desc: '低危 Issue 数' },
-    { name: '{{ISSUE_AUTO_FILTERED}}', desc: '自动过滤数' },
-    { name: '{{ISSUE_GONE}}', desc: '上次有本次未复现数' },
-    { name: '{{ISSUE_NEW}}', desc: '本次全新 Issue 数' },
-    { name: '{{ISSUE_RESOLVED_REAPPEARED}}', desc: '历史已修复复现数' },
-    { name: '{{STEWARD_NAME}}', desc: '负责人名' },
-    { name: '{{DEADLINE_HOURS}}', desc: '距升级截止工作小时' },
-    { name: '{{AT_RECIPIENT}}', desc: '自动替换为 IM @' },
+const varGroups = [
+    {
+        id: 'project',
+        title: '项目与MR',
+        icon: 'fa-folder-open',
+        desc: '项目基本信息、MR 详情',
+        vars: [
+            { name: '{{PROJECT_NAME}}', desc: '项目名称' },
+            { name: '{{TASK_ID}}', desc: '任务 ID' },
+            { name: '{{EXECUTION_COUNT}}', desc: '第几次运行' },
+            { name: '{{MR_IID}}', desc: 'MR 编号' },
+            { name: '{{MR_TITLE}}', desc: 'MR 标题' },
+            { name: '{{MR_AUTHOR}}', desc: 'MR 提交者' },
+            { name: '{{DEVELOPER}}', desc: '提交者展示名' },
+            { name: '{{BRANCH}}', desc: '源分支→目标分支' },
+            { name: '{{MR_URL}}', desc: 'MR 链接' },
+        ]
+    },
+    {
+        id: 'issue',
+        title: 'Issue 统计',
+        icon: 'fa-bug',
+        desc: '任务完成时的 Issue 汇总数据',
+        vars: [
+            { name: '{{ISSUE_TOTAL}}', desc: 'Issue 总数' },
+            { name: '{{ISSUE_PENDING}}', desc: '待处理数' },
+            { name: '{{ISSUE_CRITICAL}}', desc: '严重 Issue 数' },
+            { name: '{{ISSUE_HIGH}}', desc: '高危 Issue 数' },
+            { name: '{{ISSUE_MEDIUM}}', desc: '中危 Issue 数' },
+            { name: '{{ISSUE_LOW}}', desc: '低危 Issue 数' },
+            { name: '{{ISSUE_AUTO_FILTERED}}', desc: '自动过滤数' },
+            { name: '{{ISSUE_GONE}}', desc: '上次有本次未复现数' },
+            { name: '{{ISSUE_NEW}}', desc: '本次全新 Issue 数' },
+            { name: '{{ISSUE_RESOLVED_REAPPEARED}}', desc: '历史已修复复现数' },
+        ]
+    },
+    {
+        id: 'people',
+        title: '人员与通知',
+        icon: 'fa-user',
+        desc: '相关人员、评分、截止时间',
+        vars: [
+            { name: '{{STEWARD_NAME}}', desc: '负责人名' },
+            { name: '{{SCORE}}', desc: '评审分数' },
+            { name: '{{CHANGES}}', desc: '代码变更量' },
+            { name: '{{DEADLINE_HOURS}}', desc: '距升级截止工作小时' },
+            { name: '{{AT_RECIPIENT}}', desc: '自动替换为 IM @' },
+        ]
+    },
+    {
+        id: 'im',
+        title: 'IM 升级专用',
+        icon: 'fa-comments',
+        desc: '仅 Issue 升级的 IM 模板可用',
+        isImOnly: true,
+        vars: [
+            { name: '{{ISSUE_COUNT}}', desc: '聚合 Issue 数量' },
+            { name: '{{ISSUE_LIST}}', desc: '聚合 Issue 列表（例：【72】信息泄露）' },
+            { name: '{{ISSUE_ID}}', desc: '单条 Issue ID' },
+            { name: '{{ISSUE_MESSAGE}}', desc: '单条 Issue 描述' },
+        ]
+    }
 ];
+
+// 各触发器对应的推荐变量组（用于高亮提示）
+const triggerVarGroupMap = {
+    'task.completed': ['project', 'issue', 'people'],
+    'task.failed': ['project', 'people'],
+    'issue.escalation': ['project', 'people', 'im']
+};
 
 const DEFAULT_TEMPLATES = {
     'task.completed': '**🔍 AI 代码评审完成**\n\n**项目：**{{PROJECT_NAME}}\n**开发人员：**{{DEVELOPER}}\n**分支：**{{BRANCH}}\n**分数：**{{SCORE}}\n**变更：**{{CHANGES}}\n**MR：**{{MR_TITLE}}\n**MR 链接：**{{MR_URL}}\n{{#if ISSUE_TOTAL}}\n**Issue 统计：**\n- 总计：{{ISSUE_TOTAL}}\n- 严重：{{ISSUE_CRITICAL}}\n- 高危：{{ISSUE_HIGH}}\n- 中危：{{ISSUE_MEDIUM}}\n- 低危：{{ISSUE_LOW}}\n- 待处理：{{ISSUE_PENDING}}\n{{/if ISSUE_TOTAL}}',
     'issue.escalation': '**⚠️ Issue 升级告警**\n\n**项目：**{{PROJECT_NAME}}\n**MR：**!{{MR_IID}} {{MR_TITLE}}\n**开发人员：**{{DEVELOPER}}\n**待处理：**{{ISSUE_PENDING}}\n**距升级截止：**{{DEADLINE_HOURS}} 工作小时\n请尽快处理。',
-    'daily.digest': '📊 {{PROJECT_NAME}} 每日摘要\n\n今日发现 Issue：{{ISSUE_TOTAL}} 条\n待处理：{{ISSUE_PENDING}} 条\n{{#if ISSUE_CRITICAL}}⚠️ 包含 {{ISSUE_CRITICAL}} 条严重 Issue，请关注！{{/if ISSUE_CRITICAL}}',
-    'task.failed': '❌ **任务执行失败**\n\n**项目：**{{PROJECT_NAME}}\n**MR：**{{MR_TITLE}}\n**开发人员：**{{DEVELOPER}}\n任务执行失败，请检查配置或重试。',
-    'auto.archived': '📦 **Issue 自动归档通知**\n\n**项目：**{{PROJECT_NAME}}\n部分 Issue 已超期 {{DEADLINE_HOURS}} 工作小时，系统已自动归档。'
+    'task.failed': '❌ **任务执行失败**\n\n**项目：**{{PROJECT_NAME}}\n**MR：**{{MR_TITLE}}\n**开发人员：**{{DEVELOPER}}\n任务执行失败，请检查配置或重试。'
 };
 
 const triggerLabels = {
     'task.completed': '任务完成',
     'task.failed': '任务失败',
-    'issue.escalation': 'Issue 升级',
-    'daily.digest': '每日摘要',
-    'auto.archived': '自动归档'
+    'issue.escalation': 'Issue 升级'
 };
 
 const providerLabels = {
@@ -275,25 +368,83 @@ const STAGE_MEANINGS = [
     '自动归档'
 ];
 
+const IM_TEMPLATE_DEFAULTS = {
+    1: '',
+    2: '**⚠️ Issue 协助督促（{{ISSUE_COUNT}} 条）**\n\n项目：{{PROJECT_NAME}}\nMR：!{{MR_IID}} {{MR_TITLE}}\n\n{{ISSUE_LIST}}\n\n{{AT_RECIPIENT}}\n> 请在规定时间内处理，否则将正式升级。',
+    3: '**⬆️ Issue 正式升级（{{ISSUE_COUNT}} 条）**\n\n项目：{{PROJECT_NAME}}\nMR：!{{MR_IID}} {{MR_TITLE}}\n\n{{ISSUE_LIST}}\n\n{{AT_RECIPIENT}}\n> 本 Issue 已超期较长时间，请尽快协助处理。',
+    4: '**【全局告警】Issue 严重超期（{{ISSUE_COUNT}} 条）**\n\n项目：{{PROJECT_NAME}}\nMR：!{{MR_IID}} {{MR_TITLE}}\n开发者：{{DEVELOPER}}\n\n{{ISSUE_LIST}}\n\n{{AT_RECIPIENT}}\n> Issue 已超期多日未闭环，请关注。',
+    5: ''
+};
+
 const STAGE_DEFAULTS = [
-    { threshold_hours: 24, recipient: 'owner', notify_im: false },
-    { threshold_hours: 72, recipient: 'owner+steward', notify_im: true },
-    { threshold_hours: 120, recipient: 'steward', notify_im: true },
-    { threshold_hours: 240, recipient: 'admin', notify_im: true },
-    { threshold_hours: 360, recipient: 'auto_archive', notify_im: false }
+    { threshold_hours: 24, recipient: 'owner', notify_im: false, im_template: '' },
+    { threshold_hours: 72, recipient: 'owner+steward', notify_im: true, im_template: IM_TEMPLATE_DEFAULTS[2] },
+    { threshold_hours: 120, recipient: 'steward', notify_im: true, im_template: IM_TEMPLATE_DEFAULTS[3] },
+    { threshold_hours: 240, recipient: 'admin', notify_im: true, im_template: IM_TEMPLATE_DEFAULTS[4] },
+    { threshold_hours: 360, recipient: 'auto_archive', notify_im: false, im_template: '' }
 ];
 
+let collapsedGroups = {};
+
 function renderVarList() {
-    document.getElementById('varList').innerHTML = templateVars.map(v => `
-        <div onclick="insertVar('${escapeHtml(v.name)}')" class="group cursor-pointer hover:bg-blue-100 rounded px-2 py-1.5 transition border border-transparent hover:border-blue-200">
-            <code class="text-[11px] bg-white text-blue-700 px-1 rounded border border-blue-100">${escapeHtml(v.name)}</code>
-            <div class="text-[11px] text-gray-500 mt-0.5">${escapeHtml(v.desc)}</div>
+    const trigger = document.getElementById('rTrigger').value;
+    const recommended = triggerVarGroupMap[trigger] || [];
+
+    document.getElementById('varList').innerHTML = varGroups.map(g => {
+        const isRecommended = recommended.includes(g.id);
+        const isCollapsed = !!collapsedGroups[g.id];
+
+        return `
+        <div class="mb-3 ${isRecommended ? '' : 'opacity-50'}">
+            <!-- 组标题 -->
+            <div onclick="toggleVarGroup('${g.id}')" class="flex items-center justify-between cursor-pointer select-none rounded-md px-2 py-1.5 mb-1 transition-colors bg-gray-50/95 backdrop-blur-sm sticky top-8 z-[5] ${isRecommended ? 'hover:bg-blue-50' : 'hover:bg-gray-100'}" title="${escapeHtml(g.desc)}">
+                <div class="flex items-center gap-1.5">
+                    <i class="fas ${g.icon} text-[10px] ${isRecommended ? (g.isImOnly ? 'text-orange-500' : 'text-blue-500') : 'text-gray-400'}"></i>
+                    <span class="text-[11px] font-semibold ${isRecommended ? 'text-gray-700' : 'text-gray-400'}">${escapeHtml(g.title)}</span>
+                    ${g.isImOnly ? '<span class="text-[9px] bg-orange-100 text-orange-600 px-1 rounded ml-1">IM</span>' : ''}
+                </div>
+                <i class="fas ${isCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'} text-[10px] text-gray-400"></i>
+            </div>
+            <!-- 变量列表 -->
+            <div class="space-y-0.5 ${isCollapsed ? 'hidden' : ''}">
+                ${g.vars.map(v => `
+                    ${isRecommended ? `
+                    <div onclick="insertVar('${escapeHtml(v.name)}')" class="cursor-pointer hover:bg-blue-50 rounded px-2 py-1.5 transition border border-transparent hover:border-blue-200 group/item">
+                        <div class="flex items-center gap-1">
+                            <code class="text-[11px] bg-white text-blue-700 px-1 rounded border border-blue-100 font-mono">${escapeHtml(v.name)}</code>
+                            <i class="fas fa-copy text-[9px] text-gray-300 opacity-0 group-hover/item:opacity-100 transition-opacity"></i>
+                        </div>
+                        <div class="text-[10px] text-gray-500 mt-0.5 pl-0.5 leading-tight">${escapeHtml(v.desc)}</div>
+                    </div>
+                    ` : `
+                    <div class="rounded px-2 py-1.5 border border-transparent">
+                        <div class="flex items-center gap-1">
+                            <code class="text-[11px] bg-gray-100 text-gray-500 px-1 rounded border border-gray-200 font-mono">${escapeHtml(v.name)}</code>
+                        </div>
+                        <div class="text-[10px] text-gray-400 mt-0.5 pl-0.5 leading-tight">${escapeHtml(v.desc)}</div>
+                    </div>
+                    `}
+                `).join('')}
+            </div>
         </div>
-    `).join('');
+        `;
+    }).join('');
+}
+
+function toggleVarGroup(groupId) {
+    collapsedGroups[groupId] = !collapsedGroups[groupId];
+    renderVarList();
+}
+
+let activeTemplateTextarea = null;
+
+function setActiveTextarea(el) {
+    activeTemplateTextarea = el;
 }
 
 function insertVar(name) {
-    const ta = document.getElementById('rTemplate');
+    const ta = activeTemplateTextarea || document.getElementById('rTemplate');
+    if (!ta) return;
     const start = ta.selectionStart || 0;
     const end = ta.selectionEnd || 0;
     const text = ta.value;
@@ -311,6 +462,11 @@ function resetToDefaultTemplate() {
 function onTriggerChange() {
     const trigger = document.getElementById('rTrigger').value;
 
+    // 通知模板：Issue 升级不使用上方通用模板，模板已下沉到各阶段 IM 配置中
+    const showTemplate = (trigger !== 'issue.escalation');
+    const tplSection = document.getElementById('templateSection');
+    if (tplSection) tplSection.style.display = showTemplate ? 'block' : 'none';
+
     // IM 相关配置：仅 task.completed / issue.escalation 显示
     const showIM = (trigger === 'task.completed' || trigger === 'issue.escalation');
     document.getElementById('imConfigSection').style.display = showIM ? 'block' : 'none';
@@ -319,46 +475,102 @@ function onTriggerChange() {
     const showEscalation = (trigger === 'issue.escalation');
     document.getElementById('escalationSection').style.display = showEscalation ? 'block' : 'none';
 
+    // Issue 升级唯一性冲突提示（排除当前编辑的规则自身）
+    const tipEl = document.getElementById('escalationConflictTip');
+    if (tipEl) {
+        if (showEscalation && window.__hasEnabledEscalation && window.__escalationConflictId !== editingId) {
+            tipEl.classList.remove('hidden');
+        } else {
+            tipEl.classList.add('hidden');
+        }
+    }
+
     // 自动填充默认模板（若当前为空或仍是旧默认）
     const ta = document.getElementById('rTemplate');
-    const val = ta.value.trim();
-    const knownTemplates = Object.values(DEFAULT_TEMPLATES);
-    if (!val || knownTemplates.includes(val)) {
-        ta.value = DEFAULT_TEMPLATES[trigger] || '';
+    if (showTemplate && ta) {
+        const val = ta.value.trim();
+        const knownTemplates = Object.values(DEFAULT_TEMPLATES);
+        if (!val || knownTemplates.includes(val)) {
+            ta.value = DEFAULT_TEMPLATES[trigger] || '';
+        }
     }
+
+    // 触发器切换时重绘变量参考面板（高亮/置灰动态更新）
+    renderVarList();
 }
 
 // ========== 升级策略表单 ==========
 function renderStages() {
     const container = document.getElementById('escalationStages');
     if (stages.length === 0) {
-        container.innerHTML = '<div class="text-xs text-gray-400 py-2">暂无升级阶段，请点击下方按钮添加</div>';
+        container.innerHTML = '<div class="text-xs text-gray-400 py-3 bg-gray-50 rounded text-center">暂无升级阶段，点击下方「添加升级阶段」开始配置</div>';
         return;
     }
     container.innerHTML = stages.map((s, i) => `
         <div class="stage-row">
-            <div class="flex-shrink-0 w-28">
-                <span class="text-xs font-bold text-blue-700">第${i+1}级升级</span>
-                <div class="text-[10px] text-gray-400">${STAGE_MEANINGS[i] || ''}</div>
+            <!-- 左侧：级别标识（加宽避免换行） -->
+            <div style="width:148px;flex-shrink:0;">
+                <div class="flex items-center gap-1.5">
+                    <span class="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-bold">${i+1}</span>
+                    <span class="text-xs font-semibold text-gray-700">级升级</span>
+                </div>
+                <div class="text-[10px] text-gray-400 mt-0.5 pl-[26px] leading-tight">${STAGE_MEANINGS[i] || ''}</div>
             </div>
-            <div>
-                <label class="block text-[10px] text-gray-400 mb-0.5">阈值（工作小时）</label>
-                <input type="number" value="${s.threshold_hours}" min="1"
-                    class="w-20 text-xs border rounded px-2 py-1" onchange="updateStage(${i},'threshold_hours',this.value)">
+
+            <!-- 阈值 -->
+            <div style="width:82px;flex-shrink:0;">
+                <label class="block text-[10px] text-gray-400 font-medium mb-0.5">超期阈值</label>
+                <div class="flex items-center gap-1">
+                    <input type="number" value="${s.threshold_hours}" min="1"
+                        class="w-12 text-xs border rounded px-1.5 py-1 focus:ring-1 focus:ring-blue-500 focus:outline-none" onchange="updateStage(${i},'threshold_hours',this.value)">
+                    <span class="text-[10px] text-gray-400">h</span>
+                </div>
             </div>
-            <div class="flex-1">
-                <label class="block text-[10px] text-gray-400 mb-0.5">通知对象</label>
-                <select class="text-xs border rounded px-2 py-1 w-full max-w-[140px]" onchange="updateStage(${i},'recipient',this.value)">
+
+            <!-- 通知对象（固定窄宽度，不再flex撑满） -->
+            <div style="width:136px;flex-shrink:0;">
+                <label class="block text-[10px] text-gray-400 font-medium mb-0.5">通知对象</label>
+                <select class="text-xs border rounded px-2 py-1 w-full focus:ring-1 focus:ring-blue-500 focus:outline-none" onchange="updateStage(${i},'recipient',this.value)">
                     <option value="owner" ${s.recipient==='owner'?'selected':''}>开发者</option>
                     <option value="owner+steward" ${s.recipient==='owner+steward'?'selected':''}>开发者+负责人</option>
-                    <option value="steward" ${s.recipient==='steward'?'selected':''}>负责人</option>
+                    <option value="steward" ${s.recipient==='steward'?'selected':''}>项目负责人</option>
                     <option value="admin" ${s.recipient==='admin'?'selected':''}>管理员</option>
                 </select>
             </div>
-            <label class="flex items-center gap-1.5 text-[12px] text-gray-500 px-2 cursor-pointer">
-                <input type="checkbox" ${s.notify_im?'checked':''} onchange="updateStage(${i},'notify_im',this.checked)"> IM
-            </label>
-            <button onclick="removeStage(${i})" class="text-red-400 hover:text-red-600 text-xs px-2" title="删除"><i class="fas fa-trash-alt"></i></button>
+
+            <!-- 右侧：IM + 删除（padding-top与前方label+input对齐） -->
+            <div class="flex items-center gap-2" style="width:112px;flex-shrink:0;padding-top:14px;">
+                ${i === 0 || i === 4 ? '<span class="text-[10px] text-gray-400" title="本阶段仅发送站内信">仅站内信</span>' : `
+                <label class="flex items-center gap-1 text-xs text-gray-600 cursor-pointer bg-gray-50 px-2 py-1 rounded border hover:bg-gray-100 transition-colors" title="同时发送企业微信/IM消息">
+                    <input type="checkbox" ${s.notify_im?'checked':''} onchange="updateStage(${i},'notify_im',this.checked)">
+                    <i class="fas fa-comment text-[10px] text-blue-500"></i>
+                    <span>IM</span>
+                </label>
+                `}
+                <button onclick="removeStage(${i})" class="w-6 h-6 flex items-center justify-center rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors" title="删除该阶段"><i class="fas fa-times text-xs"></i></button>
+            </div>
+
+            <!-- IM 模板编辑区（占满整行） -->
+            <div style="width:100%;">
+                ${(i === 0 || i === 4) ? `
+                <div class="mt-1 text-[10px] text-gray-400">本阶段不发送 IM，无需配置模板</div>
+                ` : `
+                <div class="mt-2">
+                    <div class="flex items-center justify-between">
+                        <label class="text-[10px] text-gray-400 font-medium">IM 消息模板</label>
+                        <button type="button" onclick="resetIMTemplate(${i})" class="text-[10px] text-blue-600 hover:text-blue-800">
+                            <i class="fas fa-undo mr-0.5"></i>重置默认
+                        </button>
+                    </div>
+                    <textarea rows="3"
+                        class="w-full text-[11px] border rounded px-2 py-1 font-mono focus:ring-1 focus:ring-blue-500 focus:outline-none bg-gray-50 mt-0.5"
+                        placeholder="支持 {{PROJECT_NAME}} {{MR_TITLE}} {{ISSUE_COUNT}} {{ISSUE_LIST}} {{AT_RECIPIENT}} 等变量"
+                        onchange="updateStage(${i},'im_template',this.value)"
+                        onfocus="setActiveTextarea(this)"
+                    >${escapeHtml(s.im_template || '')}</textarea>
+                </div>
+                `}
+            </div>
         </div>
     `).join('');
 }
@@ -381,8 +593,19 @@ function updateStage(idx, field, value) {
     else stages[idx][field] = value;
 }
 
+function resetIMTemplate(idx) {
+    const level = idx + 1;
+    stages[idx].im_template = IM_TEMPLATE_DEFAULTS[level] || '';
+    renderStages();
+}
+
 function getEscalationJSON() {
     if (stages.length === 0) return '';
+    // 确保每个 stage 有正确 level，且 Level 1 / Level 5 的 notify_im 强制为 false
+    stages.forEach((s, i) => { 
+        if (!s.level) s.level = i + 1; 
+        if (s.level === 1 || s.level === 5) s.notify_im = false;
+    });
     return JSON.stringify(stages);
 }
 
@@ -460,10 +683,23 @@ async function editRule(id) {
 }
 
 async function doSave() {
+    const trigger = document.getElementById('rTrigger').value;
+    const enabled = document.getElementById('rEnabled').checked;
+    // issue.escalation 唯一性前端校验（编辑时排除自身）
+    if (trigger === 'issue.escalation') {
+        const res = await apiFetch(`${API_BASE}/notification-rules`);
+        const json = await res.json();
+        const rules = json.data || [];
+        const conflict = rules.find(r => r.trigger === 'issue.escalation' && r.enabled && r.id !== editingId);
+        if (conflict) {
+            showToast('已存在启用的 Issue 升级规则，请先禁用或删除现有规则', 'error');
+            return;
+        }
+    }
     const notifierIdVal = document.getElementById('rNotifierId').value;
     const payload = {
         name: document.getElementById('rName').value.trim(),
-        trigger: document.getElementById('rTrigger').value,
+        trigger: trigger,
         provider: document.getElementById('rProvider').value,
         notifier_id: notifierIdVal ? parseInt(notifierIdVal) : null,
         template: document.getElementById('rTemplate').value,
@@ -472,7 +708,7 @@ async function doSave() {
         quiet_hours_end: document.getElementById('rQuietEnd').value,
         dedup_window_minutes: parseInt(document.getElementById('rDedup').value) || 0,
         escalation_config: getEscalationJSON(),
-        enabled: document.getElementById('rEnabled').checked
+        enabled: enabled
     };
     if (!payload.name) { showToast('请填写规则名称', 'error'); return; }
     if (!payload.notifier_id) { showToast('请选择通知机器人', 'error'); return; }
@@ -480,7 +716,14 @@ async function doSave() {
         const url = editingId ? `${API_BASE}/notification-rules/${editingId}` : `${API_BASE}/notification-rules`;
         const method = editingId ? 'PUT' : 'POST';
         const res = await apiFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
+        if (!res.ok) {
+            let msg = 'HTTP ' + res.status;
+            try {
+                const errJson = await res.json();
+                if (errJson.error) msg = errJson.error;
+            } catch (_) {}
+            throw new Error(msg);
+        }
         showToast(editingId ? '更新成功' : '创建成功', 'success');
         hideAddModal();
         loadRules();
@@ -488,6 +731,45 @@ async function doSave() {
 }
 
 async function testRule() {
+    const trigger = document.getElementById('rTrigger').value;
+
+    // Issue 升级：批量测试各 stage IM 模板
+    if (trigger === 'issue.escalation') {
+        const imStages = stages.filter((s, i) => i > 0 && i < 4 && s.im_template && s.im_template.trim());
+        if (imStages.length === 0) {
+            showToast('当前未配置 IM 模板，请先填写', 'error');
+            return;
+        }
+        try {
+            let html = '<div class="space-y-4">';
+            for (const st of imStages) {
+                const level = st.level || (stages.indexOf(st) + 1);
+                const label = STAGE_MEANINGS[level - 1] || `Level ${level}`;
+                const res = await apiFetch(`${API_BASE}/notification-rules/0/test`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ template: st.im_template, template_type: 'im_escalation' })
+                });
+                const json = await res.json();
+                const rendered = json.data || '渲染失败';
+                html += `
+                <div>
+                    <div class="flex items-center gap-2 mb-1.5">
+                        <span class="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-bold">${level}</span>
+                        <span class="text-xs font-semibold text-gray-700">${escapeHtml(label)}</span>
+                    </div>
+                    <div class="bg-white border rounded-lg p-3 text-sm text-gray-800">${marked.parse(rendered)}</div>
+                </div>`;
+            }
+            html += '</div>';
+            document.getElementById('previewContent').innerHTML = html;
+            document.getElementById('previewModal').classList.remove('hidden');
+            document.getElementById('previewModal').classList.add('flex');
+        } catch (e) { showToast('测试失败: ' + e.message, 'error'); }
+        return;
+    }
+
+    // 其他触发器：走原有通用模板测试
     const template = document.getElementById('rTemplate').value;
     if (!template.trim()) { showToast('请先输入模板内容', 'error'); return; }
     try {
@@ -497,7 +779,7 @@ async function testRule() {
             body: JSON.stringify({ template })
         });
         const json = await res.json();
-        document.getElementById('previewContent').textContent = json.data || '渲染失败';
+        document.getElementById('previewContent').innerHTML = marked.parse(json.data || '渲染失败');
         document.getElementById('previewModal').classList.remove('hidden');
         document.getElementById('previewModal').classList.add('flex');
     } catch (e) { showToast('测试失败: ' + e.message, 'error'); }
@@ -505,22 +787,275 @@ async function testRule() {
 
 async function testRuleById(id) {
     try {
+        // 先获取规则详情以确认触发器类型
+        const detailRes = await apiFetch(`${API_BASE}/notification-rules/${id}`);
+        if (!detailRes.ok) throw new Error('HTTP ' + detailRes.status);
+        const detailJson = await detailRes.json();
+        const rule = (detailJson && detailJson.data) || null;
+
+        if (!rule || !rule.id) {
+            showToast('规则不存在', 'error');
+            return;
+        }
+
+        // Issue 升级：批量测试各 stage IM 模板
+        if (rule.trigger === 'issue.escalation' && rule.escalation_config) {
+            let cfgStages = [];
+            try { cfgStages = JSON.parse(rule.escalation_config); } catch (e) {}
+
+            const imStages = cfgStages.filter((s, i) => i > 0 && i < 4 && s.im_template && s.im_template.trim());
+            if (imStages.length === 0) {
+                showToast('当前规则未配置 IM 模板', 'error');
+                return;
+            }
+
+            let html = '<div class="space-y-4">';
+            for (const st of imStages) {
+                const level = st.level || (cfgStages.indexOf(st) + 1);
+                const label = STAGE_MEANINGS[level - 1] || `Level ${level}`;
+                const res = await apiFetch(`${API_BASE}/notification-rules/0/test`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ template: st.im_template, template_type: 'im_escalation' })
+                });
+                const json = await res.json();
+                const rendered = json.data || '渲染失败';
+                html += `
+                <div>
+                    <div class="flex items-center gap-2 mb-1.5">
+                        <span class="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-bold">${level}</span>
+                        <span class="text-xs font-semibold text-gray-700">${escapeHtml(label)}</span>
+                    </div>
+                    <div class="bg-white border rounded-lg p-3 text-sm text-gray-800">${marked.parse(rendered)}</div>
+                </div>`;
+            }
+            html += '</div>';
+
+            document.getElementById('previewContent').innerHTML = html;
+            document.getElementById('previewModal').classList.remove('hidden');
+            document.getElementById('previewModal').classList.add('flex');
+            return;
+        }
+
+        // 其他触发器：走原有通用模板测试
         const res = await apiFetch(`${API_BASE}/notification-rules/${id}/test`, { method: 'POST' });
         const json = await res.json();
-        document.getElementById('previewContent').textContent = json.data || '渲染失败';
+        document.getElementById('previewContent').innerHTML = marked.parse(json.data || '渲染失败');
         document.getElementById('previewModal').classList.remove('hidden');
         document.getElementById('previewModal').classList.add('flex');
     } catch (e) { showToast('测试失败: ' + e.message, 'error'); }
 }
 
+let pendingDeleteId = null;
+
 async function deleteRule(id) {
-    if (!confirm('确定删除该规则？')) return;
+    pendingDeleteId = id;
+    document.getElementById('deleteConfirmModal').classList.remove('hidden');
+    document.getElementById('deleteConfirmModal').classList.add('flex');
+}
+
+function closeDeleteModal() {
+    document.getElementById('deleteConfirmModal').classList.add('hidden');
+    document.getElementById('deleteConfirmModal').classList.remove('flex');
+    pendingDeleteId = null;
+}
+
+async function confirmDeleteRule() {
+    if (!pendingDeleteId) return;
     try {
-        const res = await apiFetch(`${API_BASE}/notification-rules/${id}`, { method: 'DELETE' });
+        const res = await apiFetch(`${API_BASE}/notification-rules/${pendingDeleteId}`, { method: 'DELETE' });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         showToast('已删除', 'success');
         loadRules();
     } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
+    closeDeleteModal();
+}
+
+function hideDetailModal() {
+    document.getElementById('detailModal').classList.add('hidden');
+    document.getElementById('detailModal').classList.remove('flex');
+}
+
+async function showRuleDetail(id) {
+    try {
+        const res = await apiFetch(`${API_BASE}/notification-rules/${id}`);
+        if (!res.ok) {
+            showToast('加载失败: HTTP ' + res.status, 'error');
+            return;
+        }
+        const json = await res.json();
+        const r = (json && json.data) || null;
+        if (!r || !r.id) {
+            showToast('规则不存在', 'error');
+            return;
+        }
+
+        let stagesHtml = '';
+        const INBOX_PREVIEW = {
+            1: [{ role: '开发者', title: 'Issue 超期提醒（已超期 {th} 小时）', desc: 'Issue #N 已超期 {th} 小时\n项目：XXX\nMR：XXX\n问题：XXX\n请尽快处理，否则将进一步升级。' }],
+            2: [
+                { role: '开发者', title: 'Issue 超期提醒（已超期 {th} 小时）', desc: 'Issue #N 已超期 {th} 小时\n项目：XXX\nMR：XXX\n问题：XXX\n请立即处理，否则将进一步升级。' },
+                { role: '负责人', title: 'Issue 协助督促（已超期 {th} 小时）', desc: '协助督促：Issue #N\n任务ID：TID\n项目：XXX\nMR：XXX\n开发者：AUTHOR\n问题：XXX\n请协助督促处理。' }
+            ],
+            3: [
+                { role: '负责人', title: 'Issue 正式升级（已超期 {th} 小时）', desc: 'Issue #N 已升级给您处理\n任务ID：TID\n项目：XXX\nMR：XXX\n开发者：AUTHOR\n问题：XXX\n请尽快协助处理。' },
+                { role: '开发者', title: 'Issue 已升级给项目负责人', desc: 'Issue #N 已升级给项目负责人\n您的 Issue 因超期 {th} 小时未处理，已升级给项目负责人协助推进。' }
+            ],
+            4: [
+                { role: '管理员', title: '【全局告警】Issue 超期 {th} 小时', desc: '【全局告警】项目 XXX 有 Issue 超期 {th} 小时未闭环，请关注。\nIssue #N\nMR：XXX\n问题：XXX' }
+            ],
+            5: [
+                { role: '责任人', title: 'Issue 已自动归档', desc: 'Issue #N 已自动归档\n因超期 {th} 小时未处理，系统已自动归档。\n项目：XXX\nMR：XXX' },
+                { role: '管理员', title: '【全局通知】Issue 自动归档', desc: '【全局通知】项目 XXX 有 Issue 已自动归档\nIssue #N 因超期 {th} 小时未处理，系统已自动归档。\nMR：XXX' }
+            ]
+        };
+        if (r.trigger === 'issue.escalation' && r.escalation_config) {
+            let cfgStages = [];
+            try { cfgStages = JSON.parse(r.escalation_config); } catch (e) {}
+            if (cfgStages.length > 0) {
+                stagesHtml = `
+                <div class="mt-6">
+                    <h4 class="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
+                        <i class="fas fa-layer-group text-blue-500"></i>升级阶段配置
+                    </h4>
+                    <div class="space-y-3">
+                        ${cfgStages.map((s, idx) => {
+                            const level = s.level || (idx + 1);
+                            const label = STAGE_MEANINGS[level - 1] || `Level ${level}`;
+                            const recipientMap = { owner: '开发者', 'owner+steward': '开发者+负责人', steward: '项目负责人', admin: '管理员', auto_archive: '自动归档' };
+                            const recipientLabel = recipientMap[s.recipient] || s.recipient || '-';
+                            const imBadge = s.notify_im
+                                ? '<span class="inline-flex items-center gap-1 text-[11px] bg-green-50 text-green-700 px-2 py-0.5 rounded border border-green-200"><i class="fas fa-comment text-[9px]"></i>启用IM</span>'
+                                : '<span class="inline-flex items-center gap-1 text-[11px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded border border-gray-200"><i class="fas fa-comment-slash text-[9px]"></i>仅站内信</span>';
+                            const inboxPreviews = (INBOX_PREVIEW[level] || []).map(p => `
+                                <div class="bg-amber-50 border border-amber-100 rounded-md p-2 mt-1.5">
+                                    <div class="flex items-center gap-1.5 mb-0.5">
+                                        <span class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">${escapeHtml(p.role)}</span>
+                                        <span class="text-[11px] font-semibold text-gray-700">${escapeHtml(p.title.replace(/{th}/g, s.threshold_hours || 0))}</span>
+                                    </div>
+                                    <div class="text-[11px] text-gray-500 leading-relaxed whitespace-pre-wrap font-mono">${escapeHtml(p.desc.replace(/{th}/g, s.threshold_hours || 0))}</div>
+                                </div>
+                            `).join('');
+                            return `
+                            <div class="border rounded-lg overflow-hidden">
+                                <div class="bg-gray-50 px-4 py-2.5 border-b flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-bold">${level}</span>
+                                        <span class="text-sm font-semibold text-gray-700">${escapeHtml(label)}</span>
+                                    </div>
+                                    ${imBadge}
+                                </div>
+                                <div class="px-4 py-3 text-sm space-y-2">
+                                    <div class="flex items-center gap-4">
+                                        <span class="text-gray-500 w-16 shrink-0">超期阈值</span>
+                                        <span class="font-medium text-gray-800">${s.threshold_hours || 0} 小时</span>
+                                    </div>
+                                    <div class="flex items-center gap-4">
+                                        <span class="text-gray-500 w-16 shrink-0">通知对象</span>
+                                        <span class="font-medium text-gray-800">${escapeHtml(recipientLabel)}</span>
+                                    </div>
+                                    ${s.im_template ? `
+                                    <div>
+                                        <div class="text-gray-500 mb-1">IM 模板</div>
+                                        <div class="bg-gray-50 border rounded-md p-2.5 text-xs text-gray-700 font-mono leading-relaxed whitespace-pre-wrap">${escapeHtml(s.im_template)}</div>
+                                    </div>
+                                    ` : ''}
+                                    <div>
+                                        <div class="text-gray-500 mb-1 flex items-center gap-1">
+                                            <i class="fas fa-inbox text-[10px] text-amber-500"></i>站内信消息示例
+                                        </div>
+                                        ${inboxPreviews}
+                                    </div>
+                                </div>
+                            </div>`;
+                        }).join('')}
+                    </div>
+                </div>`;
+            }
+        }
+
+        const notifierName = (() => {
+            if (!r.notifier_id) return '未指定';
+            const found = wecomNotifiers.find(n => n.id === r.notifier_id);
+            if (!found) return '机器人 #' + r.notifier_id;
+            const scope = found.project_id ? escapeHtml(found.project_name || '项目') : '全局';
+            return escapeHtml(found.name) + ' <span class="text-xs text-gray-400">（' + scope + '）</span>';
+        })();
+
+        const html = `
+            <div class="space-y-4">
+                <div class="flex items-start gap-4 pb-4 border-b">
+                    <div class="flex-1">
+                        <h2 class="text-lg font-bold text-gray-900">${escapeHtml(r.name || '未命名规则')}</h2>
+                        <div class="flex items-center gap-2 mt-1.5">
+                            ${r.enabled
+                                ? '<span class="inline-flex items-center text-[11px] bg-green-50 text-green-700 px-2 py-0.5 rounded border border-green-200"><i class="fas fa-check-circle mr-1 text-[9px]"></i>已启用</span>'
+                                : '<span class="inline-flex items-center text-[11px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded border border-gray-200"><i class="fas fa-ban mr-1 text-[9px]"></i>已禁用</span>'}
+                            <span class="text-xs text-gray-400">ID: ${r.id}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-gray-50 rounded-lg p-3 border">
+                        <div class="text-[11px] text-gray-400 mb-0.5">触发器</div>
+                        <div class="text-sm font-medium text-gray-800">${escapeHtml(triggerLabels[r.trigger] || r.trigger || '-')}</div>
+                    </div>
+                    <div class="bg-gray-50 rounded-lg p-3 border">
+                        <div class="text-[11px] text-gray-400 mb-0.5">供应商</div>
+                        <div class="text-sm font-medium text-gray-800">${escapeHtml(providerLabels[r.provider] || r.provider || '-')}</div>
+                    </div>
+                    <div class="bg-gray-50 rounded-lg p-3 border">
+                        <div class="text-[11px] text-gray-400 mb-0.5">通知机器人</div>
+                        <div class="text-sm font-medium text-gray-800">${notifierName}</div>
+                    </div>
+                    <div class="bg-gray-50 rounded-lg p-3 border">
+                        <div class="text-[11px] text-gray-400 mb-0.5">延迟发送</div>
+                        <div class="text-sm font-medium text-gray-800">${r.delay_minutes || 0} 分钟</div>
+                    </div>
+                    <div class="bg-gray-50 rounded-lg p-3 border">
+                        <div class="text-[11px] text-gray-400 mb-0.5">免打扰时段</div>
+                        <div class="text-sm font-medium text-gray-800">${r.quiet_hours_start || '-'} ~ ${r.quiet_hours_end || '-'}</div>
+                    </div>
+                    <div class="bg-gray-50 rounded-lg p-3 border">
+                        <div class="text-[11px] text-gray-400 mb-0.5">去重窗口</div>
+                        <div class="text-sm font-medium text-gray-800">${r.dedup_window_minutes !== undefined ? r.dedup_window_minutes : 15} 分钟</div>
+                    </div>
+                </div>
+
+                ${r.trigger !== 'issue.escalation' ? `
+                <div>
+                    <h4 class="text-sm font-bold text-gray-800 mb-2 flex items-center gap-2">
+                        <i class="fas fa-file-alt text-blue-500"></i>通知模板
+                    </h4>
+                    <div class="bg-gray-50 border rounded-lg p-3 text-sm text-gray-700 font-mono leading-relaxed whitespace-pre-wrap">${escapeHtml(r.template || '')}</div>
+                </div>
+                ` : ''}
+
+                ${stagesHtml}
+            </div>
+        `;
+
+        document.getElementById('detailContent').innerHTML = html;
+        document.getElementById('detailModal').classList.remove('hidden');
+        document.getElementById('detailModal').classList.add('flex');
+    } catch (e) {
+        console.error('showRuleDetail error:', e);
+        showToast('加载详情失败: ' + (e.message || '未知错误'), 'error');
+    }
+}
+
+async function toggleRuleEnabled(id, enabled) {
+    try {
+        const res = await apiFetch(`${API_BASE}/notification-rules/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        showToast(enabled ? '已启用' : '已禁用', 'success');
+        loadRules();
+    } catch (e) { showToast('切换失败: ' + e.message, 'error'); }
 }
 
 async function loadRules() {
@@ -535,9 +1070,12 @@ async function loadRules() {
                 r.notifier_name = found ? found.name : null;
             }
         });
+        // 检查是否已有启用的 issue.escalation 规则（用于 onTriggerChange 中的提示）
+        window.__hasEnabledEscalation = rules.some(r => r.trigger === 'issue.escalation' && r.enabled);
+        window.__escalationConflictId = rules.find(r => r.trigger === 'issue.escalation' && r.enabled)?.id || null;
         const tbody = document.getElementById('ruleTableBody');
         if (rules.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">暂无规则</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">暂无规则</td></tr>';
             return;
         }
         tbody.innerHTML = rules.map(r => `
@@ -545,12 +1083,22 @@ async function loadRules() {
                 <td class="px-4 py-3 text-sm font-medium text-gray-800">${escapeHtml(r.name)}</td>
                 <td class="px-4 py-3 text-sm text-gray-600">${triggerLabels[r.trigger] || r.trigger}</td>
                 <td class="px-4 py-3 text-sm text-gray-600">${providerLabels[r.provider] || r.provider || '-'}</td>
-                <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(r.notifier_name || (r.notifier_id ? '机器人 #' + r.notifier_id : '未指定'))}</td>
+                <td class="px-4 py-3 text-sm text-gray-600">${r.notifier_id ? (() => {
+                    const found = wecomNotifiers.find(n => n.id === r.notifier_id);
+                    if (!found) return '机器人 #' + r.notifier_id;
+                    const scope = found.project_id ? escapeHtml(found.project_name || '项目') : '全局';
+                    return escapeHtml(found.name) + ' <span class="text-[10px] text-gray-400">（' + scope + '）</span>';
+                })() : '未指定'}</td>
                 <td class="px-4 py-3 text-sm text-gray-600">${r.delay_minutes} min</td>
-                <td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-xs ${r.enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}">${r.enabled ? '启用' : '禁用'}</span></td>
-                <td class="px-4 py-3 text-right space-x-2">
+                <td class="px-4 py-3 text-right whitespace-nowrap w-52">
+                    <button onclick="showRuleDetail(${r.id})" class="text-gray-600 hover:text-gray-900 text-xs"><i class="fas fa-eye mr-0.5"></i>详情</button>
+                    <span class="text-gray-300 mx-1">|</span>
+                    <button onclick="toggleRuleEnabled(${r.id}, ${!r.enabled})" class="text-xs ${r.enabled ? 'text-gray-500 hover:text-gray-800' : 'text-green-600 hover:text-green-800'}">${r.enabled ? '禁用' : '启用'}</button>
+                    <span class="text-gray-300 mx-1">|</span>
                     <button onclick="editRule(${r.id})" class="text-blue-600 hover:text-blue-800 text-xs">编辑</button>
+                    <span class="text-gray-300 mx-1">|</span>
                     <button onclick="testRuleById(${r.id})" class="text-green-600 hover:text-green-800 text-xs">测试</button>
+                    <span class="text-gray-300 mx-1">|</span>
                     <button onclick="deleteRule(${r.id})" class="text-red-500 hover:text-red-700 text-xs">删除</button>
                 </td>
             </tr>`).join('');
@@ -565,7 +1113,12 @@ async function loadWeComNotifiers() {
         const select = document.getElementById('rNotifierId');
         if (!select) return;
         select.innerHTML = '<option value="">请选择机器人</option>' +
-            wecomNotifiers.map(n => `<option value="${n.id}">${escapeHtml(n.name)}</option>`).join('');
+            wecomNotifiers.map(n => {
+                const label = n.project_id
+                    ? `📁 ${escapeHtml(n.name)}（${escapeHtml(n.project_name || '项目')}）`
+                    : `🌍 ${escapeHtml(n.name)}（全局）`;
+                return `<option value="${n.id}">${label}</option>`;
+            }).join('');
     } catch (e) {
         console.error('loadWeComNotifiers failed:', e);
     }
@@ -591,6 +1144,7 @@ function escapeHtml(str) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    activeTemplateTextarea = document.getElementById('rTemplate');
     renderVarList();
     loadWeComNotifiers();
     loadRules();
