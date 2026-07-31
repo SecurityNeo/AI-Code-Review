@@ -28,7 +28,7 @@
         }
         .orb {
             position: absolute; border-radius: 50%; filter: blur(100px); opacity: 0.30;
-            animation: float 14s ease-in-out infinite;
+            animation: float 14s ease-in-out infinite, colorShift 20s ease-in-out infinite;
         }
         .orb-1 { width: 520px; height: 520px; background: #1e3a5f; top: -180px; left: 8%; }
         .orb-2 { width: 420px; height: 420px; background: #312e81; bottom: -120px; right: 12%; animation-delay: -5s; }
@@ -37,6 +37,102 @@
             0%, 100% { transform: translate(0, 0) scale(1); }
             33% { transform: translate(25px, -25px) scale(1.03); }
             66% { transform: translate(-15px, 18px) scale(0.97); }
+        }
+        @keyframes colorShift {
+            0%, 100% { filter: blur(100px) hue-rotate(0deg); }
+            50% { filter: blur(100px) hue-rotate(15deg); }
+        }
+        /* 代码字符飘落 */
+        .code-particle {
+            position: absolute;
+            color: rgba(59,130,246,0.06);
+            font-family: monospace;
+            font-size: 13px;
+            font-weight: 600;
+            pointer-events: none;
+            animation: particleFall linear infinite;
+            z-index: 0;
+        }
+        @keyframes particleFall {
+            0% { transform: translateY(-10vh) translateX(0); opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { transform: translateY(110vh) translateX(30px); opacity: 0; }
+        }
+
+        /* ===== 数据指标橱窗 ===== */
+        /* ===== 能力列表 ===== */
+        .capability-list {
+            width: 100%;
+            max-width: 520px;
+            margin-top: 28px;
+        }
+        .cap-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            transition: all 0.2s;
+        }
+        .cap-item:last-child {
+            border-bottom: none;
+        }
+        .cap-item:hover {
+            padding-left: 4px;
+        }
+        .cap-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+        .cap-icon.review { color: #60a5fa; background: rgba(59,130,246,0.10); }
+        .cap-icon.rules { color: #a78bfa; background: rgba(139,92,246,0.10); }
+        .cap-icon.issue { color: #fb923c; background: rgba(249,115,22,0.10); }
+        .cap-icon.metrics { color: #4ade80; background: rgba(34,197,94,0.10); }
+        .cap-icon.team { color: #22d3ee; background: rgba(6,182,212,0.10); }
+        .cap-body {
+            flex: 1;
+            text-align: left;
+        }
+        .cap-body .cap-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.88);
+            margin-bottom: 2px;
+        }
+        .cap-body .cap-desc {
+            font-size: 12px;
+            color: rgba(255,255,255,0.40);
+            line-height: 1.5;
+        }
+
+        /* ===== 打字机 slogan ===== */
+        .typewriter {
+            font-size: 15px;
+            color: rgba(255,255,255,0.55);
+            line-height: 1.6;
+            min-height: 24px;
+            margin-bottom: 20px;
+        }
+        .typewriter .cursor {
+            display: inline-block;
+            width: 2px;
+            height: 16px;
+            background: #60a5fa;
+            margin-left: 2px;
+            animation: blink 1s step-end infinite;
+            vertical-align: middle;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
         }
 
         /* ===== 移动端拦截 ===== */
@@ -89,37 +185,7 @@
             box-shadow: 0 10px 40px rgba(37,99,235,0.35);
         }
         .brand-side .logo i { font-size: 32px; color: #fff; }
-        .brand-side h1 { font-size: 48px; font-weight: 700; letter-spacing: -1px; margin-bottom: 14px; }
-        .brand-side .subtitle {
-            font-size: 18px; color: rgba(255,255,255,0.55); line-height: 1.7;
-            margin-bottom: 52px;
-        }
-
-        .feature-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 18px;
-            width: 100%;
-        }
-        .feature-card {
-            background: rgba(255,255,255,0.03);
-            border: 1px solid rgba(255,255,255,0.06);
-            border-radius: 14px;
-            padding: 22px 18px;
-            text-align: left;
-            transition: all 0.3s;
-        }
-        .feature-card:hover {
-            background: rgba(255,255,255,0.06);
-            border-color: rgba(255,255,255,0.12);
-            transform: translateY(-2px);
-        }
-        .feature-card i {
-            font-size: 22px; color: #60a5fa; margin-bottom: 12px;
-            display: block;
-        }
-        .feature-card h4 { font-size: 16px; font-weight: 600; margin-bottom: 6px; color: rgba(255,255,255,0.92); }
-        .feature-card p { font-size: 14px; color: rgba(255,255,255,0.50); line-height: 1.6; }
+        .brand-side h1 { font-size: 40px; font-weight: 700; letter-spacing: -1px; margin-bottom: 8px; }
 
         /* ---- 右侧登录卡片 ---- */
         .form-card {
@@ -240,41 +306,53 @@
     <!-- 桌面端登录 -->
     <div class="login-wrap">
 
-        <!-- ===== 左侧品牌区（固定宽度 + 内容居中） ===== -->
+        <!-- ===== 左侧品牌区 ===== -->
         <div class="brand-side">
             <div class="logo"><i class="fas fa-robot"></i></div>
             <h1>AI Code Guard</h1>
-            <p class="subtitle">基于 LLM 的智能代码门禁系统<br>让每一次代码提交都经过 AI 的深度审查</p>
+            <div class="typewriter" id="typewriter"><span class="cursor"></span></div>
 
-            <div class="feature-grid">
-                <div class="feature-card">
-                    <i class="fas fa-shield-alt"></i>
-                    <h4>自动拦截风险</h4>
-                    <p>实时分析 MR 变更，智能评分拦截低质量代码</p>
+            <div class="capability-list">
+                <div class="cap-item">
+                    <div class="cap-icon review"><i class="fas fa-microscope"></i></div>
+                    <div class="cap-body">
+                        <div class="cap-title">智能评审</div>
+                        <div class="cap-desc">AI 多模型代码审查，MR Diff 逐行分析</div>
+                    </div>
                 </div>
-                <div class="feature-card">
-                    <i class="fas fa-brain"></i>
-                    <h4>多模型评审</h4>
-                    <p>支持 DeepSeek、Qwen 等多种大模型</p>
+                <div class="cap-item">
+                    <div class="cap-icon rules"><i class="fas fa-cogs"></i></div>
+                    <div class="cap-body">
+                        <div class="cap-title">规则引擎</div>
+                        <div class="cap-desc">内置评审规则库，规则孵化台智能挖掘</div>
+                    </div>
                 </div>
-                <div class="feature-card">
-                    <i class="fas fa-chart-line"></i>
-                    <h4>开发者画像</h4>
-                    <p>全方位度量代码质量，产出团队研发数据</p>
+                <div class="cap-item">
+                    <div class="cap-icon issue"><i class="fas fa-tasks"></i></div>
+                    <div class="cap-body">
+                        <div class="cap-title">Issue 治理</div>
+                        <div class="cap-desc">多级自动升级告警，节假日免打扰冻结</div>
+                    </div>
                 </div>
-                <div class="feature-card">
-                    <i class="fas fa-plug"></i>
-                    <h4>GitLab 集成</h4>
-                    <p>无缝对接 GitLab Webhook</p>
+                <div class="cap-item">
+                    <div class="cap-icon metrics"><i class="fas fa-chart-pie"></i></div>
+                    <div class="cap-body">
+                        <div class="cap-title">质量度量</div>
+                        <div class="cap-desc">开发者代码画像，实时规则命中统计</div>
+                    </div>
+                </div>
+                <div class="cap-item">
+                    <div class="cap-icon team"><i class="fas fa-users"></i></div>
+                    <div class="cap-body">
+                        <div class="cap-title">团队协同</div>
+                        <div class="cap-desc">项目职责自动分配，企微 / 站内信即时通知</div>
+                    </div>
                 </div>
             </div>
         </div>
 
         <!-- ===== 右侧登录卡片 ===== -->
         <div class="form-card">
-            <div class="card-title">账号密码登录</div>
-            <div class="card-sub">请输入您的管理员账号信息</div>
-
             <div id="errorMsg" class="err-msg">
                 <i class="fas fa-exclamation-circle"></i>
                 <span id="errorText"></span>
@@ -282,7 +360,7 @@
 
             <form id="loginForm" onsubmit="return doLogin(event)">
                 <div class="field">
-                    <label>用户名</label>
+                    <label>本地账号</label>
                     <div class="input-box">
                         <i class="fas fa-user"></i>
                         <input type="text" id="username" placeholder="请输入用户名" autocomplete="username">
@@ -309,20 +387,71 @@
                 <div class="sep-line"></div>
             </div>
 
-            <div class="sso-row">
-                <a href="/api/v1/auth/gitlab" class="sso-btn" title="GitLab 单点登录">
-                    <i class="fab fa-gitlab"></i>
-                </a>
-            </div>
+            <a href="/api/v1/auth/gitlab" class="sso-btn" style="width:100%; height:44px; border-radius:10px; font-size:14px; gap:8px;" title="GitLab 单点登录">
+                <i class="fab fa-gitlab" style="font-size:18px;"></i>
+                <span>GitLab 单点登录</span>
+            </a>
 
             <div class="card-foot">
-                <p>AI Code Guard — 智能代码门禁系统</p>
+                <p>AI Code Guard — 智能代码门禁与质量治理平台</p>
             </div>
         </div>
 
     </div>
 
     <script>
+        // ===== 代码字符飘落 =====
+        (function initParticles() {
+            const chars = ['{', '}', '(', ')', ';', '+', '-', '=', '>', '<', '/', '*', '[', ']', '&', '|', '!', '?', ':', ','];
+            const container = document.querySelector('.bg-wrap');
+            for (let i = 0; i < 40; i++) {
+                const el = document.createElement('div');
+                el.className = 'code-particle';
+                el.textContent = chars[Math.floor(Math.random() * chars.length)];
+                el.style.left = Math.random() * 100 + 'vw';
+                el.style.animationDuration = (15 + Math.random() * 25) + 's';
+                el.style.animationDelay = (Math.random() * 20) + 's';
+                el.style.fontSize = (11 + Math.random() * 8) + 'px';
+                container.appendChild(el);
+            }
+        })();
+
+        // ===== 打字机 Slogan =====
+        (function initTypewriter() {
+            const slogans = [
+                'AI 驱动的代码质量守门人',
+                '自动化规则引擎 + 智能评审',
+                'Issue 全生命周期追踪治理',
+                '让每一次代码提交都经过 AI 的深度审查'
+            ];
+            const container = document.getElementById('typewriter');
+            let idx = 0, charIdx = 0, isDeleting = false;
+
+            function type() {
+                const text = slogans[idx];
+                const display = isDeleting
+                    ? text.substring(0, charIdx - 1)
+                    : text.substring(0, charIdx + 1);
+                container.childNodes[0].nodeValue = display;
+
+                if (!isDeleting && charIdx < text.length) {
+                    charIdx++;
+                    setTimeout(type, 60 + Math.random() * 40);
+                } else if (isDeleting && charIdx > 0) {
+                    charIdx--;
+                    setTimeout(type, 30);
+                } else {
+                    isDeleting = !isDeleting;
+                    if (!isDeleting) idx = (idx + 1) % slogans.length;
+                    setTimeout(type, isDeleting ? 2000 : 500);
+                }
+            }
+            // 初始化：把光标 span 移到最后
+            const cursor = container.querySelector('.cursor');
+            container.insertBefore(document.createTextNode(''), cursor);
+            type();
+        })();
+
         const API_BASE = '/api/v1';
 
         function checkAuth() {
