@@ -62,78 +62,6 @@
 
         /* ===== 数据指标橱窗 ===== */
         /* ===== 能力列表 ===== */
-        .capability-list {
-            width: 100%;
-            max-width: 520px;
-            margin-top: 28px;
-        }
-        .cap-item {
-            display: flex;
-            align-items: flex-start;
-            gap: 12px;
-            padding: 10px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.04);
-            transition: all 0.2s;
-        }
-        .cap-item:last-child {
-            border-bottom: none;
-        }
-        .cap-item:hover {
-            padding-left: 4px;
-        }
-        .cap-icon {
-            width: 32px;
-            height: 32px;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 13px;
-            flex-shrink: 0;
-            margin-top: 1px;
-        }
-        .cap-icon.review { color: #60a5fa; background: rgba(59,130,246,0.10); }
-        .cap-icon.rules { color: #a78bfa; background: rgba(139,92,246,0.10); }
-        .cap-icon.issue { color: #fb923c; background: rgba(249,115,22,0.10); }
-        .cap-icon.metrics { color: #4ade80; background: rgba(34,197,94,0.10); }
-        .cap-icon.team { color: #22d3ee; background: rgba(6,182,212,0.10); }
-        .cap-body {
-            flex: 1;
-            text-align: left;
-        }
-        .cap-body .cap-title {
-            font-size: 13px;
-            font-weight: 600;
-            color: rgba(255,255,255,0.88);
-            margin-bottom: 2px;
-        }
-        .cap-body .cap-desc {
-            font-size: 12px;
-            color: rgba(255,255,255,0.40);
-            line-height: 1.5;
-        }
-
-        /* ===== 打字机 slogan ===== */
-        .typewriter {
-            font-size: 15px;
-            color: rgba(255,255,255,0.55);
-            line-height: 1.6;
-            min-height: 24px;
-            margin-bottom: 20px;
-        }
-        .typewriter .cursor {
-            display: inline-block;
-            width: 2px;
-            height: 16px;
-            background: #60a5fa;
-            margin-left: 2px;
-            animation: blink 1s step-end infinite;
-            vertical-align: middle;
-        }
-        @keyframes blink {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0; }
-        }
 
         /* ===== 移动端拦截 ===== */
         .mobile-block { display: none; }
@@ -157,11 +85,11 @@
             align-items: center;
             justify-content: space-between;
             padding: 0 80px;
-            max-width: 1600px;
+            max-width: 1280px;
             margin: 0 auto;
         }
 
-        /* ---- 左侧品牌区（固定宽度 + 内容居中） ---- */
+        /* ---- 左侧品牌区 ---- */
         .brand-side {
             width: 600px;
             display: flex;
@@ -172,20 +100,45 @@
             color: #fff;
             animation: fadeLeft 0.7s ease-out;
         }
-        @keyframes fadeLeft {
-            from { opacity: 0; transform: translateX(-20px); }
-            to   { opacity: 1; transform: translateX(0); }
-        }
         .brand-side .logo {
-            width: 72px; height: 72px;
+            width: 64px; height: 64px;
             background: linear-gradient(135deg, #3b82f6, #2563eb);
-            border-radius: 20px;
+            border-radius: 18px;
             display: flex; align-items: center; justify-content: center;
-            margin-bottom: 28px;
-            box-shadow: 0 10px 40px rgba(37,99,235,0.35);
+            margin-bottom: 32px;
+            box-shadow: 0 10px 40px rgba(37,99,235,0.30);
         }
-        .brand-side .logo i { font-size: 32px; color: #fff; }
-        .brand-side h1 { font-size: 40px; font-weight: 700; letter-spacing: -1px; margin-bottom: 8px; }
+        .brand-side .logo i { font-size: 28px; color: #fff; }
+        .brand-side h1 {
+            font-size: 48px; font-weight: 700; letter-spacing: -1.5px;
+            margin-bottom: 16px; line-height: 1.1;
+        }
+        .brand-side .slogan {
+            font-size: 15px; color: rgba(255,255,255,0.45);
+            letter-spacing: 0.06em; margin-bottom: 24px;
+        }
+        .brand-side .desc {
+            font-size: 13px; color: rgba(255,255,255,0.35);
+            line-height: 1.8; max-width: 440px; margin-bottom: 36px;
+        }
+        .brand-side .tag-row {
+            display: flex; flex-wrap: wrap; justify-content: center; gap: 8px;
+        }
+        .tag-row .tag {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 999px;
+            padding: 5px 14px;
+            font-size: 11px;
+            color: rgba(255,255,255,0.50);
+            display: flex; align-items: center; gap: 5px;
+            transition: all 0.2s;
+        }
+        .tag-row .tag:hover {
+            background: rgba(255,255,255,0.08);
+            border-color: rgba(255,255,255,0.15);
+            color: rgba(255,255,255,0.70);
+        }
 
         /* ---- 右侧登录卡片 ---- */
         .form-card {
@@ -310,49 +263,24 @@
         <div class="brand-side">
             <div class="logo"><i class="fas fa-robot"></i></div>
             <h1>AI Code Guard</h1>
-            <div class="typewriter" id="typewriter"><span class="cursor"></span></div>
-
-            <div class="capability-list">
-                <div class="cap-item">
-                    <div class="cap-icon review"><i class="fas fa-microscope"></i></div>
-                    <div class="cap-body">
-                        <div class="cap-title">智能评审</div>
-                        <div class="cap-desc">AI 多模型代码审查，MR Diff 逐行分析</div>
-                    </div>
-                </div>
-                <div class="cap-item">
-                    <div class="cap-icon rules"><i class="fas fa-cogs"></i></div>
-                    <div class="cap-body">
-                        <div class="cap-title">规则引擎</div>
-                        <div class="cap-desc">内置评审规则库，规则孵化台智能挖掘</div>
-                    </div>
-                </div>
-                <div class="cap-item">
-                    <div class="cap-icon issue"><i class="fas fa-tasks"></i></div>
-                    <div class="cap-body">
-                        <div class="cap-title">Issue 治理</div>
-                        <div class="cap-desc">多级自动升级告警，节假日免打扰冻结</div>
-                    </div>
-                </div>
-                <div class="cap-item">
-                    <div class="cap-icon metrics"><i class="fas fa-chart-pie"></i></div>
-                    <div class="cap-body">
-                        <div class="cap-title">质量度量</div>
-                        <div class="cap-desc">开发者代码画像，实时规则命中统计</div>
-                    </div>
-                </div>
-                <div class="cap-item">
-                    <div class="cap-icon team"><i class="fas fa-users"></i></div>
-                    <div class="cap-body">
-                        <div class="cap-title">团队协同</div>
-                        <div class="cap-desc">项目职责自动分配，企微 / 站内信即时通知</div>
-                    </div>
-                </div>
+            <div class="slogan">智能代码门禁与质量治理平台</div>
+            <div class="desc">
+                基于 LLM 大模型为团队提供自动化代码审查、智能规则引擎与 Issue 全生命周期治理能力，持续提升代码质量与研发效率。
+            </div>
+            <div class="tag-row">
+                <div class="tag"><i class="fas fa-microscope" style="font-size:9px;"></i> 智能评审</div>
+                <div class="tag"><i class="fas fa-cogs" style="font-size:9px;"></i> 规则引擎</div>
+                <div class="tag"><i class="fas fa-tasks" style="font-size:9px;"></i> Issue 治理</div>
+                <div class="tag"><i class="fas fa-chart-pie" style="font-size:9px;"></i> 质量度量</div>
+                <div class="tag"><i class="fas fa-users" style="font-size:9px;"></i> 团队协同</div>
             </div>
         </div>
 
         <!-- ===== 右侧登录卡片 ===== -->
         <div class="form-card">
+            <div class="card-title">账号密码登录</div>
+            <div class="card-sub">请输入您的管理员账号信息</div>
+
             <div id="errorMsg" class="err-msg">
                 <i class="fas fa-exclamation-circle"></i>
                 <span id="errorText"></span>
@@ -360,7 +288,7 @@
 
             <form id="loginForm" onsubmit="return doLogin(event)">
                 <div class="field">
-                    <label>本地账号</label>
+                    <label>用户名</label>
                     <div class="input-box">
                         <i class="fas fa-user"></i>
                         <input type="text" id="username" placeholder="请输入用户名" autocomplete="username">
@@ -387,13 +315,14 @@
                 <div class="sep-line"></div>
             </div>
 
-            <a href="/api/v1/auth/gitlab" class="sso-btn" style="width:100%; height:44px; border-radius:10px; font-size:14px; gap:8px;" title="GitLab 单点登录">
-                <i class="fab fa-gitlab" style="font-size:18px;"></i>
-                <span>GitLab 单点登录</span>
-            </a>
+            <div class="sso-row">
+                <a href="/api/v1/auth/gitlab" class="sso-btn" title="GitLab 单点登录">
+                    <i class="fab fa-gitlab"></i>
+                </a>
+            </div>
 
             <div class="card-foot">
-                <p>AI Code Guard — 智能代码门禁与质量治理平台</p>
+                <p>AI Code Guard — 智能代码门禁系统</p>
             </div>
         </div>
 
@@ -417,40 +346,6 @@
         })();
 
         // ===== 打字机 Slogan =====
-        (function initTypewriter() {
-            const slogans = [
-                'AI 驱动的代码质量守门人',
-                '自动化规则引擎 + 智能评审',
-                'Issue 全生命周期追踪治理',
-                '让每一次代码提交都经过 AI 的深度审查'
-            ];
-            const container = document.getElementById('typewriter');
-            let idx = 0, charIdx = 0, isDeleting = false;
-
-            function type() {
-                const text = slogans[idx];
-                const display = isDeleting
-                    ? text.substring(0, charIdx - 1)
-                    : text.substring(0, charIdx + 1);
-                container.childNodes[0].nodeValue = display;
-
-                if (!isDeleting && charIdx < text.length) {
-                    charIdx++;
-                    setTimeout(type, 60 + Math.random() * 40);
-                } else if (isDeleting && charIdx > 0) {
-                    charIdx--;
-                    setTimeout(type, 30);
-                } else {
-                    isDeleting = !isDeleting;
-                    if (!isDeleting) idx = (idx + 1) % slogans.length;
-                    setTimeout(type, isDeleting ? 2000 : 500);
-                }
-            }
-            // 初始化：把光标 span 移到最后
-            const cursor = container.querySelector('.cursor');
-            container.insertBefore(document.createTextNode(''), cursor);
-            type();
-        })();
 
         const API_BASE = '/api/v1';
 
