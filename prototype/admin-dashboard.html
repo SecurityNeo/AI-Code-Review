@@ -162,11 +162,17 @@ async function loadData(force = false) {
 
 function renderAlerts(alerts) {
     const container = document.getElementById('alertList');
+    container.dataset.alerts = JSON.stringify(alerts);
     if (alerts.length === 0) {
         container.innerHTML = '<div class="text-gray-400 text-center py-4">🎉 当前无积压告警</div>';
         return;
     }
-    container.innerHTML = alerts.map(a => `
+    const expanded = container.dataset.expanded === 'true';
+    const total = alerts.length;
+    const limit = expanded ? total : Math.min(5, total);
+    const visible = alerts.slice(0, limit);
+
+    let html = visible.map(a => `
         <div class="flex items-center justify-between p-2 bg-red-50 rounded border border-red-100">
             <div class="flex items-center gap-2">
                 <i class="fas fa-exclamation-circle text-red-500"></i>
@@ -176,6 +182,22 @@ function renderAlerts(alerts) {
             <a href="project-dashboard.html?project_id=${a.project_id}" class="text-xs text-blue-600 hover:underline">查看</a>
         </div>
     `).join('');
+
+    if (total > 5) {
+        const btnText = expanded ? '收起' : `查看更多 (${total - 5})`;
+        html += `<div class="text-center pt-1">
+            <button onclick="toggleAlerts()" class="text-xs text-blue-600 hover:text-blue-800 hover:underline focus:outline-none">${btnText}</button>
+        </div>`;
+    }
+    container.innerHTML = html;
+}
+
+function toggleAlerts() {
+    const container = document.getElementById('alertList');
+    container.dataset.expanded = container.dataset.expanded === 'true' ? 'false' : 'true';
+    // Re-render with same data stored on container
+    const alerts = JSON.parse(container.dataset.alerts || '[]');
+    renderAlerts(alerts);
 }
 
 function renderStatusChart(dist) {
@@ -208,11 +230,17 @@ function renderStatusChart(dist) {
 
 function renderTopProjects(list) {
     const container = document.getElementById('topPendingProjects');
+    container.dataset.projects = JSON.stringify(list);
     if (list.length === 0) {
         container.innerHTML = '<div class="text-gray-400 text-center py-4">暂无数据</div>';
         return;
     }
-    container.innerHTML = list.map((p, i) => `
+    const expanded = container.dataset.expanded === 'true';
+    const total = list.length;
+    const limit = expanded ? total : Math.min(5, total);
+    const visible = list.slice(0, limit);
+
+    let html = visible.map((p, i) => `
         <div class="flex items-center justify-between py-2 border-b last:border-0">
             <div class="flex items-center gap-2">
                 <span class="text-xs font-bold text-gray-400 w-4">${i + 1}</span>
@@ -221,6 +249,21 @@ function renderTopProjects(list) {
             <span class="text-sm font-bold text-orange-600">${p.pending_count}</span>
         </div>
     `).join('');
+
+    if (total > 5) {
+        const btnText = expanded ? '收起' : `查看更多 (${total - 5})`;
+        html += `<div class="text-center pt-1">
+            <button onclick="toggleTopProjects()" class="text-xs text-blue-600 hover:text-blue-800 hover:underline focus:outline-none">${btnText}</button>
+        </div>`;
+    }
+    container.innerHTML = html;
+}
+
+function toggleTopProjects() {
+    const container = document.getElementById('topPendingProjects');
+    container.dataset.expanded = container.dataset.expanded === 'true' ? 'false' : 'true';
+    const list = JSON.parse(container.dataset.projects || '[]');
+    renderTopProjects(list);
 }
 
 function escapeHtml(str) {
