@@ -68,58 +68,101 @@ func (s *IncubatorService) EnsureRuleEmbeddings() {
 	incubationVecStatus.Unlock()
 
 	ctx := context.Background()
-	missing := 0
-	stored := 0
-	for i, r := range rules {
-		_, err := s.store.Get(ctx, vectorstore.Key{
+	type ruleItem struct {
+		rule model.ReviewRule
+		text string
+		key  vectorstore.Key
+	}
+	existingCount := 0
+	var missing []ruleItem
+	for _, r := range rules {
+		key := vectorstore.Key{
 			EntityType: "rule",
 			EntityID:   r.ID,
 			ModelID:    modelID,
-		})
+		}
+		_, err := s.store.Get(ctx, key)
 		if err == nil {
-			incubationVecStatus.Lock()
-			incubationVecStatus.Done = i + 1
-			incubationVecStatus.Unlock()
-			continue // already exists
-		}
-		missing++
-		text := r.Name + " " + r.Description + " " + r.Prompt
-		vec, _, err := s.embedSvc.Embed(ctx, text)
-		if err != nil {
-			zap.L().Warn("EnsureRuleEmbeddings: embed failed",
-				zap.Uint("rule_id", r.ID), zap.String("code", r.Code), zap.Error(err))
-			incubationVecStatus.Lock()
-			incubationVecStatus.Done = i + 1
-			incubationVecStatus.Unlock()
+			existingCount++
 			continue
 		}
-		if err := s.store.Save(ctx, vectorstore.Item{
-			Key: vectorstore.Key{
-				EntityType: "rule",
-				EntityID:   r.ID,
-				ModelID:    modelID,
-			},
-			Vector:    vec,
-			Dimension: len(vec),
-		}); err != nil {
-			zap.L().Warn("EnsureRuleEmbeddings: save failed",
-				zap.Uint("rule_id", r.ID), zap.Error(err))
-			incubationVecStatus.Lock()
-			incubationVecStatus.Done = i + 1
-			incubationVecStatus.Unlock()
-			continue
-		}
-		stored++
-		incubationVecStatus.Lock()
-		incubationVecStatus.Done = i + 1
-		incubationVecStatus.Unlock()
+		missing = append(missing, ruleItem{
+			rule: r,
+			text: r.Name + " " + r.Description + " " + r.Prompt,
+			key:  key,
+		})
 	}
+
+	incubationVecStatus.Lock()
+	incubationVecStatus.Done = existingCount
+	incubationVecStatus.Unlock()
+
+	stored := 0
+	if len(missing) > 0 {
+		texts := make([]string, len(missing))
+		for i, it := range missing {
+			texts[i] = it.text
+		}
+		vecs, _, err := s.embedSvc.EmbedBatch(ctx, texts)
+		if err != nil {
+			zap.L().Warn("EnsureRuleEmbeddings: batch embed failed, falling back to single",
+				zap.Error(err))
+			for i, it := range missing {
+				vec, _, err2 := s.embedSvc.Embed(ctx, it.text)
+				if err2 != nil {
+					zap.L().Warn("EnsureRuleEmbeddings: single embed failed",
+						zap.Uint("rule_id", it.rule.ID), zap.Error(err2))
+					incubationVecStatus.Lock()
+					incubationVecStatus.Done = existingCount + i + 1
+					incubationVecStatus.Unlock()
+					continue
+				}
+				if err := s.store.Save(ctx, vectorstore.Item{
+					Key:       it.key,
+					Vector:    vec,
+					Dimension: len(vec),
+				}); err != nil {
+					zap.L().Warn("EnsureRuleEmbeddings: save failed",
+						zap.Uint("rule_id", it.rule.ID), zap.Error(err))
+					incubationVecStatus.Lock()
+					incubationVecStatus.Done = existingCount + i + 1
+					incubationVecStatus.Unlock()
+					continue
+				}
+				stored++
+				incubationVecStatus.Lock()
+				incubationVecStatus.Done = existingCount + i + 1
+				incubationVecStatus.Unlock()
+			}
+		} else {
+			for i, it := range missing {
+				if err := s.store.Save(ctx, vectorstore.Item{
+					Key:       it.key,
+					Vector:    vecs[i],
+					Dimension: len(vecs[i]),
+				}); err != nil {
+					zap.L().Warn("EnsureRuleEmbeddings: save failed",
+						zap.Uint("rule_id", it.rule.ID), zap.Error(err))
+					incubationVecStatus.Lock()
+					incubationVecStatus.Done = existingCount + i + 1
+					incubationVecStatus.Unlock()
+					continue
+				}
+				stored++
+				incubationVecStatus.Lock()
+				incubationVecStatus.Done = existingCount + i + 1
+				incubationVecStatus.Unlock()
+			}
+		}
+	}
+
 	incubationVecStatus.Lock()
 	incubationVecStatus.Running = false
 	incubationVecStatus.Unlock()
 	zap.L().Info("EnsureRuleEmbeddings: completed",
 		zap.Int("total_rules", len(rules)),
-		zap.Int("missing", missing),
+		zap.Int("existing", existingCount),
+		zap.Int("missing", len(missing)),
 		zap.Int("stored", stored))
 }
 
@@ -830,15 +873,31 @@ func (s *IncubatorService) doClusterIssues(timeRangeDays int, languages []string
 				return
 			}
 			ctx := context.Background()
-			for _, iss := range issList {
-				key := vectorstore.Key{
+
+			texts := make([]string, len(issList))
+			keys := make([]vectorstore.Key, len(issList))
+			for i, iss := range issList {
+				texts[i] = iss.Message + " " + iss.Suggestion
+				keys[i] = vectorstore.Key{
 					EntityType: "issue",
 					EntityID:   iss.ID,
 					ModelID:    *cfg.EmbeddingModelID,
 				}
-				text := iss.Message + " " + iss.Suggestion
-				if err := s.embedSvc.EmbedAndStore(ctx, key, text); err != nil {
-					zap.L().Warn("embed issue failed", zap.Uint("issue_id", iss.ID), zap.Error(err))
+			}
+
+			vecs, _, err := s.embedSvc.EmbedBatch(ctx, texts)
+			if err != nil {
+				zap.L().Warn("embed issues batch failed", zap.Int("count", len(issList)), zap.Error(err))
+				return
+			}
+			for i, key := range keys {
+				if err := s.store.Save(ctx, vectorstore.Item{
+					Key:       key,
+					Vector:    vecs[i],
+					Dimension: len(vecs[i]),
+				}); err != nil {
+					zap.L().Warn("save issue embedding failed",
+						zap.Uint("issue_id", issList[i].ID), zap.Error(err))
 				}
 			}
 		}(issues)
@@ -1098,7 +1157,7 @@ func extractSemanticSlug(msg string) string {
 			r == '(' || r == ')' || r == '（' || r == '）' ||
 			r == '[' || r == ']' || r == '【' || r == '】' ||
 			r == '!' || r == '！' || r == '?' || r == '？' ||
-			r == '"' || r == '"' || r == '"' || r == '"' ||
+			r == '"' || r == '\'' || r == '「' || r == '」' ||
 			r == '<' || r == '>' || r == '《' || r == '》' ||
 			r == '/' || r == '\\' || r == '|' || r == '_' ||
 			r == '+' || r == '=' || r == '-' || r == '@' || r == '#' ||
@@ -1296,25 +1355,26 @@ func (s *IncubatorService) suggestDescription(issues []model.ReviewIssue) string
 }
 
 func extractKeywords(text string) []string {
-	// Very basic keyword extraction for MVP
+	seen := make(map[string]struct{})
+	var res []string
+
+	// 1. 英文/西文分词（原有逻辑）
 	words := strings.FieldsFunc(text, func(r rune) bool {
 		return r == ' ' || r == '\t' || r == '\n' || r == ',' || r == '.' || r == ':' || r == ';' || r == '(' || r == ')'
 	})
-	stopwords := map[string]struct{}{
+	englishStopwords := map[string]struct{}{
 		"the": {}, "a": {}, "an": {}, "is": {}, "are": {}, "was": {}, "were": {},
 		"to": {}, "of": {}, "in": {}, "on": {}, "at": {}, "for": {}, "with": {},
 		"and": {}, "or": {}, "not": {}, "it": {}, "this": {}, "that": {},
 		"建议": {}, "检查": {}, "需要": {}, "应该": {}, "可能": {}, "存在": {},
 		"一个": {}, "进行": {}, "使用": {}, "没有": {},
 	}
-	var res []string
-	seen := make(map[string]struct{})
 	for _, w := range words {
 		w = strings.ToLower(strings.TrimSpace(w))
 		if w == "" || len(w) < 2 {
 			continue
 		}
-		if _, ok := stopwords[w]; ok {
+		if _, ok := englishStopwords[w]; ok {
 			continue
 		}
 		if _, ok := seen[w]; ok {
@@ -1323,7 +1383,45 @@ func extractKeywords(text string) []string {
 		seen[w] = struct{}{}
 		res = append(res, w)
 	}
+
+	// 2. CJK bigram 提取（解决中文文本聚类失效问题）
+	runes := []rune(text)
+	for i := 0; i < len(runes)-1; i++ {
+		if isCJK(runes[i]) && isCJK(runes[i+1]) {
+			if isChineseStopword(runes[i]) || isChineseStopword(runes[i+1]) {
+				continue
+			}
+			bigram := string(runes[i : i+2])
+			if _, ok := seen[bigram]; ok {
+				continue
+			}
+			seen[bigram] = struct{}{}
+			res = append(res, bigram)
+		}
+	}
+
 	return res
+}
+
+func isCJK(r rune) bool {
+	return (r >= '\u4e00' && r <= '\u9fff') ||
+		(r >= '\u3400' && r <= '\u4dbf') ||
+		(r >= '\uF900' && r <= '\uFAFF')
+}
+
+func isChineseStopword(r rune) bool {
+	switch r {
+	case '的', '了', '在', '和', '与', '或', '及', '等', '是', '有', '个',
+		'不', '也', '而', '但', '就', '都', '能', '会', '可', '要', '这', '那',
+		'为', '之', '所', '以', '来', '去', '上', '下', '中', '内', '外',
+		'前', '后', '对', '给', '向', '从', '把', '被', '让', '使', '令',
+		'当', '到', '着', '过', '得', '地', '很', '更', '最', '太', '只',
+		'又', '再', '还', '才', '却', '并', '若', '虽', '因', '于', '则',
+		'乃', '已', '正', '仍', '仅', '别', '勿', '毋', '未', '无', '莫':
+		return true
+	default:
+		return false
+	}
 }
 
 func jaccard(a, b []string) float64 {
