@@ -348,6 +348,19 @@ func (s *ModelService) runModelHealthChecks() {
 		if !connected && err != nil {
 			errMsg = err.Error()
 		}
+
+		// 检查模型是否在此期间被禁用（防止禁用与健康检查竞态）
+		var current model.LLMModel
+		if dbErr := model.DB.First(&current, m.ID).Error; dbErr != nil {
+			zap.L().Error("failed to query current model status", zap.Uint("model_id", m.ID), zap.Error(dbErr))
+			continue
+		}
+		if current.Status == "inactive" {
+			zap.L().Info("model was disabled during health check, skipping status update",
+				zap.Uint("model_id", m.ID))
+			continue
+		}
+
 		prevStatus := m.Status
 		newStatus := "active"
 		if !connected {
