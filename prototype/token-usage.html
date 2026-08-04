@@ -341,6 +341,12 @@
         });
     }
 
+    function formatModelName(modelName, provider) {
+        const name = modelName || '未知模型';
+        if (!provider || provider === '-') return name;
+        return name + '（' + provider + '）';
+    }
+
     async function loadByModel() {
         const res = await apiFetch(`${API_BASE}/token-usage/by-model?range=${getRange()}`);
         if (!res.ok) throw new Error('模型接口 HTTP ' + res.status);
@@ -356,17 +362,20 @@
                 type: 'pie',
                 radius: ['45%', '70%'],
                 label: { formatter: '{b}\n{d}%' },
-                data: data.map(d => ({ name: d.model_name || '未知', value: d.total_tokens || 0 }))
+                data: data.map(d => ({ name: formatModelName(d.model_name, d.provider), value: d.total_tokens || 0 }))
             }],
             color: ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#6b7280']
         });
 
-        // 同步填充筛选下拉
+        // 同步填充筛选下拉（value 保持原始 model_name，展示增加 provider）
         const sel = document.getElementById('filterModel');
         const cur = sel.value;
-        const names = data.map(d => d.model_name || '未知');
         sel.innerHTML = '<option value="">所有模型</option>' +
-            names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+            data.map(d => {
+                const raw = d.model_name || '未知模型';
+                const display = formatModelName(d.model_name, d.provider);
+                return `<option value="${escapeHtml(raw)}">${escapeHtml(display)}</option>`;
+            }).join('');
         sel.value = cur;
     }
 
@@ -530,7 +539,7 @@
                 return `
                     <tr>
                         <td>${(r.created_at || '').slice(0, 19).replace('T', ' ')}</td>
-                        <td>${escapeHtml(r.model_name || '-')}</td>
+                        <td>${escapeHtml(formatModelName(r.model_name, r.provider))}</td>
                         <td>${renderCallerBadge(r.caller)}</td>
                         <td style="text-align:right;">${formatNumber(r.prompt_tokens)}</td>
                         <td style="text-align:right;">${formatNumber(r.completion_tokens)}</td>
