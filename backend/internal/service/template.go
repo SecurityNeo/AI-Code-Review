@@ -12,7 +12,7 @@ func NewTemplateService() *TemplateService {
 
 func (s *TemplateService) List() ([]model.ProjectTemplate, error) {
 	var templates []model.ProjectTemplate
-	if err := model.DB.Order("updated_at DESC").Find(&templates).Error; err != nil {
+	if err := model.DB.Order("created_at DESC").Find(&templates).Error; err != nil {
 		return nil, err
 	}
 	return templates, nil

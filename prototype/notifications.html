@@ -403,6 +403,10 @@ async function updateUnreadBadge() {
             el.textContent = count;
             el.style.display = count > 0 ? 'inline-flex' : 'none';
         });
+        // 同时刷新 sidebar 菜单徽标与全局铃铛徽标
+        if (typeof window.refreshNotificationBadge === 'function') {
+            await window.refreshNotificationBadge();
+        }
     } catch (e) { /* ignore */ }
 }
 
