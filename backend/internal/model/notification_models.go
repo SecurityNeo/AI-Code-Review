@@ -88,3 +88,12 @@ type NotificationRule struct {
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }
+
+// NotificationGlobalSetting 通知规则全局生效起点（单行表，id=1）
+type NotificationGlobalSetting struct {
+	ID                     uint       `gorm:"primaryKey" json:"id"`
+	NotificationBaselineAt *time.Time `json:"notification_baseline_at"`                          // 生效起点：此时间之前的 Issue 不参与通知规则
+	BaselineSetBy          uint       `json:"baseline_set_by"`                                    // 最后一次设置者 user_id
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
+}

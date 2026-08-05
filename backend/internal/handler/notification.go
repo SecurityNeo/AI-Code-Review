@@ -10,6 +10,7 @@ import (
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // NotificationHandler 站内信/通知中心 Handler
@@ -1133,4 +1134,205 @@ func (h *NotificationHandler) SyncHolidaysFromAPI(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "ok", "count": count, "year": year})
+}
+
+// --- Notification Global Settings (生效起点) ---
+
+// GetGlobalSettings 获取通知规则生效起点
+func (h *NotificationHandler) GetGlobalSettings(c *gin.Context) {
+	user := c.MustGet("user").(model.User)
+	if user.Role != model.RoleAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "admin required"})
+		return
+	}
+
+	var setting model.NotificationGlobalSetting
+	if err := model.DB.First(&setting, 1).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "load setting failed"})
+		return
+	}
+
+	type operatorInfo struct {
+		ID          uint   `json:"id"`
+		DisplayName string `json:"display_name"`
+	}
+	var op operatorInfo
+	if setting.BaselineSetBy > 0 {
+		var u model.User
+		if err := model.DB.First(&u, setting.BaselineSetBy).Error; err == nil {
+			op = operatorInfo{ID: u.ID, DisplayName: u.DisplayName}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": gin.H{
+			"notification_baseline_at": setting.NotificationBaselineAt,
+			"baseline_set_by":          op,
+			"updated_at":               setting.UpdatedAt,
+		},
+	})
+}
+
+// UpdateGlobalSettings 修改通知规则生效起点
+func (h *NotificationHandler) UpdateGlobalSettings(c *gin.Context) {
+	user := c.MustGet("user").(model.User)
+	if user.Role != model.RoleAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "admin required"})
+		return
+	}
+
+	var req struct {
+		NotificationBaselineAt *time.Time `json:"notification_baseline_at"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 校验：不能设置为未来时间
+	if req.NotificationBaselineAt != nil && req.NotificationBaselineAt.After(time.Now()) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "baseline cannot be in the future"})
+		return
+	}
+
+	// 读取旧值用于日志
+	var oldSetting model.NotificationGlobalSetting
+	var oldBaselineStr string
+	if err := model.DB.First(&oldSetting, 1).Error; err == nil && oldSetting.NotificationBaselineAt != nil {
+		oldBaselineStr = oldSetting.NotificationBaselineAt.Format("2006-01-02 15:04")
+	}
+
+	var newBaselineStr string
+	if req.NotificationBaselineAt != nil {
+		newBaselineStr = req.NotificationBaselineAt.Format("2006-01-02 15:04")
+	}
+
+	updates := map[string]interface{}{
+		"baseline_set_by": user.ID,
+	}
+	if req.NotificationBaselineAt != nil {
+		updates["notification_baseline_at"] = *req.NotificationBaselineAt
+	} else {
+		updates["notification_baseline_at"] = gorm.Expr("NULL")
+	}
+
+	if err := model.DB.Model(&model.NotificationGlobalSetting{}).Where("id = ?", 1).Updates(updates).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "update failed"})
+		return
+	}
+
+	// 统计影响范围变化
+	var oldCount, newCount int64
+	if oldSetting.NotificationBaselineAt != nil {
+		model.DB.Model(&model.ReviewIssue{}).
+			Where("status IN ? AND original_created_at < ?", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, oldSetting.NotificationBaselineAt).
+			Count(&oldCount)
+	}
+	if req.NotificationBaselineAt != nil {
+		model.DB.Model(&model.ReviewIssue{}).
+			Where("status IN ? AND original_created_at < ?", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, req.NotificationBaselineAt).
+			Count(&newCount)
+	}
+
+	detail := fmt.Sprintf("生效起点从 %s 变更为 %s，被排除 Issue 从 %d 条变为 %d 条", oldBaselineStr, newBaselineStr, oldCount, newCount)
+	if oldBaselineStr == "" && newBaselineStr != "" {
+		detail = fmt.Sprintf("首次设置生效起点为 %s，排除 %d 条 Issue", newBaselineStr, newCount)
+	} else if newBaselineStr == "" && oldBaselineStr != "" {
+		detail = fmt.Sprintf("清除生效起点（原 %s），所有 Issue 重新纳入规则计算", oldBaselineStr)
+	} else if oldBaselineStr == "" && newBaselineStr == "" {
+		detail = "生效起点保持未配置状态"
+	}
+
+	model.RecordOpLog("修改通知规则生效起点", "notification_global_settings", 1, user.ID, "success", detail, c.ClientIP())
+
+	c.JSON(http.StatusOK, gin.H{"message": "updated"})
+}
+
+// PreviewBaseline 预览指定生效起点的影响范围
+func (h *NotificationHandler) PreviewBaseline(c *gin.Context) {
+	user := c.MustGet("user").(model.User)
+	if user.Role != model.RoleAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "admin required"})
+		return
+	}
+
+	baselineStr := c.Query("baseline")
+	if baselineStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "baseline is required"})
+		return
+	}
+	baseline, err := time.Parse(time.RFC3339Nano, baselineStr)
+	if err != nil {
+		// 尝试兼容无前缀毫秒等变体格式
+		baseline, err = time.Parse(time.RFC3339, baselineStr)
+		if err != nil {
+			baseline, err = time.Parse("2006-01-02T15:04:05Z", baselineStr)
+			if err != nil {
+				baseline, err = time.Parse("2006-01-02 15:04:05", baselineStr)
+				if err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "invalid baseline format"})
+					return
+				}
+			}
+		}
+	}
+
+	var totalAffected int64
+	model.DB.Model(&model.ReviewIssue{}).
+		Where("status IN ? AND original_created_at < ?", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, baseline).
+		Count(&totalAffected)
+
+	type projectCount struct {
+		ProjectID   uint   `json:"project_id"`
+		ProjectName string `json:"project_name"`
+		Count       int64  `json:"count"`
+	}
+	var projects []projectCount
+	model.DB.Raw(`
+		SELECT p.id as project_id, p.name as project_name, COUNT(*) as count
+		FROM review_issues ri
+		JOIN tasks t ON ri.task_id = t.id
+		JOIN projects p ON t.project_id = p.id
+		WHERE ri.status IN ? AND ri.original_created_at < ?
+		GROUP BY p.id, p.name
+		ORDER BY count DESC
+		LIMIT 20
+	`, []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, baseline).Scan(&projects)
+
+	var severityDist struct {
+		Critical int64 `json:"critical"`
+		High     int64 `json:"high"`
+		Medium   int64 `json:"medium"`
+		Low      int64 `json:"low"`
+	}
+	model.DB.Model(&model.ReviewIssue{}).
+		Select("SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) as critical," +
+			"SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END) as high," +
+			"SUM(CASE WHEN severity = 'medium' THEN 1 ELSE 0 END) as medium," +
+			"SUM(CASE WHEN severity = 'low' THEN 1 ELSE 0 END) as low").
+		Where("status IN ? AND original_created_at < ?", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, baseline).
+		Scan(&severityDist)
+
+	var oldest struct {
+		Date time.Time `json:"date"`
+	}
+	model.DB.Model(&model.ReviewIssue{}).
+		Select("MIN(original_created_at) as date").
+		Where("status IN ? AND original_created_at < ?", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, baseline).
+		Scan(&oldest)
+
+	oldestDays := 0
+	if !oldest.Date.IsZero() {
+		oldestDays = int(time.Since(oldest.Date).Hours() / 24)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": gin.H{
+			"total_affected":         totalAffected,
+			"projects":               projects,
+			"severity_distribution":  severityDist,
+			"oldest_issue_date":      oldest.Date,
+			"oldest_issue_days":      oldestDays,
+		},
+	})
 }

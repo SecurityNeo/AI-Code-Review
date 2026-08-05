@@ -168,6 +168,7 @@ func autoMigrate() error {
 		&ProjectResponsibility{},   // 项目职责分配
 		&Holiday{},
 		&NotificationRule{},
+		&NotificationGlobalSetting{}, // 通知规则生效起点
 	); err != nil {
 		return err
 	}
@@ -255,6 +256,9 @@ func autoMigrate() error {
 
 	// 初始化 IncubatorConfig 单例（确保 id=1 存在）
 	initIncubatorConfig()
+
+	// 初始化 NotificationGlobalSetting 单例（确保 id=1 存在）
+	initNotificationGlobalSetting()
 
 	// 兼容：为已有 rule_incubations 补充 similar_passed 默认值（根据 similar_rules 推断）
 	DB.Exec("UPDATE rule_incubations SET similar_passed = true WHERE similar_rules IN ('[]','{}','null') AND similar_passed = false")
@@ -764,5 +768,19 @@ func initIncubatorConfig() {
 		}
 	} else {
 		zap.L().Info("incubator config already exists", zap.Uint("id", cfg.ID))
+	}
+}
+
+func initNotificationGlobalSetting() {
+	var setting NotificationGlobalSetting
+	if err := SilentFirst(DB.Where("id = ?", 1), &setting); err != nil {
+		setting = NotificationGlobalSetting{ID: 1}
+		if err := DB.Create(&setting).Error; err != nil {
+			zap.L().Error("init notification global setting failed", zap.Error(err))
+		} else {
+			zap.L().Info("notification global setting initialized")
+		}
+	} else {
+		zap.L().Info("notification global setting already exists", zap.Uint("id", setting.ID))
 	}
 }

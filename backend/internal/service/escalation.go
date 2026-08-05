@@ -8,6 +8,7 @@ import (
 
 	"github.com/ai-optimizer/backend/internal/model"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // WorkdayCalculator 工作日计算器
@@ -255,6 +256,27 @@ func (s *EscalationService) loadEscalationConfig() []EscalationStage {
 	}
 }
 
+// getNotificationBaseline 读取通知规则生效起点
+func (s *EscalationService) getNotificationBaseline() time.Time {
+	var setting model.NotificationGlobalSetting
+	if err := model.SilentFirst(model.DB, &setting, 1); err != nil {
+		return time.Time{}
+	}
+	if setting.NotificationBaselineAt == nil {
+		return time.Time{}
+	}
+	return *setting.NotificationBaselineAt
+}
+
+// applyNotificationBaseline 将生效起点过滤条件应用到查询
+func (s *EscalationService) applyNotificationBaseline(query *gorm.DB) *gorm.DB {
+	baseline := s.getNotificationBaseline()
+	if baseline.IsZero() {
+		return query
+	}
+	return query.Where("original_created_at >= ?", baseline)
+}
+
 func (s *EscalationService) collectAlert(userID uint, level int, typ, title, item string) {
 	key := fmt.Sprintf("%d:%d", userID, level)
 	if s.alertCollector == nil {
@@ -315,8 +337,9 @@ func (s *EscalationService) RunDailyEscalation() {
 
 	for {
 		var issues []model.ReviewIssue
-		model.DB.Where("deleted_at IS NULL AND status IN (?)", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}).
-			Order("id ASC").Limit(batchSize).Offset(offset).Find(&issues)
+		query := model.DB.Where("deleted_at IS NULL AND status IN (?)", []string{model.IssueStatusPending, model.IssueStatusPendingInherited})
+		query = s.applyNotificationBaseline(query)
+		query.Order("id ASC").Limit(batchSize).Offset(offset).Find(&issues)
 		if len(issues) == 0 {
 			break
 		}
@@ -746,17 +769,26 @@ func (s *EscalationService) SendDailyDigest() {
 		return
 	}
 
+	// 加载通知规则生效起点
+	baseline := s.getNotificationBaseline()
+
 	type UserStat struct {
 		UserID       uint
 		PendingCount int64
 	}
 	var stats []UserStat
-	model.DB.Raw(`
+	rawSQL := `
 		SELECT current_owner_id AS user_id, COUNT(*) AS pending_count
 		FROM review_issues
 		WHERE deleted_at IS NULL AND status IN (?) AND current_owner_id > 0
-		GROUP BY current_owner_id
-	`, []string{model.IssueStatusPending, model.IssueStatusPendingInherited}).Scan(&stats)
+	`
+	args := []interface{}{[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}}
+	if !baseline.IsZero() {
+		rawSQL += ` AND original_created_at >= ?`
+		args = append(args, baseline)
+	}
+	rawSQL += ` GROUP BY current_owner_id`
+	model.DB.Raw(rawSQL, args...).Scan(&stats)
 
 	for _, st := range stats {
 		s.notifSvc.SendInbox(st.UserID, model.NotificationTypeDailyDigest,

@@ -406,6 +406,11 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 		adminOnly.PUT("/notification-rules/:id", notifH.UpdateRule)
 		adminOnly.DELETE("/notification-rules/:id", notifH.DeleteRule)
 
+		// 通知规则全局生效起点
+		adminOnly.GET("/notification-global-settings", notifH.GetGlobalSettings)
+		adminOnly.PUT("/notification-global-settings", notifH.UpdateGlobalSettings)
+		adminOnly.GET("/notification-global-settings/preview", notifH.PreviewBaseline)
+
 		// 节假日管理
 		adminOnly.GET("/holidays", notifH.ListHolidays)
 		adminOnly.POST("/holidays", notifH.CreateHoliday)
