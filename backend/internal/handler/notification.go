@@ -396,28 +396,60 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 	user := c.MustGet("user").(model.User)
 	baseline := getNotificationBaseline()
 
-	// 待处理统计（包含 pending 和 pending_inherited）
+	// show_legacy: 0=仅活跃(默认) 1=展示全部
+	showLegacy := c.DefaultQuery("show_legacy", "0") == "1"
+
+	// 看板统计始终只统计活跃数据（基线之后）
+	activeStatQ := func(db *gorm.DB) *gorm.DB {
+		return db
+	}
+	if !baseline.IsZero() {
+		activeStatQ = func(db *gorm.DB) *gorm.DB {
+			return db.Where("original_created_at >= ?", baseline)
+		}
+	}
+
+	// 列表查询根据 show_legacy 控制
+	listFilter := func(db *gorm.DB) *gorm.DB {
+		return db
+	}
+	if !showLegacy && !baseline.IsZero() {
+		listFilter = func(db *gorm.DB) *gorm.DB {
+			return db.Where("original_created_at >= ?", baseline)
+		}
+	}
+
+	// 待处理统计（包含 pending 和 pending_inherited）- 仅活跃
 	var pendingCount, pendingBefore, criticalCount, criticalBefore, highCount, highBefore int64
-	qp := model.DB.Model(&model.ReviewIssue{}).
+	qp := activeStatQ(model.DB.Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND status IN (?) AND (owner_id = ? OR current_owner_id = ?)",
-			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID)
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID))
 	qp.Count(&pendingCount)
 	if !baseline.IsZero() {
-		qp.Where("original_created_at < ?", baseline).Count(&pendingBefore)
+		model.DB.Model(&model.ReviewIssue{}).
+			Where("deleted_at IS NULL AND status IN (?) AND (owner_id = ? OR current_owner_id = ?) AND original_created_at < ?",
+				[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID, baseline).
+			Count(&pendingBefore)
 	}
-	qc := model.DB.Model(&model.ReviewIssue{}).
+	qc := activeStatQ(model.DB.Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?)",
-			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "critical", user.ID, user.ID)
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "critical", user.ID, user.ID))
 	qc.Count(&criticalCount)
 	if !baseline.IsZero() {
-		qc.Where("original_created_at < ?", baseline).Count(&criticalBefore)
+		model.DB.Model(&model.ReviewIssue{}).
+			Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?) AND original_created_at < ?",
+				[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "critical", user.ID, user.ID, baseline).
+			Count(&criticalBefore)
 	}
-	qh := model.DB.Model(&model.ReviewIssue{}).
+	qh := activeStatQ(model.DB.Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?)",
-			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "high", user.ID, user.ID)
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "high", user.ID, user.ID))
 	qh.Count(&highCount)
 	if !baseline.IsZero() {
-		qh.Where("original_created_at < ?", baseline).Count(&highBefore)
+		model.DB.Model(&model.ReviewIssue{}).
+			Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?) AND original_created_at < ?",
+				[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "high", user.ID, user.ID, baseline).
+			Count(&highBefore)
 	}
 
 	// 本周统计（简化：近7天）
@@ -445,23 +477,23 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 
 	// 待处理列表（增强：携带项目信息、任务MR信息）
 	var totalIssues int64
-	model.DB.Model(&model.ReviewIssue{}).
+	totalQ := listFilter(model.DB.Model(&model.ReviewIssue{}).
 		Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?)",
-			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID).
-		Count(&totalIssues)
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID))
+	totalQ.Count(&totalIssues)
 
 	var rawItems []struct {
 		model.ReviewIssue
 		ProjectName string `json:"project_name"`
 		MRTitle     string `json:"mr_title"`
 	}
-	model.DB.Model(&model.ReviewIssue{}).
+	listQ := listFilter(model.DB.Model(&model.ReviewIssue{}).
 		Select("review_issues.*, projects.name as project_name, tasks.mr_title as mr_title").
 		Joins("LEFT JOIN tasks ON tasks.id = review_issues.task_id").
 		Joins("LEFT JOIN projects ON projects.id = tasks.project_id").
 		Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?)",
-			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID).
-		Order("review_issues.escalation_level ASC, review_issues.severity DESC, review_issues.original_created_at ASC").
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID))
+	listQ.Order("review_issues.escalation_level ASC, review_issues.severity DESC, review_issues.original_created_at ASC").
 		Limit(pageSize).Offset(offset).Scan(&rawItems)
 
 	// 转换为前端需要的格式（避免 embedded struct 字段名冲突）
@@ -536,32 +568,38 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 
 	// 待处理 Issue severity 分组统计 + 最早未处理距今
 	var mediumCount, mediumBefore, lowCount, lowBefore int64
-	qm := model.DB.Model(&model.ReviewIssue{}).
+	qm := activeStatQ(model.DB.Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?)",
-			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "medium", user.ID, user.ID)
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "medium", user.ID, user.ID))
 	qm.Count(&mediumCount)
 	if !baseline.IsZero() {
-		qm.Where("original_created_at < ?", baseline).Count(&mediumBefore)
+		model.DB.Model(&model.ReviewIssue{}).
+			Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?) AND original_created_at < ?",
+				[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "medium", user.ID, user.ID, baseline).
+			Count(&mediumBefore)
 	}
-	ql := model.DB.Model(&model.ReviewIssue{}).
+	ql := activeStatQ(model.DB.Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?)",
-			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "low", user.ID, user.ID)
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "low", user.ID, user.ID))
 	ql.Count(&lowCount)
 	if !baseline.IsZero() {
-		ql.Where("original_created_at < ?", baseline).Count(&lowBefore)
+		model.DB.Model(&model.ReviewIssue{}).
+			Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?) AND original_created_at < ?",
+				[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "low", user.ID, user.ID, baseline).
+			Count(&lowBefore)
 	}
 
-	// 最早未处理距今
+	// 最早未处理距今（始终使用活跃数据统计）
 	var earliestPending model.ReviewIssue
-	err := model.DB.Where("deleted_at IS NULL AND status IN (?) AND (owner_id = ? OR current_owner_id = ?)",
-		[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID).
+	err := activeStatQ(model.DB.Model(&model.ReviewIssue{}).
+		Where("deleted_at IS NULL AND status IN (?) AND (owner_id = ? OR current_owner_id = ?)",
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID)).
 		Order("original_created_at ASC").First(&earliestPending).Error
 
 	var earliestPendingHours interface{} = nil
 	if err == nil {
 		t := earliestPending.OriginalCreatedAt
 		if t == nil || t.IsZero() {
-			// 旧数据可能没有 original_created_at，回退到 created_at
 			t = &earliestPending.CreatedAt
 		}
 		if t != nil && !t.IsZero() {
@@ -627,6 +665,9 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 	for i := 3; i >= 0; i-- {
 		weekStart := time.Now().AddDate(0, 0, -7*(i+1)).Truncate(24 * time.Hour)
 		weekEnd := weekStart.AddDate(0, 0, 7)
+		if i == 0 {
+			weekEnd = time.Now()
+		}
 		var wRecv, wClose, wPending int64
 		model.DB.Model(&model.ReviewIssue{}).
 			Where("deleted_at IS NULL AND (owner_id = ? OR current_owner_id = ?) AND created_at >= ? AND created_at < ?", user.ID, user.ID, weekStart, weekEnd).
@@ -647,6 +688,7 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{
 		"notification_baseline_at": baselineStr,
+		"show_legacy":              showLegacy,
 		"pending_count":            pendingCount,
 		"pending_before_baseline":  pendingBefore,
 		"critical_count":           criticalCount,

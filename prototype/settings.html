@@ -101,10 +101,10 @@
                         </div>
                     </div>
 
-                    <!-- LLM 调用重试卡片 -->
+                    <!-- 模型调用重试策略卡片 -->
                     <div class="bg-gray-50 rounded-lg p-5 border">
                         <h4 class="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
-                            <i class="fas fa-redo text-blue-500"></i>LLM 调用重试
+                            <i class="fas fa-redo text-blue-500"></i>模型调用重试策略
                         </h4>
                         <div class="grid grid-cols-2 gap-5">
                             <div>
@@ -126,6 +126,45 @@
                                 <label class="block text-sm font-medium text-gray-700 mb-1">最大重试延迟（毫秒）</label>
                                 <input type="number" id="llmRetryMaxDelayMs" value="30000" min="1000" max="300000" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
                                 <p class="text-xs text-gray-400 mt-1">退避延迟上限，避免等待过长</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- JSON 重试配置卡片 -->
+                    <div class="bg-gray-50 rounded-lg p-5 border mt-5">
+                        <h4 class="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                            <i class="fas fa-redo-alt text-green-500"></i>JSON 解析重试策略
+                        </h4>
+                        <p class="text-xs text-gray-500 mb-3">AI 返回非结构化 JSON 时的自动重试与降级配置</p>
+                        <div class="grid grid-cols-2 gap-5">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">最大重试次数</label>
+                                <input type="number" id="jsonRetryMaxAttempts" value="3" min="0" max="10" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                <p class="text-xs text-gray-400 mt-1">JSON 解析失败后最多尝试重新调用 LLM 的次数</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">初始延迟（秒）</label>
+                                <input type="number" id="jsonRetryInitialDelaySec" value="2" min="0" max="60" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                <p class="text-xs text-gray-400 mt-1">第一次重试前的等待时间</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">退避乘数</label>
+                                <input type="number" id="jsonRetryBackoffMultiplier" value="2.0" min="1.0" max="10.0" step="0.1" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                <p class="text-xs text-gray-400 mt-1">每次重试延迟按此倍数增长（如 2s → 4s → 8s）</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">最大延迟（秒）</label>
+                                <input type="number" id="jsonRetryMaxDelaySec" value="30" min="1" max="300" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                <p class="text-xs text-gray-400 mt-1">重试延迟的上限，防止间隔过长</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">降级策略</label>
+                                <select id="jsonRetryFallbackStrategy" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                    <option value="regex">正则提取分数（兼容模式）</option>
+                                    <option value="markdown">保留原始文本</option>
+                                    <option value="fail">标记任务失败</option>
+                                </select>
+                                <p class="text-xs text-gray-400 mt-1">所有重试均失败时的处理策略</p>
                             </div>
                         </div>
                     </div>
@@ -195,42 +234,22 @@
                         </div>
                     </div>
 
-                    <!-- JSON 重试配置卡片 -->
+                    <!-- 数据活跃基准时间卡片 -->
                     <div class="bg-gray-50 rounded-lg p-5 border mt-5">
                         <h4 class="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
-                            <i class="fas fa-redo-alt text-green-500"></i>JSON 解析重试策略
+                            <i class="fas fa-history text-purple-500"></i>数据活跃基准时间
                         </h4>
-                        <p class="text-xs text-gray-500 mb-3">AI 返回非结构化 JSON 时的自动重试与降级配置</p>
-                        <div class="grid grid-cols-2 gap-5">
+                        <div class="space-y-4">
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">最大重试次数</label>
-                                <input type="number" id="jsonRetryMaxAttempts" value="3" min="0" max="10" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
-                                <p class="text-xs text-gray-400 mt-1">JSON 解析失败后最多尝试重新调用 LLM 的次数</p>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">基准时间</label>
+                                <div class="flex items-center gap-3">
+                                    <input type="datetime-local" id="baselineInput" class="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                    <button onclick="saveBaselineFromSettings()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors">保存</button>
+                                    <button onclick="clearBaselineFromSettings()" class="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors">清除</button>
+                                </div>
+                                <p class="text-xs text-gray-500 mt-1.5">设置后，Dashboard 将区分"活跃待处理"与"历史遗留"数据，通知规则（Issue 升级、每日摘要）仅对活跃数据生效。Issue 状态不变。</p>
                             </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">初始延迟（秒）</label>
-                                <input type="number" id="jsonRetryInitialDelaySec" value="2" min="0" max="60" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
-                                <p class="text-xs text-gray-400 mt-1">第一次重试前的等待时间</p>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">退避乘数</label>
-                                <input type="number" id="jsonRetryBackoffMultiplier" value="2.0" min="1.0" max="10.0" step="0.1" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
-                                <p class="text-xs text-gray-400 mt-1">每次重试延迟按此倍数增长（如 2s → 4s → 8s）</p>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">最大延迟（秒）</label>
-                                <input type="number" id="jsonRetryMaxDelaySec" value="30" min="1" max="300" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
-                                <p class="text-xs text-gray-400 mt-1">重试延迟的上限，防止间隔过长</p>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">降级策略</label>
-                                <select id="jsonRetryFallbackStrategy" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
-                                    <option value="regex">正则提取分数（兼容模式）</option>
-                                    <option value="markdown">保留原始文本</option>
-                                    <option value="fail">标记任务失败</option>
-                                </select>
-                                <p class="text-xs text-gray-400 mt-1">所有重试均失败时的处理策略</p>
-                            </div>
+                            <div id="baselineStatus" class="text-xs text-gray-500"></div>
                         </div>
                     </div>
 
@@ -772,6 +791,77 @@
                 }
             } catch (e) {
                 console.error('加载配置失败:', e);
+            }
+            // 加载基准时间配置（独立 API）
+            await loadBaselineSettings();
+        }
+
+        async function loadBaselineSettings() {
+            try {
+                const res = await apiFetch(`${API_BASE}/notification-global-settings`);
+                const json = await res.json();
+                const data = json.data || {};
+                const inputEl = document.getElementById('baselineInput');
+                const statusEl = document.getElementById('baselineStatus');
+                if (data.notification_baseline_at) {
+                    const d = new Date(data.notification_baseline_at);
+                    const fmt = (n) => String(n).padStart(2, '0');
+                    inputEl.value = `${d.getFullYear()}-${fmt(d.getMonth()+1)}-${fmt(d.getDate())}T${fmt(d.getHours())}:${fmt(d.getMinutes())}`;
+                    const setter = data.baseline_set_by ? escapeHtml(data.baseline_set_by.display_name || '未知') : '系统';
+                    const updated = data.updated_at ? new Date(data.updated_at).toLocaleString('zh-CN') : '-';
+                    statusEl.innerHTML = `<i class="fas fa-check-circle text-green-500 mr-1"></i>当前已设置，${updated} 由 ${setter} 保存`;
+                } else {
+                    inputEl.value = '';
+                    statusEl.innerHTML = '<i class="fas fa-info-circle text-gray-400 mr-1"></i>未设置：所有数据均视为活跃，通知规则对所有 Issue 生效';
+                }
+            } catch (e) {
+                console.error('加载基准时间失败:', e);
+                document.getElementById('baselineStatus').innerHTML = '<i class="fas fa-exclamation-circle text-red-500 mr-1"></i>加载失败';
+            }
+        }
+
+        async function saveBaselineFromSettings() {
+            const input = document.getElementById('baselineInput').value;
+            if (!input) {
+                showToast('请选择基准时间', 'error');
+                return;
+            }
+            const dt = new Date(input);
+            if (isNaN(dt.getTime())) {
+                showToast('时间格式无效', 'error');
+                return;
+            }
+            if (dt > new Date()) {
+                showToast('基准时间不能设置为未来时间', 'error');
+                return;
+            }
+            try {
+                await apiFetch(`${API_BASE}/notification-global-settings`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ notification_baseline_at: dt.toISOString() })
+                });
+                showToast('基准时间已保存', 'success');
+                await loadBaselineSettings();
+            } catch (e) {
+                showToast('保存失败', 'error');
+            }
+        }
+
+        async function clearBaselineFromSettings() {
+            if (!confirm('确定清除基准时间吗？\n\n清除后，系统中所有 pending Issue 将重新纳入 Dashboard 统计和通知规则计算。')) {
+                return;
+            }
+            try {
+                await apiFetch(`${API_BASE}/notification-global-settings`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ notification_baseline_at: null })
+                });
+                showToast('已清除', 'success');
+                await loadBaselineSettings();
+            } catch (e) {
+                showToast('清除失败', 'error');
             }
         }
 

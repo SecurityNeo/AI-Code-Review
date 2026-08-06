@@ -122,7 +122,7 @@
                     <div class="grid grid-cols-3 gap-3 mb-3">
                         <div class="text-center">
                             <div class="text-xl font-bold text-gray-700" id="legacyTotal">-</div>
-                            <div class="text-[10px] text-gray-400">遗留总数</div>
+                            <div class="text-[10px] text-gray-400">历史遗留总数</div>
                         </div>
                         <div class="text-center">
                             <div class="text-xl font-bold text-gray-700" id="legacyProjects">-</div>
@@ -163,14 +163,14 @@ async function loadData(force = false) {
         const d = data.data || {};
 
         document.getElementById('kpiTodayNewTotalPending').textContent = `${d.today_new ?? 0} / ${d.total_pending ?? 0}`;
-        const totalPendingSub = (d.notification_baseline_at && (d.total_pending_before_baseline || 0) > 0)
-            ? `其中 ${d.total_pending_before_baseline} 条历史遗留` : '';
-        document.getElementById('kpiTodayNewTotalPendingSub').textContent = totalPendingSub;
+        if (d.notification_baseline_at && (d.total_pending_before_baseline || 0) > 0) {
+            document.getElementById('kpiTodayNewTotalPending').innerHTML = `${d.today_new ?? 0} / ${d.total_pending ?? 0}<span class="text-[10px] text-gray-400 ml-1">(历史遗留 ${d.total_pending_before_baseline})</span>`;
+        }
 
         document.getElementById('kpiOverdue').textContent = d.overdue ?? '-';
-        const overdueSub = (d.notification_baseline_at && (d.overdue_before_baseline || 0) > 0)
-            ? `其中 ${d.overdue_before_baseline} 条历史遗留` : '';
-        document.getElementById('kpiOverdueSub').textContent = overdueSub;
+        if (d.notification_baseline_at && (d.overdue_before_baseline || 0) > 0) {
+            document.getElementById('kpiOverdue').innerHTML = `${d.overdue ?? '-'}<span class="text-[10px] text-gray-400 ml-1">(历史遗留 ${d.overdue_before_baseline})</span>`;
+        }
         document.getElementById('kpiArchived').textContent = `${d.today_archived ?? 0} / ${d.total_archived ?? 0}`;
         document.getElementById('kpiEscalated').textContent = d.today_escalated ?? '-';
         document.getElementById('kpiCloseRate').textContent = d.week_close_rate ?? '-';
@@ -227,8 +227,8 @@ function renderAlerts(alerts) {
                 <i class="fas fa-exclamation-circle text-red-500"></i>
                 <span class="font-medium text-gray-800">${escapeHtml(a.project_name)}</span>
                 <span class="text-xs text-gray-500">
-                    待处理 ${a.pending_count}${a.pending_before_baseline > 0 ? ' <span class="text-gray-400">(遗留 ' + a.pending_before_baseline + ')</span>' : ''}
-                     / 超期 ${a.overdue_count}${a.overdue_before_baseline > 0 ? ' <span class="text-gray-400">(遗留 ' + a.overdue_before_baseline + ')</span>' : ''}
+                    待处理 ${a.pending_count}${a.pending_before_baseline > 0 ? '<span class="text-gray-400">(历史遗留 ' + a.pending_before_baseline + ')</span>' : ''}
+                     / 超期 ${a.overdue_count}${a.overdue_before_baseline > 0 ? '<span class="text-gray-400">(历史遗留 ' + a.overdue_before_baseline + ')</span>' : ''}
                 </span>
             </div>
             <a href="project-dashboard.html?project_id=${a.project_id}" class="text-xs text-blue-600 hover:underline">查看</a>
@@ -298,10 +298,7 @@ function renderTopProjects(list) {
                 <span class="text-xs font-bold text-gray-400 w-4">${i + 1}</span>
                 <span class="text-sm text-gray-800">${escapeHtml(p.name)}</span>
             </div>
-            <div class="text-right">
-                <span class="text-sm font-bold text-orange-600">${p.pending_count}</span>
-                ${p.pending_before_baseline > 0 ? '<span class="text-[10px] text-gray-400 block">遗留 ' + p.pending_before_baseline + '</span>' : ''}
-            </div>
+            <span class="text-sm font-bold text-orange-600">${p.pending_count}${p.pending_before_baseline > 0 ? '<span class="text-[10px] text-gray-400 font-normal ml-1">(历史遗留 ' + p.pending_before_baseline + ')</span>' : ''}</span>
         </div>
     `).join('');
 

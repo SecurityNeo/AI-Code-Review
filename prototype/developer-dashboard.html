@@ -77,10 +77,6 @@
                                 <div class="text-[11px] text-blue-400 mt-0.5">⚪ 低危</div>
                             </div>
                         </div>
-                        <div class="bg-gray-50 rounded-lg p-3 border text-center mb-3">
-                            <div class="text-2xl font-bold text-gray-800" id="statPendingTotal">0</div>
-                            <div class="text-[11px] text-gray-500 mt-0.5">总计待处理问题</div>
-                        </div>
                         <div class="text-center border-t pt-4">
                             <a href="tasks.html" class="inline-block text-sm text-blue-600 hover:text-blue-800 px-4 py-2 bg-blue-50 rounded-lg hover:bg-blue-100">
                                 <i class="fas fa-external-link-alt mr-1"></i>前往处理
@@ -135,10 +131,21 @@
                     <h3 class="font-bold text-gray-800">
                         <i class="fas fa-list-check text-blue-600 mr-2"></i>待处理问题列表
                         <span id="issueCountBadge" class="ml-2 text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">0</span>
+                        <span id="activeModeHint" class="ml-2 text-[10px] text-gray-400 hidden">当前仅展示活跃问题</span>
                     </h3>
-                    <div class="flex items-center gap-2">
+                    <div class="flex items-center gap-3">
+                        <div id="legacyToggleWrap" class="flex items-center gap-2 hidden">
+                            <span class="text-xs text-gray-500">展示历史遗留问题</span>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="showLegacyToggle" class="sr-only peer" onchange="toggleShowLegacy()">
+                                <div class="w-9 h-5 bg-gray-200 peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                            </label>
+                        </div>
                         <button onclick="loadDashboard(true)" class="text-xs text-gray-500 hover:text-blue-600"><i class="fas fa-sync-alt mr-1"></i>刷新</button>
                     </div>
+                </div>
+                <div id="issueListTips" class="hidden px-6 py-2 bg-gray-50 text-xs text-gray-500 border-b">
+                    当前仅展示活跃问题。管理员可设置<a href="settings.html?tab=config" class="text-blue-600 hover:underline">数据活跃基准时间</a>以区分历史遗留数据。
                 </div>
                 <div id="issueList" class="divide-y">
                     <div class="text-center py-12 text-gray-400">加载中...</div>
@@ -171,22 +178,46 @@ let trendChart = null;
 let currentPage = 1;
 let pageSize = 10;
 let totalPages = 1;
+let showLegacy = false;
+
+function toggleShowLegacy() {
+    showLegacy = document.getElementById('showLegacyToggle').checked;
+    currentPage = 1;
+    loadDashboard(true);
+}
 
 async function loadDashboard(force = false) {
     try {
         const params = new URLSearchParams();
         params.set('page', currentPage);
         params.set('page_size', pageSize);
+        params.set('show_legacy', showLegacy ? '1' : '0');
         const res = await apiFetch(API_BASE + '/dashboard/developer?' + params.toString());
         const data = await res.json();
         const d = data.data || {};
 
-        // 顶部统计
-        document.getElementById('statPending').textContent = d.pending_count || 0;
-        document.getElementById('statCritical').innerHTML = renderSeverityWithLegacy(d.critical_count, d.critical_before_baseline, d.notification_baseline_at, 'text-red-600');
-        document.getElementById('statHigh').innerHTML = renderSeverityWithLegacy(d.high_count, d.high_before_baseline, d.notification_baseline_at, 'text-orange-600');
-        document.getElementById('statMedium').innerHTML = renderSeverityWithLegacy(d.medium_count, d.medium_before_baseline, d.notification_baseline_at, 'text-yellow-600');
-        document.getElementById('statLow').innerHTML = renderSeverityWithLegacy(d.low_count, d.low_before_baseline, d.notification_baseline_at, 'text-blue-600');
+        // Toggle visibility based on baseline
+        const hasBaseline = !!d.notification_baseline_at;
+        const toggleWrap = document.getElementById('legacyToggleWrap');
+        const activeModeHint = document.getElementById('activeModeHint');
+        const issueListTips = document.getElementById('issueListTips');
+        if (hasBaseline) {
+            toggleWrap.classList.remove('hidden');
+            activeModeHint.classList.toggle('hidden', showLegacy);
+            issueListTips.classList.add('hidden');
+        } else {
+            toggleWrap.classList.add('hidden');
+            activeModeHint.classList.add('hidden');
+            issueListTips.classList.remove('hidden');
+        }
+        document.getElementById('showLegacyToggle').checked = showLegacy;
+
+        // 顶部统计 - 始终展示活跃数据（历史遗留作为补充信息）
+        document.getElementById('statPending').innerHTML = renderStatWithLegacy(d.pending_count, d.pending_before_baseline, d.notification_baseline_at);
+        document.getElementById('statCritical').innerHTML = renderStatWithLegacy(d.critical_count, d.critical_before_baseline, d.notification_baseline_at, 'text-red-600');
+        document.getElementById('statHigh').innerHTML = renderStatWithLegacy(d.high_count, d.high_before_baseline, d.notification_baseline_at, 'text-orange-600');
+        document.getElementById('statMedium').innerHTML = renderStatWithLegacy(d.medium_count, d.medium_before_baseline, d.notification_baseline_at, 'text-yellow-600');
+        document.getElementById('statLow').innerHTML = renderStatWithLegacy(d.low_count, d.low_before_baseline, d.notification_baseline_at, 'text-blue-600');
 
         document.getElementById('statWeekReceived').textContent = d.week_received || 0;
         document.getElementById('statWeekResolved').textContent = d.week_resolved || 0;
@@ -206,21 +237,6 @@ async function loadDashboard(force = false) {
         }
         document.getElementById('statEarliest').textContent = earliestText;
 
-        // 新增总计显示
-        const hasBaseline = !!d.notification_baseline_at;
-        const pendingBefore = d.pending_before_baseline || 0;
-        if (hasBaseline && pendingBefore > 0) {
-            document.getElementById('statPendingTotal').innerHTML = `
-                <div class="text-2xl font-bold text-gray-800">${d.pending_count || 0}</div>
-                <div class="text-[11px] text-gray-400 mt-1">其中 ${pendingBefore} 条历史遗留（不受通知规则约束）</div>
-            `;
-        } else {
-            document.getElementById('statPendingTotal').innerHTML = `
-                <div class="text-2xl font-bold text-gray-800">${d.pending_count || 0}</div>
-                <div class="text-[11px] text-gray-500 mt-0.5">总计待处理问题</div>
-            `;
-        }
-
         // 团队排名
         let rankText = '-';
         if (d.team_rank_position > 0) {
@@ -228,7 +244,7 @@ async function loadDashboard(force = false) {
         }
         document.getElementById('statRank').textContent = rankText;
 
-        // Issue 列表
+        // Issue 列表（仅列表受 showLegacy 影响）
         const issues = d.issues || [];
         const total = d.total || 0;
         totalPages = Math.ceil(total / pageSize) || 1;
@@ -238,7 +254,7 @@ async function loadDashboard(force = false) {
         if (issues.length === 0) {
             container.innerHTML = '<div class="text-center py-12 text-gray-400">🎉 太棒了，当前没有待处理的问题</div>';
         } else {
-            container.innerHTML = issues.map(issue => renderIssueCard(issue)).join('');
+            container.innerHTML = issues.map(issue => renderIssueCard(issue, showLegacy)).join('');
         }
         renderPagination();
 
@@ -250,15 +266,15 @@ async function loadDashboard(force = false) {
     }
 }
 
-function renderSeverityWithLegacy(count, legacyCount, baselineAt, colorClass) {
+function renderStatWithLegacy(count, legacyCount, baselineAt, colorClass) {
     let html = `<div class="text-xl font-bold ${colorClass || ''}">${count || 0}</div>`;
     if (baselineAt && (legacyCount || 0) > 0) {
-        html += `<div class="text-[10px] text-gray-400 mt-0.5">遗留 ${legacyCount}</div>`;
+        html = `<div class="text-xl font-bold ${colorClass || ''}">${count || 0}<span class="text-[10px] text-gray-400 font-normal ml-1">(历史遗留 ${legacyCount})</span></div>`;
     }
     return html;
 }
 
-function renderIssueCard(issue) {
+function renderIssueCard(issue, showLegacyMode) {
     const sevClass = 'severity-' + issue.severity;
     const sevLabel = SEVERITY_LABELS[issue.severity] || issue.severity;
     const sevColor = SEVERITY_COLORS[issue.severity] || 'text-gray-500';
@@ -268,7 +284,7 @@ function renderIssueCard(issue) {
     const projectName = escapeHtml(issue.project_name || '未知项目');
     const mrTitle = escapeHtml(issue.mr_title || '');
 
-    const legacyBadge = issue.is_before_baseline
+    const legacyBadge = (showLegacyMode && issue.is_before_baseline)
         ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200">历史遗留</span>'
         : '';
 
