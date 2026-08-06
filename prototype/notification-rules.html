@@ -1331,12 +1331,12 @@ function escapeHtml(str) {
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     activeTemplateTextarea = document.getElementById('rTemplate');
     renderVarList();
-    loadWeComNotifiers();
-    loadRules();
-    loadBaselineSettings();
+    await loadWeComNotifiers(); // 先加载机器人列表，确保 loadRules 能正确匹配
+    await loadRules();
+    await loadBaselineSettings();
 });
 </script>
 <script defer src="/static/js/tailwindcss.min.js"></script>
