@@ -1290,13 +1290,17 @@ func (h *NotificationHandler) GetGlobalSettings(c *gin.Context) {
 		ID          uint   `json:"id"`
 		DisplayName string `json:"display_name"`
 	}
-	var op operatorInfo
-	if setting.BaselineSetBy > 0 {
-		var u model.User
-		if err := model.DB.First(&u, setting.BaselineSetBy).Error; err == nil {
-			op = operatorInfo{ID: u.ID, DisplayName: u.DisplayName}
-		}
-	}
+    var op operatorInfo
+    if setting.BaselineSetBy > 0 {
+        var u model.User
+        if err := model.DB.First(&u, setting.BaselineSetBy).Error; err == nil {
+            displayName := u.DisplayName
+            if displayName == "" {
+                displayName = u.Username
+            }
+            op = operatorInfo{ID: u.ID, DisplayName: displayName}
+        }
+    }
 
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{

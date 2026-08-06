@@ -37,10 +37,11 @@ func (s *UserService) InitAdmin() error {
 		return fmt.Errorf("hash password failed: %w", err)
 	}
 	admin := model.User{
-		Username:  "admin",
-		Password:  hashedPassword,
-		Role:      "admin",
-		LoginType: "local",
+		Username:    "admin",
+		DisplayName: "系统管理员",
+		Password:    hashedPassword,
+		Role:        "admin",
+		LoginType:   "local",
 	}
 	if err := model.DB.Create(&admin).Error; err != nil {
 		return fmt.Errorf("create admin user failed: %w", err)
