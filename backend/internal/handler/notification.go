@@ -1243,7 +1243,7 @@ func (h *NotificationHandler) UpdateGlobalSettings(c *gin.Context) {
 		detail = "生效起点保持未配置状态"
 	}
 
-	model.RecordOpLog("修改通知规则生效起点", "notification_global_settings", 1, user.ID, "success", detail, c.ClientIP())
+	model.RecordOpLog("修改通知规则生效起点", "通知规则生效起点", 1, user.ID, "success", detail, c.ClientIP())
 
 	c.JSON(http.StatusOK, gin.H{"message": "updated"})
 }
