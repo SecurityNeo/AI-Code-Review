@@ -306,6 +306,7 @@ function renderIssueCard(issue, showLegacyMode) {
                     <div class="text-sm text-gray-800 font-medium mb-1">${summary}</div>
                     <div class="flex items-center gap-3 text-xs text-gray-500">
                         <span><i class="fas fa-file-code mr-1 text-gray-400"></i>${escapeHtml(issue.file || '-')}${lineInfo}</span>
+                        <span><i class="fas fa-user mr-1 text-gray-400"></i>${escapeHtml(issue.owner_display_name || issue.owner_username || '未知')}</span>
                         <span title="${escapeHtml(String(issue.original_created_at || issue.created_at || ''))}"><i class="fas fa-clock mr-1 text-gray-400"></i>${formatAge(issue.original_created_at || issue.created_at)}</span>
                     </div>
                 </div>

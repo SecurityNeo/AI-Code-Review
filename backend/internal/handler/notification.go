@@ -484,13 +484,16 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 
 	var rawItems []struct {
 		model.ReviewIssue
-		ProjectName string `json:"project_name"`
-		MRTitle     string `json:"mr_title"`
+		ProjectName      string `json:"project_name"`
+		MRTitle          string `json:"mr_title"`
+		OwnerUsername    string `json:"owner_username"`
+		OwnerDisplayName string `json:"owner_display_name"`
 	}
 	listQ := listFilter(model.DB.Model(&model.ReviewIssue{}).
-		Select("review_issues.*, projects.name as project_name, tasks.mr_title as mr_title").
+		Select("review_issues.*, projects.name as project_name, tasks.mr_title as mr_title, owners.username as owner_username, owners.display_name as owner_display_name").
 		Joins("LEFT JOIN tasks ON tasks.id = review_issues.task_id").
 		Joins("LEFT JOIN projects ON projects.id = tasks.project_id").
+		Joins("LEFT JOIN users AS owners ON owners.id = review_issues.owner_id").
 		Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?)",
 			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID))
 	listQ.Order("review_issues.escalation_level ASC, review_issues.severity DESC, review_issues.original_created_at ASC").
@@ -526,8 +529,10 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 		IsBeforeBaseline     bool       `json:"is_before_baseline"`
 		EscalationLevel      int        `json:"escalation_level"`
 		CreatedAt            time.Time  `json:"created_at"`
-		ProjectName          string     `json:"project_name"`
-		MRTitle              string     `json:"mr_title"`
+		ProjectName          string `json:"project_name"`
+		MRTitle              string `json:"mr_title"`
+		OwnerUsername        string `json:"owner_username"`
+		OwnerDisplayName     string `json:"owner_display_name"`
 	}
 
 	issues := make([]issueItem, len(rawItems))
@@ -563,6 +568,8 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 			CreatedAt:            raw.CreatedAt,
 			ProjectName:          raw.ProjectName,
 			MRTitle:              raw.MRTitle,
+			OwnerUsername:        raw.OwnerUsername,
+			OwnerDisplayName:     raw.OwnerDisplayName,
 		}
 	}
 
