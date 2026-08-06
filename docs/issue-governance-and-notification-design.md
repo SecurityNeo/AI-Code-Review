@@ -71,7 +71,34 @@ CREATE TABLE notification_delivery_log (
     INDEX idx_status (status),
     INDEX idx_created (created_at)
 ) ENGINE=InnoDB COMMENT='通知渠道投递日志';
+
+-- 新增：通知规则全局生效起点（单行表，id=1）
+CREATE TABLE notification_global_settings (
+    id                      BIGINT UNSIGNED PRIMARY KEY DEFAULT 1 COMMENT '固定 id=1',
+    notification_baseline_at TIMESTAMP NULL COMMENT '数据活跃基准时间：此时间之前的 pending Issue 视为历史遗留',
+    baseline_set_by         BIGINT UNSIGNED DEFAULT NULL COMMENT '最后设置者 user_id',
+    created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB COMMENT='通知规则全局生效起点（单行表）';
 ```
+
+### 3.2 data_baseline 与 Dashboard 数据分离机制
+
+系统通过 `notification_global_settings.notification_baseline_at` 定义一条**数据活跃基准线**，将待处理 Issue 划分为两类：
+
+| 类型 | 判定条件 | 通知规则 | Dashboard 展示 |
+|------|---------|---------|---------------|
+| **活跃** | `original_created_at >= baseline` | ✅ 纳入升级/提醒/归档计算 | 统计数字默认只展示活跃数 |
+| **历史遗留** | `original_created_at < baseline` | ❌ 排除在通知规则之外 | 以副文本/徽章形式展示，不影响主统计 |
+
+**关键原则**：
+- 统计看板（severity 四宫格、本周统计待处理、趋势等）**始终只统计活跃数据**，历史遗留作为补充信息展示。
+- `show_legacy` 参数**仅控制 Issue 列表查询**，不影响统计数字。
+- 效率指标（平均闭环天数、团队排名、近4周趋势）**不区分活跃/遗留**，反映团队整体能力。
+
+**配置入口**：`settings.html` 系统配置 Tab →「数据活跃基准时间」卡片。前端保存时同时调 `PUT /system/config` 和 `PUT /notification-global-settings` 两个 API。
+
+**向后兼容**：未配置 baseline 时，所有数据视为活跃，统计与列表均展示全量数据。
 
 ### 3.2 review_issue 状态机
 
@@ -371,40 +398,54 @@ GET    /api/notifications/unread-count // 导航栏徽标数字
 ### 8.1 页面布局
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  👤 我的工作台（开发者视角）                               │
-├─────────────────────────┬───────────────────────────────┤
-│  📋 待处理 Issue（8）    │  📊 本周统计                 │
-│  ├── 🔴 严重：1         │  ├── 收到 Issue：15 条        │
-│  ├── 🟡 高危：2         │  ├── 已闭环：10 条            │
-│  ├── 🟢 中危：3         │  ├── 待处理：5 条             │
-│  └── ⚪ 低危：2         │  └── 平均闭环：1.8 天         │
-│                         │                               │
-│  [一键前往处理]          │  ⏰ 最早未处理距今：3 天       │
-│                         │  🏅 团队排名：前 20%          │
-├─────────────────────────────────────────────────────────┤
-│  📋 待处理 Issue 列表（按超期风险排序）                    │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ ⚠️ 🔴 opencode-prod  MR!456  空指针解引用      │   │
-│  │    规则：nil-guard | 距今：3 天 | [标记已处理]   │   │
-│  │                                                 │   │
-│  │ 🟡 opencode-prod  MR!460  错误未处理           │   │
-│  │    规则：error-handling | 距今：1 天 | [标记误报]│   │
-│  │                                                 │   │
-│  │ ...                                             │   │
-│  └─────────────────────────────────────────────────┘   │
-├─────────────────────────────────────────────────────────┤
-│  📈 我的质量趋势（近 30 天）                              │
-│  [折线图：每周收到 / 闭环 / 待处理]                       │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│  👤 我的工作台（开发者视角）                                            │
+├────────────────────────────┬─────────────────────────────────────────┤
+│  📋 待处理问题             │  📊 本周统计                             │
+│  ┌──────┬──────┐         │  ├── 收到问题：15 条                      │
+│  │🔴严重│🟡高危│         │  ├── 已闭环：10 条                        │
+│  │  1   │  2   │         │  ├── 待处理：5 条（活跃）                 │
+│  │(遗留3)│(遗留2)│        │  └── 平均闭环：1.8 天                     │
+│  ├──────┴──────┤         │                                         │
+│  │🟢中危  ⚪低危│         │  ⏰ 最早未处理距今：3 天                   │
+│  │  3    │  2   │         │  🏅 团队排名：前 20%                     │
+│  │(遗留1)│(遗留0)│        │                                         │
+│  └──────────────┘         │                                         │
+│                            │                                          │
+│  [前往处理]                 │                                          │
+├──────────────────────────────────────────────────────────────────────┤
+│  📋 待处理问题列表                                                       │
+│  ├── Toggle：展示历史遗留问题 [ ]                                        │
+│  ├── 共 5 条记录（默认仅活跃）                                           │
+│  │                                                                            │
+│  │ ⚠️ 🔴 opencode-prod  MR!456  空指针解引用                            │
+│  │    规则：nil-guard | 距今：3 天 | [标记已处理]                         │
+│  │                                                                            │
+│  │ 🟡 opencode-prod  MR!460  错误未处理                                 │
+│  │    规则：error-handling | 距今：1 天 | [标记误报]                      │
+│  │                                                                            │
+│  │ ...                                                                        │
+│  └────────────────────────────────────────────────────────────────────────────┘
+├──────────────────────────────────────────────────────────────────────┤
+│  📈 我的质量趋势（近 4 周）                                               │
+│  [折线图：每周收到 / 闭环 / 待处理] — 统计全量数据，不区分活跃/遗留          │
+└──────────────────────────────────────────────────────────────────────┘
 ```
+
+**展示规则**：
+- **Severity 四宫格**：主数字 = 活跃数；若存在历史遗留，在同一格内以灰色小字展示 `(历史遗留 N)`。
+- **本周统计「待处理」**：展示活跃数。
+- **Issue 列表**：默认仅展示活跃 Issue；开启 Toggle 后展示全部，历史遗留 Issue 卡片上显示「历史遗留」灰色徽章。
+- **效率指标**（平均闭环、团队排名、趋势）：始终统计全量数据，反映团队真实能力，不受 baseline 影响。
 
 ### 8.2 排序逻辑
 
 默认按**超期风险**排序，而非时间：
 1. 距离下次升级 < 12 小时的置顶
 2. critical > high > medium > low
-3. 同级别按 created_at 升序（越早的越靠前）
+3. 同级别按 `original_created_at` 升序（越早的越靠前）
+
+> 当开启「展示历史遗留问题」时，列表中同时包含活跃与历史遗留 Issue，但排序规则不变。
 
 ### 8.3 行内快捷操作
 
@@ -418,9 +459,23 @@ GET    /api/notifications/unread-count // 导航栏徽标数字
 ### 8.4 关键 API
 
 ```
-GET /api/dashboard/developer       // 工作台聚合数据（待处理统计、本周数据、趋势）
-GET /api/dashboard/developer/issues // 待处理 Issue 列表（支持排序、过滤）
+GET /api/dashboard/developer?show_legacy=0&page=1&page_size=20
+// 工作台聚合数据
+// show_legacy: 0=仅活跃(默认)，1=展示全部；仅影响 Issue 列表，统计数字始终为活跃数
+
+GET /api/dashboard/developer/issues?sort=risk&severity=
+// 待处理 Issue 列表（支持排序、过滤）
 ```
+
+**响应关键字段**：
+| 字段 | 说明 |
+|------|------|
+| `notification_baseline_at` | 基准时间（空字符串 = 未设置） |
+| `pending_count` | 活跃待处理数 |
+| `pending_before_baseline` | 历史遗留待处理数（用于副文本展示） |
+| `critical_count` / `critical_before_baseline` | 严重活跃数 / 历史遗留数 |
+| `show_legacy` | 当前模式回显 |
+| `trends[].received` / `closed` / `still_pending` | 近4周趋势（全量数据） |
 
 ---
 
@@ -432,8 +487,8 @@ GET /api/dashboard/developer/issues // 待处理 Issue 列表（支持排序、�
 项目：opencode-prod
 
 质量健康度：72 分（🟡）
-├── 当前未处理：23 条
-├── 超期未处理：4 条（🔴 需关注）
+├── 当前未处理：23 条（历史遗留 8）
+├── 超期未处理：4 条（历史遗留 3）
 └── 今日新增：5 条
 
 待督促人员：
@@ -441,23 +496,45 @@ GET /api/dashboard/developer/issues // 待处理 Issue 列表（支持排序、�
 ├── 李四：6 条（1 条超期）
 └── 王五：9 条（全部正常）
 
+历史遗留概览（可折叠）：
+├── 涉及 3 个项目
+├── 最早距今 45 天
+└── 严重：2 / 高危：3 / 中危：2 / 低危：1
+
 [查看项目报告] [导出 Excel]
 ```
+
+**展示规则**：
+- 主数字 = 活跃数，历史遗留 inline 展示在括号中。
+- 超期 badge 同时展示活跃超期数和历史遗留超期数。
+- 历史遗留概览面板可折叠，调用 `/notification-global-settings/preview` 接口展示影响范围。
 
 ### 9.2 管理员全局大盘
 
 ```
 全平台概览
 ├── 今日新增 Issue：127 条
-├── 当前待处理：342 条
-├── 超期未处理：45 条（🔴）
+├── 当前待处理：342 条（历史遗留 128）
+├── 超期未处理：45 条（历史遗留 18）
 ├── 7 天闭环率：78%
 ├── 闭环速度中位数：1.2 天
 └── 警报：
-    ├── 项目 payment-service 积压 89 条 ⚠️
+    ├── 项目 payment-service 积压 89 条（历史遗留 67） ⚠️
     ├── 项目 opencode-prod 的 IM 推送失败 2 天 ⚠️
     └── 规则 nil-guard 误触发率过高 ⚠️
+
+历史遗留概览（可折叠）：
+├── 历史遗留总数：128 条
+├── 涉及项目：12 个
+├── 最早距今：45 天
+└── 严重：15 / 高危：30 / 中危：45 / 低危：38
 ```
+
+**展示规则**：
+- KPI 卡片的总待处理/超期数字后 inline 展示历史遗留数。
+- 积压告警列表中展示活跃 pending 和超期，历史遗留 inline。
+- 历史遗留概览面板可折叠，从 `notification_global_settings` 读取 baseline 后调用 preview API。
+- 效率指标（闭环率、闭环速度）不区分活跃/遗留。
 
 ---
 
@@ -529,7 +606,7 @@ POST   /api/notifications/read-all
 ### 12.2 开发者工作台
 
 ```
-GET    /api/dashboard/developer
+GET    /api/dashboard/developer?show_legacy=0&page=1&page_size=20
 GET    /api/dashboard/developer/issues?sort=risk&severity=
 ```
 
@@ -538,6 +615,14 @@ GET    /api/dashboard/developer/issues?sort=risk&severity=
 ```
 GET    /api/dashboard/project/:project_id
 GET    /api/dashboard/admin/global
+```
+
+### 12.4 数据活跃基准时间（后台管理）
+
+```
+GET    /api/notification-global-settings              // 读取当前 baseline
+PUT    /api/notification-global-settings               // 修改 baseline（admin only）
+GET    /api/notification-global-settings/preview?baseline=ISO8601  // 预览影响范围
 ```
 
 ### 12.4 项目环节负责人（后台管理）
@@ -621,6 +706,12 @@ POST   /api/admin/notifiers
 - [ ] 工作日/节假日工具函数 + 后台配置
 - [ ] IM 投递日志与失败监控
 - [ ] 全量回归测试（任务重试场景、指纹匹配场景、升级场景）
+- [x] `notification_global_settings` 表设计 + 初始化（id=1 单行表）
+- [x] Dashboard baseline 分离：统计始终活跃、列表受 `show_legacy` 控制
+- [x] 开发者工作台 frontend：Toggle「展示历史遗留问题」+ 活跃/遗留 compact UI
+- [x] 管理员全局大盘：KPI inline 历史遗留 + 可折叠遗留概览面板
+- [x] 数据活跃基准时间配置迁移：从 `notification-rules.html` 迁移到 `settings.html` 系统配置 Tab
+- [x] 近4周趋势数据修复：最近一周 `weekEnd` 从截断变为 `time.Now()`
 
 ---
 

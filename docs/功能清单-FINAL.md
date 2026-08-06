@@ -10,6 +10,7 @@
 
 1. [项目概述](#1-项目概述)
 2. [首页统计仪表板](#2-首页统计仪表板)
+   - [工作台 Dashboard](#工作台-dashboard)
 3. [MR 统计](#3-mr-统计)
 4. [MR 审查记录](#4-mr-审查记录)
 5. [用户与认证管理](#5-用户与认证管理)
@@ -132,7 +133,63 @@ CodeGuard（代码智能门禁）是一个通过 GitLab Webhook 触发 AI 代码
 
 ---
 
-## 3. MR 统计
+## 工作台 Dashboard
+
+面向不同角色的专属工作台，支持活跃/历史遗留数据分离展示。
+
+### 3.1 数据活跃基准时间
+
+| 功能 | 说明 | 实现状态 |
+|------|------|----------|
+| 基准时间配置 | `settings.html` 系统配置 Tab 内「数据活跃基准时间」卡片，独立保存至 `notification_global_settings` 表 | ✅ |
+| 配置入口迁移 | 原 `notification-rules.html` 中的 baseline 面板已删除，统一迁移至系统配置 | ✅ |
+| 影响预览 | 保存前可调 `GET /notification-global-settings/preview?baseline=` 预览影响范围 | ✅ |
+| 清除操作 | 支持清除基准时间，清除后所有数据视为活跃 | ✅ |
+| 操作人追溯 | 记录最后修改人 `baseline_set_by`，API 返回时 `display_name` 为空则 fallback 到 `username` | ✅ |
+
+### 3.2 开发者工作台
+
+`developer-dashboard.html` 为开发者角色默认首页。
+
+| 功能 | 说明 | 实现状态 |
+|------|------|----------|
+| Severity 四宫格 | 严重/高危/中危/低危，主数字展示**活跃数**；存在历史遗留时 inline 展示 `(历史遗留 N)` | ✅ |
+| 本周统计 | 收到/已闭环/待处理/平均闭环；其中「待处理」展示**活跃数** | ✅ |
+| 最早未处理距今 | 查询**活跃 Issue** 中最早的一条 | ✅ |
+| 团队排名 | 基于近30天闭环率，**不区分**活跃/遗留 | ✅ |
+| 质量趋势（近4周） | 每周收到/闭环/待处理，统计**全量数据** | ✅ |
+| Toggle 开关 | 「展示历史遗留问题」仅控制 Issue 列表；默认关闭（只展示活跃） | ✅ |
+| Issue 列表 | 默认只展示活跃 Issue；开启后展示全部，历史遗留 Issue 显示灰色徽章 | ✅ |
+| 行内快捷操作 | 已处理/误报/忽略，无需进入详情 | ✅ |
+| 无基准提示 | 未设置基准时间时，底部提示条引导前往系统配置 | ✅ |
+
+### 3.3 项目负责人工作台
+
+`project-dashboard.html` 展示项目维度的质量概览。
+
+| 功能 | 说明 | 实现状态 |
+|------|------|----------|
+| 质量健康度 | 基于活跃 pending + 超期计算 | ✅ |
+| 核心指标横排 | 待处理/严重/高危/7天闭环率/平均闭环；待处理/严重/高危 inline 展示历史遗留数 | ✅ |
+| 超期 badge | 同时展示活跃超期数和历史遗留超期数 | ✅ |
+| 历史遗留总览 | 可折叠面板，展示该项目历史遗留总数 | ✅ |
+
+### 3.4 管理员全局大盘
+
+`admin-dashboard.html` 全局视角。
+
+| 功能 | 说明 | 实现状态 |
+|------|------|----------|
+| KPI 卡片 | 今日新增/总待处理/超期/今日归档/今日升级；总待处理和超期 inline 展示历史遗留数 | ✅ |
+| Issue 状态分布 | 饼图展示 pending / pending_inherited / resolved / false_positive / ignored / auto_filtered | ✅ |
+| 积压告警 | 高 pending 项目列表，inline 展示历史遗留数 | ✅ |
+| 待处理 TOP10 项目 | 按活跃 pending 排序，inline 展示历史遗留数 | ✅ |
+| 历史遗留概览 | 可折叠面板，显示历史遗留总数/涉及项目/最早距今/severity 分布 | ✅ |
+| 效率指标 | 7天闭环率、闭环速度中位数；**不区分**活跃/遗留 | ✅ |
+
+---
+
+## 4. MR 统计
 
 `mr-stats.html` 为独立的 MR 聚合统计页面。
 
@@ -166,9 +223,9 @@ CodeGuard（代码智能门禁）是一个通过 GitLab Webhook 触发 AI 代码
 
 ---
 
-## 4. MR 审查记录
+## 5. MR 审查记录
 
-### 4.1 记录列表（卡片视图）
+### 5.1 记录列表（卡片视图）
 
 #### 卡片字段
 
@@ -205,7 +262,7 @@ CodeGuard（代码智能门禁）是一个通过 GitLab Webhook 触发 AI 代码
 | 标记 Ready | 调用 GitLab API 移除标题前的 `Draft:` 前缀 | ✅ |
 | 统一分页 | 支持页码跳转及 10/20/50 条/页选择 | ✅ |
 
-### 4.2 详情弹窗
+### 5.2 详情弹窗
 
 | 信息 | 说明 | 实现状态 |
 |------|------|----------|
@@ -216,7 +273,7 @@ CodeGuard（代码智能门禁）是一个通过 GitLab Webhook 触发 AI 代码
 | 关联任务 | 跳转任务详情 | ✅ |
 | 系统信息 | 更新时间、Commit ID | ✅ |
 
-### 4.4 筛选/搜索
+### 5.4 筛选/搜索
 
 | 功能 | 说明 | 实现状态 |
 |------|------|----------|
@@ -230,7 +287,7 @@ CodeGuard（代码智能门禁）是一个通过 GitLab Webhook 触发 AI 代码
 
 ---
 
-## 5. 用户与认证管理
+## 6. 用户与认证管理
 
 ### 5.1 用户登录
 
@@ -271,9 +328,9 @@ CodeGuard（代码智能门禁）是一个通过 GitLab Webhook 触发 AI 代码
 
 ---
 
-## 6. 项目管理
+## 7. 项目管理
 
-### 6.1 项目列表
+### 13.1 项目列表
 
 #### 列表字段
 
@@ -304,7 +361,7 @@ CodeGuard（代码智能门禁）是一个通过 GitLab Webhook 触发 AI 代码
 |------|------|----------|
 | 新建项目 | 手动录入项目 | ✅ |
 
-### 6.2 项目详情页
+### 13.2 项目详情页
 
 | 字段 | 说明 | 实现状态 |
 |------|------|----------|
@@ -313,7 +370,7 @@ CodeGuard（代码智能门禁）是一个通过 GitLab Webhook 触发 AI 代码
 | 关联任务列表 | 展示项目关联的任务信息（**不含 AI 分支列与操作列**） | ✅ |
 | **评审规则配置** | 项目级规则启用/禁用、严重程度覆盖 | ✅ |
 
-### 6.3 评审规则配置
+### 13.3 评审规则配置
 
 项目详情页「评审规则配置」标签页，管理该项目针对规则库的个性化配置。
 
@@ -357,7 +414,7 @@ CodeGuard（代码智能门禁）是一个通过 GitLab Webhook 触发 AI 代码
 | 分页导航 | 上一页/下一页 + 页码快捷跳转 | ✅ |
 | 重置默认 | 一键清除项目自定义配置，回退到全局规则默认状态 | ✅ |
 
-### 6.4 成员映射管理
+### 13.4 成员映射管理
 
 成员映射管理页面。
 
@@ -369,9 +426,9 @@ CodeGuard（代码智能门禁）是一个通过 GitLab Webhook 触发 AI 代码
 
 ---
 
-## 7. 任务管理
+## 8. 任务管理
 
-### 7.1 任务列表
+### 13.1 任务列表
 
 #### 列表字段
 
@@ -411,7 +468,7 @@ CodeGuard（代码智能门禁）是一个通过 GitLab Webhook 触发 AI 代码
 | 按时间筛选 | 今天 / 最近 7 天 / 最近 30 天 / 本月 / 本年 / 自定义 | ✅ |
 | 分页 | 统一分页组件，支持 10/20/50 条/页 | ✅ |
 
-### 7.2 任务执行流程增强
+### 13.2 任务执行流程增强
 
 | 功能 | 说明 | 实现状态 |
 |------|------|----------|
@@ -430,7 +487,7 @@ CodeGuard（代码智能门禁）是一个通过 GitLab Webhook 触发 AI 代码
 | **LLM HTTP 重试** | 502/503/504 + 网络层瞬时错误 + JSON 解析失败触发指数退避重试 | ✅ |
 | **主备全失败聚合错误** | 任务 ErrorMsg 保留每个模型尝试的具体错误细节 | ✅ |
 
-### 7.3 任务详情页布局（v4.5 重构）
+### 13.3 任务详情页布局（v4.5 重构）
 
 #### 顶部主信息卡
 
@@ -452,7 +509,7 @@ CodeGuard（代码智能门禁）是一个通过 GitLab Webhook 触发 AI 代码
 | AI Response | 任务对象的 `ai_response` 字段（同步） | 同步渲染 |
 | Token 用量 | `/token-usage/by-task` | 首次切换到 Token Tab（仅 review 任务） |
 
-### 7.4 结构化评审结果（任务详情）
+### 13.4 结构化评审结果（任务详情）
 
 review 类型任务执行完成后，AI 评审结果按规则拆分为结构化 Issue 列表，支持逐条处理。
 
@@ -487,7 +544,7 @@ review 类型任务执行完成后，AI 评审结果按规则拆分为结构化 
 | 展开详情自动显示 | 点击拒绝按钮时自动展开详情区域，避免输入框被遮挡 | ✅ |
 | 后端日志记录 | Issue 状态变更写入操作日志，格式：`任务ID：N，Issue ID：M 状态变更为 rejected` | ✅ |
 
-### 7.5 任务详情 Token 用量
+### 13.5 任务详情 Token 用量
 
 review 类型任务详情页提供独立的 Token 用量 Tab。
 
@@ -502,9 +559,9 @@ review 类型任务详情页提供独立的 Token 用量 Tab。
 
 ---
 
-## 8. AI 实时对话
+## 9. AI 实时对话
 
-### 8.1 对话弹窗
+### 13.1 对话弹窗
 
 | 功能 | 说明 | 实现状态 |
 |------|------|----------|
@@ -516,7 +573,7 @@ review 类型任务详情页提供独立的 Token 用量 Tab。
 | 白色消息气泡 | 用户消息白色背景（非蓝色） | ✅ |
 | Markdown 渲染 | 完整渲染表格、代码块、标题、列表 | ✅ |
 
-### 8.2 工具卡片渲染
+### 13.2 工具卡片渲染
 
 SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 
@@ -528,7 +585,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | `patch` | patch diff + 应用输出 | ✅ |
 | `skill` | Markdown 格式的技能学习输出 | ✅ |
 
-### 8.3 会话管理
+### 13.3 会话管理
 
 | 功能 | 说明 | 实现状态 |
 |------|------|----------|
@@ -539,9 +596,9 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 
 ---
 
-## 9. 任务资源池
+## 10. 任务资源池
 
-### 9.1 资源池列表
+### 13.1 资源池列表
 
 #### 列表字段
 
@@ -570,7 +627,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 设为默认 | 设为默认资源池 | ✅ |
 | 启用/禁用 | 切换状态 | ✅ |
 
-### 9.2 新建/编辑资源池
+### 13.2 新建/编辑资源池
 
 | 配置项 | 必填 | 说明 | 实现状态 |
 |--------|------|------|----------|
@@ -582,14 +639,14 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 最大并行数 | 是 | 默认 5 | ✅ |
 | 检查间隔秒 | 是 | 默认 5 秒 | ✅ |
 
-### 9.3 资源池详情弹窗
+### 13.3 资源池详情弹窗
 
 | 信息 | 说明 | 实现状态 |
 |------|------|----------|
 | 卡片布局 | 弹窗卡片展示资源池全部字段 | ✅ |
 | 展示字段 | Name、OpenCode Endpoint、Username、Password、API Key、Version、Max Parallel、Check Interval、Status、Is Default、Last Check At、Check Error、Active Jobs | ✅ |
 
-### 9.4 资源池技能详情
+### 13.4 资源池技能详情
 
 | 功能 | 说明 | 实现状态 |
 |------|------|----------|
@@ -602,9 +659,9 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 
 ---
 
-## 10. 大模型管理
+## 11. 大模型管理
 
-### 10.1 大模型列表
+### 13.1 大模型列表
 
 #### 列表字段
 
@@ -638,7 +695,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 连通性检查 | 发送测试请求验证 API 可用性 | ✅ |
 | 查看详情 | 弹窗卡片展示模型完整配置（含角色徽章） | ✅ |
 
-### 10.2 大模型主备切换
+### 13.2 大模型主备切换
 
 | 功能 | 说明 | 实现状态 |
 |------|------|----------|
@@ -649,7 +706,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | **失败降级** | 主模型调用失败（非 2xx）时自动尝试备用模型，记录实际使用的模型 | ✅ |
 | **角色互斥** | 主模型和备用模型互斥，radio 单选组控制 | ✅ |
 
-### 10.3 大模型健康检查守护进程
+### 13.3 大模型健康检查守护进程
 
 | 功能 | 说明 | 实现状态 |
 |------|------|----------|
@@ -660,7 +717,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 状态变化追踪 | 记录状态变化时间 status_changed_at | ✅ |
 | 告警冷却 | 支持告警冷却期，避免重复告警 | ✅ |
 
-### 10.4 大模型详情弹窗
+### 13.4 大模型详情弹窗
 
 | 信息 | 说明 | 实现状态 |
 |------|------|----------|
@@ -670,9 +727,9 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 
 ---
 
-## 11. 项目模板管理
+## 12. 项目模板管理
 
-### 11.1 模板列表
+### 13.1 模板列表
 
 | 字段 | 说明 | 实现状态 |
 |------|------|----------|
@@ -682,7 +739,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 关联项目数 | 使用此模板的项目数量 | ✅ |
 | 创建时间 | 创建时间戳 | ✅ |
 
-### 11.2 支持的 Prompt 变量
+### 13.2 支持的 Prompt 变量
 
 | 变量 | 说明 | 实现状态 |
 |------|------|----------|
@@ -694,7 +751,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | `{{DEST_BRANCH}}` | 目标分支名 | ✅ |
 | `{{AI_BRANCH}}` | AI 创建的分支名 | ✅ |
 
-### 11.3 列表操作
+### 13.3 列表操作
 
 | 操作 | 说明 | 实现状态 |
 |------|------|----------|
@@ -702,7 +759,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 删除 | 删除模板 | ✅ |
 | 克隆 | 基于现有模板复制 | ✅ |
 
-### 11.4 AI 评审提示词格式规范
+### 13.4 AI 评审提示词格式规范
 
 | 规范项 | 说明 | 实现状态 |
 |--------|------|----------|
@@ -711,9 +768,9 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 
 ---
 
-## 12. 企业微信通知
+## 13. 企业微信通知
 
-### 12.1 通知场景
+### 13.1 通知场景
 
 | 场景 | 说明 | 实现状态 |
 |------|------|----------|
@@ -722,7 +779,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 任务超时 | 通知项目 MR 作者 | ✅ |
 | 资源池异常 | 通知管理员 | ✅ |
 
-### 12.2 通知配置
+### 13.2 通知配置
 
 | 字段 | 说明 | 实现状态 |
 |------|------|----------|
@@ -733,7 +790,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 关联项目 | 可绑定到具体项目 | ✅ |
 | 测试按钮 | 发送测试消息 | ✅ |
 
-### 12.3 列表操作
+### 13.3 列表操作
 
 | 操作 | 说明 | 实现状态 |
 |------|------|----------|
@@ -744,11 +801,11 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 
 ---
 
-## 13. 邮件通知
+## 14. 邮件通知
 
 独立的 SMTP 配置与邮件收件人管理模块。
 
-### 13.1 SMTP 配置
+### 22.1 SMTP 配置
 
 | 字段 | 说明 | 实现状态 |
 |------|------|----------|
@@ -759,7 +816,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 启用 TLS | STARTTLS 开关 | ✅ |
 | 测试发送 | 发送测试邮件验证配置 | ✅ |
 
-### 13.2 邮件认证
+### 22.2 邮件认证
 
 | 功能 | 说明 | 实现状态 |
 |------|------|----------|
@@ -767,7 +824,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 纯 TCP + textproto | 自定义 SMTP 客户端，兼容不支持 PLAIN 的服务器 | ✅ |
 | STARTTLS | 支持 TLS 升级 | ✅ |
 
-### 13.3 收件人管理
+### 22.3 收件人管理
 
 | 字段 | 说明 | 实现状态 |
 |------|------|----------|
@@ -777,7 +834,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 启用状态 | 是否接收邮件 | ✅ |
 | 快速切换 | 点击状态徽章直接切换启用/禁用，无需打开编辑行 | ✅ |
 
-### 13.4 报告发送分组
+### 22.4 报告发送分组
 
 | 功能 | 说明 | 实现状态 |
 |------|------|----------|
@@ -796,11 +853,11 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 
 ---
 
-## 14. 报告管理
+## 15. 报告管理
 
 自动生成并发送周报/月报邮件的完整管理模块。
 
-### 14.1 报告配置
+### 22.1 报告配置
 
 | 字段 | 说明 | 实现状态 |
 |------|------|----------|
@@ -812,7 +869,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | Cron 表达式 | 自动生成：`0 m h * * dow` / `0 m h dom * *` | ✅ |
 | 热重载 | 保存配置后立即重载定时任务，无需重启服务 | ✅ |
 
-### 14.2 并发安全
+### 22.2 并发安全
 
 | 功能 | 说明 | 实现状态 |
 |------|------|----------|
@@ -820,7 +877,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | EntryID 追踪 | `map[string]cron.EntryID]` 管理 weekly/monthly 两个定时器 | ✅ |
 | 单实例要求 | 多实例部署会导致重复发送，需确保单实例运行 cron | ✅ |
 
-### 14.3 报告数据时间对齐
+### 22.3 报告数据时间对齐
 
 | 功能 | 说明 | 实现状态 |
 |------|------|----------|
@@ -828,7 +885,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 月报周期 | 最近 30 个自然日（00:00 对齐） | ✅ |
 | 周号计算 | 使用当前日期 ISOWeek，避免显示偏差 | ✅ |
 
-### 14.4 报告内容（8 宫格 KPI）
+### 22.4 报告内容（8 宫格 KPI）
 
 | 区块 | 内容 | 实现状态 |
 |------|------|----------|
@@ -845,7 +902,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 
 > **注**：发送时按「发送分组」过滤收件人，系统配置中 `send_groups` JSON 数组控制报告默认发送的分组列表。
 
-### 14.5 Outlook 2016 兼容邮件模板
+### 22.5 Outlook 2016 兼容邮件模板
 
 | 特性 | 说明 | 实现状态 |
 |------|------|----------|
@@ -856,7 +913,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 固定宽度 | 外容器 `width="900"`，内容区 `width="852"` | ✅ |
 | 无渐变/圆角 | 纯色背景、无 border-radius | ✅ |
 
-### 14.6 报告日志管理
+### 22.6 报告日志管理
 
 | 字段 | 说明 | 实现状态 |
 |------|------|----------|
@@ -867,7 +924,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 状态 | sent_success / sent_failed / generated_success / generated_failed | ✅ |
 | 创建时间 | 生成时间 | ✅ |
 
-### 14.7 报告操作
+### 22.7 报告操作
 
 | 操作 | 说明 | 实现状态 |
 |------|------|----------|
@@ -880,9 +937,9 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 
 ---
 
-## 15. 系统管理
+## 16. 系统管理
 
-### 15.1 操作日志
+### 22.1 操作日志
 
 | 字段 | 说明 | 实现状态 |
 |------|------|----------|
@@ -899,7 +956,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 - 支持清理过期日志
 - **用户关联**：记录操作人用户 ID，接口返回中关联 `username` 字段展示
 
-### 15.2 System Configuration
+### 22.2 System Configuration
 
 | Configuration Item | Default Value | Description | Implemented |
 |--------|------|---------|----------|
@@ -941,7 +998,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 
 > **热加载**：Web 端保存上述配置项后立即生效（TTL 5min + cron 1min 主动刷新）。无需重启服务。
 
-### 15.3 System Info
+### 22.3 System Info
 
 | Item | Description | Implemented |
 |--------|------|---------|
@@ -955,7 +1012,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | Running Tasks | Tasks in running status | ✅ |
 | Failed Tasks | Tasks in failed status | ✅ |
 
-### 15.4 Background Cron Jobs
+### 22.4 Background Cron Jobs
 
 | Job Name | Interval | Description | Implemented |
 |----------|------|---------|----------|
@@ -968,11 +1025,11 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 
 ---
 
-## 16. 数据洞察：Token 用量监控
+## 17. 数据洞察：Token 用量监控
 
 `token-usage.html` 是完整的 Token 用量监控页面（仅 admin 可见）。系统通过 `LLMCallLog` 表对每次 LLM 调用按行记录，含 prompt/completion/cached tokens、耗时、状态、错误信息等完整审计字段。
 
-### 19.1 8 宫格 KPI 卡片
+### 22.1 8 宫格 KPI 卡片
 
 | 指标 | 说明 |
 |------|------|
@@ -985,7 +1042,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 成功率 | success / total 百分比 |
 | 当前任务 | 关联任务数（去重） |
 
-### 19.2 多维趋势图
+### 22.2 多维趋势图
 
 | 图表 | 说明 |
 |------|------|
@@ -993,7 +1050,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 模型分布（环形图） | 按 `model_name` 维度聚合调用次数占比 |
 | 调用方分布 | 按 `caller` 字段（LLMService / PrimaryFallback / JSONRetry 等）中文化展示 |
 
-### 19.3 Top 排行
+### 22.3 Top 排行
 
 | 维度 | 说明 |
 |------|------|
@@ -1001,7 +1058,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 模型 TOP 10 | 按 token 用量倒序的模型排行 |
 | 用户 TOP 10 | 按 token 用量倒序的作者排行 |
 
-### 19.4 调用明细
+### 22.4 调用明细
 
 | 功能 | 说明 |
 |------|------|
@@ -1011,11 +1068,11 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 字段 | 时间 / 模型 / 调用方（中文）/ 输入·输出 / 总计 / 状态·耗时（紧凑 6 列） |
 | **任务详情集成** | 单任务详情页 Token Tab 复用同一接口（`/token-usage/by-task`），支持任务维度筛选 |
 
-### 19.5 首页摘要
+### 22.5 首页摘要
 
 `statistics.html` 首页对 admin 用户展示 Token 用量摘要块（4 个 KPI + 趋势小图），不展示完整监控页。
 
-### 19.6 异步记录机制
+### 22.6 异步记录机制
 
 | 维度 | 设计 |
 |------|------|
@@ -1027,11 +1084,11 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 
 ---
 
-## 17. 数据洞察：规则命中统计
+## 18. 数据洞察：规则命中统计
 
 `rule-stats.html` 是规则命中统计页面（admin/user 均可见）。基于 `ReviewIssue` 表（含 soft delete + 复合索引 `(rule_code, created_at)`）聚合规则命中率、修复率、误报率等核心指标。
 
-### 20.1 4 个 KPI 卡
+### 22.1 4 个 KPI 卡
 
 | 指标 | 说明 |
 |------|------|
@@ -1040,7 +1097,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 涉及开发者 | 命中的不同作者数（去重） |
 | 修复率（+误报率+待处理率） | 修复率 = accepted / total；误报率 = rejected / total；待处理率 = pending / total；三者之和 = 100% |
 
-### 20.2 趋势 + 分布
+### 22.2 趋势 + 分布
 
 | 图表 | 说明 |
 |------|------|
@@ -1049,7 +1106,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 分类分布（饼图） | 按 `category` 字段聚合占比（中文分类名） |
 | 严重级别分布（饼图） | 按 `severity` 字段聚合（critical/high/medium/low/info → 严重/高/中/低/提示） |
 
-### 20.3 TOP 10 规则表格
+### 22.3 TOP 10 规则表格
 
 | 列 | 说明 |
 |------|------|
@@ -1061,7 +1118,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 修复率 | accepted / 命中数 百分比 |
 | 操作 | 钻取按钮 → 进入单规则详情 |
 
-### 20.4 单规则钻取（URL 参数 `?rule=XXX&range=YYY`）
+### 22.4 单规则钻取（URL 参数 `?rule=XXX&range=YYY`）
 
 | 模块 | 说明 |
 |------|------|
@@ -1072,7 +1129,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 作者 TOP 5 | 命中该规则的 TOP 5 作者 |
 | 最近命中分页 | 最近命中 issue 列表 + 代码片段（`<pre>` 截断 800 字符） |
 
-### 20.5 时间范围
+### 22.5 时间范围
 
 | 范围 | 说明 |
 |------|------|
@@ -1082,17 +1139,17 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 90d | 按天（90 桶） |
 | 全部 | 按天（历史全部） |
 
-### 20.6 规则库联动
+### 22.6 规则库联动
 
 `review-rules.html` 规则卡片显示"近 7 天命中 N"，链接指向 `rule-stats.html?rule=XXX&range=7d` 自动打开对应规则的钻取抽屉。
 
 ---
 
-## 18. 规则孵化台
+## 19. 规则孵化台
 
 `incubator.html` 是规则孵化台的完整管理页面（admin 可见）。系统通过 6 节点流水线从 Issue 自动聚类提炼候选规则，经 LLM 智能提炼、相似检测、模拟测试后发布上线。
 
-### 18.1 6 节点流水线可视化
+### 22.1 6 节点流水线可视化
 
 | 节点 | 说明 | 实现状态 |
 |------|------|----------|
@@ -1114,7 +1171,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 节点点击 | 点击节点展开右侧详情面板 | ✅ |
 | 自动重连 | 切换 Tab 后 SSE 自动恢复连接 | ✅ |
 
-### 18.2 聚类分析
+### 22.2 聚类分析
 
 | 功能 | 说明 | 实现状态 |
 |------|------|----------|
@@ -1124,7 +1181,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 最大候选数 | 可配置单次最多生成候选规则数（默认 20） | ✅ |
 | 进度面板 | 聚类期间实时展示各簇处理进度 | ✅ |
 
-### 18.3 候选规则管理
+### 22.3 候选规则管理
 
 #### 列表展示
 
@@ -1163,7 +1220,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 相似检测未通过 | `similar_passed == false` | ✅ |
 | 模拟测试未通过 | `test_results.accuracy < 0.5` | ✅ |
 
-### 18.4 智能提炼
+### 22.4 智能提炼
 
 | 功能 | 说明 | 实现状态 |
 |------|------|----------|
@@ -1172,7 +1229,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 置信度计算 | 基于 Prompt 完整度 / 名称描述质量 / 模拟测试准确率 / 相似检测结果动态计算 | ✅ |
 | 异步向量化 | 提炼完成后异步触发 Embedding 生成 | ✅ |
 
-### 18.5 相似检测
+### 22.5 相似检测
 
 #### 双重检测策略
 
@@ -1198,7 +1255,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | `similar_passed` | `true` = 无相似规则通过；`false` = 存在高相似规则 | ✅ |
 | `similar_rules` | JSON 数组，存储 Top5 相似规则详情 | ✅ |
 
-### 18.6 模拟测试
+### 22.6 模拟测试
 
 | 功能 | 说明 | 实现状态 |
 |------|------|----------|
@@ -1207,7 +1264,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 结果存储 | `test_results` JSON 存储 accuracy / cases / timestamp | ✅ |
 | 置信度联动 | 测试准确率直接参与置信度评分计算 | ✅ |
 
-### 18.7 向量投影（3D 可视化）
+### 22.7 向量投影（3D 可视化）
 
 | 功能 | 说明 | 实现状态 |
 |------|------|----------|
@@ -1217,7 +1274,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 悬浮提示 | 展示规则 ID、名称、代码、相似度、分类、严重级别、Prompt 片段 | ✅ |
 | 文本换行 | Tooltip 强制自动换行，防止长文本溢出 | ✅ |
 
-### 18.8 Embedding 引擎配置
+### 22.8 Embedding 引擎配置
 
 | 功能 | 说明 | 实现状态 |
 |------|------|----------|
@@ -1228,7 +1285,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 增量同步 | 规则 Create / Update / Publish 时自动异步触发向量化 | ✅ |
 | 进度持久化 | 从 `review_rule_vectors` 表实时查询，服务重启不丢失 | ✅ |
 
-### 18.9 数据表
+### 22.9 数据表
 
 | 表名 | 说明 |
 |------|------|
@@ -1240,9 +1297,9 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 
 ---
 
-## 19. 前端体验：主题与导航
+## 20. 前端体验：主题与导航
 
-### 21.1 主题系统
+### 22.1 主题系统
 
 | 功能 | 说明 |
 |------|------|
@@ -1253,7 +1310,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 防 FOUC | `<head>` 顶部注入 `theme.js?v=1`，在 CSS 加载前应用主题 |
 | API | `window.ThemeManager.get()/set()/toggle()/on('change', cb)` |
 
-### 21.2 CSS 变量设计系统
+### 22.2 CSS 变量设计系统
 
 | 变量类别 | 变量 |
 |----------|------|
@@ -1263,7 +1320,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | 侧边栏 | `--cg-sidebar-bg` (渐变) / `--cg-sidebar-text` / `--cg-sidebar-item-hover` / `--cg-sidebar-item-active` |
 | 阴影 / 圆角 / 过渡 | `--cg-shadow-sm/md/lg` / `--cg-radius-sm/md/lg/xl` / `--cg-transition` (200ms cubic-bezier) |
 
-### 21.3 菜单架构（6 折叠组 admin/user 差异化）
+### 22.3 菜单架构（6 折叠组 admin/user 差异化）
 
 | 顶层 | admin 子项 | user 子项 |
 |------|------------|-----------|
@@ -1274,7 +1331,7 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 | **通知管理** | 企业微信 / 邮件报告 / 成员映射 / 报告管理 | （隐藏） |
 | **系统管理** | 项目管理 / 项目模板 / 资源池 / 大模型 / 系统设置 | （隐藏） |
 
-### 21.4 菜单交互细节
+### 22.4 菜单交互细节
 
 | 功能 | 说明 |
 |------|------|
@@ -1286,9 +1343,9 @@ SSE `part_updated` 事件触发工具卡片实时更新，支持以下工具：
 
 ---
 
-## 20. 数据模型定义
+## 21. 数据模型定义
 
-### 20.1 User (User)
+### 22.1 User (User)
 
 ```go
 type User struct {
@@ -1301,7 +1358,7 @@ type User struct {
 }
 ```
 
-### 20.2 Token (Token)
+### 22.2 Token (Token)
 
 ```go
 type Token struct {
@@ -1314,7 +1371,7 @@ type Token struct {
 }
 ```
 
-### 20.3 Project (Project)
+### 22.3 Project (Project)
 
 ```go
 type Project struct {
@@ -1346,7 +1403,7 @@ type Project struct {
 }
 ```
 
-### 20.4 Task (Task)
+### 22.4 Task (Task)
 
 ```go
 type TaskStatus string
@@ -1395,7 +1452,7 @@ type Task struct {
 }
 ```
 
-### 20.5 Project Template (ProjectTemplate)
+### 22.5 Project Template (ProjectTemplate)
 
 ```go
 type ProjectTemplate struct {
@@ -1408,7 +1465,7 @@ type ProjectTemplate struct {
 }
 ```
 
-### 20.6 Resource Pool (ResourcePool)
+### 22.6 Resource Pool (ResourcePool)
 
 ```go
 type PoolStatus string
@@ -1441,7 +1498,7 @@ type ResourcePool struct {
 }
 ```
 
-### 20.7 LLM Model (LLMModel)
+### 22.7 LLM Model (LLMModel)
 
 ```go
 type LLMModel struct {
@@ -1475,7 +1532,7 @@ type LLMModel struct {
 }
 ```
 
-### 20.8 WeCom Notifier (WeComNotifier)
+### 22.8 WeCom Notifier (WeComNotifier)
 
 ```go
 type WeComNotifier struct {
@@ -1492,7 +1549,7 @@ type WeComNotifier struct {
 }
 ```
 
-### 20.9 Operation Log (OperationLog)
+### 22.9 Operation Log (OperationLog)
 
 ```go
 type OperationLog struct {
@@ -1507,7 +1564,7 @@ type OperationLog struct {
 }
 ```
 
-### 20.10 System Config (SystemConfig)
+### 22.10 System Config (SystemConfig)
 
 ```go
 type SystemConfig struct {
@@ -1561,7 +1618,7 @@ type SystemConfig struct {
 }
 ```
 
-### 20.11 MR Review Log (MergeRequestReviewLog) (this app DB)
+### 22.11 MR Review Log (MergeRequestReviewLog) (this app DB)
 
 ```go
 type MergeRequestReviewLog struct {
@@ -1586,7 +1643,7 @@ type MergeRequestReviewLog struct {
 }
 ```
 
-### 20.12 SMTP Config (SMTPConfig)
+### 22.12 SMTP Config (SMTPConfig)
 
 ```go
 type SMTPConfig struct {
@@ -1600,7 +1657,7 @@ type SMTPConfig struct {
 }
 ```
 
-### 19.13 Report Config (ReportConfig)
+### 22.13 Report Config (ReportConfig)
 
 ```go
 type ReportConfig struct {
@@ -1618,7 +1675,7 @@ type ReportConfig struct {
 }
 ```
 
-### 19.15 Report Recipient (ReportRecipient)
+### 22.15 Report Recipient (ReportRecipient)
 
 ```go
 type ReportRecipient struct {
@@ -1632,7 +1689,7 @@ type ReportRecipient struct {
 }
 ```
 
-### 19.16 Review Rule (ReviewRule)
+### 22.16 Review Rule (ReviewRule)
 
 全局评审规则库，多语言内置规则。
 
@@ -1654,7 +1711,7 @@ type ReviewRule struct {
 }
 ```
 
-### 19.17 Project Review Config (ProjectReviewConfig)
+### 22.17 Project Review Config (ProjectReviewConfig)
 
 项目级规则配置，覆盖全局规则状态与严重程度。
 
@@ -1670,7 +1727,7 @@ type ProjectReviewConfig struct {
 }
 ```
 
-### 19.18 Task Review Rule (TaskReviewRule)
+### 22.18 Task Review Rule (TaskReviewRule)
 
 任务执行时实际使用的评审规则快照（包含截断记录）。
 
@@ -1690,7 +1747,7 @@ type TaskReviewRule struct {
 }
 ```
 
-### 19.19 Structured Review Result (Task 扩展字段)
+### 22.19 Structured Review Result (Task 扩展字段)
 
 任务表扩展字段，存储结构化评审结果。
 
@@ -1705,7 +1762,7 @@ type Task struct {
 }
 ```
 
-### 19.20 Review Category (评审分类字典)
+### 22.20 Review Category (评审分类字典)
 
 评审分类字典表（rule-stats 通过 LEFT JOIN 拿到中文分类名）。
 
@@ -1721,7 +1778,7 @@ type ReviewCategory struct {
 }
 ```
 
-### 19.21 Review Issue (评审 Issue 主表)
+### 22.21 Review Issue (评审 Issue 主表)
 
 AI 结构化评审产出的 Issue 主表，规则命中统计的数据源。
 
@@ -1755,7 +1812,7 @@ type ReviewIssue struct {
 >
 > **soft delete 策略**：`gorm.DeletedAt` 启用后，`engine/persistor.go` 的 `Delete` 操作自动变为 soft delete（保留记录供审计与统计）；规则统计接口使用**默认 scope**（与任务详情列表一致），避免重试场景下软删记录与新记录重复统计。
 
-### 19.22 LLM Call Log (LLM 调用流水)
+### 22.22 LLM Call Log (LLM 调用流水)
 
 全量 LLM 调用的按行审计日志，支撑 Token 用量监控与成本核算。
 
@@ -1786,9 +1843,9 @@ type LLMCallLog struct {
 
 ---
 
-## 21. 核心业务流程
+## 22. 核心业务流程
 
-### 20.1 GitLab Webhook Processing Flow
+### 22.1 GitLab Webhook Processing Flow
 
 ```
 GitLab sends "Note Hook" POST request
@@ -1830,7 +1887,7 @@ GitLab sends "Note Hook" POST request
 [Notify Layer] Post AI comment to MR
 ```
 
-### 20.2 AI Real-time Conversation Flow
+### 22.2 AI Real-time Conversation Flow
 
 ```
 User clicks [AI Conversation] button
@@ -1851,7 +1908,7 @@ SSE receives NDJSON events:
     - finish: AI response complete
 ```
 
-### 20.3 MR Status Sync Flow
+### 22.3 MR Status Sync Flow
 
 ```
 Background cron (per mr_sync_interval_sec, default 60s)
@@ -1866,7 +1923,7 @@ For each opened MR:
 Update SyncedAt = now()
 ```
 
-### 20.4 Task Timeout Flow
+### 22.4 Task Timeout Flow
 
 ```
 Cron (every 10 sec)
@@ -1881,7 +1938,7 @@ Update Task:
     - ErrorMsg = "Task timeout"
 ```
 
-### 20.5 Score Threshold Trigger Flow
+### 22.5 Score Threshold Trigger Flow
 
 ```
 MR change triggers AI review
@@ -1902,7 +1959,7 @@ Conditions:
     - Post result to MR
 ```
 
-### 20.6 Report Generation & Send Flow
+### 22.6 Report Generation & Send Flow
 
 ```
 Save ReportConfig
@@ -1923,7 +1980,7 @@ Write ReportLog
 If SendEnabled: send emails
 ```
 
-### 20.7 AI Review + LLM Primary/Backup Switching Flow
+### 22.7 AI Review + LLM Primary/Backup Switching Flow
 
 ```
 GitLab MR Webhook → ExecuteAIReviewTask
@@ -1946,7 +2003,7 @@ Any backup success → Record UsedModelID
 None success → Task failed
 ```
 
-### 20.8 Frontend Auth Intercept Flow
+### 22.8 Frontend Auth Intercept Flow
 
 ```
 Page load → js/auth.js
@@ -1961,9 +2018,9 @@ Override window.fetch:
 
 ---
 
-## 22. 接口清单
+## 23. 接口清单
 
-### 21.1 Auth
+### 22.1 Auth
 
 | Method | Path | Description | Implemented |
 |------|------|------|----------|
@@ -1974,7 +2031,7 @@ Override window.fetch:
 | GET | /api/v1/users/me | Current user info | ✅ |
 | PUT | /api/v1/users/password | Change password | ✅ |
 
-### 21.2 Statistics Dashboard (Home)
+### 22.2 Statistics Dashboard (Home)
 
 | Method | Path | Description | Implemented |
 |------|------|------|----------|
@@ -1986,7 +2043,7 @@ Override window.fetch:
 | GET | /api/v1/dashboard/task-distribution | Task distribution | ✅ |
 | GET | /api/v1/dashboard/token-summary | 首页 Token 用量摘要（admin only） | ✅ |
 
-### 21.3 Token Usage (admin only)
+### 22.3 Token Usage (admin only)
 
 | Method | Path | Description | Implemented |
 |------|------|------|----------|
@@ -1998,7 +2055,7 @@ Override window.fetch:
 | GET | /api/v1/token-usage/calls | 调用明细（分页 + 多维筛选） | ✅ |
 | GET | /api/v1/token-usage/by-task | 单任务 Token 用量（任务详情 Tab 使用） | ✅ |
 
-### 21.4 Rule Stats (规则命中统计)
+### 22.4 Rule Stats (规则命中统计)
 
 | Method | Path | Description | Implemented |
 |------|------|------|----------|
@@ -2006,13 +2063,13 @@ Override window.fetch:
 | GET | /api/v1/rule-stats/by-rule/:code | 单规则钻取（元信息 + KPI + 趋势 + 项目/作者 TOP + 最近命中） | ✅ |
 | GET | /api/v1/rule-stats/recent-issues | 最近命中分页（含代码片段） | ✅ |
 
-### 21.5 MR Statistics
+### 22.5 MR Statistics
 
 | Method | Path | Description | Implemented |
 |------|------|------|----------|
 | GET | /api/v1/mr-review-logs | List (paginated, filtered, aggregated stats) | ✅ |
 
-### 21.6 MR Review Log
+### 22.6 MR Review Log
 
 | Method | Path | Description | Implemented |
 |------|------|------|----------|
@@ -2023,7 +2080,7 @@ Override window.fetch:
 | GET | /api/v1/mr-review-logs/projects | Project dropdown | ✅ |
 | GET | /api/v1/mr-review-logs/authors | Author dropdown | ✅ |
 
-### 21.5 Projects
+### 22.5 Projects
 
 | Method | Path | Description | Implemented |
 |------|------|------|----------|
@@ -2035,7 +2092,7 @@ Override window.fetch:
 | GET | /api/v1/projects/:id/tasks | Project tasks | ✅ |
 | GET | /api/v1/projects/options | Project dropdown (public) | ✅ |
 
-### 21.6 Tasks
+### 22.6 Tasks
 
 | Method | Path | Description | Implemented |
 |------|------|------|----------|
@@ -2051,14 +2108,14 @@ Override window.fetch:
 | GET | /api/v1/tasks/:id/review-comments | List review comments | ✅ |
 | DELETE | /api/v1/tasks/:id/session | Delete OpenCode session (admin) | ✅ |
 
-### 21.7 Webhook
+### 22.7 Webhook
 
 | Method | Path | Description | Implemented |
 |------|------|------|----------|
 | POST | /api/v1/webhooks/gitlab | GitLab Webhook (Note + MR) | ✅ |
 | POST | /api/v1/tasks/callback | Task callback from OpenCode | ✅ |
 
-### 21.8 Templates
+### 22.8 Templates
 
 | Method | Path | Description | Implemented |
 |------|------|------|----------|
@@ -2069,7 +2126,7 @@ Override window.fetch:
 | DELETE | /api/v1/templates/:id | Delete template | ✅ |
 | POST | /api/v1/templates/:id/clone | Clone template | ✅ |
 
-### 21.9 Pools
+### 22.9 Pools
 
 | Method | Path | Description | Implemented |
 |------|------|------|----------|
@@ -2085,7 +2142,7 @@ Override window.fetch:
 | DELETE | /api/v1/pools/:id/default | Unset default | ✅ |
 | GET | /api/v1/pools/:id/skills | Get pool skills | ✅ |
 
-### 21.10 LLM Models
+### 22.10 LLM Models
 
 | Method | Path | Description | Implemented |
 |------|------|------|----------|
@@ -2101,7 +2158,7 @@ Override window.fetch:
 | POST | /api/v1/models/test | Create and test model | ✅ |
 | POST | /api/v1/models/:id/check | API health check | ✅ |
 
-### 21.11 WeCom Notifier
+### 22.11 WeCom Notifier
 
 | Method | Path | Description | Implemented |
 |------|------|------|----------|
@@ -2114,7 +2171,7 @@ Override window.fetch:
 | POST | /api/v1/notifiers/:id/test | Send test message | ✅ |
 | PUT | /api/v1/notifiers/:id/toggle | Enable/disable notifier | ✅ |
 
-### 21.12 Member Mappings
+### 22.12 Member Mappings
 
 | Method | Path | Description | Implemented |
 |------|------|------|----------|
@@ -2126,7 +2183,7 @@ Override window.fetch:
 | GET | /api/v1/member-mappings/git-users | GitLab user list | ✅ |
 | GET | /api/v1/member-mappings/check | Check mapping status | ✅ |
 
-### 21.13 SMTP & Recipients
+### 22.13 SMTP & Recipients
 
 | Method | Path | Description | Implemented |
 |------|------|------|----------|
@@ -2138,7 +2195,7 @@ Override window.fetch:
 | PUT | /api/v1/reports/recipients/:id | Edit recipient | ✅ |
 | DELETE | /api/v1/reports/recipients/:id | Delete recipient | ✅ |
 
-### 21.14 Report Management
+### 22.14 Report Management
 
 | Method | Path | Description | Implemented |
 |------|------|------|----------|
@@ -2148,7 +2205,7 @@ Override window.fetch:
 | POST | /api/v1/reports/preview | Preview report | ✅ |
 | POST | /api/v1/reports/send | Manually send report | ✅ |
 
-### 21.15 Users (Admin)
+### 22.15 Users (Admin)
 
 | Method | Path | Description | Implemented |
 |------|------|------|----------|
@@ -2158,7 +2215,7 @@ Override window.fetch:
 | DELETE | /api/v1/users/:id | Delete user | ✅ |
 | POST | /api/v1/users/:id/reset-password | Reset password | ✅ |
 
-### 21.16 System
+### 22.16 System
 
 | Method | Path | Description | Implemented |
 |------|------|------|----------|
@@ -2170,7 +2227,7 @@ Override window.fetch:
 
 ---
 
-## 23. 技术栈
+## 24. 技术栈
 
 | Layer | Tech | Description |
 |------|------|------|
@@ -2190,9 +2247,9 @@ Override window.fetch:
 
 ---
 
-## 24. 附录：认证与鉴权
+## 25. 附录：认证与鉴权
 
-### 24.1 Auth Flow
+### 25.1 Auth Flow
 
 1. User submits username/password via `/api/v1/login`
 2. Backend verifies with bcrypt
@@ -2200,7 +2257,7 @@ Override window.fetch:
 4. Return Token to frontend
 5. Frontend stores in `localStorage.auth_token`
 
-### 24.2 Authorization Flow
+### 25.2 Authorization Flow
 
 1. `auth.js` globally intercepts all `fetch` calls
 2. API requests auto-inject `Authorization: Bearer <token>`
@@ -2208,7 +2265,7 @@ Override window.fetch:
 4. Backend `Auth()` middleware verifies token
 5. Frontend 401 → auto redirect to login
 
-### 24.3 Whitelist Paths
+### 25.3 Whitelist Paths
 
 | Path Pattern | Description |
 |----------|------|
@@ -2221,7 +2278,7 @@ Override window.fetch:
 | `/health` | 健康检查 |
 | 非 `/api/` 前缀 | 静态文件 |
 
-### 20.4 Sensitive Data Encryption
+### 22.4 Sensitive Data Encryption
 
 | Field | Algorithm | Location | Description |
 |------|----------|----------|------|
