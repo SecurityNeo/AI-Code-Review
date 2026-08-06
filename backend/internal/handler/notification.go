@@ -21,6 +21,18 @@ func NewNotificationHandler() *NotificationHandler {
 	return &NotificationHandler{}
 }
 
+// getNotificationBaseline 读取通知规则生效起点
+func getNotificationBaseline() time.Time {
+	var setting model.NotificationGlobalSetting
+	if err := model.SilentFirst(model.DB, &setting, 1); err != nil {
+		return time.Time{}
+	}
+	if setting.NotificationBaselineAt == nil {
+		return time.Time{}
+	}
+	return *setting.NotificationBaselineAt
+}
+
 // List 站内信列表
 func (h *NotificationHandler) List(c *gin.Context) {
 	user := c.MustGet("user").(model.User)
@@ -165,6 +177,7 @@ func (h *NotificationHandler) GetRule(c *gin.Context) {
 // 管理员可查看所有项目，普通用户仅查看自己负责的项目
 func (h *NotificationHandler) ProjectOwnerDashboard(c *gin.Context) {
 	user := c.MustGet("user").(model.User)
+	baseline := getNotificationBaseline()
 
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
@@ -217,19 +230,23 @@ func (h *NotificationHandler) ProjectOwnerDashboard(c *gin.Context) {
 	}
 
 	type projInfo struct {
-		ID              uint     `json:"id"`
-		Name            string   `json:"name"`
-		ProjectPath     string   `json:"project_path"`
-		GitlabProjectID int      `json:"gitlab_project_id"`
-		Language        string   `json:"language"`
-		StewardCount    int64    `json:"steward_count"`
-		Stewards        []string `json:"stewards"`
-		PendingCount    int64    `json:"pending_count"`
-		CriticalCount   int64    `json:"critical_count"`
-		HighCount       int64    `json:"high_count"`
-		OverdueCount    int64    `json:"overdue_count"`
-		WeekCloseRate   float64  `json:"week_close_rate"`
-		AvgResolveDays  float64  `json:"avg_resolve_days"`
+		ID                      uint     `json:"id"`
+		Name                    string   `json:"name"`
+		ProjectPath             string   `json:"project_path"`
+		GitlabProjectID         int      `json:"gitlab_project_id"`
+		Language                string   `json:"language"`
+		StewardCount            int64    `json:"steward_count"`
+		Stewards                []string `json:"stewards"`
+		PendingCount            int64    `json:"pending_count"`
+		PendingBeforeBaseline   int64    `json:"pending_before_baseline"`
+		CriticalCount           int64    `json:"critical_count"`
+		CriticalBeforeBaseline  int64    `json:"critical_before_baseline"`
+		HighCount               int64    `json:"high_count"`
+		HighBeforeBaseline      int64    `json:"high_before_baseline"`
+		OverdueCount            int64    `json:"overdue_count"`
+		OverdueBeforeBaseline   int64    `json:"overdue_before_baseline"`
+		WeekCloseRate           float64  `json:"week_close_rate"`
+		AvgResolveDays          float64  `json:"avg_resolve_days"`
 	}
 
 	// 查询项目基础信息（用原生模型查询，避免 GORM Scan 兼容性问题）
@@ -292,26 +309,38 @@ func (h *NotificationHandler) ProjectOwnerDashboard(c *gin.Context) {
 			}
 		}
 
-		model.DB.Model(&model.ReviewIssue{}).
+		qp := model.DB.Model(&model.ReviewIssue{}).
 			Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?)", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}).
 			Joins("INNER JOIN tasks ON tasks.id = review_issues.task_id").
-			Where("tasks.project_id = ?", p.ID).
-			Count(&p.PendingCount)
-		model.DB.Model(&model.ReviewIssue{}).
+			Where("tasks.project_id = ?", p.ID)
+		qp.Count(&p.PendingCount)
+		if !baseline.IsZero() {
+			qp.Where("review_issues.original_created_at < ?", baseline).Count(&p.PendingBeforeBaseline)
+		}
+		qc := model.DB.Model(&model.ReviewIssue{}).
 			Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND review_issues.severity = ?", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "critical").
 			Joins("INNER JOIN tasks ON tasks.id = review_issues.task_id").
-			Where("tasks.project_id = ?", p.ID).
-			Count(&p.CriticalCount)
-		model.DB.Model(&model.ReviewIssue{}).
+			Where("tasks.project_id = ?", p.ID)
+		qc.Count(&p.CriticalCount)
+		if !baseline.IsZero() {
+			qc.Where("review_issues.original_created_at < ?", baseline).Count(&p.CriticalBeforeBaseline)
+		}
+		qh := model.DB.Model(&model.ReviewIssue{}).
 			Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND review_issues.severity = ?", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "high").
 			Joins("INNER JOIN tasks ON tasks.id = review_issues.task_id").
-			Where("tasks.project_id = ?", p.ID).
-			Count(&p.HighCount)
-		model.DB.Model(&model.ReviewIssue{}).
+			Where("tasks.project_id = ?", p.ID)
+		qh.Count(&p.HighCount)
+		if !baseline.IsZero() {
+			qh.Where("review_issues.original_created_at < ?", baseline).Count(&p.HighBeforeBaseline)
+		}
+		qo := model.DB.Model(&model.ReviewIssue{}).
 			Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND review_issues.original_created_at < ?", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, overdueSince).
 			Joins("INNER JOIN tasks ON tasks.id = review_issues.task_id").
-			Where("tasks.project_id = ?", p.ID).
-			Count(&p.OverdueCount)
+			Where("tasks.project_id = ?", p.ID)
+		qo.Count(&p.OverdueCount)
+		if !baseline.IsZero() {
+			qo.Where("review_issues.original_created_at < ?", baseline).Count(&p.OverdueBeforeBaseline)
+		}
 
 		var weekCreated, weekClosed int64
 		model.DB.Model(&model.ReviewIssue{}).
@@ -344,8 +373,18 @@ func (h *NotificationHandler) ProjectOwnerDashboard(c *gin.Context) {
 	}
 
 	debugInfo["projects_returned"] = len(projects)
+	baselineStr := ""
+	if !baseline.IsZero() {
+		baselineStr = baseline.Format(time.RFC3339)
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"data":  gin.H{"projects": projects, "total": total, "page": page, "page_size": pageSize},
+		"data": gin.H{
+			"projects":                 projects,
+			"total":                    total,
+			"page":                     page,
+			"page_size":                pageSize,
+			"notification_baseline_at": baselineStr,
+		},
 		"debug": debugInfo,
 	})
 }
@@ -355,21 +394,31 @@ func (h *NotificationHandler) ProjectOwnerDashboard(c *gin.Context) {
 // DeveloperDashboard 开发者工作台数据
 func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 	user := c.MustGet("user").(model.User)
+	baseline := getNotificationBaseline()
 
 	// 待处理统计（包含 pending 和 pending_inherited）
-	var pendingCount, criticalCount, highCount int64
-	model.DB.Model(&model.ReviewIssue{}).
+	var pendingCount, pendingBefore, criticalCount, criticalBefore, highCount, highBefore int64
+	qp := model.DB.Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND status IN (?) AND (owner_id = ? OR current_owner_id = ?)",
-			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID).
-		Count(&pendingCount)
-	model.DB.Model(&model.ReviewIssue{}).
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID)
+	qp.Count(&pendingCount)
+	if !baseline.IsZero() {
+		qp.Where("original_created_at < ?", baseline).Count(&pendingBefore)
+	}
+	qc := model.DB.Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?)",
-			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "critical", user.ID, user.ID).
-		Count(&criticalCount)
-	model.DB.Model(&model.ReviewIssue{}).
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "critical", user.ID, user.ID)
+	qc.Count(&criticalCount)
+	if !baseline.IsZero() {
+		qc.Where("original_created_at < ?", baseline).Count(&criticalBefore)
+	}
+	qh := model.DB.Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?)",
-			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "high", user.ID, user.ID).
-		Count(&highCount)
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "high", user.ID, user.ID)
+	qh.Count(&highCount)
+	if !baseline.IsZero() {
+		qh.Where("original_created_at < ?", baseline).Count(&highBefore)
+	}
 
 	// 本周统计（简化：近7天）
 	var weekReceived, weekResolved int64
@@ -442,6 +491,7 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 		OwnerID              *uint      `json:"owner_id"`
 		CurrentOwnerID       *uint      `json:"current_owner_id"`
 		OriginalCreatedAt    *time.Time `json:"original_created_at"`
+		IsBeforeBaseline     bool       `json:"is_before_baseline"`
 		EscalationLevel      int        `json:"escalation_level"`
 		CreatedAt            time.Time  `json:"created_at"`
 		ProjectName          string     `json:"project_name"`
@@ -476,6 +526,7 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 			OwnerID:              raw.OwnerID,
 			CurrentOwnerID:       raw.CurrentOwnerID,
 			OriginalCreatedAt:    raw.OriginalCreatedAt,
+			IsBeforeBaseline:     !baseline.IsZero() && raw.OriginalCreatedAt != nil && raw.OriginalCreatedAt.Before(baseline),
 			EscalationLevel:      raw.EscalationLevel,
 			CreatedAt:            raw.CreatedAt,
 			ProjectName:          raw.ProjectName,
@@ -484,15 +535,21 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 	}
 
 	// 待处理 Issue severity 分组统计 + 最早未处理距今
-	var mediumCount, lowCount int64
-	model.DB.Model(&model.ReviewIssue{}).
+	var mediumCount, mediumBefore, lowCount, lowBefore int64
+	qm := model.DB.Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?)",
-			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "medium", user.ID, user.ID).
-		Count(&mediumCount)
-	model.DB.Model(&model.ReviewIssue{}).
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "medium", user.ID, user.ID)
+	qm.Count(&mediumCount)
+	if !baseline.IsZero() {
+		qm.Where("original_created_at < ?", baseline).Count(&mediumBefore)
+	}
+	ql := model.DB.Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?)",
-			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "low", user.ID, user.ID).
-		Count(&lowCount)
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "low", user.ID, user.ID)
+	ql.Count(&lowCount)
+	if !baseline.IsZero() {
+		ql.Where("original_created_at < ?", baseline).Count(&lowBefore)
+	}
 
 	// 最早未处理距今
 	var earliestPending model.ReviewIssue
@@ -584,22 +641,32 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 		trends = append(trends, trendItem{Week: weekStart.Format("01/02") + "-" + weekEnd.Format("01/02"), Received: wRecv, Closed: wClose, StillPending: wPending})
 	}
 
+	baselineStr := ""
+	if !baseline.IsZero() {
+		baselineStr = baseline.Format(time.RFC3339)
+	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{
-		"pending_count":          pendingCount,
-		"critical_count":         criticalCount,
-		"high_count":             highCount,
-		"medium_count":           mediumCount,
-		"low_count":              lowCount,
-		"week_received":          weekReceived,
-		"week_resolved":          weekResolved,
-		"average_close_days":     fmt.Sprintf("%.1f", avgCloseDays),
-		"earliest_pending_hours": earliestPendingHours,
-		"team_rank_percent":      teamRank,
-		"team_rank_position":     position,
-		"team_rank_total":        totalRankers,
-		"trends":                 trends,
-		"issues":                 issues,
-		"total":                  totalIssues,
+		"notification_baseline_at": baselineStr,
+		"pending_count":            pendingCount,
+		"pending_before_baseline":  pendingBefore,
+		"critical_count":           criticalCount,
+		"critical_before_baseline": criticalBefore,
+		"high_count":               highCount,
+		"high_before_baseline":     highBefore,
+		"medium_count":             mediumCount,
+		"medium_before_baseline":   mediumBefore,
+		"low_count":                lowCount,
+		"low_before_baseline":      lowBefore,
+		"week_received":            weekReceived,
+		"week_resolved":            weekResolved,
+		"average_close_days":       fmt.Sprintf("%.1f", avgCloseDays),
+		"earliest_pending_hours":   earliestPendingHours,
+		"team_rank_percent":        teamRank,
+		"team_rank_position":       position,
+		"team_rank_total":          totalRankers,
+		"trends":                   trends,
+		"issues":                   issues,
+		"total":                    totalIssues,
 	}})
 }
 
@@ -611,17 +678,29 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 		return
 	}
 
-	var todayNew, totalPending, overdue int64
+	baseline := getNotificationBaseline()
+
+	var todayNew, totalPending, totalPendingBefore, overdue, overdueBefore int64
 	todayStart := time.Now().Truncate(24 * time.Hour)
 	model.DB.Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND created_at >= ?", todayStart).Count(&todayNew)
-	model.DB.Model(&model.ReviewIssue{}).
-		Where("deleted_at IS NULL AND status IN (?)", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}).Count(&totalPending)
+	q := model.DB.Model(&model.ReviewIssue{}).
+		Where("deleted_at IS NULL AND status IN (?)", []string{model.IssueStatusPending, model.IssueStatusPendingInherited})
+	q.Count(&totalPending)
+	if !baseline.IsZero() {
+		qb := q.Where("original_created_at < ?", baseline)
+		qb.Count(&totalPendingBefore)
+	}
 
 	// overdue: pending > 120 work hours（简化用 5 天）
 	overdueSince := time.Now().AddDate(0, 0, -5)
-	model.DB.Model(&model.ReviewIssue{}).
-		Where("deleted_at IS NULL AND status IN (?) AND original_created_at < ?", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, overdueSince).Count(&overdue)
+	qo := model.DB.Model(&model.ReviewIssue{}).
+		Where("deleted_at IS NULL AND status IN (?) AND original_created_at < ?", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, overdueSince)
+	qo.Count(&overdue)
+	if !baseline.IsZero() {
+		qob := qo.Where("original_created_at < ?", baseline)
+		qob.Count(&overdueBefore)
+	}
 
 	// 归档统计
 	var todayArchived, totalArchived, todayEscalated int64
@@ -676,10 +755,12 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 
 	// 积压项目告警
 	type alertItem struct {
-		ProjectID    uint   `json:"project_id"`
-		ProjectName  string `json:"project_name"`
-		PendingCount int64  `json:"pending_count"`
-		OverdueCount int64  `json:"overdue_count"`
+		ProjectID             uint   `json:"project_id"`
+		ProjectName           string `json:"project_name"`
+		PendingCount          int64  `json:"pending_count"`
+		OverdueCount          int64  `json:"overdue_count"`
+		PendingBeforeBaseline int64  `json:"pending_before_baseline"`
+		OverdueBeforeBaseline int64  `json:"overdue_before_baseline"`
 	}
 	var alerts []alertItem
 	model.DB.Raw(`
@@ -687,7 +768,9 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 			projects.id AS project_id,
 			projects.name AS project_name,
 			COUNT(review_issues.id) AS pending_count,
-			COUNT(CASE WHEN review_issues.original_created_at < ? THEN 1 END) AS overdue_count
+			COUNT(CASE WHEN review_issues.original_created_at < ? THEN 1 END) AS overdue_count,
+			COUNT(CASE WHEN review_issues.original_created_at < ? THEN 1 END) AS pending_before_baseline,
+			COUNT(CASE WHEN review_issues.original_created_at < ? AND review_issues.original_created_at < ? THEN 1 END) AS overdue_before_baseline
 		FROM projects
 		INNER JOIN tasks ON tasks.project_id = projects.id
 		INNER JOIN review_issues ON review_issues.task_id = tasks.id
@@ -697,7 +780,7 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 		HAVING pending_count > 0
 		ORDER BY pending_count DESC
 		LIMIT 10
-	`, overdueSince, []string{model.IssueStatusPending, model.IssueStatusPendingInherited}).Scan(&alerts)
+	`, overdueSince, baseline, overdueSince, baseline, []string{model.IssueStatusPending, model.IssueStatusPendingInherited}).Scan(&alerts)
 
 	// Issue 状态分布
 
@@ -711,12 +794,14 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 
 	// 待处理最多的项目 Top 10
 	type pendingProj struct {
-		Name         string `json:"name"`
-		PendingCount int64  `json:"pending_count"`
+		Name                    string `json:"name"`
+		PendingCount            int64  `json:"pending_count"`
+		PendingBeforeBaseline   int64  `json:"pending_before_baseline"`
 	}
 	var topPendingProjects []pendingProj
 	model.DB.Raw(`
-		SELECT projects.name AS name, COUNT(review_issues.id) AS pending_count
+		SELECT projects.name AS name, COUNT(review_issues.id) AS pending_count,
+			COUNT(CASE WHEN review_issues.original_created_at < ? THEN 1 END) AS pending_before_baseline
 		FROM projects
 		INNER JOIN tasks ON tasks.project_id = projects.id
 		INNER JOIN review_issues ON review_issues.task_id = tasks.id
@@ -725,20 +810,27 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 		GROUP BY projects.id, projects.name
 		ORDER BY pending_count DESC
 		LIMIT 10
-	`, []string{model.IssueStatusPending, model.IssueStatusPendingInherited}).Scan(&topPendingProjects)
+	`, baseline, []string{model.IssueStatusPending, model.IssueStatusPendingInherited}).Scan(&topPendingProjects)
 
+	baselineStr := ""
+	if !baseline.IsZero() {
+		baselineStr = baseline.Format(time.RFC3339)
+	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{
-		"today_new":           todayNew,
-		"total_pending":       totalPending,
-		"overdue":             overdue,
-		"today_archived":      todayArchived,
-		"total_archived":      totalArchived,
-		"today_escalated":     todayEscalated,
-		"im_total":            imTotal,
-		"im_success":          imSuccess,
-		"week_close_rate":     fmt.Sprintf("%.1f%%", closeRate),
-		"median_resolve_days": fmt.Sprintf("%.1f", medianDays),
-		"alerts":              alerts,
+		"notification_baseline_at":        baselineStr,
+		"today_new":                       todayNew,
+		"total_pending":                   totalPending,
+		"total_pending_before_baseline":   totalPendingBefore,
+		"overdue":                         overdue,
+		"overdue_before_baseline":         overdueBefore,
+		"today_archived":                  todayArchived,
+		"total_archived":                  totalArchived,
+		"today_escalated":                 todayEscalated,
+		"im_total":                        imTotal,
+		"im_success":                      imSuccess,
+		"week_close_rate":                 fmt.Sprintf("%.1f%%", closeRate),
+		"median_resolve_days":             fmt.Sprintf("%.1f", medianDays),
+		"alerts":                          alerts,
 		"status_distribution": gin.H{
 			"pending":           distPending,
 			"pending_inherited": distPendingInherited,

@@ -183,10 +183,11 @@ async function loadDashboard(force = false) {
 
         // 顶部统计
         document.getElementById('statPending').textContent = d.pending_count || 0;
-        document.getElementById('statCritical').textContent = d.critical_count || 0;
-        document.getElementById('statHigh').textContent = d.high_count || 0;
-        document.getElementById('statMedium').textContent = d.medium_count || 0;
-        document.getElementById('statLow').textContent = d.low_count || 0;
+        document.getElementById('statCritical').innerHTML = renderSeverityWithLegacy(d.critical_count, d.critical_before_baseline, d.notification_baseline_at, 'text-red-600');
+        document.getElementById('statHigh').innerHTML = renderSeverityWithLegacy(d.high_count, d.high_before_baseline, d.notification_baseline_at, 'text-orange-600');
+        document.getElementById('statMedium').innerHTML = renderSeverityWithLegacy(d.medium_count, d.medium_before_baseline, d.notification_baseline_at, 'text-yellow-600');
+        document.getElementById('statLow').innerHTML = renderSeverityWithLegacy(d.low_count, d.low_before_baseline, d.notification_baseline_at, 'text-blue-600');
+
         document.getElementById('statWeekReceived').textContent = d.week_received || 0;
         document.getElementById('statWeekResolved').textContent = d.week_resolved || 0;
         document.getElementById('statAvgClose').textContent = d.average_close_days || '-';
@@ -206,7 +207,19 @@ async function loadDashboard(force = false) {
         document.getElementById('statEarliest').textContent = earliestText;
 
         // 新增总计显示
-        document.getElementById('statPendingTotal').textContent = d.pending_count || 0;
+        const hasBaseline = !!d.notification_baseline_at;
+        const pendingBefore = d.pending_before_baseline || 0;
+        if (hasBaseline && pendingBefore > 0) {
+            document.getElementById('statPendingTotal').innerHTML = `
+                <div class="text-2xl font-bold text-gray-800">${d.pending_count || 0}</div>
+                <div class="text-[11px] text-gray-400 mt-1">其中 ${pendingBefore} 条历史遗留（不受通知规则约束）</div>
+            `;
+        } else {
+            document.getElementById('statPendingTotal').innerHTML = `
+                <div class="text-2xl font-bold text-gray-800">${d.pending_count || 0}</div>
+                <div class="text-[11px] text-gray-500 mt-0.5">总计待处理问题</div>
+            `;
+        }
 
         // 团队排名
         let rankText = '-';
@@ -237,6 +250,14 @@ async function loadDashboard(force = false) {
     }
 }
 
+function renderSeverityWithLegacy(count, legacyCount, baselineAt, colorClass) {
+    let html = `<div class="text-xl font-bold ${colorClass || ''}">${count || 0}</div>`;
+    if (baselineAt && (legacyCount || 0) > 0) {
+        html += `<div class="text-[10px] text-gray-400 mt-0.5">遗留 ${legacyCount}</div>`;
+    }
+    return html;
+}
+
 function renderIssueCard(issue) {
     const sevClass = 'severity-' + issue.severity;
     const sevLabel = SEVERITY_LABELS[issue.severity] || issue.severity;
@@ -246,6 +267,10 @@ function renderIssueCard(issue) {
     const summary = escapeHtml(issue.message).substring(0, 100) + (issue.message.length > 100 ? '...' : '');
     const projectName = escapeHtml(issue.project_name || '未知项目');
     const mrTitle = escapeHtml(issue.mr_title || '');
+
+    const legacyBadge = issue.is_before_baseline
+        ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200">历史遗留</span>'
+        : '';
 
     return `
         <div class="issue-card ${sevClass} p-4 hover:bg-gray-50 group">
@@ -257,6 +282,7 @@ function renderIssueCard(issue) {
                         <span class="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-100"><i class="fas fa-hashtag mr-0.5 text-indigo-400"></i>问题 #${issue.id}</span>
                         <span class="text-[11px] font-mono text-gray-600 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-200"><i class="fas fa-shield-alt mr-0.5 text-gray-400"></i>${issue.rule_code || 'AI发现'}</span>
                         ${issue.inherited_from_issue_id ? '<span class="text-[10px] text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100" title="历史曾标记处理">复现</span>' : ''}
+                        ${legacyBadge}
                         <span class="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-100"><i class="fas fa-folder-open mr-0.5"></i>${projectName}</span>
                         <a href="task-detail.html?id=${issue.task_id}" class="text-[11px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-100 hover:bg-blue-100"><i class="fas fa-tasks mr-0.5"></i>任务 #${issue.task_id}</a>
                         ${mrTitle ? `<span class="text-[11px] text-gray-400 truncate max-w-[200px]" title="${mrTitle}"><i class="fab fa-gitlab mr-0.5"></i>${mrTitle}</span>` : ''}
