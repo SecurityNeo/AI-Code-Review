@@ -41,7 +41,7 @@ func PersistStructuredReview(taskID uint, result *llm.AIReviewResult) error {
 			"issue_count":      len(result.Issues),
 			"score_value":      result.TotalScore,         // 后置校验后的最终评分
 			"raw_ai_score":     result.OriginalTotalScore, // LLM 原始评分（用于对比）
-			"execution_count":  gorm.Expr("execution_count + 1"),
+			"execution_count":  gorm.Expr("execution_count + 1"), // 首次创建为0，首次保存后变为1
 		}
 
 		if err := tx.Model(&model.Task{}).Where("id = ?", taskID).Updates(taskUpdates).Error; err != nil {

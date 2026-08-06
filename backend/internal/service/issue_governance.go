@@ -30,7 +30,7 @@ func (s *IssueGovernanceService) ProcessTaskCompletion(taskID uint, newIssues []
 			return fmt.Errorf("task not found: %w", err)
 		}
 
-		// 2. execution_count += 1（首次也会走到这里，从 1 开始；重试时累加）
+		// 2. execution_count += 1（首次也会走到这里，从 0 开始；重试时累加）
 		if err := tx.Model(&task).UpdateColumn("execution_count", gorm.Expr("execution_count + 1")).Error; err != nil {
 			return fmt.Errorf("update execution_count failed: %w", err)
 		}

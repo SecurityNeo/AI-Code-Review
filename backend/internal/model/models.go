@@ -88,7 +88,7 @@ type Task struct {
 	Pool                ResourcePool        `gorm:"foreignKey:PoolID" json:"pool,omitempty"`
 	UsedModel           LLMModel            `gorm:"foreignKey:UsedModelID;references:ID" json:"used_model,omitempty"`
 	PendingIssueCount   int                 `gorm:"default:0;column:pending_issue_count" json:"pending_issue_count"` // 待处理Issue数量（列表页由子查询填充）
-	ExecutionCount      int                 `gorm:"default:1;column:execution_count" json:"execution_count"` // 同一任务第几次运行
+	ExecutionCount      int                 `gorm:"default:0;column:execution_count" json:"execution_count"` // 同一任务第几次运行（首次创建为0，首次保存后变为1）
 }
 
 // BeforeCreate GORM hook: 确保 JSON 字段有合法默认值
