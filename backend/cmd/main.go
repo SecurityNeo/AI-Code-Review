@@ -366,6 +366,9 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 			task.POST("/review-issues/batch-resolve", reviewH.BatchResolveIssues)
 		}
 
+		// 评审维度查询（所有已登录用户可读）
+		common.GET("/review-categories", handler.NewReviewCategoryHandler().List)
+
 		// MR 审查日志（数据已按user过滤）
 		mrLog := common.Group("/mr-review-logs")
 		{
@@ -458,11 +461,10 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 			reviewRules.PUT("/batch-enable", h.BatchEnable)
 		}
 
-		// 评审维度管理
+		// 评审维度管理（仅管理员可写，GET 已移至 common）
 		reviewCats := adminOnly.Group("/review-categories")
 		{
 			h := handler.NewReviewCategoryHandler()
-			reviewCats.GET("", h.List)
 			reviewCats.POST("", h.Create)
 			reviewCats.PUT("/:id", h.Update)
 			reviewCats.DELETE("/:id", h.Delete)

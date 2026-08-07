@@ -85,8 +85,8 @@ func (h *TaskHandler) Get(c *gin.Context) {
 		return
 	}
 
-	// 非admin只能看自己的任务
-	if user.Role != model.RoleAdmin && task.MRAuthor != user.GitlabUsername {
+	// 权限检查：admin、任务提交者、项目负责人均可查看
+	if !service.NewTaskService().CanViewTask(user, *task) {
 		c.JSON(403, gin.H{"error": "无权查看此任务"})
 		return
 	}
@@ -350,8 +350,8 @@ func (h *TaskHandler) GetDiff(c *gin.Context) {
 		return
 	}
 
-	// 权限检查
-	if user.Role != model.RoleAdmin && task.MRAuthor != user.GitlabUsername {
+	// 权限检查：admin、任务提交者、项目负责人均可查看
+	if !service.NewTaskService().CanViewTask(user, *task) {
 		c.JSON(403, gin.H{"error": "无权查看此任务"})
 		return
 	}
@@ -400,8 +400,8 @@ func (h *TaskHandler) ListTaskReviewRules(c *gin.Context) {
 		return
 	}
 
-	// 权限检查
-	if user.Role != model.RoleAdmin && task.MRAuthor != user.GitlabUsername {
+	// 权限检查：admin、任务提交者、项目负责人均可查看
+	if !service.NewTaskService().CanViewTask(user, *task) {
 		c.JSON(403, gin.H{"error": "无权查看此任务"})
 		return
 	}
