@@ -50,6 +50,8 @@ func (h *SystemHandler) GetConfig(c *gin.Context) {
 			JSONRetryFallbackStrategy:  "regex",
 			DefaultDimensionWeights: `{"security":30,"code_quality":25,"readability":20,"maintainability":15,"test_coverage":10}`,
 			AILogTemplate: "请先执行以下命令拉取代码：\ngit clone {{CLONE_URL}}\n\n变更摘要：\n{{MR_DIFF}}\n\n{{USER_INPUT}}\n\n请审查以上代码变更，给出审查意见。",
+			PipelineEnabled:  false,
+			BatchParallelMax: 3,
 		}
 			if err := model.DB.Create(&cfg).Error; err != nil {
 				zap.L().Error("create system config failed", zap.Error(err))
@@ -241,6 +243,18 @@ func (h *SystemHandler) UpdateConfig(c *gin.Context) {
 	}
 
 	// JSON Retry 配置字段
+	if v, ok := data["pipeline_enabled"]; ok {
+		updates["pipeline_enabled"] = v.(bool)
+	}
+	if v, ok := data["batch_parallel_max"]; ok {
+		val := int(v.(float64))
+		if val < 1 {
+			val = 1
+		} else if val > 10 {
+			val = 10
+		}
+		updates["batch_parallel_max"] = val
+	}
 	if v, ok := data["json_retry_max_attempts"]; ok {
 		val := int(v.(float64))
 		if val < 0 { val = 0 }

@@ -11,25 +11,41 @@ import (
 
 // CommentTemplateContext GitLab 评论模板上下文
 type CommentTemplateContext struct {
-	TaskID              uint
-	ProjectName         string
-	MRTitle             string
-	MRAuthor            string
-	TotalScore          int
-	Summary             string
-	DimensionsTable     string // 预渲染 Markdown 表格
-	Dimensions          []DimensionContext
-	IssuesList          string // 预渲染 Markdown 列表
-	Issues              []IssueContext
-	IssueCount          int
-	CriticalCount       int
-	HighCount           int
-	MediumCount         int
-	LowCount            int
-	InfoCount           int
-	Recommendations     []string
-	RecommendationsList string // 预渲染
-	BR                  string // 换行
+	TaskID               uint
+	ProjectName          string
+	MRTitle              string
+	MRAuthor             string
+	TotalScore           int
+	Summary              string
+	DimensionsTable      string // 预渲染 Markdown 表格
+	Dimensions           []DimensionContext
+	IssuesList           string // 预渲染 Markdown 列表
+	Issues               []IssueContext
+	IssueCount           int
+	CriticalCount        int
+	HighCount            int
+	MediumCount          int
+	LowCount             int
+	InfoCount            int
+	Recommendations      []string
+	RecommendationsList  string // 预渲染
+	DependencyVulns      []DependencyVulnContext
+	DependencyVulnsList  string // 预渲染 Markdown 列表
+	HasDependencyVulns   bool
+	BR                   string // 换行
+}
+
+// DependencyVulnContext 依赖漏洞上下文
+type DependencyVulnContext struct {
+	PackageName    string
+	CurrentVersion string
+	VulnID         string
+	Aliases        string                     // CVE-XXXX-XXXX, GHSA-XXXX (逗号分隔)
+	Severity       string
+	SeverityLabel  string
+	SeverityEmoji  string
+	Summary        string
+	FixedVersion   string
 }
 
 // DimensionContext 维度上下文
@@ -74,6 +90,11 @@ const DefaultGitLabCommentTemplate = `## 🤖 AI 代码评审报告
 ### 📊 维度评分
 {{.DimensionsTable}}
 
+{{if .HasDependencyVulns}}
+### 🛡️ 依赖漏洞扫描
+{{.DependencyVulnsList}}
+{{end}}
+
 {{if gt .IssueCount 0}}
 ### ⚠️ 发现的问题（共 {{.IssueCount}} 个）
 {{.IssuesList}}
@@ -85,13 +106,18 @@ const DefaultGitLabCommentTemplate = `## 🤖 AI 代码评审报告
 {{end}}
 `
 
-// AssembleMarkdownComment 将结构化评审结果组装为 Markdown 评论
+// AssembleMarkdownComment 将结构化评审结果组装为 Markdown 评论（向后兼容）
 func AssembleMarkdownComment(result *llm.AIReviewResult, tmplStr string) (string, error) {
+	return AssembleMarkdownCommentWithVulns(result, tmplStr, nil)
+}
+
+// AssembleMarkdownCommentWithVulns 将结构化评审结果组装为 Markdown 评论（含依赖漏洞）
+func AssembleMarkdownCommentWithVulns(result *llm.AIReviewResult, tmplStr string, vulns []DependencyVuln) (string, error) {
 	if tmplStr == "" {
 		tmplStr = DefaultGitLabCommentTemplate
 	}
 
-	ctx := buildCommentContext(result)
+	ctx := buildCommentContext(result, vulns)
 
 	tmpl, err := template.New("comment").Parse(tmplStr)
 	if err != nil {
@@ -107,7 +133,7 @@ func AssembleMarkdownComment(result *llm.AIReviewResult, tmplStr string) (string
 }
 
 // buildCommentContext 构建模板上下文
-func buildCommentContext(result *llm.AIReviewResult) *CommentTemplateContext {
+func buildCommentContext(result *llm.AIReviewResult, vulns []DependencyVuln) *CommentTemplateContext {
 	ctx := &CommentTemplateContext{
 		TotalScore:      result.TotalScore,
 		Summary:         result.Summary,
@@ -169,6 +195,25 @@ func buildCommentContext(result *llm.AIReviewResult) *CommentTemplateContext {
 
 	// 预渲染改进建议
 	ctx.RecommendationsList = buildRecommendationsList(ctx.Recommendations)
+
+	// 处理依赖漏洞
+	if len(vulns) > 0 {
+		ctx.HasDependencyVulns = true
+		for _, v := range vulns {
+			ctx.DependencyVulns = append(ctx.DependencyVulns, DependencyVulnContext{
+				PackageName:    v.PackageName,
+				CurrentVersion: v.CurrentVersion,
+				VulnID:         v.VulnID,
+				Aliases:        v.Aliases,
+				Severity:       v.Severity,
+				SeverityLabel:  severityLabel(v.Severity),
+				SeverityEmoji:  severityEmoji(v.Severity),
+				Summary:        v.Summary,
+				FixedVersion:   v.FixedVersion,
+			})
+		}
+		ctx.DependencyVulnsList = buildDependencyVulnsList(ctx.DependencyVulns)
+	}
 
 	return ctx
 }
@@ -242,6 +287,39 @@ func buildRecommendationsList(recommendations []string) string {
 	var b strings.Builder
 	for _, rec := range recommendations {
 		b.WriteString(fmt.Sprintf("- %s\n", rec))
+	}
+	return b.String()
+}
+
+// buildDependencyVulnsList 预渲染依赖漏洞 Markdown 列表
+func buildDependencyVulnsList(vulns []DependencyVulnContext) string {
+	if len(vulns) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	grouped := make(map[string][]DependencyVulnContext)
+	for _, v := range vulns {
+		grouped[v.Severity] = append(grouped[v.Severity], v)
+	}
+
+	severityOrder := []string{"critical", "high", "medium", "low"}
+	for _, sev := range severityOrder {
+		if group, ok := grouped[sev]; ok && len(group) > 0 {
+			b.WriteString(fmt.Sprintf("\n**%s** (%d)\n\n", severitySectionLabel(sev), len(group)))
+			for _, v := range group {
+				aliasPart := ""
+				if v.Aliases != "" {
+					aliasPart = fmt.Sprintf(" (%s)", v.Aliases)
+				}
+				b.WriteString(fmt.Sprintf("- %s **%s** %s → %s%s\n", v.SeverityEmoji, v.PackageName, v.CurrentVersion, v.VulnID, aliasPart))
+				if v.Summary != "" {
+					b.WriteString(fmt.Sprintf("  - %s\n", v.Summary))
+				}
+				if v.FixedVersion != "" {
+					b.WriteString(fmt.Sprintf("  - 建议升级至：**%s**\n", v.FixedVersion))
+				}
+			}
+		}
 	}
 	return b.String()
 }

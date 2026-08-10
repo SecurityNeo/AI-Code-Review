@@ -393,6 +393,14 @@ type SystemConfig struct {
 	DefaultDimensionWeights      string  `gorm:"type:json;column:default_dimension_weights" json:"default_dimension_weights"`
 	DefaultGitLabCommentTemplate string  `gorm:"type:text;column:default_gitlab_comment_template" json:"default_gitlab_comment_template"`
 
+	// Pipeline 与分批评审配置
+	PipelineEnabled  bool `gorm:"default:false;column:pipeline_enabled" json:"pipeline_enabled"`
+	BatchParallelMax int  `gorm:"default:3;column:batch_parallel_max" json:"batch_parallel_max"`
+
+	// 跨文件调用链分析配置
+	CallChainDepth       int  `gorm:"default:1;column:call_chain_depth" json:"call_chain_depth"`       // 调用链分析深度（默认1层）
+	CodeWorkspaceEnabled bool `gorm:"default:true;column:code_workspace_enabled" json:"code_workspace_enabled"` // 是否启用持久化代码工作区
+
 	// GitLab OAuth 配置（从环境变量迁移到数据库动态配置）
 	GitlabOAuthEnabled        bool   `gorm:"default:false;column:gitlab_oauth_enabled" json:"gitlab_oauth_enabled"`
 	GitlabBaseURL             string `gorm:"size:512;column:gitlab_base_url" json:"gitlab_base_url"`

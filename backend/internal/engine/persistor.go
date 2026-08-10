@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/pkg/llm"
@@ -142,6 +143,59 @@ func marshalJSON(v interface{}) string {
 
 // loadReviewRulesByCode 一次性查回 issues 引用的所有 ReviewRule，避免逐条 First
 // 在 GORM Warn 模式下产生"record not found"噪音日志；规则已删除/AI 自主发现（code 为空）静默忽略。
+// PersistTaskReviewRules 持久化任务实际使用的评审规则（含被截断记录）
+func PersistTaskReviewRules(taskID uint, selected []model.ReviewRule, truncated []model.ReviewRule) error {
+	return model.DB.Transaction(func(tx *gorm.DB) error {
+		// 先清理旧记录（幂等写入，避免重试时重复）
+		if err := tx.Where("task_id = ?", taskID).Delete(&model.TaskReviewRule{}).Error; err != nil {
+			return fmt.Errorf("delete old task review rules failed: %w", err)
+		}
+
+		var records []model.TaskReviewRule
+		now := time.Now()
+
+		for i, rule := range selected {
+			records = append(records, model.TaskReviewRule{
+				TaskID:      taskID,
+				RuleID:      &rule.ID,
+				RuleCode:    rule.Code,
+				Name:        rule.Name,
+				Category:    rule.Category,
+				Severity:    rule.Severity,
+				SortOrder:   i + 1,
+				WasSelected: true,
+				IssueCount:  0,
+				CreatedAt:   now,
+			})
+		}
+		for i, rule := range truncated {
+			records = append(records, model.TaskReviewRule{
+				TaskID:      taskID,
+				RuleID:      &rule.ID,
+				RuleCode:    rule.Code,
+				Name:        rule.Name,
+				Category:    rule.Category,
+				Severity:    rule.Severity,
+				SortOrder:   len(selected) + i + 1,
+				WasSelected: false,
+				IssueCount:  0,
+				CreatedAt:   now,
+			})
+		}
+
+		if err := tx.Create(&records).Error; err != nil {
+			return fmt.Errorf("create task review rules failed: %w", err)
+		}
+
+		zap.L().Info("task review rules persisted",
+			zap.Uint("task_id", taskID),
+			zap.Int("selected", len(selected)),
+			zap.Int("truncated", len(truncated)))
+
+		return nil
+	})
+}
+
 func loadReviewRulesByCode(tx *gorm.DB, issues []llm.AIReviewIssue) map[string]model.ReviewRule {
 	codes := make([]string, 0, len(issues))
 	seen := make(map[string]struct{}, len(issues))

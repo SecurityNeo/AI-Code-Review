@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -387,4 +388,38 @@ func parseGitLabTime(s string) *time.Time {
 		}
 	}
 	return nil
+}
+
+// RepositoryFile 表示 GitLab 仓库文件的元数据
+// GetRepositoryFileRaw 获取文件原始内容（不通过 base64 解码）
+func (c *Client) GetRepositoryFileRaw(projectID int, filePath, branch string) (string, error) {
+	// file_path 需要替换 / 为 %2F 进行路径编码
+	encodedPath := url.PathEscape(filePath)
+	path := fmt.Sprintf("/api/v4/projects/%d/repository/files/%s/raw?ref=%s", projectID, encodedPath, url.QueryEscape(branch))
+	req, err := http.NewRequest("GET", c.baseURL+path, nil)
+	if err != nil {
+		return "", err
+	}
+	if c.token != "" {
+		req.Header.Set("PRIVATE-TOKEN", c.token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return "", fmt.Errorf("file not found: %s (ref=%s)", filePath, branch)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("gitlab api returned status %d for %s", resp.StatusCode, filePath)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
 }

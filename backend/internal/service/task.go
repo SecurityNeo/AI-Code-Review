@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -16,20 +17,22 @@ import (
 	"github.com/ai-optimizer/backend/config"
 	"github.com/ai-optimizer/backend/internal/engine"
 	"github.com/ai-optimizer/backend/internal/model"
+	"github.com/ai-optimizer/backend/internal/service/pipeline"
 	"github.com/ai-optimizer/backend/pkg/encrypt"
 	"github.com/ai-optimizer/backend/pkg/gitlab"
 	"github.com/ai-optimizer/backend/pkg/llm"
 	"go.uber.org/zap"
-	"gorm.io/gorm"
 )
 
 type TaskService struct {
-	cfg *config.Config
+	cfg             *config.Config
+	TaskPipelineHub *PipelineSSEHub // Pipeline review SSE hub (key = task_id)
 }
 
 func NewTaskService() *TaskService {
 	return &TaskService{
-		cfg: config.Load(),
+		cfg:             config.Load(),
+		TaskPipelineHub: NewPipelineSSEHub(),
 	}
 }
 
@@ -253,8 +256,8 @@ func (s *TaskService) Create(data map[string]interface{}) (*model.Task, error) {
 		TargetBranch:        targetBranch,
 		NoteID:              noteID,
 		AIPrompt:            aiprompt,
-		AIResponseJSON:      "{}",  // MySQL JSON 列不接受空字符串
-		DimensionScores:     "{}",  // MySQL JSON 列不接受空字符串
+		AIResponseJSON:      "{}", // MySQL JSON 列不接受空字符串
+		DimensionScores:     "{}", // MySQL JSON 列不接受空字符串
 		TaskType:            "chat",
 		Status:              model.TaskPending,
 		TriggerType:         data["trigger_type"].(string),
@@ -900,6 +903,19 @@ func (s *TaskService) ExecuteAIReviewTaskWithComment(taskID uint, commentOverrid
 		return err
 	}
 
+	// Pipeline 模式开关：如果启用，使用 Pipeline 引擎执行
+	var pipelineSysCfg model.SystemConfig
+	pipelineEnabled := false
+	if err := model.DB.First(&pipelineSysCfg).Error; err == nil {
+		pipelineEnabled = pipelineSysCfg.PipelineEnabled
+	}
+	if pipelineEnabled {
+		zap.L().Info("Pipeline 模式已启用，使用 Pipeline 引擎执行任务", zap.Uint("task_id", taskID))
+		return s.executePipelineReviewTask(task, commentOverride)
+	}
+
+	// 以下走现有逻辑（Legacy Mode）
+
 	// ExecuteAIReviewTask uses Omit("pool_id") because AI review tasks don't have a pool
 	// and pool_id=0 violates the fk_tasks_pool foreign key constraint
 	startedAt := time.Now()
@@ -1101,6 +1117,211 @@ func (s *TaskService) fetchMRCommits(task model.Task) []gitlab.CommitInfo {
 		return []gitlab.CommitInfo{}
 	}
 	return commits
+}
+
+// executePipelineReviewTask Pipeline 结构化评审任务执行
+// 复用 engine/builder.go + engine/parser.go 的完整能力
+func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride string) error {
+	// 1. 获取 diff 文件
+	diffFiles, additions, deletions, err := s.fetchMRDiffFiles(task)
+	if err != nil {
+		return s.failReviewTask(task, err.Error())
+	}
+
+	// 限制最多 N 个文件
+	maxDiffFiles := SysCfgMaxDiffFiles()
+	if len(diffFiles) > maxDiffFiles {
+		zap.L().Warn("diff files exceed limit, truncating",
+			zap.Int("original", len(diffFiles)),
+			zap.Int("limit", maxDiffFiles))
+		diffFiles = diffFiles[:maxDiffFiles]
+	}
+
+	// 2. 获取 commits
+	commits := s.fetchMRCommits(task)
+	commitsText := formatCommitsForReview(commits)
+
+	// 3. 读取系统截断阈值，对 diff 做预截断
+	var sysCfg model.SystemConfig
+	truncationThreshold := 5000
+	if err := model.DB.First(&sysCfg).Error; err == nil && sysCfg.DiffTruncationThreshold > 0 {
+		truncationThreshold = sysCfg.DiffTruncationThreshold
+	}
+
+	// 4. 加载项目模板
+	var projectTemplate model.ProjectTemplate
+	if task.Project.TemplateID > 0 {
+		model.DB.First(&projectTemplate, task.Project.TemplateID)
+	}
+
+	// 5. 加载并合并评审规则（与 Legacy runStructuredAIReview 完全一致）
+	var allRules []model.ReviewRule
+	if err := model.DB.Find(&allRules).Error; err != nil {
+		zap.L().Warn("Pipeline: load all review rules failed", zap.Uint("project_id", task.ProjectID), zap.Error(err))
+	}
+
+	var configs []model.ProjectReviewConfig
+	if err := model.DB.Where("project_id = ?", task.ProjectID).Find(&configs).Error; err != nil {
+		zap.L().Warn("Pipeline: load project review configs failed", zap.Uint("project_id", task.ProjectID), zap.Error(err))
+	}
+	configMap := make(map[uint]model.ProjectReviewConfig)
+	for _, cfg := range configs {
+		configMap[cfg.RuleID] = cfg
+	}
+
+	var mergedRules []model.ReviewRule
+	for _, rule := range allRules {
+		if cfg, hasConfig := configMap[rule.ID]; hasConfig {
+			if !cfg.IsEnabled {
+				continue
+			}
+			if cfg.Severity != "" {
+				rule.Severity = cfg.Severity
+			}
+		} else {
+			if !rule.IsEnabled {
+				continue
+			}
+		}
+		mergedRules = append(mergedRules, rule)
+	}
+
+	// 6. 规则截断
+	maxRules := 5
+	if projectTemplate.ID > 0 && projectTemplate.MaxRulesPerReview > 0 {
+		maxRules = projectTemplate.MaxRulesPerReview
+	}
+	selectedRules, truncatedRules := engine.SelectTopRules(mergedRules, maxRules)
+
+	// 7. 解析维度权重
+	dimWeights := engine.BuildDimensionWeights(projectTemplate.DimensionWeights, selectedRules)
+
+	// 8. 解析扣分配置
+	deductCfg := engine.DefaultDeductScoreConfig()
+	if projectTemplate.ID > 0 && projectTemplate.DeductScoreConfig != "" {
+		if dc, err := engine.ParseDeductScoreConfig(projectTemplate.DeductScoreConfig); err == nil {
+			deductCfg = dc
+		}
+	}
+
+	// 9. 组合自定义指令 + 人工复核意见
+	customInstruction := ""
+	if projectTemplate.ID > 0 {
+		customInstruction = projectTemplate.CustomInstruction
+	}
+	if commentOverride != "" {
+		if customInstruction != "" {
+			customInstruction += "\n\n"
+		}
+		customInstruction += "### 【人工复核意见】（请重点参考以下意见进行审查）\n" + commentOverride
+	}
+
+	// 10. 准备 diff file maps
+	var fileMaps []map[string]interface{}
+	for _, f := range diffFiles {
+		diff := f.Diff
+		if len(diff) > truncationThreshold {
+			diff = diff[:truncationThreshold] + "\n...（已截断）"
+		}
+		fileMaps = append(fileMaps, map[string]interface{}{
+			"path":      f.NewPath,
+			"old_path":  f.OldPath,
+			"diff":      diff,
+			"additions": f.Additions,
+			"deletions": f.Deletions,
+		})
+	}
+
+	// 11. AST 上下文提取
+	lang := detectLanguage(fileMaps)
+	astCtx := pipeline.NewASTExtractor(lang).Extract(fileMaps).Format()
+	if astCtx != "" {
+		zap.L().Info("Pipeline: AST 上下文提取完成", zap.String("language", lang), zap.Int("chars", len(astCtx)))
+	}
+
+	// 12. 组装 PromptContext
+	promptCtx := &engine.PromptContext{
+		Files:                 diffFiles,
+		CommitsText:           commitsText,
+		MRTitle:               task.MRTitle,
+		CustomInstruction:     customInstruction,
+		DimensionWeights:      dimWeights,
+		DeductScoreConfig:     deductCfg,
+		Rules:                 selectedRules,
+		MaxRules:              maxRules,
+		ASTContext:            astCtx,
+		GitLabCommentTemplate: projectTemplate.GitLabCommentTemplate,
+	}
+	if sysCfg.DefaultGitLabCommentTemplate != "" && promptCtx.GitLabCommentTemplate == "" {
+		promptCtx.GitLabCommentTemplate = sysCfg.DefaultGitLabCommentTemplate
+	}
+
+	// 13. 注入 Pipeline Context
+	inputs := map[string]interface{}{
+		"diff_files":          fileMaps,
+		"commits_text":        commitsText,
+		"project_template":    projectTemplate.Prompt,
+		"prompt_context":      promptCtx,
+		"selected_rules":      selectedRules,
+		"truncated_rules":     truncatedRules,
+		"dimension_weights":   dimWeights,
+		"deduct_score_config": deductCfg,
+		"ast_context":         astCtx,
+	}
+
+	// 14. 执行 Pipeline 引擎
+	eng := pipeline.NewEngine(model.DB, &pipelineLLMAdapter{svc: NewLLMService()})
+	broadcaster := func(taskID uint, status string, data map[string]interface{}) {
+		if s.TaskPipelineHub == nil {
+			return
+		}
+		b, _ := json.Marshal(data)
+		s.TaskPipelineHub.Broadcast(int64(taskID), string(b))
+	}
+	if err := eng.ExecuteTask(task.ID, inputs, broadcaster); err != nil {
+		return s.failReviewTask(task, err.Error())
+	}
+
+	// 15. Pipeline 成功后执行后处理
+	var updatedTask model.Task
+	if err := model.DB.Preload("Project").First(&updatedTask, task.ID).Error; err != nil {
+		return err
+	}
+
+	// 生成并保存 diff 文件元信息
+	meta := prepareDiffFilesMeta(diffFiles, truncationThreshold)
+	diffFilesJSONBytes, _ := json.Marshal(meta)
+	model.DB.Model(&updatedTask).Update("diff_files_json", string(diffFilesJSONBytes))
+
+	// 保存 ReviewLog
+	if err := saveReviewLogFromTask(updatedTask, additions, deletions, commits, updatedTask.ScoreValue); err != nil {
+		zap.L().Error("Pipeline: 保存 ReviewLog 失败", zap.Error(err))
+	}
+
+	// 发布评论（Markdown 报告应该在 Pipeline PostProcess 中生成并保存到 AIResponse）
+	if updatedTask.AIResponse != "" {
+		go s.postReviewComment(updatedTask, updatedTask.AIResponse)
+	}
+
+	// 阈值检查
+	if updatedTask.ScoreValue > 0 {
+		s.checkThresholdAndTrigger(updatedTask, updatedTask.ScoreValue)
+	}
+
+	// 通知（即时企微 + 延迟队列）
+	go func() {
+		var notifyTask model.Task
+		if err := model.DB.Preload("Project").First(&notifyTask, task.ID).Error; err != nil {
+			return
+		}
+		stats := CalcIssueStats(notifyTask.ID, notifyTask.MRMergeID)
+		NewNotifierService().NotifyAIReviewCompleted(notifyTask)
+		GetDelayedNotificationQueue().Enqueue(notifyTask, stats)
+	}()
+
+	// 唤醒同项目 pending 任务
+	s.startNextPendingTask(updatedTask.ProjectID)
+	return nil
 }
 
 func (s *TaskService) runAIReview(taskID *uint, caller string, diffFiles []gitlab.DiffFile, commitsText, mrTitle, projectTemplate string, modelID uint) (string, int, string, uint, string, error) {
@@ -1365,6 +1586,54 @@ func isSingleBatch(files []gitlab.DiffFile) bool {
 	return totalChars/charsPerTokenApprox < SysCfgMaxTokensPerBatch()
 }
 
+// truncateDiffFilesForStructured 截断 diff 文件以适配单批结构化评审
+// 按 diff 长度排序后保留最重要的文件，并截断超长 diff，确保总 token 不超限制
+func truncateDiffFilesForStructured(files []gitlab.DiffFile, maxTokens int) []gitlab.DiffFile {
+	const promptTemplateTokens = 8000 // prompt 模板（不含 diff）约占 token 数
+	availableTokens := maxTokens - promptTemplateTokens
+	if availableTokens <= 0 {
+		availableTokens = maxTokens / 2
+	}
+	maxChars := availableTokens * charsPerTokenApprox
+
+	// 复制文件避免修改原始切片
+	result := make([]gitlab.DiffFile, len(files))
+	copy(result, files)
+
+	// 按 diff 长度降序排序（保留变更量最大的文件）
+	sort.Slice(result, func(i, j int) bool {
+		return len(result[i].Diff) > len(result[j].Diff)
+	})
+
+	totalChars := 0
+	keptCount := 0
+	for i, f := range result {
+		fileChars := len(f.Diff)
+		if totalChars+fileChars <= maxChars {
+			totalChars += fileChars
+			keptCount++
+		} else {
+			// 剩余额度不足以容纳完整文件时，尝试截断该文件
+			remaining := maxChars - totalChars
+			if remaining > 200 {
+				result[i].Diff = f.Diff[:remaining] + "\n...（diff 已截断，仅保留前段用于结构化评审）"
+				totalChars += remaining
+				keptCount++
+			}
+			// 丢弃后续文件
+			result = result[:keptCount]
+			break
+		}
+	}
+
+	// 按 NewPath 排序恢复稳定顺序
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].NewPath < result[j].NewPath
+	})
+
+	return result
+}
+
 func splitIntoBatches(files []gitlab.DiffFile, maxTokens int) [][]gitlab.DiffFile {
 	var batches [][]gitlab.DiffFile
 	var currentBatch []gitlab.DiffFile
@@ -1603,9 +1872,24 @@ func (s *TaskService) runStructuredAIReview(task model.Task, diffFiles []gitlab.
 		actualModelName = result.ModelName
 		llmResponse = result.Response
 	} else {
-		// 分批处理（暂不实现结构化分批，fallback 到旧模式）
-		// TODO: 实现分批结构化评审
-		return s.runAIReviewFallback(&task.ID, diffFiles, commitsText, task.MRTitle, userPrompt)
+		// 多批时：截断 diff 后强制走单批结构化，不再 fallback 到旧模式
+		maxTokens := SysCfgMaxTokensPerBatch()
+		truncatedFiles := truncateDiffFilesForStructured(diffFiles, maxTokens)
+		zap.L().Info("结构化评审多批截断",
+			zap.Int("original_files", len(diffFiles)),
+			zap.Int("truncated_files", len(truncatedFiles)),
+			zap.Uint("task_id", task.ID))
+		// 更新 promptCtx 并重建 userPrompt
+		promptCtx.Files = truncatedFiles
+		userPrompt = engine.BuildReviewPrompt(promptCtx)
+		result, err := llmService.ChatCompletionStructured(&task.ID, 0, "runAIReviewStructuredTruncated", "", userPrompt, responseFormat)
+		if err != nil {
+			return "", 0, userPrompt, 0, "", err
+		}
+		rawContent = result.Content
+		actualModelID = result.ModelID
+		actualModelName = result.ModelName
+		llmResponse = result.Response
 	}
 
 	// 8. Refusal 检测
@@ -1692,55 +1976,7 @@ func (s *TaskService) runAIReviewFallback(taskID *uint, diffFiles []gitlab.DiffF
 
 // persistTaskReviewRules 持久化任务实际使用的规则（含被截断记录）
 func persistTaskReviewRules(taskID uint, selected []model.ReviewRule, truncated []model.ReviewRule) error {
-	return model.DB.Transaction(func(tx *gorm.DB) error {
-		// 先清理旧记录（幂等写入，避免重试时重复）
-		if err := tx.Where("task_id = ?", taskID).Delete(&model.TaskReviewRule{}).Error; err != nil {
-			return fmt.Errorf("delete old task review rules failed: %w", err)
-		}
-
-		var records []model.TaskReviewRule
-		now := time.Now()
-
-		for i, rule := range selected {
-			records = append(records, model.TaskReviewRule{
-				TaskID:      taskID,
-				RuleID:      &rule.ID,
-				RuleCode:    rule.Code,
-				Name:        rule.Name,
-				Category:    rule.Category,
-				Severity:    rule.Severity,
-				SortOrder:   i + 1,
-				WasSelected: true,
-				IssueCount:  0,
-				CreatedAt:   now,
-			})
-		}
-		for i, rule := range truncated {
-			records = append(records, model.TaskReviewRule{
-				TaskID:      taskID,
-				RuleID:      &rule.ID,
-				RuleCode:    rule.Code,
-				Name:        rule.Name,
-				Category:    rule.Category,
-				Severity:    rule.Severity,
-				SortOrder:   len(selected) + i + 1,
-				WasSelected: false,
-				IssueCount:  0,
-				CreatedAt:   now,
-			})
-		}
-
-		if err := tx.Create(&records).Error; err != nil {
-			return fmt.Errorf("create task review rules failed: %w", err)
-		}
-
-		zap.L().Info("task review rules persisted",
-			zap.Uint("task_id", taskID),
-			zap.Int("selected", len(selected)),
-			zap.Int("truncated", len(truncated)))
-
-		return nil
-	})
+	return engine.PersistTaskReviewRules(taskID, selected, truncated)
 }
 
 // prepareDiffFilesMeta 将 diff 文件列表处理为前端展示所需格式
@@ -1767,11 +2003,11 @@ func prepareDiffFilesMeta(diffFiles []gitlab.DiffFile, threshold int) []map[stri
 			diffContent = diffContent[:maxDiffChars] + "\n... （diff 内容超过存储上限，请在代码库中查看）\n"
 		}
 		result = append(result, map[string]interface{}{
-			"new_path":   f.NewPath,
-			"additions":  f.Additions,
-			"deletions":  f.Deletions,
-			"truncated":  truncated,
-			"diff":       diffContent,
+			"new_path":  f.NewPath,
+			"additions": f.Additions,
+			"deletions": f.Deletions,
+			"truncated": truncated,
+			"diff":      diffContent,
 		})
 	}
 	return result
@@ -1851,4 +2087,83 @@ func (s *TaskService) ListTaskReviewRules(taskID uint) (selected []model.TaskRev
 		}
 	}
 	return selected, truncated, len(rules), nil
+}
+
+// FetchMRDiffFilesForPipeline Pipeline 专用：获取 MR diff 文件（公开接口）
+func (s *TaskService) FetchMRDiffFilesForPipeline(task model.Task) ([]gitlab.DiffFile, int, int, error) {
+	return s.fetchMRDiffFiles(task)
+}
+
+// FetchMRCommitsForPipeline Pipeline 专用：获取 MR commits（公开接口）
+func (s *TaskService) FetchMRCommitsForPipeline(task model.Task) []gitlab.CommitInfo {
+	return s.fetchMRCommits(task)
+}
+
+// FormatCommitsForPipeline Pipeline 专用：格式化 commits 文本（公开接口）
+func (s *TaskService) FormatCommitsForPipeline(commits []gitlab.CommitInfo) string {
+	return formatCommitsForReview(commits)
+}
+
+// pipelineLLMAdapter 将 service 层的 LLM 调用适配到 pipeline 接口
+type pipelineLLMAdapter struct {
+	svc *LLMService
+}
+
+func (a *pipelineLLMAdapter) ChatCompletion(taskID *uint, modelID uint, caller, customInstruction, userPrompt string) (*pipeline.ChatResult, error) {
+	r, err := a.svc.ChatCompletion(taskID, modelID, caller, customInstruction, userPrompt)
+	if err != nil {
+		return nil, err
+	}
+	return &pipeline.ChatResult{
+		Content:      r.Content,
+		ModelName:    r.ModelName,
+		ModelID:      r.ModelID,
+		InputTokens:  r.InputTokens,
+		OutputTokens: r.OutputTokens,
+	}, nil
+}
+
+func (a *pipelineLLMAdapter) ChatCompletionStructured(taskID *uint, modelID uint, caller, systemPrompt, userPrompt string, responseFormat *llm.ResponseFormat) (*pipeline.StructuredChatResult, error) {
+	r, err := a.svc.ChatCompletionStructured(taskID, modelID, caller, systemPrompt, userPrompt, responseFormat)
+	if err != nil {
+		return nil, err
+	}
+	return &pipeline.StructuredChatResult{
+		Content:      r.Content,
+		ModelName:    r.ModelName,
+		ModelID:      r.ModelID,
+		InputTokens:  r.InputTokens,
+		OutputTokens: r.OutputTokens,
+		Response:     r.Response,
+	}, nil
+}
+
+// detectLanguage 根据 diff 文件扩展名投票检测项目主语言
+func detectLanguage(files []map[string]interface{}) string {
+	counts := map[string]int{
+		"golang":     0,
+		"java":       0,
+		"python":     0,
+		"javascript": 0,
+	}
+	for _, f := range files {
+		path, _ := f["path"].(string)
+		if strings.HasSuffix(path, ".go") {
+			counts["golang"]++
+		} else if strings.HasSuffix(path, ".java") {
+			counts["java"]++
+		} else if strings.HasSuffix(path, ".py") {
+			counts["python"]++
+		} else if strings.HasSuffix(path, ".js") || strings.HasSuffix(path, ".ts") || strings.HasSuffix(path, ".jsx") || strings.HasSuffix(path, ".tsx") {
+			counts["javascript"]++
+		}
+	}
+	maxCount, maxLang := 0, "golang"
+	for lang, cnt := range counts {
+		if cnt > maxCount {
+			maxCount = cnt
+			maxLang = lang
+		}
+	}
+	return maxLang
 }

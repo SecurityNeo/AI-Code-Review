@@ -32,6 +32,84 @@ type AIReviewIssue struct {
 	Suggestion   string `json:"suggestion"`    // 改进建议
 }
 
+// BatchReviewResult 分批评审收集模式的简化输出结构
+// 只包含 issues[] 和 recommendations[]，不包含 total_score 和 dimensions
+type BatchReviewResult struct {
+	BatchNotes      string          `json:"batch_notes"`
+	Issues          []AIReviewIssue `json:"issues"`
+	Recommendations []string        `json:"recommendations"`
+}
+
+// GetBatchCollectionJSONSchema 返回分批评审收集模式的 JSON Schema
+func GetBatchCollectionJSONSchema() interface{} {
+	return map[string]interface{}{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"batch_notes", "issues", "recommendations"},
+		"properties": map[string]interface{}{
+			"batch_notes": map[string]interface{}{
+				"type":        "string",
+				"description": "对这批代码变更的简要评审摘要（50字以内）",
+			},
+			"issues": map[string]interface{}{
+				"type":        "array",
+				"description": "发现的问题列表，无问题填 []",
+				"items": map[string]interface{}{
+					"type":                 "object",
+					"additionalProperties": false,
+					"required":             []string{"rule_code", "severity", "category", "file", "line_start", "line_end", "code_snippet", "message", "suggestion"},
+					"properties": map[string]interface{}{
+						"rule_code": map[string]interface{}{
+							"type":        "string",
+							"description": "规则编码，不属于已知规则填空字符串",
+						},
+						"severity": map[string]interface{}{
+							"type":        "string",
+							"description": "严重级别：critical/high/medium/low/info",
+							"enum":        []string{"critical", "high", "medium", "low", "info"},
+						},
+						"category": map[string]interface{}{
+							"type":        "string",
+							"description": "所属维度 code",
+						},
+						"file": map[string]interface{}{
+							"type":        "string",
+							"description": "文件路径",
+						},
+						"line_start": map[string]interface{}{
+							"type":        "integer",
+							"description": "起始行号，不确定时填 0",
+						},
+						"line_end": map[string]interface{}{
+							"type":        "integer",
+							"description": "结束行号，单行为 0",
+						},
+						"code_snippet": map[string]interface{}{
+							"type":        "string",
+							"description": "相关代码片段",
+						},
+						"message": map[string]interface{}{
+							"type":        "string",
+							"description": "问题描述",
+						},
+						"suggestion": map[string]interface{}{
+							"type":        "string",
+							"description": "改进建议",
+						},
+					},
+				},
+			},
+			"recommendations": map[string]interface{}{
+				"type":        "array",
+				"description": "改进建议列表，无建议填 []",
+				"items": map[string]interface{}{
+					"type": "string",
+				},
+			},
+		},
+	}
+}
+
 // GetReviewJSONSchema 返回动态 JSON Schema（根据模板实际维度生成）
 func GetReviewJSONSchema(dimensions []string) interface{} {
 	if len(dimensions) == 0 {

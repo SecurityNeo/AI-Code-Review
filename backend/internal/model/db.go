@@ -142,7 +142,7 @@ func autoMigrate() error {
 		&ResourcePool{},
 		&LLMModel{},
 		&WeComNotifier{},
-		&TeamMember{},      // 人员管理主表
+		&TeamMember{}, // 人员管理主表
 	); err != nil {
 		return err
 	}
@@ -165,7 +165,7 @@ func autoMigrate() error {
 	if err := DB.AutoMigrate(
 		&Notification{},
 		&NotificationDeliveryLog{},
-		&ProjectResponsibility{},   // 项目职责分配
+		&ProjectResponsibility{}, // 项目职责分配
 		&Holiday{},
 		&NotificationRule{},
 		&NotificationGlobalSetting{}, // 通知规则生效起点
@@ -262,6 +262,40 @@ func autoMigrate() error {
 
 	// 兼容：为已有 rule_incubations 补充 similar_passed 默认值（根据 similar_rules 推断）
 	DB.Exec("UPDATE rule_incubations SET similar_passed = true WHERE similar_rules IN ('[]','{}','null') AND similar_passed = false")
+
+	// ========== Pipeline 链路可视化 + 对象存储（新增表）==========
+	if err := DB.AutoMigrate(
+		&ObjectStorageConfig{},
+		&ReviewPipelineStage{},
+		&TaskPipelineExecution{},
+	); err != nil {
+		return err
+	}
+
+	// ========== 漏洞数据库（新增表）==========
+	if err := DB.AutoMigrate(&VulnerabilityRecord{}); err != nil {
+		return err
+	}
+	if err := DB.AutoMigrate(&VulnerabilityAllowlist{}); err != nil {
+		return err
+	}
+	if err := DB.AutoMigrate(&VulnerabilitySyncSource{}); err != nil {
+		return err
+	}
+	// 初始化内置漏洞库同步源
+	initBuiltinVulnSyncSources()
+
+	// 兼容：移除 object_storage_configs.name 的旧 unique 索引（已改为普通字段允许多个同名配置）
+	if DB.Migrator().HasIndex(&ObjectStorageConfig{}, "idx_object_storage_configs_name") {
+		if err := DB.Migrator().DropIndex(&ObjectStorageConfig{}, "idx_object_storage_configs_name"); err != nil {
+			zap.L().Warn("drop old unique index on object_storage_configs.name failed", zap.Error(err))
+		} else {
+			zap.L().Info("dropped old unique index on object_storage_configs.name")
+		}
+	}
+
+	// 初始化 Pipeline 阶段定义
+	initPipelineStages()
 
 	return nil
 }
@@ -782,5 +816,118 @@ func initNotificationGlobalSetting() {
 		}
 	} else {
 		zap.L().Info("notification global setting already exists", zap.Uint("id", setting.ID))
+	}
+}
+
+// initPipelineStages 初始化 Pipeline 阶段定义
+func initPipelineStages() {
+	// AI 评审总超时时间使用系统配置的任务超时（分钟→秒）
+	var sysCfg SystemConfig
+	var reviewFrameTimeoutSec int
+	if err := DB.First(&sysCfg).Error; err == nil && sysCfg.TaskTimeoutMin > 0 {
+		reviewFrameTimeoutSec = sysCfg.TaskTimeoutMin * 60
+	} else {
+		reviewFrameTimeoutSec = 7200 // fallback: 120 分钟 = 7200 秒
+	}
+
+	stages := []ReviewPipelineStage{
+		{Code: "trigger_check", Name: "触发条件评估", Description: "检查 MR 是否符合自动审查条件", Icon: "fas fa-filter", SortOrder: 10, TimeoutSec: 5},
+		{Code: "git_clone", Name: "代码获取", Description: "从 Git 仓库获取变更 diff", Icon: "fas fa-code-branch", SortOrder: 20, TimeoutSec: 60},
+		{Code: "context_extract", Name: "上下文提取", Description: "Tree-sitter 解析变更文件结构", Icon: "fas fa-sitemap", SortOrder: 30, TimeoutSec: 30},
+		{Code: "dependency_scan", Name: "依赖漏洞扫描", Description: "解析依赖文件并匹配本地漏洞库", Icon: "fas fa-shield-alt", SortOrder: 35, TimeoutSec: 30},
+		{Code: "risk_analysis", Name: "风险预分析", Description: "基于变更复杂度和依赖风险决定审查策略", Icon: "fas fa-chart-line", SortOrder: 40, TimeoutSec: 10},
+		{Code: "batch_review_frame", Name: "AI 评审", Description: "结构化 AI 代码审查（含分批）", Icon: "fas fa-robot", IsGroup: true, SortOrder: 50, TimeoutSec: reviewFrameTimeoutSec},
+		{Code: "batch_plan", Name: "分批决策", Description: "根据 diff 大小决定分批策略", Icon: "fas fa-list-ol", SortOrder: 51, TimeoutSec: 5},
+		{Code: "batch_review", Name: "批次评审", Description: "逐批次 LLM 代码审查", Icon: "fas fa-layer-group", IsAsync: true, SortOrder: 52, TimeoutSec: 120},
+		{Code: "batch_summary", Name: "汇总评审", Description: "汇总各批次结果生成综合报告", Icon: "fas fa-file-signature", SortOrder: 53, TimeoutSec: 120},
+		{Code: "post_process", Name: "后处理", Description: "发布评论、发送通知、阈值检查", Icon: "fas fa-paper-plane", SortOrder: 60, TimeoutSec: 30},
+	}
+
+	for _, stage := range stages {
+		var existing ReviewPipelineStage
+		if err := SilentFirst(DB.Where("code = ?", stage.Code), &existing); err != nil {
+			// 不存在则插入
+			if err := DB.Create(&stage).Error; err != nil {
+				zap.L().Warn("init pipeline stage failed", zap.String("code", stage.Code), zap.Error(err))
+			} else {
+				zap.L().Info("init pipeline stage", zap.String("code", stage.Code), zap.String("name", stage.Name))
+			}
+		} else {
+			// 已存在则更新（允许运行时调整名称、图标、超时）
+			DB.Model(&existing).Updates(map[string]interface{}{
+				"name":        stage.Name,
+				"description": stage.Description,
+				"icon":        stage.Icon,
+				"is_group":    stage.IsGroup,
+				"is_async":    stage.IsAsync,
+				"timeout_sec": stage.TimeoutSec,
+				"sort_order":  stage.SortOrder,
+			})
+		}
+	}
+	zap.L().Info("pipeline stages initialized", zap.Int("total", len(stages)))
+}
+
+// initBuiltinVulnSyncSources 初始化内置漏洞库同步源
+func initBuiltinVulnSyncSources() {
+	builtins := []VulnerabilitySyncSource{
+		{
+			Name:       "Go 官方漏洞库",
+			SourceType: "git",
+			URL:        "https://github.com/golang/vulndb.git",
+			Branch:     "master",
+			Ecosystem:  "Go",
+			IsBuiltin:  true,
+			Enabled:    true,
+		},
+		{
+			Name:       "PyPA Advisory Database",
+			SourceType: "git",
+			URL:        "https://github.com/pypa/advisory-database.git",
+			Branch:     "main",
+			Ecosystem:  "PyPI",
+			IsBuiltin:  true,
+			Enabled:    true,
+		},
+		{
+			Name:       "RustSec Advisory Database",
+			SourceType: "git",
+			URL:        "https://github.com/rustsec/advisory-db.git",
+			Branch:     "main",
+			Ecosystem:  "cargo",
+			IsBuiltin:  true,
+			Enabled:    true,
+		},
+		{
+			Name:       "GitHub Advisory Database",
+			SourceType: "git",
+			URL:        "https://github.com/github/advisory-database.git",
+			Branch:     "main",
+			Ecosystem:  "",
+			IsBuiltin:  true,
+			Enabled:    true,
+		},
+	}
+
+	for _, src := range builtins {
+		var existing VulnerabilitySyncSource
+		if err := SilentFirst(DB.Where("url = ? AND is_builtin = ?", src.URL, true), &existing); err != nil {
+			// 不存在则插入
+			if err := DB.Create(&src).Error; err != nil {
+				zap.L().Warn("init builtin vuln sync source failed", zap.String("url", src.URL), zap.Error(err))
+			} else {
+				zap.L().Info("init builtin vuln sync source", zap.String("name", src.Name), zap.String("url", src.URL))
+			}
+		} else {
+			// 已存在则更新名称和配置（允许运行时调整）
+			if err := DB.Model(&existing).Updates(map[string]interface{}{
+				"name":      src.Name,
+				"branch":    src.Branch,
+				"ecosystem": src.Ecosystem,
+				"enabled":   src.Enabled,
+			}).Error; err != nil {
+				zap.L().Warn("update builtin vuln sync source failed", zap.String("url", src.URL), zap.Error(err))
+			}
+		}
 	}
 }

@@ -509,7 +509,15 @@ func (h *TokenUsageHandler) GetByTask(c *gin.Context) {
 		return
 	}
 	if s.CallCount == 0 {
-		c.JSON(404, gin.H{"error": "任务不存在或无权访问"})
+		// 空数据返回 200 + 空数组，避免前端控制台显示 404 错误
+		c.JSON(200, gin.H{
+			"summary":   s,
+			"calls":     []interface{}{},
+			"total":     0,
+			"page":      1,
+			"page_size": 20,
+			"has_more":  false,
+		})
 		return
 	}
 

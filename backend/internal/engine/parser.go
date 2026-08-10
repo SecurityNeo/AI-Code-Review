@@ -219,6 +219,32 @@ func extractScoreFromText(text string) int {
 	return 0
 }
 
+// ParseBatchReviewResult 解析分批评审收集模式的简化输出
+// 不校验 total_score/dimensions，只提取 issues 和 recommendations
+func ParseBatchReviewResult(content string, deductCfg DeductScoreConfig) (*llm.BatchReviewResult, error) {
+	cleaned := sanitizeJSON(content)
+	var result llm.BatchReviewResult
+	if err := json.Unmarshal([]byte(cleaned), &result); err != nil {
+		// 尝试从原始内容解析
+		if err2 := json.Unmarshal([]byte(content), &result); err2 != nil {
+			return nil, fmt.Errorf("batch review result parse failed: %w", err)
+		}
+	}
+	if result.Issues == nil {
+		result.Issues = []llm.AIReviewIssue{}
+	}
+	if result.Recommendations == nil {
+		result.Recommendations = []string{}
+	}
+	// 补充 deduct_score
+	for i := range result.Issues {
+		if result.Issues[i].DeductScore <= 0 {
+			result.Issues[i].DeductScore = deductCfg.DeductScoreFor(result.Issues[i].Severity)
+		}
+	}
+	return &result, nil
+}
+
 // NormalizeDimensionWeights 根据已启用的规则补齐缺失的维度权重
 // 如果规则分类对应的维度在 weights 中不存在，自动以 weight=0 补齐，并记录日志
 func NormalizeDimensionWeights(weights map[string]DimensionWeight, rules []model.ReviewRule) map[string]DimensionWeight {

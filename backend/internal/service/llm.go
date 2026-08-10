@@ -46,17 +46,21 @@ func newHTTPClient(timeout time.Duration) *http.Client {
 }
 
 type ChatResult struct {
-	Content   string
-	ModelID   uint   // 实际使用的模型 ID
-	ModelName string // 实际使用的模型标识名
+	Content      string
+	ModelID      uint   // 实际使用的模型 ID
+	ModelName    string // 实际使用的模型标识名
+	InputTokens  int    // prompt_tokens
+	OutputTokens int    // completion_tokens
 }
 
 // StructuredChatResult 结构化输出结果
 type StructuredChatResult struct {
-	Content   string
-	ModelID   uint
-	ModelName string
-	Response  *llm.ChatResponse // 完整响应（含 Refusal）
+	Content      string
+	ModelID      uint
+	ModelName    string
+	InputTokens  int
+	OutputTokens int
+	Response     *llm.ChatResponse // 完整响应（含 Refusal）
 }
 
 // ModelAttempt 描述一次 LLM 模型调用尝试。
@@ -126,7 +130,13 @@ func (s *LLMService) ChatCompletion(taskID *uint, modelID uint, caller, systemPr
 		if err != nil {
 			return nil, err
 		}
-		return &ChatResult{Content: resp.Choices[0].Message.Content, ModelID: m.ID, ModelName: m.ModelID}, nil
+		return &ChatResult{
+			Content:      resp.Choices[0].Message.Content,
+			ModelID:      m.ID,
+			ModelName:    m.ModelID,
+			InputTokens:  resp.Usage.PromptTokens,
+			OutputTokens: resp.Usage.CompletionTokens,
+		}, nil
 	}
 
 	// ② 未指定 modelID → 走全局主备链路
@@ -134,7 +144,13 @@ func (s *LLMService) ChatCompletion(taskID *uint, modelID uint, caller, systemPr
 	if err != nil {
 		return nil, err
 	}
-	return &ChatResult{Content: resp.Choices[0].Message.Content, ModelID: m.ID, ModelName: m.ModelID}, nil
+	return &ChatResult{
+		Content:      resp.Choices[0].Message.Content,
+		ModelID:      m.ID,
+		ModelName:    m.ModelID,
+		InputTokens:  resp.Usage.PromptTokens,
+		OutputTokens: resp.Usage.CompletionTokens,
+	}, nil
 }
 
 // callSpecificModel 调用指定 ID 的模型，失败时返回"指定模型 X (#Y): <err>"格式错误。
@@ -603,7 +619,14 @@ func (s *LLMService) ChatCompletionStructured(taskID *uint, modelID uint, caller
 		if len(resp.Choices) > 0 {
 			content = resp.Choices[0].Message.Content
 		}
-		return &StructuredChatResult{Content: content, ModelID: m.ID, ModelName: m.ModelID, Response: resp}, nil
+		return &StructuredChatResult{
+			Content:      content,
+			ModelID:      m.ID,
+			ModelName:    m.ModelID,
+			InputTokens:  resp.Usage.PromptTokens,
+			OutputTokens: resp.Usage.CompletionTokens,
+			Response:     resp,
+		}, nil
 	}
 
 	// ② 未指定 modelID → 走全局主备链路
@@ -615,5 +638,12 @@ func (s *LLMService) ChatCompletionStructured(taskID *uint, modelID uint, caller
 	if len(resp.Choices) > 0 {
 		content = resp.Choices[0].Message.Content
 	}
-	return &StructuredChatResult{Content: content, ModelID: m.ID, ModelName: m.ModelID, Response: resp}, nil
+	return &StructuredChatResult{
+		Content:      content,
+		ModelID:      m.ID,
+		ModelName:    m.ModelID,
+		InputTokens:  resp.Usage.PromptTokens,
+		OutputTokens: resp.Usage.CompletionTokens,
+		Response:     resp,
+	}, nil
 }

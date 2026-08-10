@@ -56,7 +56,9 @@ func main() {
 	handler.InitReportConfigs()
 
 	// 5. 初始化定时任务
-	cronRunner := initCron(cfg)
+	// 先创建 TaskService（hub 复用给 Pipeline SSE）
+	taskSvc := service.NewTaskService()
+	cronRunner := initCron(cfg, taskSvc)
 	defer cronRunner.Stop()
 
 	// 5.1. 初始化报表定时任务
@@ -70,6 +72,11 @@ func main() {
 	// 5.2.5. 预热 SystemConfig 缓存 + 定时刷新（cache TTL 5min，刷新周期 1min 必须 < TTL）
 	service.RefreshSysCfgCache()
 	_, _ = cronRunner.AddFunc("@every 1m", service.RefreshSysCfgCache)
+
+	// 5.2.6. 初始化对象存储 provider
+	if err := service.InitObjectStorageProvider(); err != nil {
+		logger.Warn("init object storage provider failed", zap.Error(err))
+	}
 
 	// 5.3. 启动规则孵化台异步 Job 运行器
 	vectorStore := vectorstore.NewMySQLStore(model.DB)
@@ -111,11 +118,21 @@ func main() {
 		zap.L().Sugar().Infow("SendDailyDigest cron registered", "entryID", entryID, "spec", "0 0 9 * * 1-5")
 	}
 
+	// 每天凌晨 2 点执行漏洞数据库同步（从所有启用的同步源）
+	if entryID, err := cronRunner.AddFunc("0 0 2 * * *", func() {
+		syncSvc := service.NewVulnerabilitySyncSourceService()
+		syncSvc.SyncAllEnabled()
+	}); err != nil {
+		zap.L().Error("register vuln sync sources cron failed", zap.Error(err))
+	} else {
+		zap.L().Sugar().Infow("vuln sync sources cron registered", "entryID", entryID)
+	}
+
 	// 5.4. 启动 LLM 调用日志后台 worker（依赖 model.DB，必须在 InitDB 之后调用）
 	llmcall.Start()
 
 	// 6. 初始化 HTTP Router
-	router := setupRouter(cfg, embedSvc, vectorStore)
+	router := setupRouter(cfg, taskSvc, embedSvc, vectorStore)
 
 	// 7. 启动服务
 	srv := &http.Server{
@@ -168,13 +185,13 @@ func initEncrypt(key string) {
 	}
 }
 
-func initCron(cfg *config.Config) *cron.Cron {
+func initCron(cfg *config.Config, taskSvc *service.TaskService) *cron.Cron {
 	cronRunner = cron.New(cron.WithSeconds())
 
 	service.InitMRSyncCron(cronRunner)
 
 	_, _ = cronRunner.AddFunc("@every 10s", func() {
-		service.NewTaskService().TimeoutCheck()
+		taskSvc.TimeoutCheck()
 	})
 
 	cronRunner.Start()
@@ -182,7 +199,7 @@ func initCron(cfg *config.Config) *cron.Cron {
 	return cronRunner
 }
 
-func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store vectorstore.Store) *gin.Engine {
+func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *service.EmbeddingService, store vectorstore.Store) *gin.Engine {
 	if !cfg.Debug {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -238,6 +255,7 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 		c.File(frontendPath + "/mr-stats.html")
 	})
 	r.StaticFile("/data-overview.html", frontendPath+"/data-overview.html")
+	r.StaticFile("/storage-config.html", frontendPath+"/storage-config.html")
 	r.GET("/", func(c *gin.Context) {
 		c.File(frontendPath + "/developer-dashboard.html")
 	})
@@ -279,7 +297,11 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 	r.StaticFile("/project-dashboard.html", frontendPath+"/project-dashboard.html")
 	r.StaticFile("/holiday-management.html", frontendPath+"/holiday-management.html")
 
-	// 健康检查
+		r.GET("/vulnerability-db.html", func(c *gin.Context) {
+			c.File(frontendPath + "/vulnerability-db.html")
+		})
+
+		// 健康检查
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
@@ -364,10 +386,17 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 			task.GET("/:id/structured-review", reviewH.QueryStructuredReview)
 			// Issue 状态管理：批量接纳/拒绝
 			task.POST("/review-issues/batch-resolve", reviewH.BatchResolveIssues)
+			// Pipeline 链路可视化（复用 taskSvc 的 SSE hub）
+			pipelineH := handler.NewPipelineHandler(taskSvc.TaskPipelineHub)
+			task.GET("/:id/pipeline", pipelineH.GetPipelineStatus)
+			task.GET("/:id/pipeline/events", pipelineH.SubscribePipelineEvents)
 		}
 
 		// 评审维度查询（所有已登录用户可读）
 		common.GET("/review-categories", handler.NewReviewCategoryHandler().List)
+		// Pipeline stage 详情（复用 taskSvc 的 SSE hub）
+		pipelineH := handler.NewPipelineHandler(taskSvc.TaskPipelineHub)
+		common.GET("/pipeline-stages/:execution_id/detail", pipelineH.GetStageDetail)
 
 		// MR 审查日志（数据已按user过滤）
 		mrLog := common.Group("/mr-review-logs")
@@ -631,6 +660,57 @@ func setupRouter(cfg *config.Config, embedSvc *service.EmbeddingService, store v
 			report.POST("/logs/:id/resend", h.ResendReport)
 			report.DELETE("/logs/:id", h.DeleteLog)
 			report.GET("/logs/:id/html", h.GetReportLogHTML)
+		}
+		// 对象存储配置
+		storageH := handler.NewObjectStorageHandler()
+		objStorage := adminOnly.Group("/object-storage")
+		{
+			objStorage.GET("/configs", storageH.ListConfigs)
+			objStorage.GET("/configs/:id", storageH.GetConfig)
+			objStorage.POST("/configs", storageH.CreateConfig)
+			objStorage.PUT("/configs/:id", storageH.UpdateConfig)
+			objStorage.DELETE("/configs/:id", storageH.DeleteConfig)
+			objStorage.POST("/configs/:id/test", storageH.TestConfig)
+			objStorage.POST("/configs/:id/set-default", storageH.SetDefault)
+		}
+
+		// 漏洞数据库管理
+		vulnH := handler.NewVulnerabilityHandler()
+		vulnGroup := adminOnly.Group("/vulnerabilities")
+		{
+		vulnGroup.GET("", vulnH.List)
+		vulnGroup.GET("/stats", vulnH.Stats)
+		vulnGroup.GET("/ecosystems", vulnH.Ecosystems)
+		vulnGroup.POST("/import", vulnH.Import)
+		vulnGroup.POST("/sync", vulnH.Sync)
+		vulnGroup.GET("/:id", vulnH.Get)
+		vulnGroup.POST("", vulnH.Create)
+		vulnGroup.PUT("/:id", vulnH.Update)
+		vulnGroup.DELETE("/:id", vulnH.Delete)
+		}
+
+		// 漏洞白名单管理
+		allowH := handler.NewVulnerabilityAllowlistHandler()
+		allowGroup := adminOnly.Group("/vulnerability-allowlist")
+		{
+			allowGroup.GET("", allowH.List)
+			allowGroup.POST("", allowH.Create)
+			allowGroup.PUT("/:id", allowH.Update)
+			allowGroup.DELETE("/:id", allowH.Delete)
+		}
+
+		// 漏洞库同步源管理
+		syncH := handler.NewVulnerabilitySyncSourceHandler()
+		syncGroup := adminOnly.Group("/vulnerability-sync-sources")
+		{
+			syncGroup.GET("", syncH.List)
+			syncGroup.GET("/:id", syncH.Get)
+			syncGroup.POST("", syncH.Create)
+			syncGroup.PUT("/:id", syncH.Update)
+			syncGroup.DELETE("/:id", syncH.Delete)
+			syncGroup.POST("/:id/check-version", syncH.CheckVersion)
+			syncGroup.GET("/check-all", syncH.CheckAllVersions)
+			syncGroup.POST("/:id/sync", syncH.Sync)
 		}
 	}
 
