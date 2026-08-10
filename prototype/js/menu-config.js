@@ -57,6 +57,7 @@ const MENU_CONFIG = [
             { id: 'tasks',        name: '评审任务列表', href: 'tasks.html',        icon: 'fa-tasks',             role: ['admin', 'user'] },
             { id: 'pools',        name: '任务资源池', href: 'pools.html',        icon: 'fa-server',            role: ['admin'] },
             { id: 'models',       name: '大模型管理', href: 'models.html',       icon: 'fa-microchip',         role: ['admin'] },
+            { id: 'vulnerability-db', name: '漏洞数据库', href: 'vulnerability-db.html', icon: 'fa-bug', role: ['admin'] },
         ]
     },
 
@@ -88,6 +89,7 @@ const MENU_CONFIG = [
         role: ['admin'],
         children: [
             { id: 'settings-config', name: '系统配置',     href: 'settings.html?tab=config',         icon: 'fa-sliders' },
+            { id: 'settings-storage', name: '对象存储',     href: 'storage-config.html',              icon: 'fa-database' },
             { id: 'settings-ai',     name: 'AI 对话模板',  href: 'settings.html?tab=aitemplate',     icon: 'fa-robot' },
             { id: 'settings-review', name: '代码审查模板', href: 'settings.html?tab=reviewtemplate', icon: 'fa-code' },
             { id: 'settings-users',  name: '用户管理',     href: 'settings.html?tab=users',          icon: 'fa-user-cog' },

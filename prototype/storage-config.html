@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script src="js/theme.js?v=1"></script>
+    <style>html{background-color:#1e293b;}</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>对象存储配置 - CodeGuard</title>
+    <script src="js/auth.js?v=6"></script>
+    <script src="js/menu-config.js?v=6"></script>
+    <script src="js/sidebar.js?v=6"></script>
+    <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="css/theme.css?v=1">
+    <style>
+        .sidebar-item:hover { background-color: rgba(255,255,255,0.1); }
+        .sidebar-item.active { background-color: rgba(255,255,255,0.15); border-left: 3px solid #3b82f6; }
+
+        /* Buttons */
+        .btn { padding: 8px 16px; border-radius: 6px; font-size: 14px; cursor: pointer; border: none; transition: all 0.15s; }
+        .btn-primary { background: #2563eb; color: white; }
+        .btn-primary:hover { background: #1d4ed8; }
+        .btn-secondary { background: white; color: #374151; border: 1px solid #d1d5db; }
+        .btn-secondary:hover { background: #f3f4f6; }
+        .btn-danger { background: white; color: #dc2626; border: 1px solid #fecaca; }
+        .btn-danger:hover { background: #fef2f2; }
+        .btn-ghost { background: transparent; color: #6b7280; border: 1px solid transparent; }
+        .btn-ghost:hover { color: #374151; background: #f3f4f6; }
+        .btn-sm { padding: 5px 12px; font-size: 13px; }
+        .btn-icon { padding: 6px; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; }
+
+        /* Status */
+        .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+        .status-ok .status-dot { background: #22c55e; }
+        .status-error .status-dot { background: #ef4444; }
+        .status-unknown .status-dot { background: #9ca3af; }
+        .status-ok { color: #16a34a; }
+        .status-error { color: #dc2626; }
+        .status-unknown { color: #6b7280; }
+
+        /* Table */
+        .data-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+        .data-table thead th { background: #f8fafc; padding: 12px 16px; font-size: 13px; font-weight: 600; color: #475569; text-align: left; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+        .data-table tbody td { padding: 14px 16px; font-size: 14px; color: #334155; border-bottom: 1px solid #f1f5f9; }
+        .data-table tbody tr:hover td { background: #f8fafc; }
+        .data-table tbody tr:last-child td { border-bottom: none; }
+        .table-card { background: white; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+
+        /* Badges */
+        .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 10px; font-size: 12px; font-weight: 500; }
+        .badge-type { background: #eff6ff; color: #2563eb; }
+        .badge-default { background: #dbeafe; color: #1d4ed8; }
+        .badge-enabled { background: #dcfce7; color: #166534; }
+        .badge-disabled { background: #f1f5f9; color: #64748b; }
+
+        /* Modal */
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 50; }
+        .modal-overlay.show { display: flex; }
+        .modal-box { background: white; border-radius: 12px; width: 100%; max-width: 560px; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04); }
+        .modal-header { padding: 20px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+        .modal-header h3 { font-size: 16px; font-weight: 700; color: #0f172a; margin: 0; }
+        .modal-body { padding: 24px; flex: 1; overflow-y: auto; }
+        .modal-footer { padding: 16px 24px; border-top: 1px solid #e2e8f0; background: #f8fafc; display: flex; justify-content: flex-end; gap: 8px; border-radius: 0 0 12px 12px; }
+
+        /* Delete Confirm Modal */
+        .delete-modal-box { background: white; border-radius: 12px; width: 100%; max-width: 400px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); }
+        .delete-modal-icon { width: 48px; height: 48px; border-radius: 50%; background: #fef2f2; color: #dc2626; display: flex; align-items: center; justify-content: center; font-size: 20px; margin: 0 auto 16px; }
+        .delete-modal-body { text-align: center; padding: 32px 32px 24px; }
+        .delete-modal-body h4 { font-size: 16px; font-weight: 700; color: #1e293b; margin: 0 0 8px; }
+        .delete-modal-body p { font-size: 14px; color: #64748b; margin: 0; }
+        .delete-modal-footer { padding: 16px 24px 24px; display: flex; gap: 8px; }
+        .delete-modal-footer .btn { flex: 1; justify-content: center; }
+
+        /* Form */
+        .section-title { font-size: 13px; font-weight: 700; color: #1e293b; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; letter-spacing: 0.3px; }
+        .section-title::before { content: ''; display: block; width: 4px; height: 16px; background: #2563eb; border-radius: 3px; }
+        .form-group { margin-bottom: 16px; }
+        .form-group:last-child { margin-bottom: 0; }
+        .form-group label { display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 5px; }
+        .form-group label .required { color: #dc2626; margin-left: 2px; }
+        .form-group input, .form-group select { width: 100%; padding: 9px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; transition: all 0.15s; background: white; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
+        .form-group input.error { border-color: #dc2626; box-shadow: 0 0 0 3px rgba(220,38,38,0.1); }
+        .form-hint { font-size: 12px; color: #6b7280; margin-top: 4px; line-height: 1.5; }
+        .form-error { font-size: 12px; color: #dc2626; margin-top: 4px; display: none; }
+        .form-error.show { display: block; }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+        .divider { height: 1px; background: #e5e7eb; margin: 20px 0; }
+
+        /* Help Panel */
+        .help-panel { background: #f8fafc; border-radius: 8px; padding: 16px; border: 1px solid #e2e8f0; margin-top: 8px; }
+        .help-panel-title { font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+        .help-panel-item { font-size: 12px; color: #64748b; margin-bottom: 5px; display: flex; gap: 6px; }
+        .help-panel-item:last-child { margin-bottom: 0; }
+        .help-panel-item i { color: #3b82f6; margin-top: 2px; font-size: 10px; }
+
+        /* Empty State */
+        .empty-state { text-align: center; padding: 64px 24px; }
+        .empty-state-icon { width: 64px; height: 64px; background: #f1f5f9; border-radius: 16px; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 24px; color: #94a3b8; }
+        .empty-state-title { font-size: 16px; font-weight: 600; color: #334155; margin-bottom: 8px; }
+        .empty-state-desc { font-size: 14px; color: #94a3b8; margin-bottom: 24px; }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans">
+<div id="page-transition" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#1e293b;z-index:99999;transition:opacity .25s ease;"></div>
+<script>
+(function(){
+  function hide(){var el=document.getElementById('page-transition');if(el){el.style.opacity='0';setTimeout(function(){el.remove();},250);}}
+  if(document.readyState==='complete'){hide();}else{window.addEventListener('load',hide);}
+})();
+</script>
+
+<div class="flex h-screen">
+    <aside id="sidebar" class="w-64 bg-slate-900 text-white flex-shrink-0 flex flex-col">
+        <nav style="padding: 20px; text-align: center; color: var(--cg-text-tertiary); font-size: 13px;">加载中...</nav>
+    </aside>
+    <main class="flex-1 overflow-y-auto">
+        <header class="bg-white border-b px-8 py-4 sticky top-0 z-10">
+            <div>
+                <h2 class="text-xl font-bold text-gray-800">对象存储配置</h2>
+                <p class="text-sm text-gray-500 mt-1">管理 Pipeline 快照的外部存储（COS / OSS / S3 / MinIO）</p>
+            </div>
+        </header>
+        <div class="p-8 space-y-6">
+            <!-- 搜索过滤 -->
+            <div class="bg-white rounded-xl p-4 border flex items-center gap-4">
+                <div class="flex-1">
+                    <input type="text" id="searchInput" placeholder="搜索配置名称..."
+                           class="w-full px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                           onkeyup="if(event.key==='Enter')renderList()">
+                </div>
+                <button onclick="renderList()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700">
+                    <i class="fas fa-search mr-1"></i>搜索
+                </button>
+                <button onclick="loadConfigs()" class="border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm hover:bg-gray-50 flex items-center gap-2">
+                    <i class="fas fa-redo"></i>刷新
+                </button>
+                <button data-admin-only onclick="openModal()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 flex items-center gap-2">
+                    <i class="fas fa-plus"></i>新增配置
+                </button>
+            </div>
+
+            <!-- 列表 -->
+            <div class="bg-white rounded-xl border overflow-hidden">
+                <table class="w-full">
+                    <thead class="bg-gray-50 border-b">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">配置名称</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">类型</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">Bucket</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">Endpoint</th>
+                            <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">状态</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">连接状态</th>
+                            <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="configTableBody" class="divide-y divide-gray-100">
+                        <tr><td colspan="7" class="px-6 py-8 text-center text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i>加载中...</td></tr>
+                    </tbody>
+                </table>
+                <div class="px-6 py-4 border-t flex items-center justify-between">
+                    <span class="text-sm text-gray-500" id="totalCount">共 0 条配置</span>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Create / Edit Modal -->
+<div id="configModal" class="modal-overlay">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3 id="modalTitle">新增对象存储配置</h3>
+            <button onclick="closeModal()" class="btn btn-ghost btn-icon" style="margin-right:-8px;">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="editId">
+
+            <!-- Basic -->
+            <div class="section-title">基本信息</div>
+            <div class="form-group">
+                <label>配置名称 <span class="required">*</span></label>
+                <input type="text" id="cfgName" placeholder="例如：生产环境 COS">
+                <div class="form-error" id="nameError">配置名称不能为空</div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>存储类型 <span class="required">*</span></label>
+                    <select id="cfgType" onchange="onTypeChange()">
+                        <option value="cos">腾讯云 COS</option>
+                        <option value="oss">阿里云 OSS</option>
+                        <option value="s3">AWS S3</option>
+                        <option value="minio">MinIO</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>启用状态</label>
+                    <select id="cfgEnabled">
+                        <option value="true">启用</option>
+                        <option value="false">禁用</option>
+                    </select>
+                </div>
+            </div>
+            <div class="flex items-center gap-2" style="margin-top:4px;">
+                <input type="checkbox" id="cfgDefault" style="width:16px;height:16px;border-radius:4px;cursor:pointer;">
+                <label style="font-size:13px;color:#374151;cursor:pointer;margin:0;">设为默认配置</label>
+            </div>
+
+            <div class="divider"></div>
+
+            <!-- Connection -->
+            <div class="section-title">连接配置</div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Bucket <span class="required">*</span></label>
+                    <input type="text" id="cfgBucket" placeholder="例如：codeguard-prod">
+                    <div class="form-error" id="bucketError">Bucket 不能为空</div>
+                </div>
+                <div class="form-group">
+                    <label>Region</label>
+                    <input type="text" id="cfgRegion" placeholder="">
+                    <div class="form-hint" id="regionHint">COS 必填，MinIO / S3 可留空，默认 us-east-1</div>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Endpoint 协议</label>
+                    <select id="cfgUseSSL">
+                        <option value="true">https://</option>
+                        <option value="false">http://</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Endpoint</label>
+                    <input type="text" id="cfgEndpoint" placeholder="">
+                    <div class="form-hint" id="endpointHint">MinIO 需带 API 端口，例如：10.210.20.50:9000</div>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>AccessKey <span class="required">*</span></label>
+                    <input type="password" id="cfgAK" placeholder="Access Key">
+                    <div class="form-hint">存储后不可查看，仅支持更新</div>
+                </div>
+                <div class="form-group">
+                    <label>SecretKey <span class="required">*</span></label>
+                    <input type="password" id="cfgSK" placeholder="Secret Key">
+                    <div class="form-hint">存储后不可查看，仅支持更新</div>
+                </div>
+            </div>
+
+            <!-- Dynamic Help Panel -->
+            <div id="typeHelpPanel" class="help-panel"></div>
+
+            <div class="divider"></div>
+
+            <!-- Advanced -->
+            <div class="section-title">高级选项</div>
+            <div class="form-row-3">
+                <div class="form-group">
+                    <label>对象前缀</label>
+                    <input type="text" id="cfgPrefix" value="codeguard">
+                </div>
+                <div class="form-group">
+                    <label>保留天数</label>
+                    <input type="number" id="cfgRetention" value="30" min="1">
+                </div>
+                <div class="form-group">
+                    <label>单对象上限(MB)</label>
+                    <input type="number" id="cfgMaxSize" value="50" min="1">
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" onclick="testConnection()" class="btn btn-secondary">
+                <i class="fas fa-plug mr-2"></i>测试连接
+            </button>
+            <div style="flex:1"></div>
+            <button type="button" onclick="closeModal()" class="btn btn-secondary">取消</button>
+            <button type="button" onclick="saveConfig()" class="btn btn-primary">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirm Modal -->
+<div id="deleteModal" class="modal-overlay">
+    <div class="delete-modal-box">
+        <div class="delete-modal-body">
+            <div class="delete-modal-icon">
+                <i class="fas fa-exclamation-triangle"></i>
+            </div>
+            <h4>确认删除配置？</h4>
+            <p>配置删除后无法恢复，Pipeline 快照将不再写入此存储。</p>
+        </div>
+        <div class="delete-modal-footer">
+            <button type="button" onclick="closeDeleteModal()" class="btn btn-secondary">取消</button>
+            <button type="button" onclick="confirmDelete()" class="btn btn-danger">删除</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const API_BASE = '/api/v1';
+let configs = [];
+let editingId = null;
+let deletingId = null;
+
+const TYPE_HELP = {
+    cos: { placeholder: { region: 'ap-guangzhou', endpoint: '留空（自动拼接 .cos.{region}.myqcloud.com）' }, tips: ['Region 必填', 'Endpoint 无需填写，系统自动拼接标准域名'] },
+    oss: { placeholder: { region: 'cn-hangzhou', endpoint: '留空（自动拼接 .oss-{region}.aliyuncs.com）' }, tips: ['Region 必填', 'Endpoint 无需填写，系统自动拼接标准域名'] },
+    s3:  { placeholder: { region: 'us-east-1', endpoint: '留空（自动拼接 .s3.{region}.amazonaws.com）' }, tips: ['Region 可留空，默认 us-east-1', 'Endpoint 无需填写，使用 AWS 默认域名'] },
+    minio: { placeholder: { region: 'us-east-1', endpoint: '10.210.20.50:9000' }, tips: ['Endpoint 必填，需包含 API 端口（默认 9000）', 'Region 可留空，默认 us-east-1', '基于 S3 兼容 API 签名（V4）'] }
+};
+
+function onTypeChange() {
+    const type = document.getElementById('cfgType').value;
+    const help = TYPE_HELP[type];
+    if (!help) return;
+
+    // Update placeholders
+    document.getElementById('cfgRegion').placeholder = help.placeholder.region;
+    document.getElementById('cfgEndpoint').placeholder = help.placeholder.endpoint;
+
+    // Build help panel
+    const panel = document.getElementById('typeHelpPanel');
+    panel.innerHTML = `
+        <div class="help-panel-title"><i class="fas fa-info-circle"></i>${getTypeLabel(type)} 配置提示</div>
+        ${help.tips.map(t => `<div class="help-panel-item"><i class="fas fa-check"></i><span>${t}</span></div>`).join('')}
+    `;
+}
+
+function getTypeLabel(type) {
+    const map = { cos: '腾讯云 COS', oss: '阿里云 OSS', s3: 'AWS S3', minio: 'MinIO' };
+    return map[type] || type.toUpperCase();
+}
+
+async function apiCall(url, opts) {
+    const res = await apiFetch(url, opts);
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || '请求失败');
+    }
+    return res.json();
+}
+
+async function loadConfigs() {
+    try {
+        const data = await apiCall(`${API_BASE}/object-storage/configs`);
+        configs = Array.isArray(data) ? data : (data.data || []);
+        renderList();
+    } catch (e) {
+        document.getElementById('configTableBody').innerHTML = '<tr><td colspan="7" class="px-6 py-8 text-center text-red-500">加载配置失败: ' + e.message + '</td></tr>';
+    }
+}
+
+function renderList() {
+    const tbody = document.getElementById('configTableBody');
+    const keyword = (document.getElementById('searchInput')?.value || '').trim().toLowerCase();
+    let list = configs;
+    if (keyword) {
+        list = configs.filter(c => (c.name || '').toLowerCase().includes(keyword));
+    }
+
+    document.getElementById('totalCount').textContent = `共 ${list.length} 条配置`;
+
+    if (!list.length) {
+        tbody.innerHTML = `
+            <tr><td colspan="7" class="px-6 py-8 text-center text-gray-500">
+                <div class="space-y-2">
+                    <div class="text-gray-400"><i class="fas fa-database" style="font-size:24px"></i></div>
+                    <div class="font-medium">暂无对象存储配置</div>
+                    <div class="text-sm text-gray-400">添加一个对象存储配置，用于保存 Pipeline 快照数据</div>
+                </div>
+            </td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = list.map(c => renderRow(c)).join('');
+}
+
+function renderRow(c) {
+    const statusText = c.connection_status === 'ok' ? '连接正常' : c.connection_status === 'error' ? '连接失败' : '未测试';
+    const statusIcon = c.connection_status === 'ok' ? 'fa-check-circle' : c.connection_status === 'error' ? 'fa-times-circle' : 'fa-question-circle';
+    const statusColor = c.connection_status === 'ok' ? 'text-green-600' : c.connection_status === 'error' ? 'text-red-600' : 'text-gray-400';
+    const endpointDisplay = c.endpoint || getDefaultEndpoint(c.type, c.region, c.bucket);
+
+    return `<tr>
+        <td class="px-6 py-4 text-sm">
+            <span class="font-medium text-gray-900">${esc(c.name)}</span>
+            ${c.is_default ? '<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700">默认</span>' : ''}
+        </td>
+        <td class="px-6 py-4 text-sm">
+            <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700">${getTypeLabel(c.type)}</span>
+        </td>
+        <td class="px-6 py-4 text-sm text-gray-600">${esc(c.bucket || '-')}</td>
+        <td class="px-6 py-4 text-sm text-gray-600 font-mono">${esc(endpointDisplay)}</td>
+        <td class="px-6 py-4 text-center">
+            ${c.enabled
+                ? '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700">启用</span>'
+                : '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">禁用</span>'}
+        </td>
+        <td class="px-6 py-4 text-sm ${statusColor}">
+            <i class="fas ${statusIcon} mr-1" style="font-size:12px"></i>${statusText}
+        </td>
+        <td class="px-6 py-4 text-center space-x-2">
+            <button onclick="editConfig(${c.id})" class="text-blue-600 hover:text-blue-800 text-xs">编辑</button>
+            <button onclick="testConfig(${c.id})" class="text-green-600 hover:text-green-800 text-xs">测试</button>
+            ${!c.is_default ? `<button onclick="setDefault(${c.id})" class="text-amber-600 hover:text-amber-800 text-xs">设为默认</button>` : ''}
+            <button onclick="deleteConfig(${c.id})" class="text-red-600 hover:text-red-800 text-xs">删除</button>
+        </td>
+    </tr>`;
+}
+
+function getDefaultEndpoint(type, region, bucket) {
+    if (type === 'cos') return `${bucket}.cos.${region || '?'}.myqcloud.com`;
+    if (type === 'oss') return `${bucket}.oss-${region || '?'}.aliyuncs.com`;
+    if (type === 's3')  return `${bucket}.s3.${region || 'us-east-1'}.amazonaws.com`;
+    return '-';
+}
+
+function esc(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function openModal(id) {
+    editingId = id || null;
+    // Clear errors
+    document.querySelectorAll('.form-error').forEach(el => el.classList.remove('show'));
+    document.querySelectorAll('input.error').forEach(el => el.classList.remove('error'));
+
+    document.getElementById('modalTitle').textContent = id ? '编辑对象存储配置' : '新增对象存储配置';
+    document.getElementById('configModal').classList.add('show');
+    onTypeChange();
+
+    if (!id) {
+        document.getElementById('cfgName').value = '';
+        document.getElementById('cfgType').value = 'cos';
+        document.getElementById('cfgEnabled').value = 'true';
+        document.getElementById('cfgRegion').value = '';
+        document.getElementById('cfgBucket').value = '';
+        document.getElementById('cfgUseSSL').value = 'true';
+        document.getElementById('cfgEndpoint').value = '';
+        document.getElementById('cfgAK').value = '';
+        document.getElementById('cfgSK').value = '';
+        document.getElementById('cfgPrefix').value = 'codeguard';
+        document.getElementById('cfgRetention').value = '30';
+        document.getElementById('cfgMaxSize').value = '50';
+        document.getElementById('cfgDefault').checked = false;
+    } else {
+        const c = configs.find(x => x.id === id);
+        if (c) {
+            document.getElementById('cfgName').value = c.name || '';
+            document.getElementById('cfgType').value = c.type || 'cos';
+            onTypeChange(); // refresh help panel
+            document.getElementById('cfgEnabled').value = String(c.enabled);
+            document.getElementById('cfgRegion').value = c.region || '';
+            document.getElementById('cfgBucket').value = c.bucket || '';
+            document.getElementById('cfgEndpoint').value = c.endpoint || '';
+            document.getElementById('cfgUseSSL').value = String(c.use_ssl !== false);
+            document.getElementById('cfgAK').value = '';
+            document.getElementById('cfgSK').value = '';
+            document.getElementById('cfgPrefix').value = c.prefix || 'codeguard';
+            document.getElementById('cfgRetention').value = c.retention_days || 30;
+            document.getElementById('cfgMaxSize').value = (c.max_object_size / 1048576) || 50;
+            document.getElementById('cfgDefault').checked = c.is_default || false;
+        }
+    }
+}
+
+function closeModal() {
+    document.getElementById('configModal').classList.remove('show');
+    editingId = null;
+}
+
+function showFieldError(fieldId, errorId, show) {
+    const field = document.getElementById(fieldId);
+    const error = document.getElementById(errorId);
+    if (!field || !error) return;
+    if (show) { field.classList.add('error'); error.classList.add('show'); }
+    else { field.classList.remove('error'); error.classList.remove('show'); }
+}
+
+function validateForm() {
+    let valid = true;
+    const name = document.getElementById('cfgName').value.trim();
+    const bucket = document.getElementById('cfgBucket').value.trim();
+
+    if (!name) { showFieldError('cfgName', 'nameError', true); valid = false; }
+    else { showFieldError('cfgName', 'nameError', false); }
+
+    if (!bucket) { showFieldError('cfgBucket', 'bucketError', true); valid = false; }
+    else { showFieldError('cfgBucket', 'bucketError', false); }
+
+    return valid;
+}
+
+async function saveConfig() {
+    if (!validateForm()) return;
+    const body = {
+        name: document.getElementById('cfgName').value.trim(),
+        type: document.getElementById('cfgType').value,
+        enabled: document.getElementById('cfgEnabled').value === 'true',
+        is_default: document.getElementById('cfgDefault').checked,
+        region: document.getElementById('cfgRegion').value,
+        bucket: document.getElementById('cfgBucket').value.trim(),
+        endpoint: document.getElementById('cfgEndpoint').value.trim(),
+        use_ssl: document.getElementById('cfgUseSSL').value === 'true',
+        prefix: document.getElementById('cfgPrefix').value,
+        access_key: document.getElementById('cfgAK').value,
+        secret_key: document.getElementById('cfgSK').value,
+        retention_days: parseInt(document.getElementById('cfgRetention').value) || 30,
+        max_object_size: (parseInt(document.getElementById('cfgMaxSize').value) || 50) * 1048576,
+        test_connection: false
+    };
+    try {
+        const url = editingId ? `${API_BASE}/object-storage/configs/${editingId}` : `${API_BASE}/object-storage/configs`;
+        const method = editingId ? 'PUT' : 'POST';
+        await apiCall(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        closeModal();
+        loadConfigs();
+    } catch (e) {
+        alert('保存失败: ' + e.message);
+    }
+}
+
+async function testConnection() {
+    const body = {
+        name: document.getElementById('cfgName').value || 'test',
+        type: document.getElementById('cfgType').value,
+        enabled: true,
+        region: document.getElementById('cfgRegion').value,
+        bucket: document.getElementById('cfgBucket').value,
+        endpoint: document.getElementById('cfgEndpoint').value,
+        use_ssl: document.getElementById('cfgUseSSL').value === 'true',
+        prefix: document.getElementById('cfgPrefix').value,
+        access_key: document.getElementById('cfgAK').value,
+        secret_key: document.getElementById('cfgSK').value,
+        test_connection: true
+    };
+    try {
+        await apiCall(`${API_BASE}/object-storage/configs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        alert('连接测试成功');
+    } catch (e) {
+        alert('连接测试失败: ' + e.message);
+    }
+}
+
+async function testConfig(id) {
+    try {
+        const res = await apiFetch(`${API_BASE}/object-storage/configs/${id}/test`, { method: 'POST' });
+        const json = await res.json();
+        alert(json.success ? '连接成功: ' + json.message : '连接失败: ' + json.message);
+        loadConfigs();
+    } catch (e) {
+        alert('测试失败: ' + e.message);
+    }
+}
+
+async function setDefault(id) {
+    try {
+        await apiCall(`${API_BASE}/object-storage/configs/${id}/set-default`, { method: 'POST' });
+        loadConfigs();
+    } catch (e) {
+        alert('设置失败: ' + e.message);
+    }
+}
+
+/* ===== Delete Modal ===== */
+function deleteConfig(id) {
+    deletingId = id;
+    document.getElementById('deleteModal').classList.add('show');
+}
+
+function closeDeleteModal() {
+    document.getElementById('deleteModal').classList.remove('show');
+    deletingId = null;
+}
+
+async function confirmDelete() {
+    if (!deletingId) return;
+    try {
+        await apiCall(`${API_BASE}/object-storage/configs/${deletingId}`, { method: 'DELETE' });
+        closeDeleteModal();
+        loadConfigs();
+    } catch (e) {
+        alert('删除失败: ' + e.message);
+        closeDeleteModal();
+    }
+}
+
+function editConfig(id) {
+    openModal(id);
+}
+
+document.addEventListener('DOMContentLoaded', loadConfigs);
+</script>
+<script defer src="/static/js/tailwindcss.min.js"></script>
+</body>
+</html>

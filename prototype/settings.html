@@ -201,6 +201,25 @@
                         </div>
                     </div>
 
+                    <!-- Pipeline 评审引擎配置卡片 -->
+                    <div class="bg-gray-50 rounded-lg p-5 border">
+                        <h4 class="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                            <i class="fas fa-stream text-purple-500"></i>Pipeline 评审引擎（灰度发布）
+                        </h4>
+                        <div class="grid grid-cols-1 gap-5">
+                            <div class="flex items-center gap-3">
+                                <input type="checkbox" id="pipelineEnabled" class="h-4 w-4 text-blue-600 rounded focus:ring-blue-500">
+                                <label for="pipelineEnabled" class="text-sm font-medium text-gray-700">启用 Pipeline 评审引擎</label>
+                                <span class="text-xs text-gray-400">开启后新任务将使用 Pipeline 模式执行（可视化链路、智能分批、AST 上下文）</span>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">每波最多并行批次</label>
+                                <input type="number" id="batchParallelMax" value="3" min="1" max="10" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                <p class="text-xs text-gray-400 mt-1">每波最多同时评审的批次数量（1-10），超过则按波次顺序执行</p>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- 监控告警卡片 -->
                     <div class="bg-gray-50 rounded-lg p-5 border mt-5">
                         <h4 class="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
@@ -765,6 +784,8 @@
                     setVal('scoreThreshold', data.data.score_threshold, 60);
                     document.getElementById('deepReviewEnabled').checked = data.data.deep_review_enabled === true;
                     setVal('diffTruncationThreshold', data.data.diff_truncation_threshold, 5000);
+                    document.getElementById('pipelineEnabled').checked = data.data.pipeline_enabled === true;
+                    setVal('batchParallelMax', data.data.batch_parallel_max, 3);
                     setVal('alertDurationSec', data.data.alert_duration_sec, 300);
                     setVal('alertCooldownSec', data.data.alert_cooldown_sec, 3600);
                     setVal('alertNotifierID', data.data.alert_notifier_id, 0);
@@ -985,7 +1006,8 @@ function previewTemplate() {
                 score_threshold: parseInt(document.getElementById('scoreThreshold').value) || 60,
                 deep_review_enabled: document.getElementById('deepReviewEnabled').checked,
                 diff_truncation_threshold: parseInt(document.getElementById('diffTruncationThreshold').value) || 5000,
-                max_diff_files: parseInt(document.getElementById('maxDiffFiles').value) || 50,
+                pipeline_enabled: document.getElementById('pipelineEnabled').checked,
+                batch_parallel_max: parseInt(document.getElementById('batchParallelMax').value) || 3,
                 max_tokens_per_batch: parseInt(document.getElementById('maxTokensPerBatch').value) || 100000,
                 llm_retry_max_attempts: parseInt(document.getElementById('llmRetryMaxAttempts').value) || 3,
                 llm_retry_initial_delay_ms: parseInt(document.getElementById('llmRetryInitialDelayMs').value) || 1000,
