@@ -285,6 +285,29 @@ func autoMigrate() error {
 	// 初始化内置漏洞库同步源
 	initBuiltinVulnSyncSources()
 
+	// ========== AI 评审智能体全局配置（新增表）==========
+	if err := DB.AutoMigrate(&ReviewAgentConfig{}); err != nil {
+		return err
+	}
+	initReviewAgentConfig()
+
+	// ========== Phase C：扩展智能体规则库 ==========
+	if err := DB.AutoMigrate(&SecretScanRule{}); err != nil {
+		return err
+	}
+	if err := DB.AutoMigrate(&SecretScanFinding{}); err != nil {
+		return err
+	}
+	initSecretScanRules()
+
+	if err := DB.AutoMigrate(&SecurityAuditRule{}); err != nil {
+		return err
+	}
+	if err := DB.AutoMigrate(&SecurityAuditFinding{}); err != nil {
+		return err
+	}
+	initSecurityAuditRules()
+
 	// 兼容：移除 object_storage_configs.name 的旧 unique 索引（已改为普通字段允许多个同名配置）
 	if DB.Migrator().HasIndex(&ObjectStorageConfig{}, "idx_object_storage_configs_name") {
 		if err := DB.Migrator().DropIndex(&ObjectStorageConfig{}, "idx_object_storage_configs_name"); err != nil {
@@ -712,8 +735,6 @@ func initSystemConfig() {
 			MaxParallelTask:            20,
 			LogRetentionDay:            90,
 			DiffTruncationThreshold:    5000,
-			MaxDiffFiles:               50,
-			MaxTokensPerBatch:          100000,
 			LLMRetryMaxAttempts:        3,
 			LLMRetryInitialDelayMs:     1000,
 			LLMRetryBackoffMultiplier:  2.0,
@@ -736,17 +757,10 @@ func initSystemConfig() {
 			zap.L().Info("system config initialized with defaults")
 		}
 	} else {
-		// 兼容旧记录：新加列默认 0 会导致业务逻辑异常（"不限制"/"不重试"），这里回填默认值
-		if cfg.MaxDiffFiles <= 0 || cfg.MaxTokensPerBatch <= 0 ||
-			cfg.LLMRetryMaxAttempts <= 0 || cfg.LLMRetryInitialDelayMs <= 0 ||
+		// 兼容旧记录：新加列默认 0 会导致业务逻辑异常（"不重试"），这里回填默认值
+		if cfg.LLMRetryMaxAttempts <= 0 || cfg.LLMRetryInitialDelayMs <= 0 ||
 			cfg.LLMRetryBackoffMultiplier <= 0 || cfg.LLMRetryMaxDelayMs <= 0 {
 			update := map[string]interface{}{}
-			if cfg.MaxDiffFiles <= 0 {
-				update["max_diff_files"] = 50
-			}
-			if cfg.MaxTokensPerBatch <= 0 {
-				update["max_tokens_per_batch"] = 100000
-			}
 			if cfg.LLMRetryMaxAttempts <= 0 {
 				update["llm_retry_max_attempts"] = 3
 			}
@@ -768,8 +782,6 @@ func initSystemConfig() {
 		zap.L().Info("system config already exists",
 			zap.Int("task_timeout_min", cfg.TaskTimeoutMin),
 			zap.Int("max_parallel_task", cfg.MaxParallelTask),
-			zap.Int("max_diff_files", cfg.MaxDiffFiles),
-			zap.Int("max_tokens_per_batch", cfg.MaxTokensPerBatch),
 			zap.Int("llm_retry_max_attempts", cfg.LLMRetryMaxAttempts))
 	}
 }
@@ -821,13 +833,16 @@ func initNotificationGlobalSetting() {
 
 // initPipelineStages 初始化 Pipeline 阶段定义
 func initPipelineStages() {
-	// AI 评审总超时时间使用系统配置的任务超时（分钟→秒）
+	// AI 评审总超时时间使用系统配置的任务超时（分钟→秒），但上限 600 秒（10 分钟）
 	var sysCfg SystemConfig
 	var reviewFrameTimeoutSec int
 	if err := DB.First(&sysCfg).Error; err == nil && sysCfg.TaskTimeoutMin > 0 {
 		reviewFrameTimeoutSec = sysCfg.TaskTimeoutMin * 60
+		if reviewFrameTimeoutSec > 600 {
+			reviewFrameTimeoutSec = 600
+		}
 	} else {
-		reviewFrameTimeoutSec = 7200 // fallback: 120 分钟 = 7200 秒
+		reviewFrameTimeoutSec = 600 // fallback: 10 分钟
 	}
 
 	stages := []ReviewPipelineStage{
@@ -835,12 +850,24 @@ func initPipelineStages() {
 		{Code: "git_clone", Name: "代码获取", Description: "从 Git 仓库获取变更 diff", Icon: "fas fa-code-branch", SortOrder: 20, TimeoutSec: 60},
 		{Code: "context_extract", Name: "上下文提取", Description: "Tree-sitter 解析变更文件结构", Icon: "fas fa-sitemap", SortOrder: 30, TimeoutSec: 30},
 		{Code: "dependency_scan", Name: "依赖漏洞扫描", Description: "解析依赖文件并匹配本地漏洞库", Icon: "fas fa-shield-alt", SortOrder: 35, TimeoutSec: 30},
-		{Code: "risk_analysis", Name: "风险预分析", Description: "基于变更复杂度和依赖风险决定审查策略", Icon: "fas fa-chart-line", SortOrder: 40, TimeoutSec: 10},
+		{Code: "secret_scan", Name: "密钥泄露扫描", Description: "扫描 diff 中泄露的密钥 / Token / 密码", Icon: "fas fa-key", SortOrder: 36, TimeoutSec: 30},
+		{Code: "security_audit", Name: "安全审计", Description: "AST + Regex 双模式安全敏感操作检测", Icon: "fas fa-user-secret", SortOrder: 37, TimeoutSec: 30},
+		{Code: "test_suggestion", Name: "测试建议", Description: "基于代码分支结构生成测试场景建议", Icon: "fas fa-vial", SortOrder: 45, TimeoutSec: 30},
+		{Code: "impact_analysis", Name: "影响分析", Description: "识别 Breaking Change 和跨模块影响范围", Icon: "fas fa-project-diagram", SortOrder: 46, TimeoutSec: 30},
 		{Code: "batch_review_frame", Name: "AI 评审", Description: "结构化 AI 代码审查（含分批）", Icon: "fas fa-robot", IsGroup: true, SortOrder: 50, TimeoutSec: reviewFrameTimeoutSec},
 		{Code: "batch_plan", Name: "分批决策", Description: "根据 diff 大小决定分批策略", Icon: "fas fa-list-ol", SortOrder: 51, TimeoutSec: 5},
 		{Code: "batch_review", Name: "批次评审", Description: "逐批次 LLM 代码审查", Icon: "fas fa-layer-group", IsAsync: true, SortOrder: 52, TimeoutSec: 120},
 		{Code: "batch_summary", Name: "汇总评审", Description: "汇总各批次结果生成综合报告", Icon: "fas fa-file-signature", SortOrder: 53, TimeoutSec: 120},
+		{Code: "review_arbitration", Name: "评审裁决", Description: "Agent-LLM 协同去重、汇总裁决、独立分类", Icon: "fas fa-balance-scale", SortOrder: 55, TimeoutSec: 60, IsMandatory: true, AllowedToSkip: true},
 		{Code: "post_process", Name: "后处理", Description: "发布评论、发送通知、阈值检查", Icon: "fas fa-paper-plane", SortOrder: 60, TimeoutSec: 30},
+	}
+
+	// 设置 review_arbitration 的依赖阶段
+	for i := range stages {
+		if stages[i].Code == "review_arbitration" {
+			stages[i].SetRequiredStages([]string{"batch_review_frame"})
+			break
+		}
 	}
 
 	for _, stage := range stages {
@@ -855,58 +882,84 @@ func initPipelineStages() {
 		} else {
 			// 已存在则更新（允许运行时调整名称、图标、超时）
 			DB.Model(&existing).Updates(map[string]interface{}{
-				"name":        stage.Name,
-				"description": stage.Description,
-				"icon":        stage.Icon,
-				"is_group":    stage.IsGroup,
-				"is_async":    stage.IsAsync,
-				"timeout_sec": stage.TimeoutSec,
-				"sort_order":  stage.SortOrder,
+				"name":              stage.Name,
+				"description":       stage.Description,
+				"icon":              stage.Icon,
+				"is_group":          stage.IsGroup,
+				"is_async":          stage.IsAsync,
+				"timeout_sec":       stage.TimeoutSec,
+				"sort_order":        stage.SortOrder,
+				"is_mandatory":      stage.IsMandatory,
+				"allowed_to_skip":   stage.AllowedToSkip,
+				"required_stages":   stage.RequiredStages,
 			})
 		}
 	}
 	zap.L().Info("pipeline stages initialized", zap.Int("total", len(stages)))
 }
 
+// initReviewAgentConfig 初始化默认智能体全局配置（全局唯一记录 id=1）
+func initReviewAgentConfig() {
+	var cfg ReviewAgentConfig
+	if err := DB.First(&cfg, 1).Error; err == nil {
+		// 记录已存在，直接返回
+		return
+	}
+	// 首次初始化：全部启用
+	cfg = ReviewAgentConfig{
+		ID:              1,
+		ShowAgentStatus: true,
+	}
+	cfg.SetEnabledStageCodes([]string{
+		"trigger_check", "git_clone", "context_extract",
+		"dependency_scan", "batch_review_frame", "post_process",
+	})
+	cfg.SetStageConfig("context_extract", map[string]interface{}{
+		"depth": 1,
+	})
+	cfg.SetTriggerEventCodes([]string{
+		"merge_request_open", "merge_request_update", "merge_request_reopen",
+	})
+	if err := DB.Create(&cfg).Error; err != nil {
+		// 多实例并发启动时可能出现唯一键冲突，属于正常情况，忽略即可
+		if strings.Contains(err.Error(), "Duplicate") || strings.Contains(err.Error(), "UNIQUE") {
+			return
+		}
+		zap.L().Warn("init review agent config failed", zap.Error(err))
+	} else {
+		zap.L().Info("init review agent config with default stages")
+	}
+}
 // initBuiltinVulnSyncSources 初始化内置漏洞库同步源
 func initBuiltinVulnSyncSources() {
 	builtins := []VulnerabilitySyncSource{
-		{
-			Name:       "Go 官方漏洞库",
-			SourceType: "git",
-			URL:        "https://github.com/golang/vulndb.git",
-			Branch:     "master",
-			Ecosystem:  "Go",
-			IsBuiltin:  true,
-			Enabled:    true,
-		},
-		{
-			Name:       "PyPA Advisory Database",
-			SourceType: "git",
-			URL:        "https://github.com/pypa/advisory-database.git",
-			Branch:     "main",
-			Ecosystem:  "PyPI",
-			IsBuiltin:  true,
-			Enabled:    true,
-		},
-		{
-			Name:       "RustSec Advisory Database",
-			SourceType: "git",
-			URL:        "https://github.com/rustsec/advisory-db.git",
-			Branch:     "main",
-			Ecosystem:  "cargo",
-			IsBuiltin:  true,
-			Enabled:    true,
-		},
 		{
 			Name:       "GitHub Advisory Database",
 			SourceType: "git",
 			URL:        "https://github.com/github/advisory-database.git",
 			Branch:     "main",
-			Ecosystem:  "",
+			Ecosystem:  "Go,maven,pypi,npm",
 			IsBuiltin:  true,
 			Enabled:    true,
 		},
+	}
+
+	// 删除已被移除的旧内置源
+	var oldBuiltins []VulnerabilitySyncSource
+	if err := DB.Where("is_builtin = ?", true).Find(&oldBuiltins).Error; err == nil {
+		for _, old := range oldBuiltins {
+			found := false
+			for _, b := range builtins {
+				if b.URL == old.URL {
+					found = true
+					break
+				}
+			}
+			if !found {
+				DB.Where("id = ?", old.ID).Delete(&VulnerabilitySyncSource{})
+				zap.L().Info("removed old builtin vuln sync source", zap.String("name", old.Name))
+			}
+		}
 	}
 
 	for _, src := range builtins {

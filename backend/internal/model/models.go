@@ -371,8 +371,6 @@ type SystemConfig struct {
 	DeepReviewEnabled       bool   `gorm:"default:false" json:"deep_review_enabled"`
 	ReviewTemplate          string `gorm:"type:text" json:"review_template"`
 	DiffTruncationThreshold int    `gorm:"default:5000" json:"diff_truncation_threshold"`
-	MaxDiffFiles            int    `gorm:"default:50;column:max_diff_files" json:"max_diff_files"`
-	MaxTokensPerBatch       int    `gorm:"default:100000;column:max_tokens_per_batch" json:"max_tokens_per_batch"`
 	AlertDurationSec        int    `gorm:"default:300" json:"alert_duration_sec"`
 	AlertCooldownSec        int    `gorm:"default:3600" json:"alert_cooldown_sec"`
 	AlertNotifierID         uint   `gorm:"default:0" json:"alert_notifier_id"`
@@ -394,8 +392,7 @@ type SystemConfig struct {
 	DefaultGitLabCommentTemplate string  `gorm:"type:text;column:default_gitlab_comment_template" json:"default_gitlab_comment_template"`
 
 	// Pipeline 与分批评审配置
-	PipelineEnabled  bool `gorm:"default:false;column:pipeline_enabled" json:"pipeline_enabled"`
-	BatchParallelMax int  `gorm:"default:3;column:batch_parallel_max" json:"batch_parallel_max"`
+	PipelineEnabled bool `gorm:"default:false;column:pipeline_enabled" json:"pipeline_enabled"`
 
 	// 跨文件调用链分析配置
 	CallChainDepth       int  `gorm:"default:1;column:call_chain_depth" json:"call_chain_depth"`       // 调用链分析深度（默认1层）

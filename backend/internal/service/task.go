@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -27,6 +28,40 @@ import (
 type TaskService struct {
 	cfg             *config.Config
 	TaskPipelineHub *PipelineSSEHub // Pipeline review SSE hub (key = task_id)
+}
+
+// ========== Pipeline 取消信号管理 ==========
+// 用于支持手动停止任务时立即中断正在运行的 Pipeline 阶段
+
+var (
+	pipelineCancelChans = make(map[uint]chan struct{})
+	pipelineCancelMu    sync.Mutex
+)
+
+// registerPipelineCancel 注册任务取消 channel（任务开始前调用）
+func registerPipelineCancel(taskID uint) chan struct{} {
+	ch := make(chan struct{})
+	pipelineCancelMu.Lock()
+	pipelineCancelChans[taskID] = ch
+	pipelineCancelMu.Unlock()
+	return ch
+}
+
+// unregisterPipelineCancel 注销任务取消 channel（任务结束后调用）
+func unregisterPipelineCancel(taskID uint) {
+	pipelineCancelMu.Lock()
+	delete(pipelineCancelChans, taskID)
+	pipelineCancelMu.Unlock()
+}
+
+// notifyPipelineCancel 通知指定任务的 Pipeline 取消（Abort 时调用）
+func notifyPipelineCancel(taskID uint) {
+	pipelineCancelMu.Lock()
+	if ch, ok := pipelineCancelChans[taskID]; ok {
+		close(ch)
+		delete(pipelineCancelChans, taskID)
+	}
+	pipelineCancelMu.Unlock()
 }
 
 func NewTaskService() *TaskService {
@@ -520,6 +555,9 @@ func (s *TaskService) Abort(taskID uint) error {
 		zap.L().Warn("abort task: no session_id found", zap.Uint("task_id", taskID))
 	}
 
+	// 通知正在运行的 Pipeline 引擎立即取消（不管当前在哪个阶段/批次）
+	notifyPipelineCancel(taskID)
+
 	now := time.Now()
 	updates := map[string]interface{}{
 		"status":       model.TaskStopped,
@@ -613,6 +651,11 @@ func (s *TaskService) Retry(taskID uint, userReviewComment string, selectedComme
 		model.DB.Save(&task)
 	}
 
+	// 清理旧的 Pipeline 执行记录（防止重试时新旧数据混合展示）
+	// 先删除子阶段，再删除父阶段（避免外键约束）
+	model.DB.Where("task_id = ? AND parent_id IS NOT NULL", task.ID).Delete(&model.TaskPipelineExecution{})
+	model.DB.Where("task_id = ? AND parent_id IS NULL", task.ID).Delete(&model.TaskPipelineExecution{})
+
 	// 根据任务类型调用对应的执行方法（通过闭包传递注入文本）
 	if task.TaskType == "review" {
 		go func(id uint, injected string) {
@@ -627,7 +670,7 @@ func (s *TaskService) Retry(taskID uint, userReviewComment string, selectedComme
 }
 
 func (s *TaskService) TimeoutCheck() {
-	// 从数据库获取超时配置
+	// 非 review 类型任务使用系统配置中的超时时间
 	var sysConfig model.SystemConfig
 	timeoutMin := 120
 	if err := model.SilentFirst(model.DB, &sysConfig); err == nil && sysConfig.TaskTimeoutMin > 0 {
@@ -636,17 +679,35 @@ func (s *TaskService) TimeoutCheck() {
 		zap.L().Debug("timeout check using default timeout", zap.Int("timeout_min", timeoutMin), zap.Error(err))
 	}
 
+	// AI 评审类任务使用各阶段超时之和 + 宽裕时间，不再受系统配置限制
+	reviewTimeoutMin := getReviewTaskTimeoutMin()
+	zap.L().Debug("timeout check thresholds", zap.Int("sys_timeout_min", timeoutMin), zap.Int("review_timeout_min", reviewTimeoutMin))
+
 	var tasks []model.Task
-	thresholdTime := time.Now().Add(-time.Duration(timeoutMin) * time.Minute)
-	if err := model.DB.Where("status = ? AND started_at < ?",
-		model.TaskRunning,
-		thresholdTime).Find(&tasks).Error; err != nil {
+	if err := model.DB.Where("status = ?", model.TaskRunning).Find(&tasks).Error; err != nil {
 		zap.L().Error("timeout check query failed", zap.Error(err))
 		return
 	}
 
+	now := time.Now()
 	for _, task := range tasks {
-		zap.L().Info("task timeout, aborting", zap.Uint("task_id", task.ID), zap.Duration("elapsed", time.Since(*task.StartedAt)))
+		if task.StartedAt == nil {
+			continue
+		}
+
+		var taskTimeoutMin int
+		if task.TaskType == "review" {
+			taskTimeoutMin = reviewTimeoutMin
+		} else {
+			taskTimeoutMin = timeoutMin
+		}
+
+		threshold := now.Add(-time.Duration(taskTimeoutMin) * time.Minute)
+		if task.StartedAt != nil && !task.StartedAt.Before(threshold) {
+			continue // 未超时
+		}
+
+		zap.L().Info("task timeout, aborting", zap.Uint("task_id", task.ID), zap.String("task_type", task.TaskType), zap.Duration("elapsed", now.Sub(*task.StartedAt)))
 
 		// 终止 OpenCode session（如存在）
 		if task.OpencodeSessionID != "" {
@@ -657,10 +718,15 @@ func (s *TaskService) TimeoutCheck() {
 		}
 
 		// 条件更新为 timeout，避免覆盖已被修改的状态
-		now := time.Now()
 		updates := map[string]interface{}{
-			"status":       model.TaskTimeout,
-			"error_msg":    "任务超时",
+			"status": model.TaskTimeout,
+			"error_msg": fmt.Sprintf("任务超时（已运行 %d 分钟，超过 %s类型任务阈值 %d 分钟）", int(now.Sub(*task.StartedAt).Minutes()), func() string {
+				if task.TaskType == "review" {
+					return "AI评审"
+				} else {
+					return ""
+				}
+			}(), taskTimeoutMin),
 			"completed_at": now,
 			"duration_sec": func() int {
 				if task.StartedAt != nil {
@@ -679,6 +745,49 @@ func (s *TaskService) TimeoutCheck() {
 		// 超时后触发队列中的下一个 pending 任务
 		s.startNextPendingTask(task.ProjectID)
 	}
+}
+
+// getReviewTaskTimeoutMin 计算 AI 评审类任务的超时时间（分钟）。
+// 基于 ReviewAgentConfig 中所有启用阶段的 timeout 之和，加上 30 分钟宽裕时间。
+func getReviewTaskTimeoutMin() int {
+	var cfg model.ReviewAgentConfig
+	if err := model.DB.First(&cfg, 1).Error; err != nil {
+		zap.L().Warn("getReviewTaskTimeoutMin: failed to load ReviewAgentConfig, using default", zap.Error(err))
+		return 300 // 默认 5 小时
+	}
+
+	totalSec := 0
+	for _, code := range cfg.EnabledStageCodes() {
+		sc := cfg.StageConfig(code)
+		if sc == nil {
+			continue
+		}
+		t, ok := sc["timeout"]
+		if !ok {
+			continue
+		}
+		var timeout int
+		switch val := t.(type) {
+		case float64:
+			timeout = int(val)
+		case int:
+			timeout = val
+		case json.Number:
+			iv, _ := val.Int64()
+			timeout = int(iv)
+		}
+		totalSec += timeout
+	}
+
+	if totalSec <= 0 {
+		zap.L().Debug("getReviewTaskTimeoutMin: no stage timeouts found, using default")
+		return 300 // 默认 5 小时
+	}
+
+	// 转换为分钟，加上 30 分钟宽裕时间
+	timeoutMin := (totalSec / 60) + 30
+	zap.L().Debug("getReviewTaskTimeoutMin calculated", zap.Int("stage_timeout_sec", totalSec), zap.Int("timeout_min", timeoutMin))
+	return timeoutMin
 }
 
 func StringToTaskStatus(s string) model.TaskStatus {
@@ -886,8 +995,8 @@ func (s *TaskService) DeleteTaskSession(taskID uint) error {
 
 const (
 	// charsPerTokenApprox 是 splitIntoBatches / isSingleBatch 估算 token 用的字符/token 比。
-	// maxDiffFiles / maxTokensPerBatch 已迁入 SystemConfig 并通过 service.SysCfgMaxDiffFiles /
-	// SysCfgMaxTokensPerBatch 读取（缓存 5min，UpdateConfig 后主动 RefreshSysCfgCache 立即生效）。
+	// maxDiffFiles / maxTokensPerBatch 已迁入 ReviewAgentConfig.stage_configs["batch_review_frame"] 并通过
+	// service.SysCfgMaxDiffFiles / SysCfgMaxTokensPerBatch 读取。
 	charsPerTokenApprox = 4
 )
 
@@ -903,149 +1012,9 @@ func (s *TaskService) ExecuteAIReviewTaskWithComment(taskID uint, commentOverrid
 		return err
 	}
 
-	// Pipeline 模式开关：如果启用，使用 Pipeline 引擎执行
-	var pipelineSysCfg model.SystemConfig
-	pipelineEnabled := false
-	if err := model.DB.First(&pipelineSysCfg).Error; err == nil {
-		pipelineEnabled = pipelineSysCfg.PipelineEnabled
-	}
-	if pipelineEnabled {
-		zap.L().Info("Pipeline 模式已启用，使用 Pipeline 引擎执行任务", zap.Uint("task_id", taskID))
-		return s.executePipelineReviewTask(task, commentOverride)
-	}
-
-	// 以下走现有逻辑（Legacy Mode）
-
-	// ExecuteAIReviewTask uses Omit("pool_id") because AI review tasks don't have a pool
-	// and pool_id=0 violates the fk_tasks_pool foreign key constraint
-	startedAt := time.Now()
-	task.Status = model.TaskRunning
-	task.StartedAt = &startedAt
-	model.DB.Omit("pool_id").Save(&task)
-
-	zap.L().Info("========== AI Review Task started ==========",
-		zap.Uint("task_id", task.ID),
-		zap.String("project", task.Project.Name),
-		zap.Int("mr_iid", task.MRMergeID))
-
-	// 获取 diff 文件
-	diffFiles, additions, deletions, err := s.fetchMRDiffFiles(task)
-	if err != nil {
-		return s.failReviewTask(task, err.Error())
-	}
-
-	// 限制最多 N 个文件（SystemConfig.max_diff_files，默认 50）
-	maxDiffFiles := SysCfgMaxDiffFiles()
-	if len(diffFiles) > maxDiffFiles {
-		zap.L().Warn("diff files exceed limit, truncating",
-			zap.Int("original", len(diffFiles)),
-			zap.Int("limit", maxDiffFiles))
-		diffFiles = diffFiles[:maxDiffFiles]
-	}
-
-	// 获取 commits
-	commits := s.fetchMRCommits(task)
-	commitsText := formatCommitsForReview(commits)
-
-	// 注：projectTemplate 已在 runStructuredAIReview 中使用 template 配置替代
-	// 保留旧逻辑以兼容其他代码路径
-	_ = task.Project.TemplateID
-
-	// 注入人工复核意见
-	var reviewCommentText string
-	if commentOverride != "" {
-		reviewCommentText = commentOverride
-	}
-	// 结构化评审时，人工复核意见通过 CustomInstruction 传递
-	// 这里先保存，后续在 runStructuredAIReview 中使用
-	_ = reviewCommentText
-
-	// 执行结构化 AI 评审（传入复核意见）
-	reviewReport, score, _, actualModelID, _, err := s.runStructuredAIReview(task, diffFiles, commitsText, reviewCommentText)
-	if err != nil {
-		return s.failReviewTask(task, err.Error())
-	}
-	// 生成 diff 文件元信息用于详情页展示
-	var sysCfg model.SystemConfig
-	truncationThreshold := 5000
-	if err := model.DB.First(&sysCfg).Error; err == nil && sysCfg.DiffTruncationThreshold > 0 {
-		truncationThreshold = sysCfg.DiffTruncationThreshold
-	}
-	meta := prepareDiffFilesMeta(diffFiles, truncationThreshold)
-	diffFilesJSONBytes, _ := json.Marshal(meta)
-	diffFilesJSON := string(diffFilesJSONBytes)
-
-	// 更新 Task（含实际使用的大模型信息）
-	// 条件更新：只有状态仍是 running 时才写入成功，防止被 TimeoutCheck 覆盖后回写
-	now := time.Now()
-	res := model.DB.Model(&model.Task{}).Where("id = ? AND status = ?", task.ID, model.TaskRunning).Updates(map[string]interface{}{
-		"status":          model.TaskSuccess,
-		"ai_response":     reviewReport,
-		"score_value":     score,
-		"model_id":        actualModelID,
-		"started_at":      startedAt,
-		"completed_at":    now,
-		"duration_sec":    int(now.Sub(startedAt).Seconds()),
-		"diff_files_json": diffFilesJSON,
-	})
-	if res.Error != nil {
-		zap.L().Error("failed to update review task status to success", zap.Uint("task_id", task.ID), zap.Uint("used_model_id", actualModelID), zap.Error(res.Error))
-	}
-	if res.RowsAffected == 0 {
-		zap.L().Info("review task no longer running, skip writing success status", zap.Uint("task_id", task.ID))
-	} else {
-		zap.L().Info("review 任务保存成功", zap.Uint("task_id", task.ID), zap.Uint("used_model_id", actualModelID))
-	}
-
-	// 保存 ReviewLog
-	if err := saveReviewLogFromTask(task, additions, deletions, commits, score); err != nil {
-		zap.L().Error("保存 ReviewLog 失败", zap.Error(err))
-	}
-
-	// 发布评论
-	go s.postReviewComment(task, reviewReport)
-
-	// 发送 AI 评审完成通知（即时企微 + 延迟合并队列）
-	go func() {
-		zap.L().Info("notify goroutine started", zap.Uint("task_id", task.ID))
-		// 重新加载 task 含 Project 关联，用于通知模板渲染
-		var notifyTask model.Task
-		if err := model.DB.Preload("Project").First(&notifyTask, task.ID).Error; err != nil {
-			zap.L().Error("notify preload task failed", zap.Uint("task_id", task.ID), zap.Error(err))
-			return
-		}
-		zap.L().Info("notify task preloaded",
-			zap.Uint("task_id", notifyTask.ID),
-			zap.Uint("project_id", notifyTask.ProjectID),
-			zap.String("project_name", notifyTask.Project.Name))
-
-		stats := CalcIssueStats(notifyTask.ID, notifyTask.MRMergeID)
-		zap.L().Info("notify stats calculated",
-			zap.Uint("task_id", notifyTask.ID),
-			zap.Int("total", stats.Total),
-			zap.Int("pending", stats.Pending),
-			zap.Int("critical", stats.Critical))
-
-		// 1. 即时企业微信通知（模板渲染）
-		NewNotifierService().NotifyAIReviewCompleted(notifyTask)
-		// 2. 延迟队列（站内信 + 合并重试，delay=0 时立即执行）
-		GetDelayedNotificationQueue().Enqueue(notifyTask, stats)
-	}()
-
-	// 阈值检查
-	if score > 0 {
-		// 同步更新内存中的 ScoreValue，避免 triggerDeepReview 读取到旧值
-		task.ScoreValue = score
-		s.checkThresholdAndTrigger(task, score)
-	}
-
-	// review 任务完成后触发队列，唤醒同项目的 pending 任务
-	s.startNextPendingTask(task.ProjectID)
-
-	zap.L().Info("========== AI Review Task completed ==========",
-		zap.Uint("task_id", task.ID),
-		zap.Int("score", score))
-	return nil
+	// Pipeline 评审引擎已默认启用
+	zap.L().Info("Pipeline 模式执行任务", zap.Uint("task_id", taskID))
+	return s.executePipelineReviewTask(task, commentOverride)
 }
 
 func (s *TaskService) failReviewTask(task model.Task, errMsg string) error {
@@ -1141,7 +1110,7 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 	commits := s.fetchMRCommits(task)
 	commitsText := formatCommitsForReview(commits)
 
-	// 3. 读取系统截断阈值，对 diff 做预截断
+	// 3. 读取系统截断阈值（仅用于 diff_files_json 持久化时的展示截断，不用于大模型 prompt）
 	var sysCfg model.SystemConfig
 	truncationThreshold := 5000
 	if err := model.DB.First(&sysCfg).Error; err == nil && sysCfg.DiffTruncationThreshold > 0 {
@@ -1216,17 +1185,13 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 		customInstruction += "### 【人工复核意见】（请重点参考以下意见进行审查）\n" + commentOverride
 	}
 
-	// 10. 准备 diff file maps
+	// 10. 准备 diff file maps（保留完整 diff 供大模型评审，仅在持久化到 diff_files_json 时截断）
 	var fileMaps []map[string]interface{}
 	for _, f := range diffFiles {
-		diff := f.Diff
-		if len(diff) > truncationThreshold {
-			diff = diff[:truncationThreshold] + "\n...（已截断）"
-		}
 		fileMaps = append(fileMaps, map[string]interface{}{
 			"path":      f.NewPath,
 			"old_path":  f.OldPath,
-			"diff":      diff,
+			"diff":      f.Diff,
 			"additions": f.Additions,
 			"deletions": f.Deletions,
 		})
@@ -1256,7 +1221,14 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 		promptCtx.GitLabCommentTemplate = sysCfg.DefaultGitLabCommentTemplate
 	}
 
-	// 13. 注入 Pipeline Context
+	// 13. 读取全局智能体配置并注入 PromptContext
+	var agentCfg model.ReviewAgentConfig
+	if err := model.DB.First(&agentCfg, 1).Error; err == nil {
+		promptCtx.ShowAgentStatus = agentCfg.ShowAgentStatus
+		promptCtx.AgentStatus = buildAgentExecutionStatus(agentCfg)
+	}
+
+	// 14. 注入 Pipeline Context
 	inputs := map[string]interface{}{
 		"diff_files":          fileMaps,
 		"commits_text":        commitsText,
@@ -1269,7 +1241,12 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 		"ast_context":         astCtx,
 	}
 
-	// 14. 执行 Pipeline 引擎
+	// 注册 Pipeline 取消信号（支持手动停止任务时立即中断）
+	cancelCh := registerPipelineCancel(task.ID)
+	defer unregisterPipelineCancel(task.ID)
+	inputs["_cancel_ch"] = cancelCh
+
+	// 15. 执行 Pipeline 引擎
 	eng := pipeline.NewEngine(model.DB, &pipelineLLMAdapter{svc: NewLLMService()})
 	broadcaster := func(taskID uint, status string, data map[string]interface{}) {
 		if s.TaskPipelineHub == nil {
@@ -1282,7 +1259,7 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 		return s.failReviewTask(task, err.Error())
 	}
 
-	// 15. Pipeline 成功后执行后处理
+	// 16. Pipeline 成功后执行后处理
 	var updatedTask model.Task
 	if err := model.DB.Preload("Project").First(&updatedTask, task.ID).Error; err != nil {
 		return err
@@ -2166,4 +2143,64 @@ func detectLanguage(files []map[string]interface{}) string {
 		}
 	}
 	return maxLang
+}
+
+// buildAgentExecutionStatus 根据全局智能体配置构建执行状态（用于报告注入）
+func buildAgentExecutionStatus(agentCfg model.ReviewAgentConfig) *engine.AgentExecutionStatus {
+	status := &engine.AgentExecutionStatus{}
+
+	// 固定顺序遍历（按 Pipeline 执行顺序），避免 map range 随机性
+	stageOrder := []struct {
+		Code string
+		Name string
+	}{
+		{"trigger_check", "触发过滤器"},
+		{"git_clone", "代码克隆"},
+		{"context_extract", "代码理解器"},
+		{"dependency_scan", "漏洞扫描"},
+		{"secret_scan", "密钥扫描智能体"},
+		{"security_audit", "安全审计智能体"},
+		{"test_suggestion", "测试建议智能体"},
+		{"impact_analysis", "影响分析智能体"},
+		{"batch_review_frame", "AI代码评审智能体"},
+		{"post_process", "发布智能体"},
+	}
+
+	enabled := agentCfg.EnabledStageCodes()
+	enabledMap := make(map[string]bool)
+	for _, code := range enabled {
+		enabledMap[code] = true
+	}
+
+	for _, s := range stageOrder {
+		if enabledMap[s.Code] {
+			status.Enabled = append(status.Enabled, s.Name)
+		} else {
+			status.Skipped = append(status.Skipped, s.Name)
+		}
+	}
+
+	// 影响说明（根据 skipped 的组合生成）
+	if !enabledMap["context_extract"] {
+		status.ImpactNotes = append(status.ImpactNotes,
+			"本次评审缺少 AST 上下文，AI 对函数/结构体级别的理解可能受限")
+	}
+	if !enabledMap["dependency_scan"] {
+		status.ImpactNotes = append(status.ImpactNotes,
+			"本次评审未执行依赖漏洞扫描，建议对涉及依赖变更的 MR 启用该智能体")
+	}
+	if enabledMap["secret_scan"] {
+		status.ImpactNotes = append(status.ImpactNotes,
+			"密钥扫描智能体已启用，diff 中发现的敏感信息将在评审报告中提示")
+	}
+	if enabledMap["security_audit"] {
+		status.ImpactNotes = append(status.ImpactNotes,
+			"安全审计智能体已启用，SQL 注入/unsafe eval 等安全问题将在评审报告中提示")
+	}
+	if enabledMap["impact_analysis"] && !enabledMap["context_extract"] {
+		status.ImpactNotes = append(status.ImpactNotes,
+			"影响分析智能体已启用但代码理解器未启用，跨文件影响范围可能不完整")
+	}
+
+	return status
 }

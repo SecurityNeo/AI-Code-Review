@@ -58,6 +58,7 @@ const MENU_CONFIG = [
             { id: 'pools',        name: '任务资源池', href: 'pools.html',        icon: 'fa-server',            role: ['admin'] },
             { id: 'models',       name: '大模型管理', href: 'models.html',       icon: 'fa-microchip',         role: ['admin'] },
             { id: 'vulnerability-db', name: '漏洞数据库', href: 'vulnerability-db.html', icon: 'fa-bug', role: ['admin'] },
+            { id: 'agent-config',     name: '智能体配置', href: 'agent-config.html', icon: 'fa-sliders', role: ['admin'] },
         ]
     },
 

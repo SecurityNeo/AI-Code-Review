@@ -15,14 +15,14 @@ type StageContext interface {
 
 	// 基础信息
 	Task() *model.Task
-ExecutionID() uint
-ParentExecutionID() *uint
+	ExecutionID() uint
+	ParentExecutionID() *uint
 
 	// 数据传递
 	GetInput(key string) interface{}
 	SetInput(key string, val interface{})
 	GetOutput(key string) interface{}
-SetOutput(key string, val interface{})
+	SetOutput(key string, val interface{})
 
 	// 子阶段管理
 	CreateChildExecution(stageCode string, batchIndex int) *model.TaskPipelineExecution
@@ -38,6 +38,9 @@ SetOutput(key string, val interface{})
 
 	// 广播事件
 	BroadcastStageStatus(exec *model.TaskPipelineExecution)
+
+	// WithTimeout 创建一个带超时的子上下文，用于阶段级超时控制
+	WithTimeout(timeout time.Duration) (StageContext, context.CancelFunc)
 }
 
 // stageContextImpl StageContext 的实现
@@ -52,6 +55,7 @@ type stageContextImpl struct {
 	broadcaster       func(uint, string, map[string]interface{})
 	batchFiles        map[int][]interface{}
 	selfExec          *model.TaskPipelineExecution // 当前阶段的 execution 记录
+	cancelCh          <-chan struct{}              // 任务取消信号（Abort 时关闭）
 }
 
 func newStageContext(ctx context.Context, task *model.Task, db *gorm.DB) *stageContextImpl {
@@ -65,12 +69,29 @@ func newStageContext(ctx context.Context, task *model.Task, db *gorm.DB) *stageC
 	}
 }
 
-func (c *stageContextImpl) Task() *model.Task { return c.task }
-func (c *stageContextImpl) ExecutionID() uint { return c.executionID }
-func (c *stageContextImpl) ParentExecutionID() *uint { return c.parentExecutionID }
-func (c *stageContextImpl) GetInput(key string) interface{} { return c.inputData[key] }
-func (c *stageContextImpl) SetInput(key string, val interface{}) { c.inputData[key] = val }
-func (c *stageContextImpl) GetOutput(key string) interface{} { return c.outputData[key] }
+// Done 返回任务取消信号 channel（如果注入了 _cancel_ch）
+// 覆盖嵌入 context.Context 的 Done()，支持 Abort 后 Pipeline 各阶段立即感知取消
+func (c *stageContextImpl) Done() <-chan struct{} {
+	if c.cancelCh != nil {
+		return c.cancelCh
+	}
+	return c.Context.Done()
+}
+
+func (c *stageContextImpl) Task() *model.Task                     { return c.task }
+func (c *stageContextImpl) ExecutionID() uint                     { return c.executionID }
+func (c *stageContextImpl) ParentExecutionID() *uint              { return c.parentExecutionID }
+func (c *stageContextImpl) GetInput(key string) interface{}       { return c.inputData[key] }
+func (c *stageContextImpl) SetInput(key string, val interface{})  {
+	c.inputData[key] = val
+	// 注入取消信号 channel（由 TaskService.executePipelineReviewTask 注册）
+	if key == "_cancel_ch" {
+		if ch, ok := val.(chan struct{}); ok {
+			c.cancelCh = ch
+		}
+	}
+}
+func (c *stageContextImpl) GetOutput(key string) interface{}      { return c.outputData[key] }
 func (c *stageContextImpl) SetOutput(key string, val interface{}) { c.outputData[key] = val }
 
 func (c *stageContextImpl) CreateChildExecution(stageCode string, batchIndex int) *model.TaskPipelineExecution {
@@ -192,6 +213,25 @@ func (c *stageContextImpl) BroadcastStageStatus(exec *model.TaskPipelineExecutio
 // SetBroadcaster 设置事件广播回调
 func (c *stageContextImpl) SetBroadcaster(fn func(uint, string, map[string]interface{})) {
 	c.broadcaster = fn
+}
+
+// WithTimeout 创建一个带超时的子上下文，保留所有数据和状态
+func (c *stageContextImpl) WithTimeout(timeout time.Duration) (StageContext, context.CancelFunc) {
+	newCtx, cancel := context.WithTimeout(c.Context, timeout)
+	child := &stageContextImpl{
+		Context:           newCtx,
+		task:              c.task,
+		executionID:       c.executionID,
+		parentExecutionID: c.parentExecutionID,
+		inputData:         c.inputData,
+		outputData:        c.outputData,
+		db:                c.db,
+		broadcaster:       c.broadcaster,
+		batchFiles:        c.batchFiles,
+		selfExec:          c.selfExec,
+		cancelCh:          c.cancelCh, // 传递取消信号，确保超时子上下文也能感知 Abort
+	}
+	return child, cancel
 }
 
 // SetBatchFiles 设置分批评审时的批次文件列表（用于子批次执行时获取文件）

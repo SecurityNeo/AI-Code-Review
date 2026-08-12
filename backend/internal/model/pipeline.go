@@ -1,19 +1,25 @@
 package model
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // ReviewPipelineStage 评审链路阶段定义（预置数据，由 migration 初始化）
 type ReviewPipelineStage struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	Code        string    `gorm:"uniqueIndex;size:32" json:"code"`
-	Name        string    `gorm:"size:64" json:"name"`
-	Description string    `gorm:"size:256" json:"description"`
-	Icon        string    `gorm:"size:32" json:"icon"`            // FontAwesome class
-	IsGroup     bool      `gorm:"default:false" json:"is_group"`  // 是否分组阶段（含子阶段）
-	IsAsync     bool      `gorm:"default:false" json:"is_async"`  // 是否支持并行
-	TimeoutSec  int       `gorm:"default:300" json:"timeout_sec"`
-	SortOrder   int       `json:"sort_order"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID             uint      `gorm:"primaryKey" json:"id"`
+	Code           string    `gorm:"uniqueIndex;size:32" json:"code"`
+	Name           string    `gorm:"size:64" json:"name"`
+	Description    string    `gorm:"size:256" json:"description"`
+	Icon           string    `gorm:"size:32" json:"icon"`           // FontAwesome class
+	IsGroup        bool      `gorm:"default:false" json:"is_group"` // 是否分组阶段（含子阶段）
+	IsAsync        bool      `gorm:"default:false" json:"is_async"` // 是否支持并行
+	TimeoutSec     int       `gorm:"default:300" json:"timeout_sec"`
+	SortOrder      int       `json:"sort_order"`
+	IsMandatory    bool      `gorm:"default:false" json:"is_mandatory"`   // 是否不可禁用
+	AllowedToSkip  bool      `gorm:"default:true" json:"allowed_to_skip"` // 允许在依赖失败时跳过
+	RequiredStages string    `gorm:"type:text" json:"required_stages"`    // JSON []string，依赖的阶段编码
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // TaskPipelineExecution 任务 Pipeline 阶段执行实例
@@ -58,3 +64,23 @@ const (
 	PipelineStageTimeout  = "timeout"
 	PipelineStageSkipped  = "skipped"
 )
+
+// GetRequiredStages 解析 RequiredStages JSON 为字符串数组
+func (s *ReviewPipelineStage) GetRequiredStages() []string {
+	if s.RequiredStages == "" {
+		return nil
+	}
+	var stages []string
+	_ = json.Unmarshal([]byte(s.RequiredStages), &stages)
+	return stages
+}
+
+// SetRequiredStages 将字符串数组序列化为 RequiredStages JSON
+func (s *ReviewPipelineStage) SetRequiredStages(stages []string) {
+	if len(stages) == 0 {
+		s.RequiredStages = ""
+		return
+	}
+	b, _ := json.Marshal(stages)
+	s.RequiredStages = string(b)
+}

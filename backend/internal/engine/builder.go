@@ -56,6 +56,34 @@ func (cfg DeductScoreConfig) DeductScoreFor(severity string) int {
 	}
 }
 
+// AgentExecutionStatus 智能体执行状态（用于报告注入）
+type AgentExecutionStatus struct {
+	Enabled     []string // 名称列表，如 "触发过滤器","代码克隆"
+	Skipped     []string // 名称列表
+	ImpactNotes []string // 影响说明，如 "本次评审缺少 AST 上下文..."
+}
+
+// ImpactFinding 影响分析单条结果
+type ImpactFinding struct {
+	Type          string   `json:"type"` // breaking_change / schema_change / config_change / migration
+	FilePath      string   `json:"file_path"`
+	SymbolName    string   `json:"symbol_name"`    // 变更的符号名（函数/结构体/配置项）
+	ChangeDesc    string   `json:"change_desc"`    // 变更描述
+	AffectedFiles []string `json:"affected_files"` // 受影响的下游文件（基于调用链）
+	Severity      string   `json:"severity"`       // critical / high / medium
+	Suggestion    string   `json:"suggestion"`     // 建议操作
+}
+
+// LicenseFinding 许可证检查单条结果
+type LicenseFinding struct {
+	PackageName    string `json:"package_name"`
+	CurrentVersion string `json:"current_version"`
+	License        string `json:"license"`         // 检测到的许可证
+	Compatibility  string `json:"compatibility"`   // compatible / incompatible / attention
+	ProjectLicense string `json:"project_license"` // 项目当前许可证
+	Reason         string `json:"reason"`          // 结论原因
+}
+
 // PromptContext Prompt 组装所需的上下文
 type PromptContext struct {
 	Files                 []gitlab.DiffFile // diff 文件列表
@@ -70,6 +98,120 @@ type PromptContext struct {
 	CrossFileContext      string                     // 跨文件调用链上下文
 	GitLabCommentTemplate string                     // GitLab 评论模板
 	DependencyVulns       []DependencyVuln           // 依赖漏洞扫描结果
+	ShowAgentStatus       bool                       // 是否在报告中展示智能体启用状态
+	AgentStatus           *AgentExecutionStatus      // 智能体执行状态
+
+	// 扩展智能体产出（Phase C）
+	SecretScanFindings    []model.SecretScanFinding    `json:"secret_scan_findings,omitempty"`
+	SecurityAuditFindings []model.SecurityAuditFinding `json:"security_audit_findings,omitempty"`
+	ImpactFindings        []ImpactFinding              `json:"impact_findings,omitempty"`
+	LicenseFindings       []LicenseFinding             `json:"license_findings,omitempty"`
+	TestSuggestions       []TestSuggestionItem         `json:"test_suggestions,omitempty"`
+
+	// 【新增】review_arbitration 阶段使用的聚合数据
+	BatchReviewResults []*llm.BatchReviewResult `json:"batch_review_results,omitempty"` // batch_review 输出结果
+	DimensionCodes     []string                 `json:"dimension_codes,omitempty"`      // 维度代码列表（用于 GetReviewJSONSchema）
+}
+
+// TestSuggestionItem 测试建议条目（PromptContext 使用）
+type TestSuggestionItem struct {
+	FunctionName string         `json:"function_name"`
+	FilePath     string         `json:"file_path"`
+	LineNumber   int            `json:"line_number"`
+	Scenarios    []llm.TestScenario `json:"scenarios"`
+}
+
+// AgentStatusSection 生成报告尾部的智能体配置段落
+func (p *PromptContext) AgentStatusSection() string {
+	if !p.ShowAgentStatus || p.AgentStatus == nil {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n\n---\n\n")
+	sb.WriteString("### 本次评审配置\n\n")
+
+	if len(p.AgentStatus.Enabled) > 0 {
+		sb.WriteString("**已启用的智能体**：\n")
+		for _, s := range p.AgentStatus.Enabled {
+			sb.WriteString(fmt.Sprintf("- [启用] %s\n", s))
+		}
+		sb.WriteString("\n")
+	}
+
+	if len(p.AgentStatus.Skipped) > 0 {
+		sb.WriteString("**跳过的智能体**：\n")
+		for _, s := range p.AgentStatus.Skipped {
+			sb.WriteString(fmt.Sprintf("- [跳过] %s — 管理员配置关闭\n", s))
+		}
+		sb.WriteString("\n")
+	}
+
+	if len(p.AgentStatus.ImpactNotes) > 0 {
+		sb.WriteString("**影响说明**：\n")
+		for _, note := range p.AgentStatus.ImpactNotes {
+			sb.WriteString(fmt.Sprintf("- %s\n", note))
+		}
+	}
+
+	return sb.String()
+}
+
+// ==================== 【新增】PromptContext 辅助方法（review_arbitration 使用）====================
+
+// DimensionConfig 评审维度配置（用于 review_arbitration Prompt 注入）
+type DimensionConfig struct {
+	Code   string `json:"code"`
+	Weight int    `json:"weight"`
+}
+
+// GetDimensionConfig 将 DimensionWeights 转为 review_arbitration 使用的维度配置
+func (p *PromptContext) GetDimensionConfig() map[string]DimensionConfig {
+	result := make(map[string]DimensionConfig, len(p.DimensionWeights))
+	for code, dw := range p.DimensionWeights {
+		result[code] = DimensionConfig{
+			Code:   code,
+			Weight: dw.Weight,
+		}
+	}
+	return result
+}
+
+// GetDeductScoreConfig 返回扣分规则配置
+func (p *PromptContext) GetDeductScoreConfig() DeductScoreConfig {
+	return p.DeductScoreConfig
+}
+
+// GetDimensionCodes 返回维度代码列表（用于 GetReviewJSONSchema 参数）
+func (p *PromptContext) GetDimensionCodes() []string {
+	if len(p.DimensionCodes) > 0 {
+		return p.DimensionCodes
+	}
+	// 从 DimensionWeights 推导
+	codes := make([]string, 0, len(p.DimensionWeights))
+	for k := range p.DimensionWeights {
+		codes = append(codes, k)
+	}
+	return codes
+}
+
+// AgentFindingsJSON 将 4 类 Agent Finding 统一序列化为 JSON（用于结构化 Prompt 注入）
+func (p *PromptContext) AgentFindingsJSON() ([]byte, error) {
+	data := map[string]interface{}{
+		"secret_scan":     p.SecretScanFindings,
+		"security_audit":  p.SecurityAuditFindings,
+		"test_suggestion": p.TestSuggestions,
+		"impact_analysis": p.ImpactFindings,
+	}
+	return json.Marshal(data)
+}
+
+// SecretScanJsonBytes 序列化 SecretScanFindings（懒加载，按需调用）
+func (p *PromptContext) SecretScanJsonBytes() ([]byte, error) {
+	if len(p.SecretScanFindings) == 0 {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(p.SecretScanFindings)
 }
 
 // DependencyVuln 依赖漏洞信息（用于注入 Prompt）
@@ -77,7 +219,7 @@ type DependencyVuln struct {
 	PackageName    string `json:"package_name"`
 	CurrentVersion string `json:"current_version"`
 	VulnID         string `json:"vuln_id"`
-	Aliases        string `json:"aliases"`         // CVE-XXXX-XXXX, GHSA-XXXX (逗号分隔)
+	Aliases        string `json:"aliases"` // CVE-XXXX-XXXX, GHSA-XXXX (逗号分隔)
 	Severity       string `json:"severity"`
 	Summary        string `json:"summary"`
 	FixedVersion   string `json:"fixed_version"`
@@ -109,10 +251,10 @@ func severityRank(sev string) int {
 
 // buildDependencyVulnsSection 按包汇总渲染依赖漏洞扫描结果（Prompt 注入用）
 // 规则：
-//   1. 按 PackageName:CurrentVersion 分组，每组只展示一次包名+版本
-//   2. 包的整体严重级别取该包下所有漏洞的最高级别
-//   3. 不展示 VulnID（GHSA-xxx），仅展示 Aliases（CVE-ID）
-//   4. 组内漏洞按严重级别降序排列
+//  1. 按 PackageName:CurrentVersion 分组，每组只展示一次包名+版本
+//  2. 包的整体严重级别取该包下所有漏洞的最高级别
+//  3. 不展示 VulnID（GHSA-xxx），仅展示 Aliases（CVE-ID）
+//  4. 组内漏洞按严重级别降序排列
 func buildDependencyVulnsSection(vulns []DependencyVuln) string {
 	if len(vulns) == 0 {
 		return ""
@@ -260,6 +402,31 @@ func BuildReviewPrompt(ctx *PromptContext) string {
 		sb.WriteString(buildDependencyVulnsSection(ctx.DependencyVulns))
 	}
 
+	// 4.1 密钥泄露扫描结果
+	if len(ctx.SecretScanFindings) > 0 {
+		sb.WriteString(buildSecretScanSection(ctx.SecretScanFindings))
+	}
+
+	// 4.2 敏感操作审计结果
+	if len(ctx.SecurityAuditFindings) > 0 {
+		sb.WriteString(buildSecurityAuditSection(ctx.SecurityAuditFindings))
+	}
+
+	// 4.3 License 合规检查
+	if len(ctx.LicenseFindings) > 0 {
+		sb.WriteString(buildLicenseSection(ctx.LicenseFindings))
+	}
+
+	// 4.4 变更影响分析
+	if len(ctx.ImpactFindings) > 0 {
+		sb.WriteString(buildImpactSection(ctx.ImpactFindings))
+	}
+
+	// 4.5 测试建议
+	if len(ctx.TestSuggestions) > 0 {
+		sb.WriteString(buildTestSuggestionSection(ctx.TestSuggestions))
+	}
+
 	// 5. 待评审代码
 	sb.WriteString("【待评审的代码变更】\n")
 	for i, file := range ctx.Files {
@@ -292,11 +459,11 @@ func buildSchemaExample(dimWeights map[string]DimensionWeight) string {
 	}
 
 	ex := struct {
-		SchemaVersion   string                   `json:"schema_version"`
-		TotalScore      int                      `json:"total_score"`
-		Dimensions      map[string]llm.Dimension `json:"dimensions"`
-		Summary         string                   `json:"summary"`
-		Issues          []struct {
+		SchemaVersion string                   `json:"schema_version"`
+		TotalScore    int                      `json:"total_score"`
+		Dimensions    map[string]llm.Dimension `json:"dimensions"`
+		Summary       string                   `json:"summary"`
+		Issues        []struct {
 			RuleCode    string `json:"rule_code"`
 			Severity    string `json:"severity"`
 			Category    string `json:"category"`
@@ -558,7 +725,11 @@ func BuildFullStructuredPrompt(ctx *PromptContext) (string, *llm.ResponseFormat)
 // BuildBatchCollectionPrompt 构建分批评审收集 Prompt（分批场景用）
 // 输出：含规则 + diff，但 JSON Schema 只要求 issues[] 和 recommendations[]，不计算总分
 // batchFiles 必须使用 SmartSplitIntoBatches 截断后的文件 map，确保单文件不超过可用 token 配额
-func BuildBatchCollectionPrompt(ctx *PromptContext, batchIndex, totalBatches int, batchFiles []map[string]interface{}) string {
+// BuildBatchCollectionPrompt 构建分批评审收集 Prompt（分批场景用）
+// 输出：含规则 + diff，但 JSON Schema 只要求 issues[] 和 recommendations[]，不计算总分
+// batchFiles 必须使用 SmartSplitIntoBatches 截断后的文件 map，确保单文件不超过可用 token 配额
+// isLastBatch 控制是否在最后一批注入通用信息（Agent findings、commit、MR标题、依赖漏洞），避免每批重复
+func BuildBatchCollectionPrompt(ctx *PromptContext, batchIndex, totalBatches int, batchFiles []map[string]interface{}, isLastBatch bool) string {
 	var sb strings.Builder
 
 	sb.WriteString("你是一名资深代码审查专家。请对以下代码变更进行审查。\n\n")
@@ -591,25 +762,42 @@ func BuildBatchCollectionPrompt(ctx *PromptContext, batchIndex, totalBatches int
 	// 维度 + 权重 + 规则
 	sb.WriteString(buildRulesSection(ctx.Rules, ctx.DimensionWeights))
 
-	// 依赖漏洞扫描结果
-	if len(ctx.DependencyVulns) > 0 {
-		sb.WriteString(buildDependencyVulnsSection(ctx.DependencyVulns))
-	}
+	if isLastBatch {
+		// 依赖漏洞扫描结果（仅最后一批，避免 Token 浪费）
+		if len(ctx.DependencyVulns) > 0 {
+			sb.WriteString(buildDependencyVulnsSection(ctx.DependencyVulns))
+		}
 
-	// AST 上下文
-	if ctx.ASTContext != "" {
-		sb.WriteString(ctx.ASTContext)
-		sb.WriteString("\n")
-	}
+		// 扩展智能体产出（Phase C）- 仅最后一批提供参考
+		if len(ctx.SecretScanFindings) > 0 {
+			sb.WriteString(buildSecretScanSection(ctx.SecretScanFindings))
+		}
+		if len(ctx.SecurityAuditFindings) > 0 {
+			sb.WriteString(buildSecurityAuditSection(ctx.SecurityAuditFindings))
+		}
+		if len(ctx.TestSuggestions) > 0 {
+			sb.WriteString(buildTestSuggestionSection(ctx.TestSuggestions))
+		}
 
-	// 跨文件调用链
-	if ctx.CrossFileContext != "" {
-		sb.WriteString(ctx.CrossFileContext)
-		sb.WriteString("\n")
+		// 当存在 Agent 发现时，注入禁止重复指令
+		if len(ctx.SecretScanFindings) > 0 || len(ctx.SecurityAuditFindings) > 0 {
+			sb.WriteString(buildNoRepeatInstruction())
+		}
+
+		// Commit 信息（仅最后一批）
+		if ctx.CommitsText != "" {
+			sb.WriteString(fmt.Sprintf("\ncommits：\n%s\n", ctx.CommitsText))
+		}
+
+		// MR 标题（仅最后一批）
+		if ctx.MRTitle != "" {
+			sb.WriteString(fmt.Sprintf("\nMR名称：%s", ctx.MRTitle))
+		}
 	}
 
 	// 待评审代码（使用截断后的 diff）
-	sb.WriteString(fmt.Sprintf("## 待评审内容（第 %d/%d 批）\n\n", batchIndex, totalBatches))
+	sb.WriteString(fmt.Sprintf("\n## 待评审内容（第 %d/%d 批）\n\n", batchIndex, totalBatches))
+
 	for i, f := range batchFiles {
 		path, _ := f["path"].(string)
 		diff, _ := f["diff"].(string)
@@ -621,14 +809,6 @@ func BuildBatchCollectionPrompt(ctx *PromptContext, batchIndex, totalBatches int
 		sb.WriteString(diff)
 		sb.WriteString("\n```\n\n")
 	}
-
-	// Commit 信息
-	if ctx.CommitsText != "" {
-		sb.WriteString(fmt.Sprintf("\ncommits：\n%s\n", ctx.CommitsText))
-	}
-
-	// MR 标题
-	sb.WriteString(fmt.Sprintf("\nMR名称：%s", ctx.MRTitle))
 
 	return sb.String()
 }
@@ -729,6 +909,105 @@ func BuildScoreArbitrationPrompt(ctx *PromptContext, batchResults []*llm.BatchRe
 	return sb.String(), responseFormat
 }
 
+// BuildArbitrationPrompt 【新增】构建 review_arbitration 专用的结构化 Prompt（JSON 注入模式）
+// 与 BuildScoreArbitrationPrompt 的区别：
+// 1. Agent findings 以结构化 JSON 注入（非 markdown 文本退化）
+// 2. 使用 GetReviewArbitrationJSONSchema（扩展了 security_findings / testing_notes / impact_notes / dedup_log / overall_suggestion）
+// 3. 返回 (string, *llm.ResponseFormat, error) 三元组
+func BuildArbitrationPrompt(ctx *PromptContext) (string, *llm.ResponseFormat, error) {
+	var sb strings.Builder
+
+	// 1. System Prompt（角色定义 + 核心职责 + 输入说明 + 去重/评分规则）
+	sb.WriteString("你是一名资深代码评审架构师，负责整合多智能体检出结果与 AI 增量评审发现，输出最终的代码评审报告。\n\n")
+	sb.WriteString("## 核心职责\n")
+	sb.WriteString("1. 去重仲裁：合并 Agent 规则引擎发现与 LLM 增量评审发现中的重复项\n")
+	sb.WriteString("2. 统一格式化：将所有发现转换为标准化的 AIReviewIssue 格式\n")
+	sb.WriteString("3. 综合评分：基于全量问题（Agent + LLM）计算各维度得分\n")
+	sb.WriteString("4. 独立分类：将测试建议和影响分析放入独立数组，不混入 Issues[]\n")
+	sb.WriteString("5. 来源标记：在每条 issue 中标注来源（agent / llm / merged）\n\n")
+
+	sb.WriteString("## 输入数据说明\n")
+	sb.WriteString("- Agent 发现：位置精确、severity 可信、rule_code 可追踪\n")
+	sb.WriteString("- AI 评审发现：情境理解深、描述丰富、可能重复\n\n")
+
+	sb.WriteString("## 去重规则\n")
+	sb.WriteString("1. 位置重叠：同一文件 + 行号差值 ≤ 3 行 → 视为同一位置\n")
+	sb.WriteString("2. 语义相似：消息文本相似度 > 70% 或 category 相同 + 位置重叠 → 视为同一问题\n")
+	sb.WriteString("3. 去重优先级：保留 Agent 的 severity + rule_code，优先采用 LLM 的 description + suggestion\n")
+	sb.WriteString("4. 独立保留：Agent 发现但 LLM 未发现 → 保留（source=agent）；LLM 发现但 Agent 未发现 → 保留（source=llm）\n\n")
+
+	// 2. 扣分规则（来自项目 AI 评审模板）
+	sb.WriteString(buildScoreRulesText(ctx.DeductScoreConfig))
+	sb.WriteString("\n")
+
+	// 3. 评分规则
+	sb.WriteString("## 评分规则\n")
+	sb.WriteString("1. 安全维度：Issues[] 中 category = security 的问题 + Agent SecurityFindings 共同计入\n")
+	sb.WriteString("2. 代码质量维度：Issues[] 中 category = code_quality 的问题计入\n")
+	sb.WriteString("3. 性能维度：Issues[] 中 category = performance 的问题计入\n")
+	sb.WriteString("4. 每个 Issue 的 deduct_score = DeductScoreConfig[severity]（来自项目 AI 评审模板）\n")
+	sb.WriteString("5. 维度得分 = max(0, 100 - Σ(该维度所有问题扣分))\n")
+	sb.WriteString("6. 总分 = Σ(维度得分 × 维度权重) / 100\n\n")
+
+	// 4. 独立输出规则
+	sb.WriteString("## 独立输出规则（强制执行）\n")
+	sb.WriteString("- TestSuggestion → testing_notes[]（不得放入 Issues[]）\n")
+	sb.WriteString("- ImpactAnalysis → impact_notes[]（不得放入 Issues[]）\n")
+	sb.WriteString("- SecurityFinding → security_findings[]（仅展示用，已在 Issues[] 中体现扣分）\n\n")
+
+	// 5. 构建结构化 User Prompt（JSON 格式数据注入）
+	agentJSON, err := ctx.AgentFindingsJSON()
+	if err != nil {
+		return "", nil, fmt.Errorf("Agent findings 序列化失败: %w", err)
+	}
+
+	batchJSON, err := json.Marshal(ctx.BatchReviewResults)
+	if err != nil {
+		return "", nil, fmt.Errorf("Batch results 序列化失败: %w", err)
+	}
+
+	dimConfig := ctx.GetDimensionConfig()
+	dimJSON, _ := json.Marshal(dimConfig)
+	dscJSON, _ := json.Marshal(ctx.GetDeductScoreConfig())
+
+	// 使用 struct 而非 map[string]interface{}，确保 json.RawMessage 的
+	// MarshalJSON 被正确调用（避免被误识别为 []byte 而 base64 编码）
+	type arbitrationInputData struct {
+		AgentFindings     json.RawMessage `json:"agent_findings"`
+		BatchResults      json.RawMessage `json:"batch_results"`
+		DimensionConfig   json.RawMessage `json:"dimension_config"`
+		DeductScoreConfig json.RawMessage `json:"deduct_score_config"`
+	}
+	userData := arbitrationInputData{
+		AgentFindings:     agentJSON,
+		BatchResults:      batchJSON,
+		DimensionConfig:   dimJSON,
+		DeductScoreConfig: dscJSON,
+	}
+	userJSON, err := json.MarshalIndent(userData, "", "  ")
+	if err != nil {
+		return "", nil, fmt.Errorf("输入数据序列化失败: %w", err)
+	}
+
+	sb.WriteString("## 输入数据\n\n```json\n")
+	sb.Write(userJSON)
+	sb.WriteString("\n```\n")
+
+	// 6. ResponseFormat（使用 review_arbitration 扩展 Schema）
+	dimensions := ctx.GetDimensionCodes()
+	schema := llm.GetReviewArbitrationJSONSchema(dimensions)
+	responseFormat := &llm.ResponseFormat{
+		Type: "json_schema",
+		JSONSchema: &llm.JSONSchema{
+			Name:   "review_arbitration_result",
+			Strict: true,
+			Schema: schema,
+		},
+	}
+
+	return sb.String(), responseFormat, nil
+}
+
 // ==================== 辅助函数 ====================
 
 // buildScoreRulesText 构建总分计算规则文本
@@ -790,4 +1069,123 @@ func buildRulesSection(rules []model.ReviewRule, dimWeights map[string]Dimension
 	}
 	sb.WriteString("对于未在规则列表中的其他问题，也可以一并指出，此时 `rule_code` 填空字符串。\n\n")
 	return sb.String()
+}
+
+// buildSecretScanSection 密钥泄露扫描 Prompt 段落
+func buildSecretScanSection(findings []model.SecretScanFinding) string {
+	var sb strings.Builder
+	sb.WriteString("## 密钥泄露扫描结果\n\n")
+	sb.WriteString(fmt.Sprintf("发现 %d 处潜在密钥泄露：\n\n", len(findings)))
+	sb.WriteString("| 文件 | 行号 | 类型 | 严重级别 |\n")
+	sb.WriteString("|:---|:---:|:---|:---:|\n")
+	for _, f := range findings {
+		sb.WriteString(fmt.Sprintf("| `%s` | %d | %s | %s |\n", f.FilePath, f.LineNumber, f.RuleCode, f.Severity))
+	}
+	sb.WriteString("\n请重点检查上述位置，确认是否为真实密钥泄露。如果是误报（如测试数据、示例代码），请在回复中说明。\n\n")
+	return sb.String()
+}
+
+// buildSecurityAuditSection 敏感操作审计 Prompt 段落
+func buildSecurityAuditSection(findings []model.SecurityAuditFinding) string {
+	var sb strings.Builder
+	sb.WriteString("## 敏感操作审计结果\n\n")
+	sb.WriteString(fmt.Sprintf("发现 %d 处安全敏感操作：\n\n", len(findings)))
+	sb.WriteString("| 文件 | 行号 | 规则 | 级别 | 建议 |\n")
+	sb.WriteString("|:---|:---:|:---|:---:|:---|\n")
+	for _, f := range findings {
+		suggestion := f.Suggestion
+		if suggestion == "" {
+			suggestion = "—"
+		}
+		sb.WriteString(fmt.Sprintf("| `%s` | %d | %s | %s | %s |\n", f.FilePath, f.LineNumber, f.RuleCode, f.Severity, suggestion))
+	}
+	sb.WriteString("\n请在评审中特别关注上述安全问题，确认是否存在实际风险。\n\n")
+	return sb.String()
+}
+
+// buildLicenseSection License 合规检查 Prompt 段落
+func buildLicenseSection(findings []LicenseFinding) string {
+	var sb strings.Builder
+	sb.WriteString("## License 合规检查\n\n")
+	sb.WriteString(fmt.Sprintf("发现 %d 处许可证兼容性问题：\n\n", len(findings)))
+	sb.WriteString("| 依赖 | 版本 | 许可证 | 兼容性 | 说明 |\n")
+	sb.WriteString("|:---|:---|:---|:---:|:---|\n")
+	for _, f := range findings {
+		compat := f.Compatibility
+		if compat == "incompatible" {
+			compat = "❌"
+		} else if compat == "attention" {
+			compat = "⚠️"
+		}
+		sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s |\n", f.PackageName, f.CurrentVersion, f.License, compat, f.Reason))
+	}
+	sb.WriteString("\n请确认是否需要替换不兼容的依赖，或评估许可证污染风险。\n\n")
+	return sb.String()
+}
+
+// buildImpactSection 变更影响分析 Prompt 段落
+func buildImpactSection(findings []ImpactFinding) string {
+	var sb strings.Builder
+	var breaking []ImpactFinding
+	var others []ImpactFinding
+	for _, f := range findings {
+		if f.Type == "breaking_change" {
+			breaking = append(breaking, f)
+		} else {
+			others = append(others, f)
+		}
+	}
+
+	sb.WriteString("## 变更影响分析\n\n")
+	if len(breaking) > 0 {
+		sb.WriteString(fmt.Sprintf("⚠️ 发现 %d 处潜在 Breaking Change：\n\n", len(breaking)))
+		for _, f := range breaking {
+			sb.WriteString(fmt.Sprintf("**`%s`** 在 `%s` 发生变更\n", f.SymbolName, f.FilePath))
+			sb.WriteString(fmt.Sprintf("- 影响范围：%s\n", strings.Join(f.AffectedFiles, ", ")))
+			sb.WriteString(fmt.Sprintf("- 建议：%s\n\n", f.Suggestion))
+		}
+	}
+	if len(others) > 0 {
+		sb.WriteString("### 其他变更提示\n\n")
+		for _, f := range others {
+			sb.WriteString(fmt.Sprintf("- **%s** `%s` — %s\n", f.Type, f.FilePath, f.ChangeDesc))
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// buildTestSuggestionSection 测试建议 Prompt 段落
+func buildTestSuggestionSection(suggestions []TestSuggestionItem) string {
+	var sb strings.Builder
+	sb.WriteString("## 测试建议\n\n")
+	sb.WriteString("以下函数建议补充测试场景：\n\n")
+	sb.WriteString("| 函数 | 文件 | 建议测试场景 |\n")
+	sb.WriteString("|:---|:---|:---|\n")
+	for _, s := range suggestions {
+		var sceneNames []string
+		for _, sc := range s.Scenarios {
+			sceneNames = append(sceneNames, sc.Name)
+		}
+		scenes := strings.Join(sceneNames, " · ")
+		sb.WriteString(fmt.Sprintf("| `%s` | `%s:%d` | %s |\n", s.FunctionName, s.FilePath, s.LineNumber, scenes))
+	}
+	sb.WriteString("\n> 注：以上为基于代码分支结构的自动分析建议，实际测试场景需结合业务逻辑判断。\n\n")
+	return sb.String()
+}
+
+// buildNoRepeatInstruction 构建禁止重复报告 Agent 发现的指令
+func buildNoRepeatInstruction() string {
+	return "\n## 【禁止重复】Agent 已确认的问题\n\n" +
+		"以上列出的密钥泄露扫描和安全审计结果是已由规则引擎高置信度确认的问题。\n\n" +
+		"⚠️ 你在本次批次评审中 **不要** 在 `issues[]` 中重复报告这些问题。\n\n" +
+		"正确的做法：\n" +
+		"1. 如果某条 Agent 发现在你的批次代码中确实存在，但你认为可以补充更多上下文 → 在 `recommendations[]` 中提出建议\n" +
+		"2. 如果 Agent 发现的位置在本批次代码中不存在 → 完全忽略，不输出任何相关内容\n" +
+		"3. 如果你发现了 Agent 未提及的**全新问题** → 正常放入 `issues[]`\n\n" +
+		"错误示例（不要做）：\n" +
+		"```json\n" +
+		"{ \"file\": \"config.go\", \"line_start\": 42, \"message\": \"发现 API_KEY 泄露\" }\n" +
+		"```\n" +
+		"→ 这条如果已在 Agent 扫描结果中列出，你重复报告会增加去重负担。\n\n"
 }

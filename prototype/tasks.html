@@ -565,13 +565,13 @@ function renderTasks(tasks) {
             if (source === 'score_threshold') {
                 return `<span class="bg-red-50 text-red-600 px-2 py-0.5 rounded text-xs">评分阈值${score ? ' · ' + score + '分' : ''}</span>`;
             }
-            if (source === 'merge_request') {
+            if (source === 'merge_request' || source === 'merge_request_open' || source === 'merge_request_update' || source === 'merge_request_reopen') {
                 return `<span class="bg-purple-50 text-purple-600 px-2 py-0.5 rounded text-xs">代码合并</span>`;
             }
             if (source === 'manual') {
                 return `<span class="bg-blue-50 text-blue-600 px-2 py-0.5 rounded text-xs">用户召唤</span>`;
             }
-            return `<span class="bg-gray-50 text-gray-500 px-2 py-0.5 rounded text-xs">用户召唤</span>`;
+            return `<span class="bg-gray-50 text-gray-500 px-2 py-0.5 rounded text-xs">${source || '未知'}</span>`;
         }
 
         function getModelTag(model) {

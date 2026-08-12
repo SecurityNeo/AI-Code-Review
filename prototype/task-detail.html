@@ -626,8 +626,16 @@ function renderTaskMeta(t) {
     document.getElementById('detailBranch').title = branchText;
     document.getElementById('detailAuthor').textContent = t.author || '-';
     document.getElementById('detailCreatedAt').textContent = formatDateTime(t.created_at);
-    const triggerTypeLabels = { manual: '手动触发', webhook: 'Webhook触发', retry: '重试触发' };
-    document.getElementById('detailTriggerType').textContent = triggerTypeLabels[t.trigger_type] || t.trigger_type || '-';
+    const triggerSourceLabels = {
+        manual: '用户召唤',
+        merge_request: '代码合并',
+        merge_request_open: '代码合并',
+        merge_request_update: '代码合并',
+        merge_request_reopen: '代码合并',
+        score_threshold: '低于阈值触发',
+        retry: '重试触发'
+    };
+    document.getElementById('detailTriggerType').textContent = triggerSourceLabels[t.trigger_source] || t.trigger_source || '-';
 
     // 执行时长
     document.getElementById('detailDuration').textContent = formatDuration(t.duration_sec);
@@ -824,9 +832,12 @@ function renderCallerBadge(caller) {
 
 function escapeHtml(text) {
     if (text == null) return '';
-    const div = document.createElement('div');
-    div.textContent = String(text);
-    return div.innerHTML;
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 
 // ========== Diff 相关 ==========
@@ -1843,9 +1854,17 @@ function getStatusText(status) {
 }
 
 function getTriggerSourceBadge(trigger, score) {
-    const labels = { manual: '手动触发', webhook: 'Webhook触发', score_threshold: '低于阈值触发', retry: '重试触发' };
-    const label = labels[trigger] || trigger;
-    const color = trigger === 'score_threshold' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-600';
+    const labels = {
+        manual: '用户召唤',
+        merge_request: '代码合并',
+        merge_request_open: '代码合并',
+        merge_request_update: '代码合并',
+        merge_request_reopen: '代码合并',
+        score_threshold: '低于阈值触发',
+        retry: '重试触发'
+    };
+    const label = labels[trigger] || trigger || '未知';
+    const color = trigger === 'score_threshold' ? 'bg-orange-100 text-orange-700' : (trigger === 'manual' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600');
     return `<span class="text-xs px-2 py-0.5 rounded ${color}">${label}</span>`;
 }
 
@@ -1910,11 +1929,15 @@ function copyReviewMarkdown() {
         showToast('没有可复制的内容', 'error');
         return;
     }
-    navigator.clipboard.writeText(content).then(() => {
-        showToast('Markdown 已复制到剪贴板', 'success');
-    }).catch(() => {
-        showToast('复制失败', 'error');
-    });
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(content).then(() => {
+            showToast('Markdown 已复制到剪贴板', 'success');
+        }).catch(() => {
+            fallbackCopyText(content, () => showToast('Markdown 已复制到剪贴板', 'success'));
+        });
+    } else {
+        fallbackCopyText(content, () => showToast('Markdown 已复制到剪贴板', 'success'));
+    }
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
@@ -2040,7 +2063,10 @@ const stageIconMap = {
     'git_clone': 'fa-code-branch',
     'context_extract': 'fa-sitemap',
     'dependency_scan': 'fa-shield-alt',
-    'risk_analysis': 'fa-exclamation-triangle',
+    'secret_scan': 'fa-key',
+    'security_audit': 'fa-user-secret',
+    'test_suggestion': 'fa-vial',
+    'impact_analysis': 'fa-project-diagram',
     'batch_review_frame': 'fa-robot',
     'batch_plan': 'fa-list-ol',
     'batch_summary': 'fa-clipboard-check',
@@ -2048,15 +2074,35 @@ const stageIconMap = {
 };
 
 const stageNameMap = {
-    'trigger_check': '触发检查',
+    'trigger_check': '触发过滤器',
     'git_clone': '代码克隆',
-    'context_extract': '上下文提取',
-    'dependency_scan': '依赖漏洞扫描',
-    'risk_analysis': '风险预分析',
-    'batch_review_frame': 'AI 评审',
+    'context_extract': '代码理解器',
+    'dependency_scan': '漏洞扫描',
+    'secret_scan': '密钥扫描智能体',
+    'security_audit': '安全审计智能体',
+    'test_suggestion': '测试建议智能体',
+    'impact_analysis': '影响分析智能体',
+    'batch_review_frame': 'AI代码评审智能体',
     'batch_plan': '分批决策',
     'batch_summary': '汇总评审',
-    'post_process': '后处理',
+    'review_arbitration': '评审裁决',
+    'post_process': '发布智能体',
+};
+
+const stageDescMap = {
+    'trigger_check': '检查触发条件与事件过滤',
+    'git_clone': '拉取完整仓库镜像',
+    'context_extract': 'AST 上下文提取 + 跨文件分析',
+    'dependency_scan': '依赖漏洞扫描',
+    'secret_scan': '扫描 diff 中的密钥 / Token / 密码泄露',
+    'security_audit': 'SQL 注入 / unsafe eval / 反序列化检测',
+    'test_suggestion': '基于分支结构生成测试场景建议',
+    'impact_analysis': '识别 Breaking Change 和跨模块影响',
+    'batch_review_frame': 'LLM 结构化评审',
+    'batch_plan': '智能分批 + Token 预估',
+    'batch_summary': '批次结果汇总 + 最终报告生成',
+    'review_arbitration': 'Agent-LLM 协同去重、分类与汇总裁决',
+    'post_process': '发布 GitLab 评论 + 状态持久化',
 };
 
 function renderPipeline(data) {
@@ -2067,6 +2113,7 @@ function renderPipeline(data) {
     let totalStages = 0;
     let completedMain = 0;
     let failedMain = 0;
+    let skippedMain = 0;
     let totalTokens = 0;
     let totalDuration = 0;
 
@@ -2077,16 +2124,24 @@ function renderPipeline(data) {
         if (s.has_children && s.children && s.children.length > 0) {
             // Group 阶段（如 batch_review_frame）本身不算阶段数，由其子阶段代替
             s.children.forEach(c => {
-                totalStages++;
                 totalTokens += (c.input_tokens || 0) + (c.output_tokens || 0);
                 totalDuration += c.duration_ms || 0;
-                if (c.status === 'success' || c.status === 'skipped') completedMain++;
-                if (c.status === 'failed' || c.status === 'timeout') failedMain++;
+                if (c.status === 'skipped') {
+                    skippedMain++;
+                } else {
+                    totalStages++;
+                    if (c.status === 'success') completedMain++;
+                    if (c.status === 'failed' || c.status === 'timeout') failedMain++;
+                }
             });
         } else {
-            totalStages++;
-            if (s.status === 'success' || s.status === 'skipped') completedMain++;
-            if (s.status === 'failed' || s.status === 'timeout') failedMain++;
+            if (s.status === 'skipped') {
+                skippedMain++;
+            } else {
+                totalStages++;
+                if (s.status === 'success') completedMain++;
+                if (s.status === 'failed' || s.status === 'timeout') failedMain++;
+            }
         }
     });
 
@@ -2119,7 +2174,7 @@ function renderPipeline(data) {
                 </span>
                 <div>
                     <div class="text-sm font-semibold text-gray-800">${statusText}</div>
-                    <div class="text-xs text-gray-500">${completedMain}/${totalStages} 主阶段完成${failedMain > 0 ? ' · ' + failedMain + ' 失败' : ''}</div>
+                    <div class="text-xs text-gray-500">${completedMain}/${totalStages} 完成${failedMain > 0 ? ' · ' + failedMain + ' 失败' : ''}${skippedMain > 0 ? ' · ' + skippedMain + ' 跳过' : ''}</div>
                 </div>
             </div>
             <div class="flex gap-4 text-xs text-gray-500">
@@ -2197,6 +2252,12 @@ function createPipelineStageNode(stage, index, totalCount) {
     html += `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium ${sc.text}">${sc.label}</span>`;
     html += `</div>`;
 
+    // 简要说明
+    const stageDesc = stageDescMap[stage.stage_code];
+    if (stageDesc) {
+        html += `<div class="text-xs text-gray-500 mb-1">${escapeHtml(stageDesc)}</div>`;
+    }
+
     // 元信息行
     const metas = [];
     if (durationSec !== null) metas.push(`<span class="text-[11px] text-gray-500"><i class="far fa-clock mr-0.5"></i>${durationSec}s</span>`);
@@ -2227,12 +2288,35 @@ function createPipelineStageNode(stage, index, totalCount) {
 function createBatchReviewSubflow(children, parentStage) {
     // 分类子阶段
     const planStage = children.find(c => c.stage_code === 'batch_plan');
-    const batchStages = children.filter(c => c.stage_code && c.stage_code.startsWith('batch_review_')).sort((a, b) => (a.batch_index || 0) - (b.batch_index || 0));
+    const rawBatchStages = children.filter(c => c.stage_code && c.stage_code.startsWith('batch_review_')).sort((a, b) => (a.batch_index || 0) - (b.batch_index || 0));
     const summaryStage = children.find(c => c.stage_code === 'batch_summary');
 
-    // 从父阶段获取总批次进度（batch_completed/batch_total 在父阶段上）
-    const totalBatches = parentStage.batch_total || batchStages.length;
-    const completedBatches = parentStage.batch_completed || batchStages.filter(b => b.status === 'success' || b.status === 'skipped').length;
+    // 从分批决策获取总批次数量（plan.snapshot.output_snapshot.plan.batch_count）
+    let totalBatches = parentStage.batch_total || rawBatchStages.length;
+    if (planStage && planStage.output_snapshot && planStage.output_snapshot.plan) {
+        totalBatches = planStage.output_snapshot.plan.batch_count || totalBatches;
+    }
+    totalBatches = Math.max(totalBatches, rawBatchStages.length);
+
+    // 构造完整的批次数组（含 pending 占位）
+    const batchStages = [];
+    for (let i = 1; i <= totalBatches; i++) {
+        const found = rawBatchStages.find(b => (b.batch_index || 0) === i || parseInt(b.stage_code.replace('batch_review_', ''), 10) === i);
+        if (found) {
+            batchStages.push(found);
+        } else {
+            batchStages.push({
+                stage_code: `batch_review_${i}`,
+                batch_index: i,
+                status: 'pending',
+                name: `批次 ${i}`,
+                execution_id: null,
+                id: null
+            });
+        }
+    }
+
+    const completedBatches = parentStage.batch_completed || rawBatchStages.filter(b => b.status === 'success' || b.status === 'skipped').length;
     const progressPct = totalBatches > 0 ? Math.round((completedBatches / totalBatches) * 100) : 0;
 
     let html = '';
@@ -2263,35 +2347,34 @@ function createBatchReviewSubflow(children, parentStage) {
         // 从分批决策到批次区的垂直小连线
         html += '<div class="flex justify-center -mt-1 mb-1"><div class="w-px h-2 bg-gray-300"></div></div>';
 
-        // 三列布局：批次列表 | 连接线 | 汇总评审
-        html += '<div class="flex gap-1 items-center">';
+        // 两列布局：左列是"批次卡片+箭头"的行列表，右列是汇总评审（垂直居中）
+        html += '<div class="flex gap-2">';
 
-        // 左列：批次卡片列表
-        html += '<div class="flex flex-col gap-2">';
+        // 左列：每一行 = 批次卡片 + 箭头（天然对齐，避免多列高度错位）
+        html += '<div class="flex-1 flex flex-col gap-2">';
         batchStages.forEach((batch, idx) => {
             const bStatus = batch.status || 'pending';
             const bColor = { success: 'bg-green-500', running: 'bg-blue-500', failed: 'bg-red-500', timeout: 'bg-orange-500', pending: 'bg-gray-300', skipped: 'bg-gray-300' }[bStatus] || 'bg-gray-300';
             const bExecId = batch.execution_id || batch.id;
             const bIndex = typeof batch.batch_index === 'number' ? batch.batch_index : (idx + 1);
             const bName = `批次 ${bIndex}`;
+            const isPending = bStatus === 'pending';
 
-            html += `<div onclick="${bExecId ? `showPipelineDetail(${bExecId})` : ''}" class="rounded-lg border ${bStatus === 'running' ? 'border-blue-300 bg-blue-50' : bStatus === 'success' ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-gray-50'} px-3 py-1.5 text-left transition-all hover:shadow-sm ${bExecId ? 'cursor-pointer' : ''}">`;
+            html += '<div class="flex items-center gap-1">';
+            // 批次卡片
+            html += `<div onclick="${bExecId ? `showPipelineDetail(${bExecId})` : ''}" class="flex-1 rounded-lg border ${bStatus === 'running' ? 'border-blue-300 bg-blue-50' : bStatus === 'success' ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-gray-50'} px-3 py-1.5 text-left transition-all hover:shadow-sm ${bExecId ? 'cursor-pointer' : ''}">`;
             html += `<div class="flex items-center gap-1.5">`;
             html += `<span class="w-1.5 h-1.5 rounded-full ${bColor}"></span>`;
-            html += `<span class="text-[11px] font-medium text-gray-700">${escapeHtml(bName)}</span>`;
-            html += `<span class="text-[10px] text-gray-400 ml-auto">${batch.duration_ms ? Math.round(batch.duration_ms/1000)+'s' : '-'}</span>`;
+            html += `<span class="text-[11px] font-medium ${isPending ? 'text-gray-400' : 'text-gray-700'}">${escapeHtml(bName)}</span>`;
+            html += `<span class="text-[10px] text-gray-400 ml-auto">${batch.duration_ms ? Math.round(batch.duration_ms/1000)+'s' : (isPending ? '待运行' : '-')}</span>`;
             html += `</div>`;
             html += `</div>`;
-        });
-        html += '</div>';
-
-        // 中列：连接线（每条批次一条水平线 + 箭头）
-        html += '<div class="flex flex-col gap-2 justify-center">';
-        batchStages.forEach(() => {
-            html += '<div class="flex items-center h-[28px]">';
+            // 箭头
+            html += '<div class="flex items-center flex-shrink-0">';
             html += '<div class="w-3 h-px bg-gray-300"></div>';
             html += '<div class="text-gray-300 text-[10px]"><i class="fas fa-chevron-right"></i></div>';
             html += '</div>';
+            html += '</div>'; // end row
         });
         html += '</div>';
 
@@ -2370,7 +2453,8 @@ async function showPipelineDetail(execId) {
         const res = await apiFetch(`${API_BASE}/pipeline-stages/${execId}/detail`);
         const json = await res.json();
         const stageCode = json.stage_code || '';
-        title.textContent = (stageNameMap[stageCode] || json.name || stageCode || '阶段') + ' 详情';
+        const stageDisplayName = stageNameMap[stageCode] || json.name || stageCode || '阶段';
+        title.textContent = stageCode === 'review_arbitration' ? stageDisplayName + '详情' : stageDisplayName + ' 详情';
 
         if (stageCode === 'batch_review_frame') {
             body.innerHTML = renderBatchReviewPanel(json);
@@ -2384,6 +2468,8 @@ async function showPipelineDetail(execId) {
             body.innerHTML = renderPostProcessDetail(json);
         } else if (stageCode === 'context_extract') {
             body.innerHTML = renderContextExtractDetail(json);
+        } else if (stageCode === 'review_arbitration') {
+            body.innerHTML = renderReviewArbitrationDetail(json);
         } else {
             body.innerHTML = renderGenericDetail(json);
         }
@@ -2412,6 +2498,31 @@ function renderGenericDetail(json) {
         html += '<div class="mb-3"><div class="font-medium text-gray-600 mb-1 text-xs">输出快照</div>';
         html += renderJsonSnapshot(json.output_snapshot);
         html += '</div>';
+        // 展示 LLM Prompt
+        if (json.output_snapshot.llm_prompt) {
+            html += '<div class="mb-3"><div class="font-medium text-gray-600 mb-1 text-xs">🤖 传递给模型的 Prompt</div>';
+            html += renderCopyablePre(json.output_snapshot.llm_prompt, 'prompt');
+            html += '</div>';
+        }
+        // 展示 LLM 原始输出（Agent 验证/增强阶段）
+        if (json.output_snapshot.llm_raw_output) {
+            html += '<div class="mb-3"><div class="font-medium text-gray-600 mb-1 text-xs">🤖 模型原始输出</div>';
+            html += renderCopyablePre(json.output_snapshot.llm_raw_output, 'json');
+            html += '</div>';
+        }
+        // 展示模型名称与 Token 用量（优先从 output_snapshot 读取，扩展智能体阶段）
+        const outSnap = json.output_snapshot;
+        const modelName = outSnap.model_name || json.model_name || '';
+        const inputTokens = outSnap.input_tokens || json.input_tokens || 0;
+        const outputTokens = outSnap.output_tokens || json.output_tokens || 0;
+        if (modelName || inputTokens || outputTokens) {
+            html += '<div class="mb-3"><div class="font-medium text-gray-600 mb-1 text-xs">🤖 模型与 Token 用量</div>';
+            let meta = [];
+            if (modelName) meta.push(`模型: ${escapeHtml(modelName)}`);
+            if (inputTokens || outputTokens) meta.push(`in: ${(inputTokens||0).toLocaleString()} | out: ${(outputTokens||0).toLocaleString()}`);
+            html += `<div class="text-xs text-gray-500">${meta.join(' · ')}</div>`;
+            html += '</div>';
+        }
     }
     if (!html) html = '<div class="text-gray-400 text-sm">无详细数据</div>';
     return html;
@@ -2449,26 +2560,36 @@ function renderCopyableMarkdown(markdownText, maxHeight) {
     </div>`;
 }
 
+function fallbackCopyText(text, successCb) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+        document.execCommand('copy');
+        if (successCb) successCb();
+    } catch (e) {
+        console.warn('copy fallback failed', e);
+    }
+    document.body.removeChild(ta);
+}
+
 function copyTextById(elementId, btn) {
     const el = document.getElementById(elementId);
     if (!el) return;
     const text = el.innerText || el.textContent || '';
-    navigator.clipboard.writeText(text).then(() => {
+    const success = () => {
         const original = btn.innerHTML;
         btn.innerHTML = '<i class="fas fa-check mr-0.5 text-green-500"></i>已复制';
         setTimeout(() => { btn.innerHTML = original; }, 1500);
-    }).catch(() => {
-        // fallback
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        const original = btn.innerHTML;
-        btn.innerHTML = '<i class="fas fa-check mr-0.5 text-green-500"></i>已复制';
-        setTimeout(() => { btn.innerHTML = original; }, 1500);
-    });
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(success).catch(() => fallbackCopyText(text, success));
+    } else {
+        fallbackCopyText(text, success);
+    }
 }
 
 function renderMetaBar(json) {
@@ -2478,7 +2599,6 @@ function renderMetaBar(json) {
     }
     if (json.duration_ms) html += `<span class="text-gray-500 text-xs">⏱ ${Math.round(json.duration_ms/1000)}s</span>`;
     if (json.model_name) html += `<span class="text-gray-500 text-xs">🤖 ${escapeHtml(json.model_name)}</span>`;
-    if (json.input_tokens || json.output_tokens) html += `<span class="text-gray-500 text-xs">📊 in:${(json.input_tokens||0).toLocaleString()} out:${(json.output_tokens||0).toLocaleString()}</span>`;
     if (json.batch_index > 0) html += `<span class="text-gray-500 text-xs">🗂 批次 ${json.batch_index}${json.batch_total > 0 ? '/'+json.batch_total : ''}</span>`;
     html += '</div>';
     return html;
@@ -2641,14 +2761,13 @@ function renderBatchReviewPanel(json) {
             html += `<div class="rounded-lg border p-2 ${b.is_truncated ? 'border-orange-200 bg-orange-50' : 'bg-gray-50'}">`;
             html += `<div class="flex justify-between items-center mb-1"><span class="font-semibold text-xs">批次 ${b.index}</span><span class="text-[10px] ${b.is_truncated ? 'text-orange-500' : 'text-gray-400'}">${b.file_count} 文件</span></div>`;
             html += `<div class="text-[10px] text-gray-500 mb-1">${b.file_paths.slice(0,2).map(p=>escapeHtml(p)).join(', ')}${b.file_paths.length>2?' ...':''}</div>`;
-            html += `<div class="flex justify-between"><span class="text-[10px] text-gray-400">预估</span><span class="text-[10px] font-mono">${(b.token_est||0).toLocaleString()} tok</span></div>`;
+            html += `<div class="flex justify-between"><span class="text-[10px] text-gray-400">预估</span><span class="text-[10px] font-mono">${(b.token_est||0).toLocaleString()} token</span></div>`;
             html += '</div>';
         });
         html += '</div></div>';
     }
 
     if (out.final_report || out.score !== undefined) {
-        html += '<div class="mb-2 bg-white rounded-lg border border-gray-200 p-3"><div class="font-semibold text-gray-700 text-xs mb-2">汇总评审</div>';
         if (out.score !== undefined) {
             html += `<div class="text-sm font-bold text-gray-800 mb-1">AI评分：${out.score}分</div>`;
         }
@@ -2657,7 +2776,6 @@ function renderBatchReviewPanel(json) {
             const reportHtml = typeof marked !== 'undefined' ? marked.parse(reportText) : escapeHtml(reportText);
             html += `<div class="bg-gray-50 p-2 rounded border text-[11px] overflow-auto max-h-80 leading-relaxed markdown-body">${reportHtml}</div>`;
         }
-        html += '</div>';
     }
 
     // AI 原始输出（review_result）
@@ -2686,6 +2804,36 @@ function renderBatchDetail(json) {
         html += `<div class="mb-2 bg-blue-50 border border-blue-100 rounded-lg p-2 flex justify-between items-center">`;
         html += `<span class="text-xs text-blue-700 font-medium">Token 用量</span>`;
         html += `<span class="text-[11px] font-mono text-blue-600">in: ${(json.input_tokens||0).toLocaleString()} / out: ${(json.output_tokens||0).toLocaleString()}</span>`;
+        html += `</div>`;
+    }
+
+    // Token 配额明细（来自 batch_plan）
+    const overheadTokens = out.overhead_tokens || 0;
+    const availableTokens = out.available_tokens || 0;
+    const maxTokens = overheadTokens + availableTokens;
+    if (maxTokens > 0) {
+        html += `<div class="mb-3 bg-white rounded-lg border border-gray-200 p-3">`;
+        html += `<div class="font-semibold text-gray-700 text-xs mb-2">Token 配额</div>`;
+        html += `<div class="text-[11px] text-gray-600 mb-1.5">`;
+        html += `<span class="inline-block mr-3">批次上限: <span class="font-mono font-medium">${maxTokens.toLocaleString()}</span> token</span>`;
+        html += `<span class="inline-block mr-3">固定开销: <span class="font-mono font-medium">${overheadTokens.toLocaleString()}</span> token</span>`;
+        html += `<span class="inline-block">可用额度: <span class="font-mono font-medium text-green-600">${availableTokens.toLocaleString()}</span> token</span>`;
+        html += `</div>`;
+        // 进度条可视化
+        const overheadPct = Math.round((overheadTokens / maxTokens) * 100);
+        html += `<div class="w-full h-2 rounded-full bg-gray-100 overflow-hidden flex">`;
+        html += `<div class="h-full bg-orange-400" style="width:${overheadPct}%" title="固定开销 ${overheadPct}%"></div>`;
+        html += `<div class="h-full bg-green-400 flex-1" title="可用额度 ${100 - overheadPct}%"></div>`;
+        html += `</div>`;
+        html += `<div class="flex justify-between mt-1 text-[10px] text-gray-400">`;
+        html += `<span><span class="inline-block w-2 h-2 rounded-full bg-orange-400 mr-1"></span>固定开销 (系统指令+规则+Schema等，所有批次共享)</span>`;
+        html += `<span><span class="inline-block w-2 h-2 rounded-full bg-green-400 mr-1"></span>可用额度 (用于当前批次文件 diff)</span>`;
+        html += `</div>`;
+        // 截断规则说明
+        html += `<div class="mt-2 pt-2 border-t border-gray-100 text-[10px] text-gray-500 leading-relaxed">`;
+        html += `<div class="mb-0.5"><span class="font-medium text-gray-600">批次拆分：</span>多个文件累计超过可用额度 → 拆分为新批次，每份 diff 内容完整</div>`;
+        html += `<div><span class="font-medium text-gray-600">单文件截断：</span>单个文件超过可用额度 → 该文件被截断并单独占满当前批次</div>`;
+        html += `</div>`;
         html += `</div>`;
     }
 
@@ -2800,6 +2948,91 @@ function renderSummaryDetail(json) {
 }
 
 // ========== 后处理阶段详情（展示最终评审报告）==========
+function renderReviewArbitrationDetail(json) {
+    const out = json.output_snapshot || {};
+    const inp = json.input_snapshot || {};
+    let html = renderMetaBar(json);
+
+    // 总体评分与建议
+    if (out.total_score !== undefined || out.overall_suggestion) {
+        html += `<div class="mb-3 bg-white rounded-lg border border-gray-200 p-3">`;
+        if (out.total_score !== undefined) {
+            html += `<div class="text-2xl font-bold ${out.total_score >= 60 ? 'text-green-600' : 'text-red-600'}">${out.total_score} <span class="text-sm text-gray-400 font-normal">/ 100</span></div>`;
+        }
+        if (out.overall_suggestion) {
+            html += `<div class="mt-1 text-xs text-gray-600">${escapeHtml(out.overall_suggestion)}</div>`;
+        }
+        html += `</div>`;
+    }
+
+    // 维度得分
+    if (out.dimensions && Array.isArray(out.dimensions) && out.dimensions.length > 0) {
+        html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5">各维度得分</div>`;
+        html += `<div class="flex flex-wrap gap-2">`;
+        out.dimensions.forEach(d => {
+            html += `<div class="px-2 py-1 rounded text-xs ${d.score >= 60 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'} border">${escapeHtml(d.name||d.code)}: ${d.score}</div>`;
+        });
+        html += `</div></div>`;
+    }
+
+    // 去重统计
+    if (out.dedup_stats) {
+        const ds = out.dedup_stats;
+        html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5">去重统计</div>`;
+        html += `<div class="flex flex-wrap gap-2 text-[11px] text-gray-600">`;
+        if (ds.input_issues !== undefined) html += `<span class="px-1.5 py-0.5 rounded bg-gray-50 border">输入 ${ds.input_issues} 条</span>`;
+        if (ds.output_issues !== undefined) html += `<span class="px-1.5 py-0.5 rounded bg-gray-50 border">输出 ${ds.output_issues} 条</span>`;
+        if (ds.merged_count !== undefined && ds.merged_count > 0) html += `<span class="px-1.5 py-0.5 rounded bg-yellow-50 border">合并 ${ds.merged_count} 条</span>`;
+        if (ds.removed_count !== undefined && ds.removed_count > 0) html += `<span class="px-1.5 py-0.5 rounded bg-red-50 border">剔除 ${ds.removed_count} 条</span>`;
+        html += `</div></div>`;
+    }
+
+    // Prompt 输入（可折叠）
+    const prompt = inp.prompt || '';
+    if (prompt) {
+        html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
+        html += `<span>Prompt 输入</span>`;
+        html += `<span class="text-[10px] text-gray-400">${prompt.length} 字符</span>`;
+        html += `</div>`;
+        html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden"><summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看 Prompt</summary>`;
+        html += `<pre class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[24rem] overflow-y-auto">${escapeHtml(prompt)}</pre>`;
+        html += `</details></div>`;
+    }
+
+    // 大模型原始输出（JSON 格式）
+    if (out.raw_llm_output || out.raw_content) {
+        const raw = out.raw_llm_output || out.raw_content;
+        html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
+        html += `<span>大模型原始输出 (JSON)</span>`;
+        html += `<span class="text-[10px] text-gray-400">${typeof raw === 'string' ? raw.length : JSON.stringify(raw).length} 字符</span>`;
+        html += `</div>`;
+        html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden"><summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看原始 JSON 输出</summary>`;
+        let jsonStr = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
+        // 尝试美化 JSON
+        try {
+            const parsed = JSON.parse(jsonStr);
+            jsonStr = JSON.stringify(parsed, null, 2);
+        } catch (_) { /* 保持原样 */ }
+        html += `<pre class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[28rem] overflow-y-auto">${escapeHtml(jsonStr)}</pre>`;
+        html += `</details></div>`;
+    }
+
+    // 去重日志
+    if (out.dedup_logs && Array.isArray(out.dedup_logs) && out.dedup_logs.length > 0) {
+        html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5">去重日志</div>`;
+        html += `<div class="flex flex-col gap-1">`;
+        out.dedup_logs.slice(0, 20).forEach(log => {
+            html += `<div class="text-[11px] text-gray-600 bg-gray-50 px-2 py-1 rounded">${escapeHtml(typeof log === 'string' ? log : JSON.stringify(log))}</div>`;
+        });
+        if (out.dedup_logs.length > 20) {
+            html += `<div class="text-[10px] text-gray-400">... 还有 ${out.dedup_logs.length - 20} 条日志</div>`;
+        }
+        html += `</div></div>`;
+    }
+
+    return html;
+}
+
 function renderPostProcessDetail(json) {
     const out = json.output_snapshot || {};
     const inp = json.input_snapshot || {};

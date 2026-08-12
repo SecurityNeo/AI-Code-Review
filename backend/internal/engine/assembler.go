@@ -412,3 +412,83 @@ func emojiStrip(s string) string {
 	}
 	return strings.TrimSpace(string(result))
 }
+
+// ==================== 【新增】Phase 2 扩展区域 Markdown 渲染 ====================
+
+// AssembleFullMarkdownReport 组装完整 Markdown 报告（含 SecurityFindings / TestingNotes / ImpactNotes 独立区域）
+func AssembleFullMarkdownReport(
+	result *llm.AIReviewResult,
+	template string,
+	vulns []DependencyVuln,
+) (string, error) {
+	// 步骤 1：组装基础报告（评分 + Issues + Recommendations + DependencyVulns）
+	report, err := AssembleMarkdownCommentWithVulns(result, template, vulns)
+	if err != nil {
+		// fallback 到简易报告
+		report = fmt.Sprintf("## 🤖 AI 代码评审报告\n\n**综合评分：%d/100**\n\n%s",
+			result.TotalScore, result.Summary)
+	}
+
+	var sb strings.Builder
+	sb.WriteString(report)
+
+	// 步骤 2：追加安全发现独立区域（SecurityFindings）
+	if len(result.SecurityFindings) > 0 {
+		sb.WriteString("\n\n---\n\n### 🔒 安全发现（")
+		sb.WriteString(fmt.Sprintf("%d", len(result.SecurityFindings)))
+		sb.WriteString("）\n\n")
+		sb.WriteString("| 级别 | 类型 | 文件 | 行 | 标题 | 置信度 |\n")
+		sb.WriteString("|:---|:---|:---|:---:|:---|:---:|\n")
+		for _, f := range result.SecurityFindings {
+			confStr := fmt.Sprintf("%.0f%%", f.Confidence*100)
+			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %d | %s | %s |\n",
+				f.Severity, f.Category, f.File, f.LineStart, f.Title, confStr))
+		}
+	}
+
+	// 步骤 3：追加测试建议独立区域（TestingNotes）
+	if len(result.TestingNotes) > 0 {
+		sb.WriteString("\n\n---\n\n### 🧪 测试建议（")
+		sb.WriteString(fmt.Sprintf("%d", len(result.TestingNotes)))
+		sb.WriteString("）\n\n")
+		for _, note := range result.TestingNotes {
+			sb.WriteString(fmt.Sprintf("**`%s`** @ %s:%d\n\n", note.FunctionName, note.FilePath, note.LineNumber))
+			sb.WriteString("| 优先级 | 场景 | 输入 | 期望 | 理由 |\n")
+			sb.WriteString("|:---|:---|:---|:---|:---|\n")
+			for _, s := range note.Scenarios {
+				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s |\n",
+					s.Priority, s.Name, s.Input, s.Expected, s.Reasoning))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	// 步骤 4：追加影响分析独立区域（ImpactNotes）
+	if len(result.ImpactNotes) > 0 {
+		sb.WriteString("\n\n---\n\n### 📊 变更影响分析（")
+		sb.WriteString(fmt.Sprintf("%d", len(result.ImpactNotes)))
+		sb.WriteString("）\n\n")
+		for _, note := range result.ImpactNotes {
+			sb.WriteString(fmt.Sprintf("**%s** `%s` @ %s\n\n", note.Type, note.SymbolName, note.FilePath))
+			sb.WriteString(fmt.Sprintf("- **描述**：%s\n", note.Description))
+			sb.WriteString(fmt.Sprintf("- **严重级别**：%s\n", note.Severity))
+			sb.WriteString(fmt.Sprintf("- **兼容度**：%s\n", note.Compatibility))
+			if len(note.AffectedFiles) > 0 {
+				sb.WriteString(fmt.Sprintf("- **受影响文件**：%s\n", strings.Join(note.AffectedFiles, ", ")))
+			}
+			if note.MigrationSteps != "" {
+				sb.WriteString(fmt.Sprintf("- **迁移步骤**：\n%s\n", note.MigrationSteps))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	// 步骤 5：追加总体建议
+	if result.OverallSuggestion != "" {
+		sb.WriteString("\n\n---\n\n### 📋 综合建议\n\n")
+		sb.WriteString(result.OverallSuggestion)
+		sb.WriteString("\n")
+	}
+
+	return sb.String(), nil
+}

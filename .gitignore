@@ -4,3 +4,5 @@ backend/ai-optimizer.log
 .git
 backend/main
 .vscode
+query_minio.py
+docs/*.md

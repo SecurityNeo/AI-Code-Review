@@ -185,6 +185,7 @@ DB_HOST=your_mysql_host
 DB_NAME=your_mysql_db_name
 DB_PASSWORD=your_mysql_password
 ENCRYPTION_KEY=your_32_byte_encryption_key_here!!
+CODEGUARD_WORKSPACE=/data/codeguard/repos
 EOF
 ```
 
@@ -238,6 +239,7 @@ docker run -d -p 8080:8080 \
 |------|--------|------|
 | `GITLAB_TOKEN` | `""` | GitLab API Token，当项目未单独配置 AccessToken 时作为全局 fallback 用于请求 GitLab API |
 | `PROJECT_BASE_DIR` | `/data/gitlab/` | 项目代码克隆存储目录 |
+| `CODEGUARD_WORKSPACE` | `/tmp/codeguard/repos` | 代码理解器持久化代码库根目录（用于 AST 跨文件分析、依赖扫描等），为空时回退到 `/tmp/codeguard/repos` |
 
 ### 任务与系统
 

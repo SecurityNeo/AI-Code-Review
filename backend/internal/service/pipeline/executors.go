@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,37 +33,73 @@ func (e *TriggerCheckExecutor) Execute(ctx StageContext) error {
 
 	// 保存输入快照（完整的任务信息）
 	ctx.SaveInputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
-		"task_id":      task.ID,
-		"mr_iid":       task.MRMergeID,
-		"mr_title":     task.MRTitle,
-		"author":       task.MRAuthor,
-		"project_id":   task.ProjectID,
-		"project_name": task.Project.Name,
-		"task_type":    task.TaskType,
+		"task_id":        task.ID,
+		"mr_iid":         task.MRMergeID,
+		"mr_title":       task.MRTitle,
+		"author":         task.MRAuthor,
+		"project_id":     task.ProjectID,
+		"project_name":   task.Project.Name,
+		"task_type":      task.TaskType,
+		"trigger_source": task.TriggerSource,
 	})
 
-	// 简单检查：MR IID 是否有效
-	result := "通过"
-	reason := "MR IID 有效"
+	// 检查 1：MR IID 是否有效
 	if task.MRMergeID <= 0 {
-		result = "失败"
-		reason = fmt.Sprintf("无效 MR IID: %d", task.MRMergeID)
+		reason := fmt.Sprintf("无效 MR IID: %d", task.MRMergeID)
 		ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
 			"mr_iid":   task.MRMergeID,
 			"mr_title": task.MRTitle,
 			"author":   task.MRAuthor,
-			"result":   result,
+			"result":   "失败",
 			"reason":   reason,
 		})
 		return fmt.Errorf("%s", reason)
+	}
+
+	// 检查 2：触发事件是否在全局配置白名单中
+	var agentCfg model.ReviewAgentConfig
+	if err := model.DB.First(&agentCfg, 1).Error; err == nil {
+		allowedEvents := agentCfg.TriggerEventCodes()
+		if len(allowedEvents) > 0 {
+			matched := false
+			ts := task.TriggerSource
+			if ts == "" {
+				// trigger_source 为空表示来源不明（如 Dashboard 手动触发），默认放行
+				matched = true
+			} else {
+				for _, ev := range allowedEvents {
+					if ev == ts {
+						matched = true
+						break
+					}
+					// 兼容旧配置：merge_request 包含所有子事件（merge_request_open/update/reopen）
+					if ev == "merge_request" && strings.HasPrefix(ts, "merge_request_") {
+						matched = true
+						break
+					}
+				}
+			}
+			if !matched {
+				reason := fmt.Sprintf("触发源 '%s' 不在允许列表中（当前允许: %v）", ts, allowedEvents)
+				ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
+					"mr_iid":         task.MRMergeID,
+					"mr_title":       task.MRTitle,
+					"author":         task.MRAuthor,
+					"result":         "阻止",
+					"reason":         reason,
+					"trigger_source": ts,
+				})
+				return fmt.Errorf("%s", reason)
+			}
+		}
 	}
 
 	ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
 		"mr_iid":   task.MRMergeID,
 		"mr_title": task.MRTitle,
 		"author":   task.MRAuthor,
-		"result":   result,
-		"reason":   reason,
+		"result":   "通过",
+		"reason":   "MR IID 有效且触发源在允许列表中",
 	})
 	return nil
 }
@@ -241,11 +278,15 @@ func (e *ContextExtractExecutor) Execute(ctx StageContext) error {
 	var astCtx *ASTContext
 	depth := 1
 
-	if repoDir != "" {
+	// 优先从全局配置读取深度参数，fallback 到系统配置
+	if d, ok := ctx.GetInput("_context_extract_depth").(int); ok && d >= 0 {
+		depth = d
+	} else if d := SysCfgCallChainDepth(); d > 0 {
+		depth = d
+	}
+
+	if repoDir != "" && depth > 0 {
 		// ========== 方案 C：基于完整代码库的跨文件分析 ==========
-		if d := SysCfgCallChainDepth(); d > 0 {
-			depth = d
-		}
 		analyzer := NewCrossFileAnalyzer(repoDir, lang, depth)
 		var err error
 		crossFileCtx, err = analyzer.Analyze(changedPaths)
@@ -263,6 +304,12 @@ func (e *ContextExtractExecutor) Execute(ctx StageContext) error {
 		path, _ := f["path"].(string)
 		if path == "" {
 			continue
+		}
+		// 检查任务是否已被取消
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("任务已取消")
+		default:
 		}
 		var content string
 		var err error
@@ -300,15 +347,16 @@ func (e *ContextExtractExecutor) Execute(ctx StageContext) error {
 			"path":             path,
 			"size":             len(content),
 			"language":         lang,
-			"functions_count":  len(fileAST.Functions),
-			"structs_count":    len(fileAST.Structs),
-			"interfaces_count": len(fileAST.Interfaces),
-			"imports_count":    len(fileAST.Imports),
-			"functions":        fileAST.Functions,
-			"structs":          fileAST.Structs,
-			"interfaces":       fileAST.Interfaces,
-			"imports":          fileAST.Imports,
-			"callers":          fileAST.Callers,
+			"functions":        len(fileAST.Functions),
+			"functions_count":  len(fileAST.Functions), // 兼容旧前端/消费者
+			"structs":          len(fileAST.Structs),
+			"structs_count":    len(fileAST.Structs), // 兼容旧前端/消费者
+			"interfaces":       len(fileAST.Interfaces),
+			"interfaces_count": len(fileAST.Interfaces), // 兼容旧前端/消费者
+			"imports":          len(fileAST.Imports),
+			"imports_count":    len(fileAST.Imports), // 兼容旧前端/消费者
+			"callers":          len(fileAST.Callers),
+			"callers_count":    len(fileAST.Callers), // 兼容旧前端/消费者
 		})
 	}
 
@@ -322,7 +370,7 @@ func (e *ContextExtractExecutor) Execute(ctx StageContext) error {
 	ctx.SetInput("ast_context", astText)
 	ctx.SetInput("ast_structured", astCtx)
 
-	// 将完整文件内容保存到 output，供后续 RiskAnalysis 解析依赖使用
+	// 将完整文件内容保存到 output，供后续 dependency_scan 解析依赖使用
 	ctx.SetOutput("file_contents", fullFileMap)
 
 	// 构建输出快照（非常丰富）
@@ -387,7 +435,15 @@ func buildCrossFileCallChainText(cfc *CrossFileContext) string {
 	var sb strings.Builder
 	sb.WriteString("## 跨文件调用链上下文\n\n")
 
-	for path, fc := range cfc.FileContexts {
+	// 按文件路径排序，保证输出顺序稳定
+	paths := make([]string, 0, len(cfc.FileContexts))
+	for path := range cfc.FileContexts {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	for _, path := range paths {
+		fc := cfc.FileContexts[path]
 		sb.WriteString(fmt.Sprintf("### 文件: %s\n\n", path))
 
 		if len(fc.UpstreamCallers) > 0 {
@@ -554,6 +610,12 @@ func (e *DependencyScanExecutor) Execute(ctx StageContext) error {
 		if path == "" {
 			continue
 		}
+		// 检查任务是否已被取消
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("任务已取消")
+		default:
+		}
 
 		content := e.getFileContent(ctx, path)
 		if content == "" {
@@ -562,7 +624,7 @@ func (e *DependencyScanExecutor) Execute(ctx StageContext) error {
 
 		deps, err := ParseDependenciesFromFile(path, content)
 		if err != nil {
-			zap.L().Warn("parse dependencies failed", zap.String("path", path), zap.Error(err))
+			zap.L().Debug("parse dependencies failed, file is not a dependency manifest", zap.String("path", path), zap.Error(err))
 			continue
 		}
 
@@ -657,84 +719,6 @@ func stringSliceContains(arr []string, s string) bool {
 	return false
 }
 
-// ========== RiskAnalysisExecutor ==========
-type RiskAnalysisExecutor struct{}
-
-func (e *RiskAnalysisExecutor) Code() string { return "risk_analysis" }
-
-func (e *RiskAnalysisExecutor) Execute(ctx StageContext) error {
-	diffFiles := ctx.GetInput("diff_files")
-	if diffFiles == nil {
-		return nil
-	}
-	files, ok := diffFiles.([]map[string]interface{})
-	if !ok {
-		return nil
-	}
-
-	totalLines := 0
-	fileDetails := make([]map[string]interface{}, 0, len(files))
-	for _, f := range files {
-		lines := 0
-		if diff, ok := f["diff"].(string); ok {
-			lines = strings.Count(diff, "\n")
-		}
-		totalLines += lines
-		fileDetails = append(fileDetails, map[string]interface{}{
-			"path":      f["path"],
-			"additions": f["additions"],
-			"deletions": f["deletions"],
-			"lines":     lines,
-		})
-	}
-
-	// 从 dependency_scan 阶段获取依赖风险分
-	dependencyRiskScore := 100
-	if score, ok := ctx.GetOutput("dependency_risk_score").(int); ok {
-		dependencyRiskScore = score
-	}
-
-	// 从 dependency_scan 阶段获取漏洞统计
-	depVulnCount := 0
-	if depVulns, ok := ctx.GetOutput("dependency_vulns").([]engine.DependencyVuln); ok {
-		depVulnCount = len(depVulns)
-	}
-
-	// ====== Overall Risk Level ======
-	riskLevel := "low"
-	if totalLines > 1000 || dependencyRiskScore < 30 {
-		riskLevel = "high"
-	} else if totalLines > 500 || dependencyRiskScore < 60 {
-		riskLevel = "medium"
-	}
-
-	ctx.SetInput("risk_level", riskLevel)
-
-	ctx.SaveInputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
-		"file_count": len(files),
-		"files":      fileDetails,
-	})
-
-	ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
-		"status":                "success",
-		"risk_level":            riskLevel,
-		"total_lines":           totalLines,
-		"file_count":            len(files),
-		"file_details":          fileDetails,
-		"dependency_vuln_count": depVulnCount,
-		"dependency_risk_score": dependencyRiskScore,
-		"thresholds": map[string]interface{}{
-			"high_lines":        1000,
-			"medium_lines":      500,
-			"low_lines":         0,
-			"high_dep_score":    30,
-			"medium_dep_score":  60,
-			"dependency_weight": 0.2,
-		},
-	})
-	return nil
-}
-
 // ========== BatchReviewFrameExecutor ==========
 type BatchReviewFrameExecutor struct {
 	llmService LLMService
@@ -776,6 +760,20 @@ func (e *BatchReviewFrameExecutor) Execute(ctx StageContext) error {
 		promptCtx.DependencyVulns = depVulns
 	}
 
+	// 注入 Phase C 扩展智能体产出
+	if secretFindings, ok := ctx.GetOutput("secret_scan_findings").([]model.SecretScanFinding); ok && len(secretFindings) > 0 {
+		promptCtx.SecretScanFindings = secretFindings
+	}
+	if auditFindings, ok := ctx.GetOutput("security_audit_findings").([]model.SecurityAuditFinding); ok && len(auditFindings) > 0 {
+		promptCtx.SecurityAuditFindings = auditFindings
+	}
+	if impactFindings, ok := ctx.GetOutput("impact_analysis_findings").([]engine.ImpactFinding); ok && len(impactFindings) > 0 {
+		promptCtx.ImpactFindings = impactFindings
+	}
+	if testSuggestions, ok := ctx.GetOutput("test_suggestions").([]engine.TestSuggestionItem); ok && len(testSuggestions) > 0 {
+		promptCtx.TestSuggestions = testSuggestions
+	}
+
 	// ==================== 场景 A：单批直接结构化评审 ====================
 	var actualModelID uint
 	if plan.BatchCount == 1 {
@@ -784,26 +782,24 @@ func (e *BatchReviewFrameExecutor) Execute(ctx StageContext) error {
 			return err
 		}
 		actualModelID = modelID
-		// 组装 Markdown 评论
-		report := e.assembleMarkdownReport(parsedResult, promptCtx)
-		ctx.SetOutput("ai_review_result", parsedResult)
-		ctx.SetOutput("final_report", report)
-		ctx.SetOutput("score", parsedResult.TotalScore)
+		// 【改造】单批结果也转为 batch_review_results 存储，供 review_arbitration 处理
+		batchResult := &llm.BatchReviewResult{
+			BatchNotes:      parsedResult.Summary,
+			Issues:          parsedResult.Issues,
+			Recommendations: parsedResult.Recommendations,
+		}
+		ctx.SetOutput("batch_review_results", []*llm.BatchReviewResult{batchResult})
 		ctx.SetOutput("model_id", actualModelID)
-		ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
-			"plan":         plan,
-			"final_report": report,
-			"score":        parsedResult.TotalScore,
-			"issue_count":  len(parsedResult.Issues),
-			"batch_count":  1,
-			"model_id":     actualModelID,
-		})
+		// 【注意】不再直接组装报告，由 review_arbitration 阶段处理
 		return nil
 	}
 
 	// ==================== 场景 B/C：多批收集 + 汇总裁决 ====================
 	// S2: 多批评审（按 wave 分组并行）
-	maxParallel := SysCfgBatchParallelMax()
+	maxParallel := 3 // 默认 3
+	if pm, ok := ctx.GetInput("_batch_parallel_max").(int); ok && pm > 0 {
+		maxParallel = pm
+	}
 	waves := GroupBatchesIntoWaves(plan.BatchCount, maxParallel)
 	batchResults := make([]*llm.BatchReviewResult, plan.BatchCount)
 	var completedCount int32
@@ -823,13 +819,23 @@ func (e *BatchReviewFrameExecutor) Execute(ctx StageContext) error {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				result, err := e.executeBatchCollection(ctx, plan.Batches[batchIdx], promptCtx, task)
+				// 检查任务是否已被取消
+				select {
+				case <-ctx.Done():
+					errCh <- fmt.Errorf("任务已取消")
+					return
+				default:
+				}
+				result, modelID, err := e.executeBatchCollection(ctx, plan.Batches[batchIdx], promptCtx, task)
 				if err != nil {
 					errCh <- fmt.Errorf("wave %d, batch %d 失败: %w", waveIdx+1, batchIdx+1, err)
 					return
 				}
 				mu.Lock()
 				batchResults[batchIdx] = result
+				if actualModelID == 0 {
+					actualModelID = modelID
+				}
 				mu.Unlock()
 				completed := int(atomic.AddInt32(&completedCount, 1))
 				ctx.UpdateProgress(nil, completed, plan.BatchCount)
@@ -847,32 +853,15 @@ func (e *BatchReviewFrameExecutor) Execute(ctx StageContext) error {
 		}
 	}
 
-	// S3: 汇总裁决（强制）
-	parsedResult, modelID, err := e.executeScoreArbitration(ctx, batchResults, promptCtx, task)
-	if err != nil {
-		ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
-			"plan":        plan,
-			"error":       err.Error(),
-			"batch_count": plan.BatchCount,
-		})
-		return err
-	}
-	actualModelID = modelID
-
-	// 组装 Markdown 评论
-	report := e.assembleMarkdownReport(parsedResult, promptCtx)
-	ctx.SetOutput("ai_review_result", parsedResult)
-	ctx.SetOutput("final_report", report)
-	ctx.SetOutput("score", parsedResult.TotalScore)
+	// S3: 【改造】不再内部调用 executeScoreArbitration
+	// 评审结果存储到 PipelineContext，供 review_arbitration 独立阶段处理
+	ctx.SetOutput("batch_review_results", batchResults)
 	ctx.SetOutput("model_id", actualModelID)
 
 	ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
-		"plan":         plan,
-		"final_report": report,
-		"score":        parsedResult.TotalScore,
-		"issue_count":  len(parsedResult.Issues),
-		"batch_count":  plan.BatchCount,
-		"model_id":     actualModelID,
+		"plan":        plan,
+		"batch_count": plan.BatchCount,
+		"model_id":    actualModelID,
 	})
 
 	return nil
@@ -1060,19 +1049,65 @@ func (e *BatchReviewFrameExecutor) executeSingleBatchStructured(ctx StageContext
 	return parsedResult, result.ModelID, nil
 }
 
+// filterCrossFileContextForBatch 从全局跨文件调用链文本中提取仅与当前批次文件相关的部分。
+// crossFileText 由 buildCrossFileCallChainText 生成，按 "### 文件: path" 分段。
+func filterCrossFileContextForBatch(crossFileText string, batchFilePaths []string) string {
+	if crossFileText == "" || len(batchFilePaths) == 0 {
+		return crossFileText
+	}
+
+	// 快速查找集合
+	batchSet := make(map[string]bool, len(batchFilePaths))
+	for _, p := range batchFilePaths {
+		batchSet[p] = true
+	}
+
+	const header = "## 跨文件调用链上下文\n\n"
+	if !strings.HasPrefix(crossFileText, header) {
+		return crossFileText
+	}
+
+	var result strings.Builder
+	result.WriteString(header)
+
+	trimmed := strings.TrimPrefix(crossFileText, header)
+	// 按 "### 文件: " 分割段落
+	sections := strings.Split(trimmed, "### 文件: ")
+
+	keptAny := false
+	for _, section := range sections[1:] { // sections[0] 为空或残留
+		section = strings.TrimPrefix(section, "### 文件: ")
+		lines := strings.SplitN(section, "\n", 2)
+		if len(lines) < 1 {
+			continue
+		}
+		filePath := strings.TrimSpace(lines[0])
+		if batchSet[filePath] {
+			result.WriteString("### 文件: ")
+			result.WriteString(section)
+			keptAny = true
+		}
+	}
+
+	if !keptAny {
+		return ""
+	}
+	return result.String()
+}
+
 // executeBatchCollection 场景 B：分批评审收集模式
-func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, detail BatchDetail, promptCtx *engine.PromptContext, task *model.Task) (*llm.BatchReviewResult, error) {
+func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, detail BatchDetail, promptCtx *engine.PromptContext, task *model.Task) (*llm.BatchReviewResult, uint, error) {
 	exec := ctx.CreateChildExecution(fmt.Sprintf("batch_review_%d", detail.Index), detail.Index)
 	ctx.MarkRunning(exec)
 
 	c, ok := ctx.(*stageContextImpl)
 	if !ok {
-		return nil, fmt.Errorf("invalid context type")
+		return nil, 0, fmt.Errorf("invalid context type")
 	}
 	batchFiles := c.GetBatchFiles(detail.Index - 1)
 	if batchFiles == nil {
 		ctx.MarkFailed(exec, "批次文件未找到")
-		return nil, fmt.Errorf("批次 %d 文件未找到", detail.Index)
+		return nil, 0, fmt.Errorf("批次 %d 文件未找到", detail.Index)
 	}
 
 	plan := ctx.GetOutput("batch_plan").(*BatchPlan)
@@ -1084,7 +1119,13 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 			batchFileMaps = append(batchFileMaps, fm)
 		}
 	}
-	userPrompt := engine.BuildBatchCollectionPrompt(promptCtx, detail.Index, plan.BatchCount, batchFileMaps)
+
+	// 为当前批次过滤跨文件调用链上下文，避免每批都传入无关的调用链信息
+	batchPromptCtx := *promptCtx
+	batchPromptCtx.CrossFileContext = filterCrossFileContextForBatch(promptCtx.CrossFileContext, detail.FilePaths)
+
+	isLastBatch := detail.Index == plan.BatchCount
+	userPrompt := engine.BuildBatchCollectionPrompt(&batchPromptCtx, detail.Index, plan.BatchCount, batchFileMaps, isLastBatch)
 
 	fileDetails := buildBatchFileDetails(ctx, detail.Index-1, detail.FilePaths)
 
@@ -1118,13 +1159,13 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 			"prompt":      userPrompt,
 		})
 		ctx.MarkFailed(exec, err.Error())
-		return nil, err
+		return nil, 0, err
 	}
 
 	// Refusal 检测
 	if result.Response != nil && len(result.Response.Choices) > 0 && result.Response.Choices[0].Message.Refusal != "" {
 		ctx.MarkFailed(exec, "模型拒绝回答")
-		return nil, fmt.Errorf("模型拒绝回答: %s", result.Response.Choices[0].Message.Refusal)
+		return nil, 0, fmt.Errorf("模型拒绝回答: %s", result.Response.Choices[0].Message.Refusal)
 	}
 
 	// 解析简化结果
@@ -1137,7 +1178,7 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 			"prompt":      userPrompt,
 		})
 		ctx.MarkFailed(exec, err.Error())
-		return nil, err
+		return nil, 0, err
 	}
 
 	exec.InputTokens = result.InputTokens
@@ -1148,104 +1189,27 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 	}
 
 	ctx.SaveOutputSnapshot(exec, map[string]interface{}{
-		"batch_index":   detail.Index,
-		"total_batches": plan.BatchCount,
-		"file_count":    detail.FileCount,
-		"file_paths":    detail.FilePaths,
-		"file_details":  fileDetails,
-		"issue_count":   len(batchResult.Issues),
-		"input_tokens":  result.InputTokens,
-		"output_tokens": result.OutputTokens,
-		"model_name":    result.ModelName,
-		"model_id":      result.ModelID,
-		"prompt":        userPrompt,
-		"review_result": result.Content,
+		"batch_index":      detail.Index,
+		"total_batches":    plan.BatchCount,
+		"file_count":       detail.FileCount,
+		"file_paths":       detail.FilePaths,
+		"file_details":     fileDetails,
+		"issue_count":      len(batchResult.Issues),
+		"input_tokens":     result.InputTokens,
+		"output_tokens":    result.OutputTokens,
+		"model_name":       result.ModelName,
+		"model_id":         result.ModelID,
+		"prompt":           userPrompt,
+		"review_result":    result.Content,
+		"available_tokens": plan.AvailableTokens,
+		"overhead_tokens":  plan.OverheadTokens,
 	})
 	ctx.MarkSuccess(exec)
 
-	return batchResult, nil
+	return batchResult, result.ModelID, nil
 }
 
 // executeScoreArbitration 场景 C：汇总裁决模式
-func (e *BatchReviewFrameExecutor) executeScoreArbitration(ctx StageContext, batchResults []*llm.BatchReviewResult, promptCtx *engine.PromptContext, task *model.Task) (*llm.AIReviewResult, uint, error) {
-	exec := ctx.CreateChildExecution("batch_summary", 0)
-	ctx.MarkRunning(exec)
-
-	userPrompt, responseFormat := engine.BuildScoreArbitrationPrompt(promptCtx, batchResults)
-
-	ctx.SaveInputSnapshot(exec, map[string]interface{}{
-		"batch_count":        len(batchResults),
-		"merged_issue_count": countTotalIssues(batchResults),
-		"prompt":             userPrompt,
-		"model_id":           task.UsedModelID,
-		"mode":               "score_arbitration",
-	})
-
-	result, err := e.llmService.ChatCompletionStructured(&task.ID, task.UsedModelID, "score_arbitration", "", userPrompt, responseFormat)
-	if err != nil {
-		ctx.SaveOutputSnapshot(exec, map[string]interface{}{
-			"batch_count": len(batchResults),
-			"error":       err.Error(),
-			"prompt":      userPrompt,
-		})
-		ctx.MarkFailed(exec, err.Error())
-		return nil, 0, err
-	}
-
-	// Refusal 检测
-	if result.Response != nil && len(result.Response.Choices) > 0 && result.Response.Choices[0].Message.Refusal != "" {
-		ctx.MarkFailed(exec, "模型拒绝回答")
-		return nil, 0, fmt.Errorf("模型拒绝回答: %s", result.Response.Choices[0].Message.Refusal)
-	}
-
-	// 解析 + 后置校验
-	parsedResult, err := engine.ParseReviewResult(result.Content, nil, getRetryConfig(), promptCtx.DeductScoreConfig)
-	if err != nil {
-		ctx.SaveOutputSnapshot(exec, map[string]interface{}{
-			"batch_count": len(batchResults),
-			"error":       err.Error(),
-			"raw_content": result.Content,
-			"prompt":      userPrompt,
-		})
-		ctx.MarkFailed(exec, err.Error())
-		return nil, 0, err
-	}
-
-	exec.InputTokens = result.InputTokens
-	exec.OutputTokens = result.OutputTokens
-	exec.ModelName = result.ModelName
-	if exec.LLMModelID == nil {
-		exec.LLMModelID = &result.ModelID
-	}
-
-	ctx.SaveOutputSnapshot(exec, map[string]interface{}{
-		"batch_count":   len(batchResults),
-		"total_score":   parsedResult.TotalScore,
-		"dimensions":    parsedResult.Dimensions,
-		"issue_count":   len(parsedResult.Issues),
-		"input_tokens":  result.InputTokens,
-		"output_tokens": result.OutputTokens,
-		"model_name":    result.ModelName,
-		"model_id":      result.ModelID,
-		"prompt":        userPrompt,
-		"review_result": result.Content,
-	})
-	ctx.MarkSuccess(exec)
-
-	return parsedResult, result.ModelID, nil
-}
-
-// assembleMarkdownReport 将结构化结果组装为 Markdown 评论
-func (e *BatchReviewFrameExecutor) assembleMarkdownReport(result *llm.AIReviewResult, promptCtx *engine.PromptContext) string {
-	report, err := engine.AssembleMarkdownCommentWithVulns(result, promptCtx.GitLabCommentTemplate, promptCtx.DependencyVulns)
-	if err != nil {
-		// 组装失败，fallback 到原始 JSON 的简易 Markdown
-		return fmt.Sprintf("## 🤖 AI 代码评审报告\n\n**综合评分：%d/100**\n\n%s",
-			result.TotalScore, result.Summary)
-	}
-	return report
-}
-
 // ========== PostProcessExecutor ==========
 type PostProcessExecutor struct{}
 
@@ -1257,63 +1221,81 @@ func (e *PostProcessExecutor) Execute(ctx StageContext) error {
 		return nil
 	}
 
-	finalReport, _ := ctx.GetOutput("final_report").(string)
-	score, _ := ctx.GetOutput("score").(int)
-
-	// 获取 Pipeline 内部生成的结构化结果
+	// 获取 review_arbitration 阶段生成的结构化结果
 	result, ok := ctx.GetOutput("ai_review_result").(*llm.AIReviewResult)
-	if ok && result != nil {
-		// 1. 持久化结构化数据到 review_issues
-		if err := engine.PersistStructuredReview(task.ID, result); err != nil {
-			zap.L().Warn("Pipeline: 持久化结构化评审失败", zap.Error(err))
-		}
-
-		// 2. 持久化任务实际使用的评审规则（含截断记录）
-		if selected, ok := ctx.GetInput("selected_rules").([]model.ReviewRule); ok {
-			var truncated []model.ReviewRule
-			if t, ok2 := ctx.GetInput("truncated_rules").([]model.ReviewRule); ok2 {
-				truncated = t
-			}
-			if err := engine.PersistTaskReviewRules(task.ID, selected, truncated); err != nil {
-				zap.L().Warn("Pipeline: 持久化任务评审规则失败", zap.Error(err))
-			}
-		}
-
-		// 3. 持久化 Task 字段（含实际使用的模型 ID）
-		updates := map[string]interface{}{
-			"ai_response_json": marshalJSON(result),
-			"dimension_scores": marshalJSON(result.Dimensions),
-			"issue_count":      len(result.Issues),
-			"score_value":      result.TotalScore,
-			"raw_ai_score":     result.OriginalTotalScore,
-		}
-		// 从 Pipeline 输出获取实际使用的模型 ID
-		if modelID, ok := ctx.GetOutput("model_id").(uint); ok && modelID > 0 {
-			updates["model_id"] = modelID
-			zap.L().Info("Pipeline: 更新任务实际使用模型", zap.Uint("task_id", task.ID), zap.Uint("model_id", modelID))
-		}
-		model.DB.Model(&model.Task{}).Where("id = ?", task.ID).Updates(updates)
-	} else {
-		zap.L().Warn("Pipeline: 未生成结构化结果，跳过持久化", zap.Uint("task_id", task.ID))
+	if !ok || result == nil {
+		zap.L().Warn("Pipeline: 未找到 ai_review_result，跳过 post_process")
+		return nil
 	}
+
+	score := result.TotalScore
+
+	// 【改造】使用 AssembleFullMarkdownReport 组装完整报告（含扩展区域）
+	promptCtx := getPromptContext(ctx)
+	var report string
+	if promptCtx != nil {
+		var err error
+		report, err = engine.AssembleFullMarkdownReport(result, promptCtx.GitLabCommentTemplate, promptCtx.DependencyVulns)
+		if err != nil {
+			zap.L().Warn("Pipeline: 组装完整报告失败，回退到简易报告", zap.Error(err))
+			report = fmt.Sprintf("## 🤖 AI 代码评审报告\n\n**综合评分：%d/100**\n\n%s",
+				result.TotalScore, result.Summary)
+		}
+		// 追加智能体配置段落
+		if section := promptCtx.AgentStatusSection(); section != "" {
+			report += section
+		}
+	} else {
+		report = fmt.Sprintf("## 🤖 AI 代码评审报告\n\n**综合评分：%d/100**\n\n%s",
+			result.TotalScore, result.Summary)
+	}
+
+	// 1. 持久化结构化数据到 review_issues
+	if err := engine.PersistStructuredReview(task.ID, result); err != nil {
+		zap.L().Warn("Pipeline: 持久化结构化评审失败", zap.Error(err))
+	}
+
+	// 2. 持久化任务实际使用的评审规则（含截断记录）
+	if selected, ok := ctx.GetInput("selected_rules").([]model.ReviewRule); ok {
+		var truncated []model.ReviewRule
+		if t, ok2 := ctx.GetInput("truncated_rules").([]model.ReviewRule); ok2 {
+			truncated = t
+		}
+		if err := engine.PersistTaskReviewRules(task.ID, selected, truncated); err != nil {
+			zap.L().Warn("Pipeline: 持久化任务评审规则失败", zap.Error(err))
+		}
+	}
+
+	// 3. 持久化 Task 字段（含实际使用的模型 ID）
+	updates := map[string]interface{}{
+		"ai_response_json": marshalJSON(result),
+		"dimension_scores": marshalJSON(result.Dimensions),
+		"issue_count":      len(result.Issues),
+		"score_value":      result.TotalScore,
+		"raw_ai_score":     result.OriginalTotalScore,
+	}
+	// 从 Pipeline 输出获取实际使用的模型 ID
+	if modelID, ok := ctx.GetOutput("model_id").(uint); ok && modelID > 0 {
+		updates["model_id"] = modelID
+		zap.L().Info("Pipeline: 更新任务实际使用模型", zap.Uint("task_id", task.ID), zap.Uint("model_id", modelID))
+	}
+	model.DB.Model(&model.Task{}).Where("id = ?", task.ID).Updates(updates)
 
 	// 更新 AIResponse（Markdown 报告）
-	if finalReport != "" {
-		model.DB.Model(&model.Task{}).Where("id = ?", task.ID).Update("ai_response", finalReport)
-	}
+	model.DB.Model(&model.Task{}).Where("id = ?", task.ID).Update("ai_response", report)
 
 	ctx.SaveInputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
 		"task_id":      task.ID,
-		"final_report": finalReport,
+		"final_report": report,
 		"score":        score,
 	})
 
 	ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
 		"status":         "completed",
 		"task_id":        task.ID,
-		"final_report":   finalReport,
+		"final_report":   report,
 		"score":          score,
-		"comment_posted": finalReport != "",
+		"comment_posted": report != "",
 	})
 	return nil
 }
@@ -1356,17 +1338,6 @@ func getRetryConfig() *engine.RetryConfig {
 		}
 	}
 	return cfg
-}
-
-// countTotalIssues 统计所有批次的问题总数
-func countTotalIssues(batchResults []*llm.BatchReviewResult) int {
-	total := 0
-	for _, br := range batchResults {
-		if br != nil {
-			total += len(br.Issues)
-		}
-	}
-	return total
 }
 
 // marshalJSON 安全 JSON 序列化

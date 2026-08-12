@@ -10,29 +10,33 @@ import (
 
 // ASTContext AST 上下文信息（注入 Prompt 的摘要）
 type ASTContext struct {
-	Functions     []FunctionSignature `json:"functions"`     // 变更涉及的函数签名
-	Structs       []TypeSignature     `json:"structs"`       // 变更涉及的结构体
-	Interfaces    []TypeSignature     `json:"interfaces"`    // 变更涉及的接口
-	Imports       []string            `json:"imports"`       // 新增/修改的 import
-	Callers       []string            `json:"callers"`       // 调用链（正则提取）
-	TotalChars    int                 `json:"total_chars"`   // AST 文本总字符数
-	Language      string              `json:"language"`      // 检测到的语言
+	Functions  []FunctionSignature `json:"functions"`   // 变更涉及的函数签名
+	Structs    []TypeSignature     `json:"structs"`     // 变更涉及的结构体
+	Interfaces []TypeSignature     `json:"interfaces"`  // 变更涉及的接口
+	Imports    []string            `json:"imports"`     // 新增/修改的 import
+	Callers    []string            `json:"callers"`     // 调用链（正则提取）
+	TotalChars int                 `json:"total_chars"` // AST 文本总字符数
+	Language   string              `json:"language"`    // 检测到的语言
 }
 
 // FunctionSignature 函数签名
 type FunctionSignature struct {
 	Name       string   `json:"name"`
-	Receiver   string   `json:"receiver,omitempty"`   // 接收者类型，如 "*UserService"
-	Params     []string `json:"params"`               // 参数类型列表，如 ["context.Context", "int"]
-	Returns    []string `json:"returns"`              // 返回值类型列表
+	Receiver   string   `json:"receiver,omitempty"` // 接收者类型，如 "*UserService"
+	Params     []string `json:"params"`             // 参数类型列表，如 ["context.Context", "int"]
+	Returns    []string `json:"returns"`            // 返回值类型列表
 	IsExported bool     `json:"is_exported"`
+	FilePath   string   `json:"file_path,omitempty"`  // 所在文件路径
+	LineStart  int      `json:"line_start,omitempty"` // 函数起始行号
+	Body       string   `json:"body,omitempty"`       // 函数体文本摘要
 }
 
 // TypeSignature 类型签名（struct/interface）
 type TypeSignature struct {
 	Name       string `json:"name"`
-	Kind       string `json:"kind"`       // "struct" | "interface"
+	Kind       string `json:"kind"` // "struct" | "interface"
 	IsExported bool   `json:"is_exported"`
+	FilePath   string `json:"file_path,omitempty"` // 所在文件路径
 }
 
 // ASTExtractor AST 提取器
@@ -89,6 +93,9 @@ func (e *ASTExtractor) Extract(files []map[string]interface{}) *ASTContext {
 			sb.WriteString(p)
 		}
 	}
+	// 去重：多个文件可能包含相同的 import/caller
+	ctx.Imports = uniqueStrings(ctx.Imports)
+	ctx.Callers = uniqueStrings(ctx.Callers)
 	for _, im := range ctx.Imports {
 		sb.WriteString(im)
 	}
@@ -102,7 +109,7 @@ func (e *ASTExtractor) Extract(files []map[string]interface{}) *ASTContext {
 func (e *ASTExtractor) extractGo(path, diff string, ctx *ASTContext) {
 	// 1. 尝试从 diff 中恢复可解析的代码片段
 	codeBlocks := extractCodeBlocksFromDiff(diff)
-	
+
 	for _, code := range codeBlocks {
 		if code == "" {
 			continue
@@ -111,7 +118,7 @@ func (e *ASTExtractor) extractGo(path, diff string, ctx *ASTContext) {
 		f, err := parser.ParseFile(fset, path, code, parser.SkipObjectResolution|parser.AllErrors)
 		if err != nil {
 			// 解析失败，回退到正则
-			e.extractGoByRegex(code, ctx)
+			e.extractGoByRegex(code, path, ctx)
 			continue
 		}
 
@@ -122,6 +129,14 @@ func (e *ASTExtractor) extractGo(path, diff string, ctx *ASTContext) {
 				sig := FunctionSignature{
 					Name:       x.Name.Name,
 					IsExported: ast.IsExported(x.Name.Name),
+					FilePath:   path,
+					LineStart:  fset.Position(x.Pos()).Line,
+				}
+				// 提取函数体（从 code 字符串中按 FileSet 偏移量截取）
+				if x.Body != nil {
+					if body := extractFuncBodyFromSource(fset, x.Body, code, 500); body != "" {
+						sig.Body = body
+					}
 				}
 				// Receiver
 				if x.Recv != nil && len(x.Recv.List) > 0 {
@@ -149,6 +164,7 @@ func (e *ASTExtractor) extractGo(path, diff string, ctx *ASTContext) {
 						Name:       x.Name.Name,
 						Kind:       "struct",
 						IsExported: ast.IsExported(x.Name.Name),
+						FilePath:   path,
 					})
 				}
 				if _, ok := x.Type.(*ast.InterfaceType); ok {
@@ -156,6 +172,7 @@ func (e *ASTExtractor) extractGo(path, diff string, ctx *ASTContext) {
 						Name:       x.Name.Name,
 						Kind:       "interface",
 						IsExported: ast.IsExported(x.Name.Name),
+						FilePath:   path,
 					})
 				}
 			}
@@ -169,32 +186,46 @@ func (e *ASTExtractor) extractGo(path, diff string, ctx *ASTContext) {
 	ctx.Callers = append(ctx.Callers, extractGoCallers(diff)...)
 }
 
-func (e *ASTExtractor) extractGoByRegex(code string, ctx *ASTContext) {
+func (e *ASTExtractor) extractGoByRegex(code, path string, ctx *ASTContext) {
 	// 函数签名正则
 	funcRe := regexp.MustCompile(`(?m)^\s*func\s+(?:\(([^)]+)\)\s+)?(\w+)\s*\(([^)]*)\)\s*(?:\(([^)]*)\)|([\w\[\]*.]+))?\s*\{`)
-	for _, m := range funcRe.FindAllStringSubmatch(code, -1) {
+	matches := funcRe.FindAllStringSubmatchIndex(code, -1)
+	for _, m := range matches {
+		if len(m) < 6 {
+			continue
+		}
+		name := code[m[4]:m[5]]
 		sig := FunctionSignature{
-			Name:       m[2],
-			IsExported: isExported(m[2]),
+			Name:       name,
+			IsExported: isExported(name),
+			FilePath:   path,
+			LineStart:  lineStartFromIndex(code, m[0]),
 		}
-		if m[1] != "" {
-			sig.Receiver = strings.TrimSpace(m[1])
+		// Receiver (m[2]:m[3])
+		if m[2] >= 0 && m[3] >= 0 {
+			sig.Receiver = strings.TrimSpace(code[m[2]:m[3]])
 		}
-		if m[3] != "" {
-			for _, p := range strings.Split(m[3], ",") {
+		// Params (m[6]:m[7])
+		if len(m) > 6 && m[6] >= 0 && m[7] >= 0 {
+			for _, p := range strings.Split(code[m[6]:m[7]], ",") {
 				parts := strings.Fields(strings.TrimSpace(p))
 				if len(parts) >= 1 {
 					sig.Params = append(sig.Params, parts[len(parts)-1])
 				}
 			}
 		}
-		if m[4] != "" {
-			for _, r := range strings.Split(m[4], ",") {
+		// Returns (m[8]:m[9] 或 m[10]:m[11])
+		if len(m) > 8 && m[8] >= 0 && m[9] >= 0 {
+			for _, r := range strings.Split(code[m[8]:m[9]], ",") {
 				sig.Returns = append(sig.Returns, strings.TrimSpace(r))
 			}
 		}
-		if m[5] != "" {
-			sig.Returns = append(sig.Returns, strings.TrimSpace(m[5]))
+		if len(m) > 10 && m[10] >= 0 && m[11] >= 0 {
+			sig.Returns = append(sig.Returns, strings.TrimSpace(code[m[10]:m[11]]))
+		}
+		// 尝试提取函数体
+		if body := extractGoBodyByBraces(code, m[0], 500); body != "" {
+			sig.Body = body
 		}
 		ctx.Functions = append(ctx.Functions, sig)
 	}
@@ -263,6 +294,7 @@ func (e *ASTExtractor) extractJava(path, diff string, ctx *ASTContext) {
 			Name:       m[2],
 			Returns:    []string{strings.TrimSpace(m[1])},
 			IsExported: isExported(m[2]),
+			FilePath:   path,
 		})
 	}
 	// 类定义
@@ -272,6 +304,7 @@ func (e *ASTExtractor) extractJava(path, diff string, ctx *ASTContext) {
 			Name:       m[1],
 			Kind:       "class",
 			IsExported: isExported(m[1]),
+			FilePath:   path,
 		})
 	}
 }
@@ -283,14 +316,16 @@ func (e *ASTExtractor) extractPython(path, diff string, ctx *ASTContext) {
 		ctx.Functions = append(ctx.Functions, FunctionSignature{
 			Name:       m[1],
 			IsExported: !strings.HasPrefix(m[1], "_"),
+			FilePath:   path,
 		})
 	}
 	// 类定义
 	classRe := regexp.MustCompile(`(?m)^\s*[+-]?\s*class\s+(\w+)`)
 	for _, m := range classRe.FindAllStringSubmatch(diff, -1) {
 		ctx.Structs = append(ctx.Structs, TypeSignature{
-			Name: m[1],
-			Kind: "class",
+			Name:     m[1],
+			Kind:     "class",
+			FilePath: path,
 		})
 	}
 }
@@ -302,6 +337,7 @@ func (e *ASTExtractor) extractJavaScript(path, diff string, ctx *ASTContext) {
 		ctx.Functions = append(ctx.Functions, FunctionSignature{
 			Name:       m[1],
 			IsExported: true,
+			FilePath:   path,
 		})
 	}
 	// 箭头函数 / 方法
@@ -311,7 +347,8 @@ func (e *ASTExtractor) extractJavaScript(path, diff string, ctx *ASTContext) {
 			continue
 		}
 		ctx.Functions = append(ctx.Functions, FunctionSignature{
-			Name: m[1],
+			Name:     m[1],
+			FilePath: path,
 		})
 	}
 }
@@ -321,7 +358,19 @@ func (e *ASTExtractor) extractGeneric(path, diff string, ctx *ASTContext) {
 	re := regexp.MustCompile(`(?m)^\s*[+-]?\s*(?:func|function|def|fn)\s+(\w+)`)
 	for _, m := range re.FindAllStringSubmatch(diff, -1) {
 		ctx.Functions = append(ctx.Functions, FunctionSignature{
-			Name: m[1],
+			Name:       m[1],
+			IsExported: isExported(m[1]),
+			FilePath:   path,
+		})
+	}
+	// 类定义
+	classRe := regexp.MustCompile(`(?m)^\s*[+-]?\s*(?:class|struct|interface)\s+(\w+)`)
+	for _, m := range classRe.FindAllStringSubmatch(diff, -1) {
+		ctx.Structs = append(ctx.Structs, TypeSignature{
+			Name:       m[1],
+			Kind:       "type",
+			IsExported: isExported(m[1]),
+			FilePath:   path,
 		})
 	}
 }
@@ -334,7 +383,7 @@ func extractCodeBlocksFromDiff(diff string) []string {
 	var blocks []string
 	var current strings.Builder
 	lines := strings.Split(diff, "\n")
-	
+
 	for _, line := range lines {
 		// diff 中以 + 开头的是新增代码
 		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
@@ -357,7 +406,7 @@ func extractCodeBlocksFromDiff(diff string) []string {
 	if current.Len() > 0 {
 		blocks = append(blocks, current.String())
 	}
-	
+
 	// 过滤太短的块
 	var valid []string
 	for _, b := range blocks {
@@ -514,7 +563,7 @@ func (e *ASTExtractor) extractGoFull(path, content string, ctx *ASTContext) {
 	f, err := parser.ParseFile(fset, path, content, parser.AllErrors)
 	if err != nil {
 		// 完整文件解析失败（理论上不应发生），回退到正则
-		e.extractGoByRegex(content, ctx)
+		e.extractGoByRegex(content, path, ctx)
 		return
 	}
 
@@ -524,6 +573,8 @@ func (e *ASTExtractor) extractGoFull(path, content string, ctx *ASTContext) {
 			sig := FunctionSignature{
 				Name:       x.Name.Name,
 				IsExported: ast.IsExported(x.Name.Name),
+				FilePath:   path,
+				LineStart:  fset.Position(x.Pos()).Line,
 			}
 			if x.Recv != nil && len(x.Recv.List) > 0 {
 				sig.Receiver = goTypeToString(x.Recv.List[0].Type)
@@ -540,6 +591,12 @@ func (e *ASTExtractor) extractGoFull(path, content string, ctx *ASTContext) {
 					sig.Returns = append(sig.Returns, goTypeToString(ret.Type))
 				}
 			}
+			// 提取函数体
+			if x.Body != nil {
+				if body := extractFuncBodyFromSource(fset, x.Body, content, 500); body != "" {
+					sig.Body = body
+				}
+			}
 			ctx.Functions = append(ctx.Functions, sig)
 
 		case *ast.TypeSpec:
@@ -548,6 +605,7 @@ func (e *ASTExtractor) extractGoFull(path, content string, ctx *ASTContext) {
 					Name:       x.Name.Name,
 					Kind:       "struct",
 					IsExported: ast.IsExported(x.Name.Name),
+					FilePath:   path,
 				})
 			}
 			if _, ok := x.Type.(*ast.InterfaceType); ok {
@@ -555,6 +613,7 @@ func (e *ASTExtractor) extractGoFull(path, content string, ctx *ASTContext) {
 					Name:       x.Name.Name,
 					Kind:       "interface",
 					IsExported: ast.IsExported(x.Name.Name),
+					FilePath:   path,
 				})
 			}
 
@@ -581,6 +640,7 @@ func (e *ASTExtractor) extractJavaFull(path, content string, ctx *ASTContext) {
 			Name:       m[1],
 			Kind:       "class",
 			IsExported: true,
+			FilePath:   path,
 		})
 	}
 	// 方法签名
@@ -589,6 +649,7 @@ func (e *ASTExtractor) extractJavaFull(path, content string, ctx *ASTContext) {
 		ctx.Functions = append(ctx.Functions, FunctionSignature{
 			Name:       m[1],
 			IsExported: true,
+			FilePath:   path,
 		})
 	}
 	// import
@@ -620,6 +681,7 @@ func (e *ASTExtractor) extractPythonFull(path, content string, ctx *ASTContext) 
 			Name:       m[1],
 			IsExported: !strings.HasPrefix(m[1], "_"),
 			Params:     params,
+			FilePath:   path,
 		})
 	}
 	// 类定义
@@ -629,6 +691,7 @@ func (e *ASTExtractor) extractPythonFull(path, content string, ctx *ASTContext) 
 			Name:       m[1],
 			Kind:       "class",
 			IsExported: !strings.HasPrefix(m[1], "_"),
+			FilePath:   path,
 		})
 	}
 	// import
@@ -659,6 +722,7 @@ func (e *ASTExtractor) extractJavaScriptFull(path, content string, ctx *ASTConte
 					Name:       m[1],
 					Kind:       "class",
 					IsExported: strings.Contains(m[0], "export"),
+					FilePath:   path,
 				})
 			} else {
 				params := []string{}
@@ -674,6 +738,7 @@ func (e *ASTExtractor) extractJavaScriptFull(path, content string, ctx *ASTConte
 					Name:       m[1],
 					IsExported: strings.Contains(m[0], "export"),
 					Params:     params,
+					FilePath:   path,
 				})
 			}
 		}
@@ -694,6 +759,7 @@ func (e *ASTExtractor) extractGenericFull(path, content string, ctx *ASTContext)
 		ctx.Functions = append(ctx.Functions, FunctionSignature{
 			Name:       m[1],
 			IsExported: isExported(m[1]),
+			FilePath:   path,
 		})
 	}
 	classRe := regexp.MustCompile(`(?m)^\s*(?:class|struct|interface)\s+(\w+)`)
@@ -702,6 +768,66 @@ func (e *ASTExtractor) extractGenericFull(path, content string, ctx *ASTContext)
 			Name:       m[1],
 			Kind:       "type",
 			IsExported: isExported(m[1]),
+			FilePath:   path,
 		})
 	}
+}
+
+// extractFuncBodyFromSource 基于 go/token.FileSet 从原始源码字符串中提取函数体，
+// 并截断到 maxLen 长度。用于 extractGo / extractGoFull。
+func extractFuncBodyFromSource(fset *token.FileSet, body *ast.BlockStmt, source string, maxLen int) string {
+	if body == nil {
+		return ""
+	}
+	file := fset.File(body.Pos())
+	if file == nil {
+		return ""
+	}
+	start := file.Offset(body.Pos())
+	end := file.Offset(body.End())
+	if end <= start || start < 0 || end > len(source) {
+		return ""
+	}
+	bodyText := source[start:end]
+	if len(bodyText) > maxLen {
+		bodyText = bodyText[:maxLen] + "..."
+	}
+	return bodyText
+}
+
+// extractGoBodyByBraces 从代码字符串中基于大括号匹配提取函数体。
+// 用于 extractGoByRegex 回退路径，仅做近似提取（不处理字符串字面量中的大括号）。
+func extractGoBodyByBraces(code string, funcStartIdx int, maxLen int) string {
+	braceIdx := strings.Index(code[funcStartIdx:], "{")
+	if braceIdx < 0 {
+		return ""
+	}
+	braceIdx += funcStartIdx
+	depth := 1
+	i := braceIdx + 1
+	for i < len(code) && depth > 0 {
+		switch code[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+		}
+		i++
+	}
+	if depth != 0 {
+		return "" // 未找到匹配的大括号
+	}
+	body := code[braceIdx:i]
+	if len(body) > maxLen {
+		body = body[:maxLen] + "..."
+	}
+	return body
+}
+
+// lineStartFromIndex 返回 source 中 idx 位置对应的行号（1-based）
+func lineStartFromIndex(source string, idx int) int {
+	if idx < 0 || idx > len(source) {
+		return 0
+	}
+	return strings.Count(source[:idx], "\n") + 1
 }

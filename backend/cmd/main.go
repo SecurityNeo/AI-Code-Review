@@ -300,6 +300,9 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		r.GET("/vulnerability-db.html", func(c *gin.Context) {
 			c.File(frontendPath + "/vulnerability-db.html")
 		})
+			r.GET("/agent-config.html", func(c *gin.Context) {
+				c.File(frontendPath + "/agent-config.html")
+			})
 
 		// 健康检查
 	r.GET("/health", func(c *gin.Context) {
@@ -712,6 +715,11 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 			syncGroup.GET("/check-all", syncH.CheckAllVersions)
 			syncGroup.POST("/:id/sync", syncH.Sync)
 		}
+
+		// AI 评审智能体全局配置
+		agentCfgH := handler.NewReviewAgentConfigHandler()
+		api.GET("/review-agent-config", agentCfgH.Get)           // GET 任何人可读
+		adminOnly.PUT("/review-agent-config", agentCfgH.Save)    // PUT 仅 admin 可写
 	}
 
 	return r

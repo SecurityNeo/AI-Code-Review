@@ -27,31 +27,27 @@ func (h *SystemHandler) GetConfig(c *gin.Context) {
 	if err := model.DB.First(&cfg).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 		cfg = model.SystemConfig{
-			TaskTimeoutMin:          30,
-			MaxParallelTask:         20,
-			LogRetentionDay:         90,
-			DiffTruncationThreshold: 5000,
-			MaxDiffFiles:            50,
-			MaxTokensPerBatch:       100000,
-			LLMRetryMaxAttempts:     3,
-			LLMRetryInitialDelayMs:  1000,
-			LLMRetryBackoffMultiplier: 2.0,
-			LLMRetryMaxDelayMs:      30000,
-			ScoreThreshold:           60,
-			DeepReviewEnabled:        false,
-			AlertDurationSec:        300,
-			AlertCooldownSec:        3600,
-			AlertNotifierID:         0,
-			AlertMentionUserIDs:     "",
+			TaskTimeoutMin:             30,
+			MaxParallelTask:            20,
+			LogRetentionDay:            90,
+			DiffTruncationThreshold:    5000,
+			LLMRetryMaxAttempts:        3,
+			LLMRetryInitialDelayMs:     1000,
+			LLMRetryBackoffMultiplier:  2.0,
+			LLMRetryMaxDelayMs:         30000,
+			ScoreThreshold:             60,
+			DeepReviewEnabled:          false,
+			AlertDurationSec:           300,
+			AlertCooldownSec:           3600,
+			AlertNotifierID:            0,
+			AlertMentionUserIDs:        "",
 			JSONRetryMaxAttempts:       3,
 			JSONRetryInitialDelaySec:   2,
 			JSONRetryBackoffMultiplier: 2.0,
 			JSONRetryMaxDelaySec:       30,
 			JSONRetryFallbackStrategy:  "regex",
-			DefaultDimensionWeights: `{"security":30,"code_quality":25,"readability":20,"maintainability":15,"test_coverage":10}`,
-			AILogTemplate: "请先执行以下命令拉取代码：\ngit clone {{CLONE_URL}}\n\n变更摘要：\n{{MR_DIFF}}\n\n{{USER_INPUT}}\n\n请审查以上代码变更，给出审查意见。",
-			PipelineEnabled:  false,
-			BatchParallelMax: 3,
+			DefaultDimensionWeights:    `{"security":30,"code_quality":25,"readability":20,"maintainability":15,"test_coverage":10}`,
+			AILogTemplate:              "请先执行以下命令拉取代码：\ngit clone {{CLONE_URL}}\n\n变更摘要：\n{{MR_DIFF}}\n\n{{USER_INPUT}}\n\n请审查以上代码变更，给出审查意见。",
 		}
 			if err := model.DB.Create(&cfg).Error; err != nil {
 				zap.L().Error("create system config failed", zap.Error(err))
@@ -139,25 +135,6 @@ func (h *SystemHandler) UpdateConfig(c *gin.Context) {
 		}
 		updates["diff_truncation_threshold"] = val
 	}
-	// 任务设置 - 分批评审阈值
-	if v, ok := data["max_diff_files"]; ok {
-		val := int(v.(float64))
-		if val < 1 {
-			val = 1
-		} else if val > 500 {
-			val = 500
-		}
-		updates["max_diff_files"] = val
-	}
-	if v, ok := data["max_tokens_per_batch"]; ok {
-		val := int(v.(float64))
-		if val < 1000 {
-			val = 1000
-		} else if val > 2000000 {
-			val = 2000000
-		}
-		updates["max_tokens_per_batch"] = val
-	}
 	// LLM 调用重试配置
 	if v, ok := data["llm_retry_max_attempts"]; ok {
 		val := int(v.(float64))
@@ -243,18 +220,6 @@ func (h *SystemHandler) UpdateConfig(c *gin.Context) {
 	}
 
 	// JSON Retry 配置字段
-	if v, ok := data["pipeline_enabled"]; ok {
-		updates["pipeline_enabled"] = v.(bool)
-	}
-	if v, ok := data["batch_parallel_max"]; ok {
-		val := int(v.(float64))
-		if val < 1 {
-			val = 1
-		} else if val > 10 {
-			val = 10
-		}
-		updates["batch_parallel_max"] = val
-	}
 	if v, ok := data["json_retry_max_attempts"]; ok {
 		val := int(v.(float64))
 		if val < 0 { val = 0 }
@@ -321,13 +286,8 @@ func (h *SystemHandler) UpdateConfig(c *gin.Context) {
 		service.RebuildMRSyncCron()
 	}
 
-	// 主动刷新 sysCfg 缓存：max_diff_files / max_tokens_per_batch / task_timeout_min /
-	// llm_retry_* 变更后无需等待 cron（1m）即可立即生效
-	if _, ok := data["max_diff_files"]; ok {
-		service.RefreshSysCfgCache()
-	} else if _, ok := data["max_tokens_per_batch"]; ok {
-		service.RefreshSysCfgCache()
-	} else if _, ok := data["task_timeout_min"]; ok {
+	// 主动刷新 sysCfg 缓存：task_timeout_min / llm_retry_* 变更后无需等待 cron（1m）即可立即生效
+	if _, ok := data["task_timeout_min"]; ok {
 		service.RefreshSysCfgCache()
 	} else if _, ok := data["llm_retry_max_attempts"]; ok {
 		service.RefreshSysCfgCache()

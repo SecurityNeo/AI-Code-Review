@@ -99,8 +99,6 @@ func (e *ChainError) Unwrap() error {
 // 使用 atomic.Value 提供 lock-free 读；写由后台 goroutine + TTL 触发。
 type sysCfgCacheEntry struct {
 	taskTimeoutMin          int
-	maxDiffFiles            int
-	maxTokensPerBatch       int
 	llmRetryMaxAttempts     int
 	llmRetryInitialDelayMs  int
 	llmRetryBackoffMult     float64
@@ -439,21 +437,13 @@ func RefreshSysCfgCache() {
 	}
 	entry := &sysCfgCacheEntry{
 		taskTimeoutMin:         sysCfg.TaskTimeoutMin,
-		maxDiffFiles:           sysCfg.MaxDiffFiles,
-		maxTokensPerBatch:      sysCfg.MaxTokensPerBatch,
 		llmRetryMaxAttempts:    sysCfg.LLMRetryMaxAttempts,
 		llmRetryInitialDelayMs: sysCfg.LLMRetryInitialDelayMs,
 		llmRetryBackoffMult:    sysCfg.LLMRetryBackoffMultiplier,
 		llmRetryMaxDelayMs:     sysCfg.LLMRetryMaxDelayMs,
 		fetchedAt:              time.Now(),
 	}
-	// 兜底：旧记录为 0 时用硬编码默认值，避免误判为"不限制/不重试"
-	if entry.maxDiffFiles <= 0 {
-		entry.maxDiffFiles = 50
-	}
-	if entry.maxTokensPerBatch <= 0 {
-		entry.maxTokensPerBatch = 100000
-	}
+	// 兜底：旧记录为 0 时用硬编码默认值
 	if entry.llmRetryMaxAttempts <= 0 {
 		entry.llmRetryMaxAttempts = 3
 	}
@@ -470,24 +460,32 @@ func RefreshSysCfgCache() {
 	if sysCfgCacheOnce.CompareAndSwap(false, true) {
 		zap.L().Info("sys cfg cache initialized",
 			zap.Int("task_timeout_min", entry.taskTimeoutMin),
-			zap.Int("max_diff_files", entry.maxDiffFiles),
-			zap.Int("max_tokens_per_batch", entry.maxTokensPerBatch),
 			zap.Int("llm_retry_max_attempts", entry.llmRetryMaxAttempts))
 	}
 }
 
-// SysCfgMaxDiffFiles 返回当前生效的最大 diff 文件数（来自缓存，cache miss 时返回硬编码默认值）。
+// SysCfgMaxDiffFiles 返回当前生效的最大 diff 文件数（从 ReviewAgentConfig batch_review_frame 阶段配置读取）
 func SysCfgMaxDiffFiles() int {
-	if c := loadSysCfgCached(); c != nil && c.maxDiffFiles > 0 {
-		return c.maxDiffFiles
+	var agentCfg model.ReviewAgentConfig
+	if err := model.DB.First(&agentCfg, 1).Error; err == nil {
+		if sc := agentCfg.StageConfig("batch_review_frame"); sc != nil {
+			if v, ok := sc["max_diff_files"].(float64); ok && v > 0 {
+				return int(v)
+			}
+		}
 	}
 	return 50
 }
 
-// SysCfgMaxTokensPerBatch 返回当前生效的每批最大 token 数。
+// SysCfgMaxTokensPerBatch 返回当前生效的每批最大 token 数（从 ReviewAgentConfig batch_review_frame 阶段配置读取）
 func SysCfgMaxTokensPerBatch() int {
-	if c := loadSysCfgCached(); c != nil && c.maxTokensPerBatch > 0 {
-		return c.maxTokensPerBatch
+	var agentCfg model.ReviewAgentConfig
+	if err := model.DB.First(&agentCfg, 1).Error; err == nil {
+		if sc := agentCfg.StageConfig("batch_review_frame"); sc != nil {
+			if v, ok := sc["max_tokens_per_batch"].(float64); ok && v > 0 {
+				return int(v)
+			}
+		}
 	}
 	return 100000
 }

@@ -133,7 +133,7 @@ func SmartSplitIntoBatches(
 					fileCopy[k] = v
 				}
 				diff = string([]rune(diff)[:maxChars])
-				diff += "\n\n[Diff 过大，已截断]"
+				diff += "\n\n[该文件 diff 较大，当前批次为控制 token 用量仅展示部分内容。完整变更请在代码库查看]"
 				fileCopy["diff"] = diff
 				fileCopy["truncated"] = true
 				fileObj = fileCopy
@@ -193,21 +193,23 @@ func BuildBatchContext(ctx StageContext) BatchContext {
 	if v, ok := ctx.GetInput("project_template").(string); ok {
 		template = v
 	}
-	commits := ""
+	// commits 和 MRTitle 在多批场景只在最后一批注入，不计入每批固定开销
+	// （单批场景由 executeSingleBatchStructured 自行处理）
 	if v, ok := ctx.GetInput("commits_text").(string); ok {
-		commits = v
+		_ = v
 	}
-	mrTitle := ""
 	if t := ctx.Task(); t != nil {
-		mrTitle = t.MRTitle
+		_ = t.MRTitle
 	}
-	astCtx := ""
+	// AST 文本和跨文件调用链在 batch_collection prompt 中不计入固定开销
+	// （按批次过滤后的小片段已包含在 diff 可用额度中）
+	_ = ""
 	if v, ok := ctx.GetInput("ast_context").(string); ok {
-		astCtx = v
+		_ = v
 	}
-	crossFileCtx := ""
+	_ = ""
 	if v, ok := ctx.GetInput("cross_file_call_chain").(string); ok {
-		crossFileCtx = v
+		_ = v
 	}
 
 	// 计算规则部分的字符数（从 prompt_context 中读取）
@@ -232,11 +234,15 @@ func BuildBatchContext(ctx StageContext) BatchContext {
 
 	return BatchContext{
 		SystemPromptChars: len(template) + 500, // template + 固定指令
-		CommitsChars:      len(commits),
-		MRTitleChars:      len(mrTitle),
+		// 【修复】batch_collection prompt 中不包含完整 AST 和跨文件调用链文本
+		// 这些文本只在 context_extract 阶段内部使用，或通过 filterCrossFileContextForBatch
+		// 按批次过滤后的小片段注入 prompt。使用完整文本估算会严重高估 overhead，
+		// 导致 availableTokens 为负值，所有文件被无意义截断。
+		TreeSitterChars:   0,
+		CommitsChars:      0, // 多批场景只在最后一批注入
+		MRTitleChars:      0, // 同上
 		BatchHeaderChars:  100,
 		OutputFormatChars: 1200, // 结构化输出 Schema 较大
-		TreeSitterChars:   len(astCtx) + len(crossFileCtx),
 		RulesChars:        rulesChars,
 		CustomInstChars:   customInstChars,
 	}
@@ -255,12 +261,12 @@ func ExtractFilePaths(files []interface{}) []string {
 	return paths
 }
 
-// TruncateString 截断字符串用于预览
+// TruncateString 截断字符串用于预览（DB/对象存储展示用，不用于 LLM prompt）
 func TruncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + " ... [截断]"
+	return s[:maxLen] + " ... [展示截断，完整内容请在代码库查看]"
 }
 
 // ParseDiffFilesToMap 将 service 层的 diff files 转换为 map 列表（简化接口）
@@ -274,27 +280,17 @@ func ParseDiffFilesToMap(diffFiles interface{}) []map[string]interface{} {
 	return result
 }
 
-// SysCfgMaxTokensPerBatch 从 SystemConfig 读取
+// SysCfgMaxTokensPerBatch 返回当前生效的每批最大 token 数（从 ReviewAgentConfig batch_review_frame 阶段配置读取）
 func SysCfgMaxTokensPerBatch() int {
-	var cfg model.SystemConfig
-	if err := model.DB.First(&cfg).Error; err != nil {
-		return 100000
-	}
-	if cfg.MaxTokensPerBatch > 0 {
-		return cfg.MaxTokensPerBatch
+	var agentCfg model.ReviewAgentConfig
+	if err := model.DB.First(&agentCfg, 1).Error; err == nil {
+		if sc := agentCfg.StageConfig("batch_review_frame"); sc != nil {
+			if v, ok := sc["max_tokens_per_batch"].(float64); ok && v > 0 {
+				return int(v)
+			}
+		}
 	}
 	return 100000
-}
-
-func SysCfgBatchParallelMax() int {
-	var cfg model.SystemConfig
-	if err := model.DB.First(&cfg).Error; err != nil {
-		return 3
-	}
-	if cfg.BatchParallelMax > 0 {
-		return cfg.BatchParallelMax
-	}
-	return 3
 }
 
 // SysCfgCallChainDepth 从 SystemConfig 读取调用链分析深度

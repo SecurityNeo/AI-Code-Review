@@ -342,6 +342,41 @@ func buildStageResponse(exec model.TaskPipelineExecution) gin.H {
 		resp["name"] = "批次 " + idx
 	}
 
+			// 解析 output_snapshot（供 Pipeline 概览使用，如 batch_plan 阶段的 batch_count）
+	if exec.OutputSnapshot != "" {
+		var outputSnap map[string]interface{}
+		var ref pipeline.SnapshotRef
+		if err := json.Unmarshal([]byte(exec.OutputSnapshot), &ref); err == nil && ref.StorageType == "object_storage" {
+			// 对象存储引用，尝试获取实际数据
+			mgr := pipeline.NewSnapshotManager()
+			outputSnap, _ = mgr.GetOutputSnapshot(&exec)
+		} else {
+			// 数据库存储，直接解析
+			json.Unmarshal([]byte(exec.OutputSnapshot), &outputSnap)
+		}
+		if outputSnap != nil {
+			resp["output_snapshot"] = outputSnap
+
+			// 【新增】review_arbitration 阶段的特殊字段解析
+			if exec.StageCode == "review_arbitration" {
+				resp["final_issues_count"] = outputSnap["final_issues_count"]
+				resp["security_findings_count"] = outputSnap["security_findings_count"]
+				resp["testing_notes_count"] = outputSnap["testing_notes_count"]
+				resp["impact_notes_count"] = outputSnap["impact_notes_count"]
+				resp["total_score"] = outputSnap["total_score"]
+				resp["dimensions"] = outputSnap["dimensions"]
+				resp["dedup_merged_count"] = outputSnap["dedup_merged_count"]
+				resp["dedup_kept_agent_count"] = outputSnap["dedup_kept_agent_count"]
+				resp["dedup_kept_llm_count"] = outputSnap["dedup_kept_llm_count"]
+				resp["overall_suggestion"] = outputSnap["overall_suggestion"]
+				resp["raw_llm_output"] = outputSnap["raw_llm_output"]
+				if dedupLog, ok := outputSnap["dedup_log"].([]interface{}); ok {
+					resp["dedup_logs"] = dedupLog
+				}
+			}
+		}
+	}
+
 	return resp
 }
 

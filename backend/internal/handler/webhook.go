@@ -319,6 +319,7 @@ func (h *WebhookHandler) handleNoteHook(c *gin.Context, payload map[string]inter
 
 	// ======= 只处理 @AI / @ai 召唤 =======
 	// 2026-06-08: 废弃 @AI BUGFIX 前端入口和评论分数解析触发
+	// @AI 召唤是用户主动触发的交流入口，不受智能体触发事件配置影响
 	if strings.HasPrefix(note, "@AI") || strings.HasPrefix(note, "@ai") {
 		triggerSource := "manual"
 		taskType := "chat"
@@ -404,7 +405,15 @@ func (h *WebhookHandler) handleMergeRequestHook(c *gin.Context, payload map[stri
 		return
 	}
 
-	// 3. 解析 MR 信息
+	// 4. 全局触发事件过滤
+	triggerSource := "merge_request_" + action
+	if !isTriggerEventAllowed(triggerSource) {
+		zap.L().Info("merge_request trigger disabled by agent config", zap.String("action", action), zap.String("project_path", projectPath))
+		c.JSON(200, gin.H{"message": "trigger disabled"})
+		return
+	}
+
+	// 5. 解析 MR 信息
 	mrIID := 0
 	if iid, ok := attrs["iid"].(float64); ok {
 		mrIID = int(iid)
@@ -468,7 +477,7 @@ func (h *WebhookHandler) handleMergeRequestHook(c *gin.Context, payload map[stri
 		"ai_prompt":           "",           // 由执行时动态组装
 		"task_type":           "review",
 		"trigger_type":        "webhook",
-		"trigger_source":      "merge_request",
+		"trigger_source":      "merge_request_" + action,
 	}
 
 	task, err := service.NewTaskService().Create(taskData)
@@ -562,4 +571,28 @@ func minWebhook(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// isTriggerEventAllowed 检查给定的触发事件是否被全局智能体配置允许
+func isTriggerEventAllowed(source string) bool {
+	var cfg model.ReviewAgentConfig
+	if err := model.DB.First(&cfg, 1).Error; err != nil {
+		// 配置未初始化时默认放行
+		return true
+	}
+	// 若未配置任何事件，默认放行（兼容旧数据）
+	events := cfg.TriggerEventCodes()
+	if len(events) == 0 {
+		return true
+	}
+	for _, ev := range events {
+		if ev == source {
+			return true
+		}
+		// 兼容旧配置：merge_request 包含所有子事件
+		if ev == "merge_request" && strings.HasPrefix(source, "merge_request_") {
+			return true
+		}
+	}
+	return false
 }
