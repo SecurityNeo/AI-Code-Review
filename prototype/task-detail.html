@@ -2742,6 +2742,43 @@ function renderBatchPlanDetail(json) {
     const out = json.output_snapshot || {};
     const plan = out.plan || json.input_snapshot?.plan || {};
     let html = renderMetaBar(json);
+
+    // ========== Token 预算区域（新增）==========
+    const configuredBudget = plan.max_tokens_per_batch || 0;
+    const effectiveBudget = plan.effective_budget || configuredBudget;
+    const estimatedOH = plan.estimated_overhead || 0;
+    const warning = plan.budget_warning || '';
+
+    if (configuredBudget > 0) {
+        html += `<div class="mb-3 bg-white rounded-lg border border-gray-200 p-3">`;
+        html += `<div class="font-semibold text-gray-700 text-xs mb-2">Token 预算</div>`;
+
+        // 预算信息行
+        html += `<div class="flex flex-wrap gap-3 text-[11px] text-gray-600 mb-1">`;
+        html += `<span>配置预算: <span class="font-mono font-medium">${configuredBudget.toLocaleString()}</span> token</span>`;
+        if (effectiveBudget > configuredBudget) {
+            html += `<span class="text-amber-600">→ 实际使用: <span class="font-mono font-medium">${effectiveBudget.toLocaleString()}</span> token</span>`;
+        } else {
+            html += `<span class="text-green-600"><i class="fas fa-check-circle mr-0.5"></i>预算充足</span>`;
+        }
+        html += `</div>`;
+
+        // 开销信息行
+        html += `<div class="flex gap-3 text-[11px] text-gray-500 mb-1">`;
+        html += `<span>系统开销(估): <span class="font-mono text-orange-600">${estimatedOH.toLocaleString()}</span> token</span>`;
+        html += `<span>Diff可用: <span class="font-mono text-green-600">${(plan.available_tokens||0).toLocaleString()}</span> token</span>`;
+        html += `</div>`;
+
+        // 警告信息
+        if (warning) {
+            html += `<div class="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-[11px] text-amber-700">
+                <i class="fas fa-exclamation-triangle mr-1"></i>${escapeHtml(warning)}
+            </div>`;
+        }
+
+        html += `</div>`;
+    }
+
     if (plan.strategy) {
         html += `<div class="mb-2 text-sm">策略: <span class="font-medium">${plan.strategy === 'single' ? '单批' : '多批'}</span> · 文件数: ${plan.total_files || '-'} · 批次数: ${plan.batch_count || '-'}</div>`;
     }
@@ -2848,33 +2885,61 @@ function renderBatchDetail(json) {
         html += `</div>`;
     }
 
-    // Token 配额明细（来自 batch_plan）
-    const overheadTokens = out.overhead_tokens || 0;
-    const availableTokens = out.available_tokens || 0;
-    const maxTokens = overheadTokens + availableTokens;
-    if (maxTokens > 0) {
+    // ========== Token 配额明细（重构）==========
+    const configuredBudget = inp.max_tokens_per_batch || out.max_tokens_per_batch || 0;
+    const effectiveBudget = inp.effective_budget || out.effective_budget || configuredBudget;
+    const estimatedOH = inp.estimated_overhead || out.estimated_overhead || 0;
+    const availableTokens = inp.available_tokens || out.available_tokens || 0;
+    const actualInput = json.input_tokens || 0;
+    const actualOverhead = json.actual_overhead || 0;
+
+    if (effectiveBudget > 0 || estimatedOH > 0) {
         html += `<div class="mb-3 bg-white rounded-lg border border-gray-200 p-3">`;
-        html += `<div class="font-semibold text-gray-700 text-xs mb-2">Token 配额</div>`;
-        html += `<div class="text-[11px] text-gray-600 mb-1.5">`;
-        html += `<span class="inline-block mr-3">批次上限: <span class="font-mono font-medium">${maxTokens.toLocaleString()}</span> token</span>`;
-        html += `<span class="inline-block mr-3">固定开销: <span class="font-mono font-medium">${overheadTokens.toLocaleString()}</span> token</span>`;
-        html += `<span class="inline-block">可用额度: <span class="font-mono font-medium text-green-600">${availableTokens.toLocaleString()}</span> token</span>`;
+        html += `<div class="font-semibold text-gray-700 text-xs mb-2">Token 配额明细</div>`;
+
+        // 配置 vs 实际
+        html += `<div class="text-[11px] text-gray-600 mb-2">`;
+        if (configuredBudget > 0) {
+            html += `<div class="flex justify-between mb-0.5">`;
+            html += `<span>配置预算</span>`;
+            html += `<span class="font-mono">${configuredBudget.toLocaleString()} token</span>`;
+            html += `</div>`;
+        }
+        if (effectiveBudget > configuredBudget) {
+            html += `<div class="flex justify-between mb-0.5 text-amber-600">`;
+            html += `<span><i class="fas fa-arrow-right mr-1"></i>自动扩大后</span>`;
+            html += `<span class="font-mono">${effectiveBudget.toLocaleString()} token</span>`;
+            html += `</div>`;
+        }
         html += `</div>`;
+
         // 进度条可视化
-        const overheadPct = Math.round((overheadTokens / maxTokens) * 100);
-        html += `<div class="w-full h-2 rounded-full bg-gray-100 overflow-hidden flex">`;
-        html += `<div class="h-full bg-orange-400" style="width:${overheadPct}%" title="固定开销 ${overheadPct}%"></div>`;
-        html += `<div class="h-full bg-green-400 flex-1" title="可用额度 ${100 - overheadPct}%"></div>`;
+        html += `<div class="w-full h-2 rounded-full bg-gray-100 overflow-hidden flex mb-1">`;
+        const ohPct = effectiveBudget > 0 ? Math.min(Math.round((estimatedOH / effectiveBudget) * 100), 100) : 0;
+        html += `<div class="h-full bg-orange-400" style="width:${ohPct}%" title="系统开销 ${ohPct}%"></div>`;
+        html += `<div class="h-full bg-green-400 flex-1" title="Diff内容 ${100 - ohPct}%"></div>`;
         html += `</div>`;
-        html += `<div class="flex justify-between mt-1 text-[10px] text-gray-400">`;
-        html += `<span><span class="inline-block w-2 h-2 rounded-full bg-orange-400 mr-1"></span>固定开销 (系统指令+规则+Schema等，所有批次共享)</span>`;
-        html += `<span><span class="inline-block w-2 h-2 rounded-full bg-green-400 mr-1"></span>可用额度 (用于当前批次文件 diff)</span>`;
+        html += `<div class="flex justify-between text-[10px] text-gray-400 mb-2">`;
+        html += `<span><span class="inline-block w-2 h-2 rounded-full bg-orange-400 mr-1"></span>系统开销 ${estimatedOH.toLocaleString()}</span>`;
+        html += `<span><span class="inline-block w-2 h-2 rounded-full bg-green-400 mr-1"></span>可用额度 ${availableTokens.toLocaleString()}</span>`;
         html += `</div>`;
-        // 截断规则说明
-        html += `<div class="mt-2 pt-2 border-t border-gray-100 text-[10px] text-gray-500 leading-relaxed">`;
-        html += `<div class="mb-0.5"><span class="font-medium text-gray-600">批次拆分：</span>多个文件累计超过可用额度 → 拆分为新批次，每份 diff 内容完整</div>`;
-        html += `<div><span class="font-medium text-gray-600">单文件截断：</span>单个文件超过可用额度 → 该文件被截断并单独占满当前批次</div>`;
-        html += `</div>`;
+
+        // 实际开销对比（如果有数据）
+        if (actualOverhead > 0 && actualInput > 0) {
+            const diff = actualOverhead - estimatedOH;
+            const diffPct = estimatedOH > 0 ? Math.round((diff / estimatedOH) * 100) : 0;
+            const accuracyColor = Math.abs(diffPct) <= 10 ? 'text-green-600' : 'text-amber-600';
+            html += `<div class="pt-2 border-t border-gray-100 text-[10px] text-gray-500">`;
+            html += `<div class="flex justify-between">`;
+            html += `<span>实际系统开销: <span class="font-mono">${actualOverhead.toLocaleString()}</span> token</span>`;
+            html += `<span class="${accuracyColor}">估算偏差: ${diff > 0 ? '+' : ''}${diff.toLocaleString()} (${diffPct > 0 ? '+' : ''}${diffPct}%)</span>`;
+            html += `</div>`;
+            html += `<div class="flex justify-between mt-0.5">`;
+            html += `<span>实际总输入: <span class="font-mono">${actualInput.toLocaleString()}</span> token</span>`;
+            html += `</div>`;
+            html += `</div>`;
+        }
+
         html += `</div>`;
     }
 

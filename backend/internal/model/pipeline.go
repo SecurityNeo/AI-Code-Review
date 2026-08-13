@@ -45,8 +45,16 @@ type TaskPipelineExecution struct {
 	BatchIndex      int        `json:"batch_index"` // 子批次序号，0 表示非批次
 	ParentID        *uint      `gorm:"index" json:"parent_id"`
 	SortOrder       int        `json:"sort_order"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+
+	// Token 预算相关字段（批次评审专用）
+	EstimatedOverhead int    `json:"estimated_overhead"`      // 估算系统开销token
+	ActualOverhead    int    `json:"actual_overhead"`         // 实际系统开销token
+	LLMInputBudget    int    `json:"llm_input_budget"`        // 用户配置的LLM输入预算
+	EffectiveBudget   int    `json:"effective_budget"`        // 自动扩大后的实际预算
+	BudgetWarning     string `gorm:"size:255" json:"budget_warning"` // 预算警告信息
+
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 
 	// 关联
 	Task     *Task                    `gorm:"foreignKey:TaskID" json:"task,omitempty"`

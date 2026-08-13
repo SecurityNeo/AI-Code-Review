@@ -884,23 +884,40 @@ func (e *BatchReviewFrameExecutor) executeBatchPlan(ctx StageContext, task *mode
 	}
 
 	overhead := BuildBatchContext(ctx)
-	maxTokens := SysCfgMaxTokensPerBatch()
+	configuredBudget := SysCfgMaxTokensPerBatch()
 	estimator := NewTokenEstimator()
-	batches := SmartSplitIntoBatches(files, maxTokens, overhead)
 
-	overheadTokens := estimator.EstimateOverheadTokens(overhead)
-	availableTokens := maxTokens - overheadTokens
+	// 【新增】估算系统开销
+	estimatedOverhead := estimator.EstimateOverheadTokens(overhead)
+
+	// 【新增】计算有效预算（预算不足时自动扩大）
+	effectiveBudget, budgetWarning := CalculateEffectiveBudget(configuredBudget, estimatedOverhead)
+	if budgetWarning != "" {
+		zap.L().Warn("分批评审预算自动扩大",
+			zap.Uint("task_id", task.ID),
+			zap.Int("configured_budget", configuredBudget),
+			zap.Int("estimated_overhead", estimatedOverhead),
+			zap.Int("effective_budget", effectiveBudget))
+	}
+
+	// 使用 effectiveBudget 进行分批（而非用户配置值）
+	batches := SmartSplitIntoBatches(files, effectiveBudget, overhead)
+
+	availableTokens := effectiveBudget - estimatedOverhead
 	if availableTokens <= 0 {
-		availableTokens = maxTokens / 2
+		availableTokens = effectiveBudget / 5 // 至少保留20%空间
 	}
 
 	plan := &BatchPlan{
 		TotalFiles:        len(files),
-		MaxTokensPerBatch: maxTokens,
+		MaxTokensPerBatch: configuredBudget, // 用户原始配置
+		EffectiveBudget:   effectiveBudget,  // 自动扩大后的实际预算
+		EstimatedOverhead: estimatedOverhead,
 		BatchCount:        len(batches),
 		Strategy:          "multi",
-		OverheadTokens:    overheadTokens,
+		OverheadTokens:    estimatedOverhead,
 		AvailableTokens:   availableTokens,
+		BudgetWarning:     budgetWarning,
 		Batches:           make([]BatchDetail, len(batches)),
 	}
 	if len(batches) == 1 {
@@ -948,10 +965,20 @@ func (e *BatchReviewFrameExecutor) executeBatchPlan(ctx StageContext, task *mode
 	}
 
 	tokenBreakdown := overhead.ToBreakdown(estimator)
-	availableForDiff := maxTokens - tokenBreakdown["total_overhead"].(int)
+	availableForDiff := effectiveBudget - tokenBreakdown["total_overhead"].(int)
 
 	ctx.SaveOutputSnapshot(exec, map[string]interface{}{
-		"plan":                plan,
+		"plan": map[string]interface{}{
+			"max_tokens_per_batch": configuredBudget,
+			"effective_budget":     effectiveBudget,
+			"estimated_overhead":   estimatedOverhead,
+			"available_tokens":     availableTokens,
+			"budget_warning":       budgetWarning,
+			"strategy":             plan.Strategy,
+			"batch_count":          plan.BatchCount,
+			"total_files":          plan.TotalFiles,
+			"batches":              plan.Batches,
+		},
 		"token_breakdown":     tokenBreakdown,
 		"available_for_diff":  availableForDiff,
 		"truncated_files":     truncatedFiles,
@@ -959,6 +986,14 @@ func (e *BatchReviewFrameExecutor) executeBatchPlan(ctx StageContext, task *mode
 		"context_breakdown":   overhead,
 		"input_files":         files,
 	})
+
+	// 【新增】保存预算信息到 execution 记录
+	exec.EstimatedOverhead = estimatedOverhead
+	exec.LLMInputBudget = configuredBudget
+	exec.EffectiveBudget = effectiveBudget
+	exec.BudgetWarning = budgetWarning
+	model.DB.Save(exec)
+
 	ctx.MarkSuccess(exec)
 
 	ctx.SetOutput("batch_plan", plan)
@@ -1044,6 +1079,19 @@ func (e *BatchReviewFrameExecutor) executeSingleBatchStructured(ctx StageContext
 		"prompt":        userPrompt,
 		"review_result": result.Content,
 	})
+
+	// 【新增】保存实际开销到 execution 记录，并异步保存校准数据
+	exec.ActualOverhead = result.InputTokens - calcDiffTokens(fileDetails)
+	model.DB.Save(exec)
+	go func() {
+		estOH := NewTokenEstimator().EstimateOverheadTokens(BuildBatchContext(ctx))
+		saveOverheadCalibration(
+			task.ID, exec.ID, exec.StageCode,
+			len(promptCtx.Rules), estOH,
+			result.InputTokens, calcDiffTokens(fileDetails),
+		)
+	}()
+
 	ctx.MarkSuccess(exec)
 
 	return parsedResult, result.ModelID, nil
@@ -1204,6 +1252,22 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 		"available_tokens": plan.AvailableTokens,
 		"overhead_tokens":  plan.OverheadTokens,
 	})
+
+	// 【新增】保存实际开销到 execution 记录，并异步保存校准数据
+	actualOH := result.InputTokens - calcDiffTokens(fileDetails)
+	if actualOH < 0 {
+		actualOH = 0
+	}
+	exec.ActualOverhead = actualOH
+	model.DB.Save(exec)
+	go func() {
+		saveOverheadCalibration(
+			task.ID, exec.ID, exec.StageCode,
+			len(promptCtx.Rules), plan.EstimatedOverhead,
+			result.InputTokens, calcDiffTokens(fileDetails),
+		)
+	}()
+
 	ctx.MarkSuccess(exec)
 
 	return batchResult, result.ModelID, nil
@@ -1424,4 +1488,50 @@ func extractScoreFromReport(report string) int {
 		score = 100
 	}
 	return int(score)
+}
+
+// calcDiffTokens 从 fileDetails 计算 diff 内容的 token 估算值
+func calcDiffTokens(fileDetails []map[string]interface{}) int {
+	tokens := 0
+	for _, fd := range fileDetails {
+		if diff, ok := fd["diff"].(string); ok && diff != "" {
+			tokens += len(diff) / 4
+		}
+	}
+	return tokens
+}
+
+// saveOverheadCalibration 保存 Token 开销校准记录（异步执行）
+// 用于后续任务的开销估算校准，使预算计算更加精准。
+func saveOverheadCalibration(
+	taskID uint,
+	execID uint,
+	stageCode string,
+	ruleCount int,
+	estimatedOverhead int,
+	actualInputTokens int,
+	diffTokens int,
+) {
+	actualOverhead := actualInputTokens - diffTokens
+	if actualOverhead < 0 {
+		actualOverhead = 0
+	}
+
+	calibration := model.OverheadCalibration{
+		TaskID:            taskID,
+		ExecutionID:       execID,
+		StageCode:         stageCode,
+		RuleCount:         ruleCount,
+		EstimatedOverhead: estimatedOverhead,
+		ActualOverhead:    actualOverhead,
+		TotalInputTokens:  actualInputTokens,
+		DiffTokens:        diffTokens,
+	}
+
+	if model.DB == nil {
+		return
+	}
+	if err := model.DB.Create(&calibration).Error; err != nil {
+		zap.L().Warn("保存开销校准记录失败", zap.Error(err))
+	}
 }

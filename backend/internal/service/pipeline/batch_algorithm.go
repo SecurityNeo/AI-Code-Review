@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"fmt"
 	"unicode/utf8"
 
 	"github.com/ai-optimizer/backend/internal/engine"
@@ -26,6 +27,7 @@ type BatchContext struct {
 	TreeSitterChars   int
 	RulesChars        int // 评审规则部分字符数（模式A/C较大，模式B也较大）
 	CustomInstChars   int // 项目自定义说明字符数
+	RuleCount         int // 参与评审的规则数量（用于校准比率查询）
 }
 
 // ToBreakdown 将 BatchContext 转换为 Token 构成明细（tokens）
@@ -56,13 +58,66 @@ func (ctx BatchContext) ToBreakdown(estimator *TokenEstimator) map[string]interf
 	}
 }
 
+// CalculateEffectiveBudget 计算有效预算
+// 当配置预算 < 系统开销*1.25 时，自动扩大预算并返回警告说明
+// 返回: (effectiveBudget 实际预算, warning 警告信息)
+func CalculateEffectiveBudget(configuredBudget, estimatedOverhead int) (int, string) {
+	// 最小需要 = 开销 + 20% diff空间
+	minRequired := int(float64(estimatedOverhead) * 1.25)
+
+	if configuredBudget >= minRequired {
+		return configuredBudget, ""
+	}
+
+	// 预算不足，自动扩大
+	return minRequired, fmt.Sprintf(
+		"配置预算(%d)不足以覆盖系统固定开销(%d)，为保证评审质量已自动扩大至%d token，建议将「每批token上限」调整为≥%d",
+		configuredBudget, estimatedOverhead, minRequired, minRequired)
+}
+
 // EstimateOverheadTokens 估算固定开销 Token 数
 func (e *TokenEstimator) EstimateOverheadTokens(ctx BatchContext) int {
-	overhead := ctx.SystemPromptChars + ctx.CommitsChars + ctx.MRTitleChars +
+	rawChars := ctx.SystemPromptChars + ctx.CommitsChars + ctx.MRTitleChars +
 		ctx.BatchHeaderChars + ctx.OutputFormatChars + ctx.TreeSitterChars + ctx.RulesChars + ctx.CustomInstChars
+
+	// 应用校准比率（如果有历史数据）
+	ratio := e.calibratedRatio(ctx.RuleCount)
+	if ratio > 0 {
+		rawChars = int(float64(rawChars) * ratio)
+	}
+
 	// 10% 安全余量
-	overhead += overhead / 10
-	return overhead / e.charsPerToken
+	rawChars += rawChars / 10
+	return rawChars / e.charsPerToken
+}
+
+// calibratedRatio 从最近历史记录计算校准比率
+// 返回 0 表示校准数据不足，应使用原始估算
+func (e *TokenEstimator) calibratedRatio(ruleCount int) float64 {
+	if model.DB == nil {
+		return 0
+	}
+	var cals []model.OverheadCalibration
+	// 查找同规模（±5条规则）的最近20条记录
+	model.DB.Where("rule_count BETWEEN ? AND ?", ruleCount-5, ruleCount+5).
+		Order("created_at DESC").Limit(20).Find(&cals)
+
+	if len(cals) < 5 {
+		return 0 // 校准数据不足
+	}
+
+	var totalRatio float64
+	validCount := 0
+	for _, c := range cals {
+		if c.EstimatedOverhead > 0 && c.ActualOverhead > 0 {
+			totalRatio += float64(c.ActualOverhead) / float64(c.EstimatedOverhead)
+			validCount++
+		}
+	}
+	if validCount < 5 {
+		return 0
+	}
+	return totalRatio / float64(validCount)
 }
 
 // Batch 分批单元
@@ -78,12 +133,15 @@ type Batch struct {
 type BatchPlan struct {
 	TotalFiles        int           `json:"total_files"`
 	TotalTokens       int           `json:"total_tokens"`
-	MaxTokensPerBatch int           `json:"max_tokens_per_batch"`
+	MaxTokensPerBatch int           `json:"max_tokens_per_batch"` // 用户原始配置值
+	EffectiveBudget   int           `json:"effective_budget"`     // 自动扩大后的实际预算
+	EstimatedOverhead int           `json:"estimated_overhead"`   // 估算系统开销
 	BatchCount        int           `json:"batch_count"`
 	Strategy          string        `json:"strategy"` // "single" | "multi"
 	Batches           []BatchDetail `json:"batches"`
 	OverheadTokens    int           `json:"overhead_tokens"`
 	AvailableTokens   int           `json:"available_tokens"`
+	BudgetWarning     string        `json:"budget_warning"` // 预算不足警告
 }
 
 // BatchDetail 批次明细
@@ -215,7 +273,9 @@ func BuildBatchContext(ctx StageContext) BatchContext {
 	// 计算规则部分的字符数（从 prompt_context 中读取）
 	rulesChars := 0
 	customInstChars := 0
+	ruleCount := 0
 	if pc, ok := ctx.GetInput("prompt_context").(*engine.PromptContext); ok && pc != nil {
+		ruleCount = len(pc.Rules)
 		// 估算规则文本长度（code + name + severity + prompt 的大致长度）
 		for _, rule := range pc.Rules {
 			rulesChars += len(rule.Code) + len(rule.Name) + len(rule.Severity) + len(rule.Prompt) + 50 // 格式开销
@@ -245,6 +305,7 @@ func BuildBatchContext(ctx StageContext) BatchContext {
 		OutputFormatChars: 1200, // 结构化输出 Schema 较大
 		RulesChars:        rulesChars,
 		CustomInstChars:   customInstChars,
+		RuleCount:         ruleCount,
 	}
 }
 
