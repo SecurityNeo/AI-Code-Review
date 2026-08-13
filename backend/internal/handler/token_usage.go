@@ -17,16 +17,24 @@ import (
 
 // callerLabelMap 调用方英文标识 → 中文名称
 var callerLabelMap = map[string]string{
-	"score":                 "代码评审",
-	"rule_refine":           "智能提炼",
-	"sandbox_test":          "模拟测试",
-	"similar_check":         "相似检测",
-	"rule_incubator":        "规则孵化平台",
-	"retry":                 "解析重试",
-	"runAIReview":           "AI 评审",
-	"runAIReviewStructured": "AI 评审（结构化）",
-	"runAIReviewFallback":   "AI 评审（分批）",
-	"callLLMAPI":            "LLM 调用",
+	"score":                        "代码评审",
+	"rule_refine":                  "智能提炼",
+	"sandbox_test":                 "模拟测试",
+	"similar_check":                "相似检测",
+	"rule_incubator":               "规则孵化平台",
+	"retry":                        "解析重试",
+	"runAIReview":                  "AI 评审",
+	"runAIReviewStructured":        "AI 评审（结构化）",
+	"runAIReviewStructuredTruncated": "AI 评审（截断）",
+	"runAIReviewFallback":          "AI 评审（分批）",
+	"callLLMAPI":                   "LLM 调用",
+	"single_batch_structured":      "单批次代码评审",
+	"batch_collection":             "多批次代码评审",
+	"review_arbitration":           "评审仲裁",
+	"secret_scan_verify":           "密钥扫描验证",
+	"security_audit_verify":        "安全审计验证",
+	"test_suggestion_enrich":       "测试建议增强",
+	"impact_analysis_enrich":       "影响分析增强",
 }
 
 // incubatorCallers 是规则孵化平台相关的 caller 标识列表

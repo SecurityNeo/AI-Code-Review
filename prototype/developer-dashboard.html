@@ -311,9 +311,9 @@ function renderIssueCard(issue, showLegacyMode) {
                     </div>
                 </div>
                 <div class="flex items-center gap-2 flex-shrink-0">
-                    <button onclick="resolveIssue(${issue.id}, 'resolved')" class="text-xs px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700"><i class="fas fa-check mr-1"></i>已处理</button>
-                    <button onclick="showActionPanel(${issue.id}, 'false_positive', '误报原因')" class="text-xs px-3 py-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200"><i class="fas fa-times mr-1"></i>误报</button>
-                    <button onclick="showActionPanel(${issue.id}, 'ignored', '忽略原因')" class="text-xs px-3 py-1.5 bg-gray-100 text-gray-600 rounded hover:bg-gray-200"><i class="fas fa-pause mr-1"></i>忽略</button>
+                    <button onclick="resolveIssue(${issue.id}, 'resolved')" class="text-xs px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 min-w-[5rem] flex items-center justify-center gap-1 whitespace-nowrap"><i class="fas fa-check mr-1"></i>已处理</button>
+                    <button onclick="showActionPanel(${issue.id}, 'false_positive', '误报原因')" class="text-xs px-3 py-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200 min-w-[5rem] flex items-center justify-center gap-1 whitespace-nowrap"><i class="fas fa-times mr-1"></i>误报</button>
+                    <button onclick="showActionPanel(${issue.id}, 'ignored', '忽略原因')" class="text-xs px-3 py-1.5 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 min-w-[5rem] flex items-center justify-center gap-1 whitespace-nowrap"><i class="fas fa-pause mr-1"></i>忽略</button>
                 </div>
             </div>
             <div id="actionPanel-${issue.id}" class="hidden mt-2 p-2 bg-gray-50 rounded border">

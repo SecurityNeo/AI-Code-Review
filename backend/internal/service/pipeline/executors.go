@@ -1290,12 +1290,17 @@ func (e *PostProcessExecutor) Execute(ctx StageContext) error {
 		"score":        score,
 	})
 
+	// 6. 评论发布状态：仅表示 "具备发布条件"（报告非空且关联 MR 信息完整）
+	// 真正的 GitLab 发布是在 Pipeline 成功后由 executePipelineReviewTask 异步执行 postReviewComment 完成的，
+	// 此处 snapshot 无法反映实际发布结果（网络/token/MR状态等均可能导致失败）。
+	canPostComment := report != "" && task.MRMergeID > 0 && task.ProjectID > 0
 	ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
-		"status":         "completed",
-		"task_id":        task.ID,
-		"final_report":   report,
-		"score":          score,
-		"comment_posted": report != "",
+		"status":           "completed",
+		"task_id":          task.ID,
+		"final_report":     report,
+		"score":            score,
+		"comment_posted":   false,          // 避免前端误认为"已发布"；实际发布结果见 task.mr_thread_id 或日志
+		"comment_eligible": canPostComment, // 是否具备发布条件
 	})
 	return nil
 }

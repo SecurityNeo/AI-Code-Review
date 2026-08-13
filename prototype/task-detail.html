@@ -816,14 +816,23 @@ function truncate(s, n) {
 
 // 调用方中文化映射 + 颜色 badge
 const CALLER_LABELS = {
-    runAIReview:              { text: 'AI 评审',         cls: 'bg-blue-50 text-blue-700 border-blue-200' },
-    runAIReviewStructured:    { text: 'AI 评审（结构化）', cls: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
-    runAIReviewFallback:      { text: 'AI 评审（分批）',   cls: 'bg-purple-50 text-purple-700 border-purple-200' },
-    retry:                    { text: '解析重试',         cls: 'bg-orange-50 text-orange-700 border-orange-200' },
-    callLLMAPI:               { text: 'LLM 调用',         cls: 'bg-gray-100 text-gray-600 border-gray-200' },
-    rule_refine:              { text: '智能提炼',         cls: 'bg-pink-50 text-pink-700 border-pink-200' },
-    sandbox_test:             { text: '模拟测试',         cls: 'bg-teal-50 text-teal-700 border-teal-200' },
-    similar_check:            { text: '相似检测',         cls: 'bg-orange-50 text-orange-700 border-orange-200' },
+    runAIReview:                    { text: 'AI 评审',               cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+    runAIReviewStructured:          { text: 'AI 评审（结构化）',     cls: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+    runAIReviewStructuredTruncated: { text: 'AI 评审（截断）',       cls: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+    runAIReviewFallback:            { text: 'AI 评审（分批）',       cls: 'bg-purple-50 text-purple-700 border-indigo-200' },
+    single_batch_structured:        { text: '单批次代码评审',        cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+    batch_collection:               { text: '多批次代码评审',        cls: 'bg-purple-50 text-purple-700 border-purple-200' },
+    review_arbitration:             { text: '评审仲裁',               cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+    secret_scan_verify:             { text: '密钥扫描验证',           cls: 'bg-red-50 text-red-700 border-red-200' },
+    security_audit_verify:          { text: '安全审计验证',           cls: 'bg-red-50 text-red-700 border-red-200' },
+    test_suggestion_enrich:         { text: '测试建议增强',           cls: 'bg-green-50 text-green-700 border-green-200' },
+    impact_analysis_enrich:         { text: '影响分析增强',           cls: 'bg-green-50 text-green-700 border-green-200' },
+    retry:                          { text: '解析重试',               cls: 'bg-orange-50 text-orange-700 border-orange-200' },
+    callLLMAPI:                     { text: 'LLM 调用',               cls: 'bg-gray-100 text-gray-600 border-gray-200' },
+    rule_refine:                    { text: '智能提炼',               cls: 'bg-pink-50 text-pink-700 border-pink-200' },
+    sandbox_test:                   { text: '模拟测试',               cls: 'bg-teal-50 text-teal-700 border-teal-200' },
+    similar_check:                  { text: '相似检测',               cls: 'bg-orange-50 text-orange-700 border-orange-200' },
+    score:                          { text: '代码评审',               cls: 'bg-blue-50 text-blue-700 border-blue-200' },
 };
 function renderCallerBadge(caller) {
     const info = CALLER_LABELS[caller] || { text: caller || '-', cls: 'bg-gray-50 text-gray-500 border-gray-200' };
@@ -1052,8 +1061,8 @@ function renderIssues() {
     const severityLabels = { critical: '严重', high: '高危', medium: '中危', low: '低危', info: '提示' };
     const severityColors = { critical: 'text-red-600', high: 'text-orange-600', medium: 'text-yellow-600', low: 'text-blue-600', info: 'text-gray-500' };
     const categoryLabels = { security: '安全', performance: '性能', code_quality: '代码质量', readability: '可读性', maintainability: '可维护性', test_coverage: '测试覆盖', common: '通用' };
-    const statusLabels = { pending: '待处理', pending_inherited: '待处理', resolved: '已处理', false_positive: '误报', ignored: '已忽略', auto_filtered: '已过滤' };
-    const statusColors = { pending: 'text-gray-500', pending_inherited: 'text-gray-500', resolved: 'text-green-600', false_positive: 'text-red-600', ignored: 'text-gray-400', auto_filtered: 'text-blue-500' };
+    const statusLabels = { pending: '待处理', pending_inherited: '待处理', resolved: '已处理', false_positive: '误报', ignored: '已忽略', auto_filtered: '已过滤', auto_archived: '已归档' };
+    const statusColors = { pending: 'text-gray-500', pending_inherited: 'text-gray-500', resolved: 'text-green-600', false_positive: 'text-red-600', ignored: 'text-gray-400', auto_filtered: 'text-blue-500', auto_archived: 'text-gray-400' };
 
     // 统计摘要
     const allIssues = data.issues;
@@ -1102,13 +1111,13 @@ function renderIssues() {
                 <div class="flex flex-col items-center gap-1.5 flex-shrink-0">
                     <i id="issue-toggle-${issue.id}" class="fas fa-chevron-down issue-toggle-icon text-gray-400 text-sm cursor-pointer p-1 hover:text-gray-600" onclick="toggleIssueDetail(${issue.id}, event)"></i>
                     <div class="flex flex-col gap-1.5 ${['pending', 'pending_inherited'].includes(issue.status) ? '' : 'hidden'}" onclick="event.stopPropagation()">
-                        <button onclick="resolveIssue(${issue.id}, 'resolved')" class="text-[11px] px-2.5 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 flex items-center gap-1 whitespace-nowrap" title="确认这是问题，已处理">
+                        <button onclick="resolveIssue(${issue.id}, 'resolved')" class="text-[11px] px-2.5 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 flex items-center justify-center gap-1 whitespace-nowrap min-w-[5rem]" title="确认这是问题，已处理">
                             <i class="fas fa-check"></i>已处理
                         </button>
-                        <button onclick="showActionInput(${issue.id}, 'false_positive')" class="text-[11px] px-2.5 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 flex items-center gap-1 whitespace-nowrap" title="这是误报">
+                        <button onclick="showActionInput(${issue.id}, 'false_positive')" class="text-[11px] px-2.5 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 flex items-center justify-center gap-1 whitespace-nowrap min-w-[5rem]" title="这是误报">
                             <i class="fas fa-times"></i>误报
                         </button>
-                        <button onclick="showActionInput(${issue.id}, 'ignored')" class="text-[11px] px-2.5 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 flex items-center gap-1 whitespace-nowrap" title="暂缓处理">
+                        <button onclick="showActionInput(${issue.id}, 'ignored')" class="text-[11px] px-2.5 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 flex items-center justify-center gap-1 whitespace-nowrap min-w-[5rem]" title="暂缓处理">
                             <i class="fas fa-pause"></i>忽略
                         </button>
                     </div>
@@ -1915,7 +1924,14 @@ function showToast(message, type="success") {
     setTimeout(() => toast.remove(), 3000);
 }
 
-function showReviewMarkdownModal() {
+async function showReviewMarkdownModal() {
+    // 确保弹窗内容已加载（用户可能未切换到评审报告 tab）
+    if (!currentStructuredReview) {
+        const taskId = new URLSearchParams(window.location.search).get('id');
+        if (taskId) {
+            await loadStructuredReview(taskId);
+        }
+    }
     document.getElementById('reviewMarkdownModal').style.display = 'flex';
 }
 
@@ -2483,11 +2499,27 @@ function renderGenericDetail(json) {
     if (json.error_message) {
         html += `<div class="text-red-600 bg-red-50 p-2 rounded text-xs mb-3">❌ ${escapeHtml(json.error_message)}</div>`;
     }
+
+    // 状态行（状态 + 耗时 + 模型名称）
+    // 扩展智能体数据在 output_snapshot 中，batch_review 等在顶层，均需兼容
+    const outSnap = json.output_snapshot || {};
+    const modelName = outSnap.model_name || json.model_name || '';
+    const inputTokens = outSnap.input_tokens || json.input_tokens || 0;
+    const outputTokens = outSnap.output_tokens || json.output_tokens || 0;
+
     const metaItems = [];
     if (json.status) metaItems.push(`<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${json.status==='success'?'bg-green-100 text-green-700':json.status==='running'?'bg-blue-100 text-blue-700':'bg-gray-100 text-gray-600'}">${getStatusText(json.status)}</span>`);
-    if (json.duration_ms) metaItems.push(`<span class="text-gray-500 text-xs">耗时 ${Math.round(json.duration_ms/1000)}s</span>`);
-    if (json.model_name) metaItems.push(`<span class="text-gray-500 text-xs">模型 ${escapeHtml(json.model_name)}</span>`);
-    if (metaItems.length) html += `<div class="flex flex-wrap gap-2 mb-3">${metaItems.join('')}</div>`;
+    if (json.duration_ms) metaItems.push(`<span class="text-gray-500 text-xs">⏱ ${Math.round(json.duration_ms/1000)}s</span>`);
+    if (modelName) metaItems.push(`<span class="text-gray-500 text-xs">🤖 ${escapeHtml(modelName)}</span>`);
+    if (metaItems.length) html += `<div class="flex flex-wrap gap-2 mb-2">${metaItems.join('')}</div>`;
+
+    // Token 用量（放在状态行下方，参考 batch detail 样式）
+    if (inputTokens || outputTokens) {
+        html += `<div class="mb-3 bg-blue-50 border border-blue-100 rounded-lg p-2 flex justify-between items-center">`;
+        html += `<span class="text-xs text-blue-700 font-medium">Token 用量</span>`;
+        html += `<span class="text-[11px] font-mono text-blue-600">in: ${(inputTokens||0).toLocaleString()} / out: ${(outputTokens||0).toLocaleString()}</span>`;
+        html += `</div>`;
+    }
 
     if (json.input_snapshot) {
         html += '<div class="mb-3"><div class="font-medium text-gray-600 mb-1 text-xs">输入快照</div>';
@@ -2498,30 +2530,39 @@ function renderGenericDetail(json) {
         html += '<div class="mb-3"><div class="font-medium text-gray-600 mb-1 text-xs">输出快照</div>';
         html += renderJsonSnapshot(json.output_snapshot);
         html += '</div>';
-        // 展示 LLM Prompt
-        if (json.output_snapshot.llm_prompt) {
-            html += '<div class="mb-3"><div class="font-medium text-gray-600 mb-1 text-xs">🤖 传递给模型的 Prompt</div>';
-            html += renderCopyablePre(json.output_snapshot.llm_prompt, 'prompt');
-            html += '</div>';
+
+        // Prompt 输入（可折叠 + 可复制）
+        const prompt = json.output_snapshot.llm_prompt;
+        if (prompt) {
+            const pid = 'prompt-' + Math.random().toString(36).substr(2, 8);
+            html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
+            html += `<span>Prompt 输入</span>`;
+            html += `<span class="text-[10px] text-gray-400">${prompt.length} 字符</span>`;
+            html += `</div>`;
+            html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">`;
+            html += `<summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看 Prompt</summary>`;
+            html += `<div class="relative group">`;
+            html += `<button onclick="copyTextById('${pid}', this)" class="absolute top-1.5 right-1.5 z-10 bg-white/90 border border-gray-200 rounded px-2 py-0.5 text-[10px] text-gray-400 hover:text-blue-600 hover:border-blue-300 shadow-sm" title="复制内容"><i class="far fa-copy mr-0.5"></i>复制</button>`;
+            html += `<pre id="${pid}" class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[24rem] overflow-y-auto">${escapeHtml(prompt)}</pre>`;
+            html += `</div></details></div>`;
         }
-        // 展示 LLM 原始输出（Agent 验证/增强阶段）
-        if (json.output_snapshot.llm_raw_output) {
-            html += '<div class="mb-3"><div class="font-medium text-gray-600 mb-1 text-xs">🤖 模型原始输出</div>';
-            html += renderCopyablePre(json.output_snapshot.llm_raw_output, 'json');
-            html += '</div>';
-        }
-        // 展示模型名称与 Token 用量（优先从 output_snapshot 读取，扩展智能体阶段）
-        const outSnap = json.output_snapshot;
-        const modelName = outSnap.model_name || json.model_name || '';
-        const inputTokens = outSnap.input_tokens || json.input_tokens || 0;
-        const outputTokens = outSnap.output_tokens || json.output_tokens || 0;
-        if (modelName || inputTokens || outputTokens) {
-            html += '<div class="mb-3"><div class="font-medium text-gray-600 mb-1 text-xs">🤖 模型与 Token 用量</div>';
-            let meta = [];
-            if (modelName) meta.push(`模型: ${escapeHtml(modelName)}`);
-            if (inputTokens || outputTokens) meta.push(`in: ${(inputTokens||0).toLocaleString()} | out: ${(outputTokens||0).toLocaleString()}`);
-            html += `<div class="text-xs text-gray-500">${meta.join(' · ')}</div>`;
-            html += '</div>';
+
+        // 大模型原始输出（JSON）（可折叠 + 可复制）
+        const raw = json.output_snapshot.llm_raw_output;
+        if (raw) {
+            const rid = 'raw-' + Math.random().toString(36).substr(2, 8);
+            html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
+            html += `<span>大模型原始输出（JSON）</span>`;
+            html += `<span class="text-[10px] text-gray-400">${typeof raw === 'string' ? raw.length : JSON.stringify(raw).length} 字符</span>`;
+            html += `</div>`;
+            html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">`;
+            html += `<summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看原始 JSON 输出</summary>`;
+            html += `<div class="relative group">`;
+            html += `<button onclick="copyTextById('${rid}', this)" class="absolute top-1.5 right-1.5 z-10 bg-white/90 border border-gray-200 rounded px-2 py-0.5 text-[10px] text-gray-400 hover:text-blue-600 hover:border-blue-300 shadow-sm" title="复制内容"><i class="far fa-copy mr-0.5"></i>复制</button>`;
+            let jsonStr = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
+            try { const parsed = JSON.parse(jsonStr); jsonStr = JSON.stringify(parsed, null, 2); } catch (_) {}
+            html += `<pre id="${rid}" class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[28rem] overflow-y-auto">${escapeHtml(jsonStr)}</pre>`;
+            html += `</div></details></div>`;
         }
     }
     if (!html) html = '<div class="text-gray-400 text-sm">无详细数据</div>';
@@ -3061,9 +3102,10 @@ function renderPostProcessDetail(json) {
         html += `<div class="text-gray-400 text-sm">未生成评审报告</div>`;
     }
 
-    // 评论发布状态
-    if (out.comment_posted !== undefined) {
-        html += `<div class="mb-2 text-[11px] text-gray-500"><i class="fab fa-gitlab mr-1"></i>GitLab 评论: ${out.comment_posted ? '已发布' : '未发布'}</div>`;
+    // 评论发布状态（comment_posted 为 false，不代表真正未发布；comment_eligible 表示是否具备发布条件）
+    const eligible = out.comment_eligible || (finalReport && currentTask && currentTask.mr_iid > 0);
+    if (out.comment_posted !== undefined || out.comment_eligible !== undefined) {
+        html += `<div class="mb-2 text-[11px] text-gray-500"><i class="fab fa-gitlab mr-1"></i>GitLab 评论: ${eligible ? '待发布' : '未发布'}</div>`;
     }
 
     return html;

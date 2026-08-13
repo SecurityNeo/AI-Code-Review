@@ -83,7 +83,8 @@ func (e *SecurityAuditExecutor) Execute(ctx StageContext) error {
 		if err == nil && len(vres) > 0 {
 			var updated []model.SecurityAuditFinding
 			for _, vr := range vres {
-				if vr.Result.Confidence >= 0.5 {
+				// LLM 判定为真实安全问题且置信度>=50%时才保留
+				if vr.Result.IsLeak && vr.Result.Confidence >= 0.5 {
 					updated = append(updated, vr.Original)
 					verifiedCount++
 				}

@@ -1830,8 +1830,8 @@ function renderTasks(tasks) {
 
             const severityColors = { critical: 'border-red-500 bg-red-50', high: 'border-orange-500 bg-orange-50', medium: 'border-yellow-500 bg-yellow-50', low: 'border-blue-500 bg-blue-50', info: 'border-gray-400 bg-gray-50' };
             const severityLabels = { critical: '严重', high: '高危', medium: '中危', low: '低危', info: '提示' };
-            const statusLabels = { pending: '待处理', resolved: '已处理', false_positive: '误报', ignored: '已忽略' };
-            const statusColors = { pending: 'text-gray-500', resolved: 'text-green-600', false_positive: 'text-red-600', ignored: 'text-gray-400' };
+            const statusLabels = { pending: '待处理', pending_inherited: '待处理', resolved: '已处理', false_positive: '误报', ignored: '已忽略', auto_filtered: '已过滤', auto_archived: '已归档' };
+            const statusColors = { pending: 'text-gray-500', pending_inherited: 'text-gray-500', resolved: 'text-green-600', false_positive: 'text-red-600', ignored: 'text-gray-400', auto_filtered: 'text-blue-500', auto_archived: 'text-gray-400' };
             const categoryColors = { security: 'bg-red-50 text-red-700', performance: 'bg-orange-50 text-orange-700', code_quality: 'bg-purple-50 text-purple-700', readability: 'bg-blue-50 text-blue-700', maintainability: 'bg-green-50 text-green-700', test_coverage: 'bg-pink-50 text-pink-700', common: 'bg-gray-50 text-gray-600' };
             const categoryLabels = { security: '安全', performance: '性能', code_quality: '代码质量', readability: '可读性', maintainability: '可维护性', test_coverage: '测试覆盖', common: '通用' };
 

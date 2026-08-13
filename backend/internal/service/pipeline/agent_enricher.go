@@ -109,6 +109,7 @@ func (v *AgentVerificator) VerifySecretScan(
 
 	// 构建 Prompt：候选列表 + 代码上下文（±5 行）
 	prompt := v.buildSecretVerifyPrompt(findings, fileContents)
+	v.lastPrompt = prompt
 
 	schema := getSecretVerifyJSONSchema()
 	rf := &llm.ResponseFormat{
@@ -219,6 +220,7 @@ func (v *AgentVerificator) buildSecretVerifyPrompt(findings []model.SecretScanFi
   {"is_leak": true, "leak_type": "AWS AK", "severity": "critical", "confidence": 0.97, "reason": "第15行硬编码了 AK/SK 对，且文件路径为 config/prod.go 生产环境配置"},
   ...
 ]`)
+	v.lastPrompt = sb.String()
 	return sb.String()
 }
 

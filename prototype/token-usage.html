@@ -236,14 +236,23 @@
     }
 
     const CALLER_LABELS = {
-        runAIReview:           { text: 'AI 评审',           cls: 'bg-blue-50 text-blue-700 border-blue-200' },
-        runAIReviewStructured: { text: 'AI 评审（结构化）', cls: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
-        runAIReviewFallback:   { text: 'AI 评审（分批）',   cls: 'bg-purple-50 text-purple-700 border-indigo-200' },
-        retry:                 { text: '解析重试',         cls: 'bg-orange-50 text-orange-700 border-orange-200' },
-        callLLMAPI:            { text: 'LLM 调用',         cls: 'bg-gray-100 text-gray-600 border-gray-200' },
-        rule_refine:           { text: '智能提炼',         cls: 'bg-pink-50 text-pink-700 border-pink-200' },
-        sandbox_test:          { text: '模拟测试',         cls: 'bg-teal-50 text-teal-700 border-teal-200' },
-        similar_check:         { text: '相似检测',         cls: 'bg-orange-50 text-orange-700 border-orange-200' },
+        runAIReview:                    { text: 'AI 评审',               cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+        runAIReviewStructured:          { text: 'AI 评审（结构化）',     cls: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+        runAIReviewStructuredTruncated: { text: 'AI 评审（截断）',       cls: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+        runAIReviewFallback:            { text: 'AI 评审（分批）',       cls: 'bg-purple-50 text-purple-700 border-indigo-200' },
+        single_batch_structured:        { text: '单批次代码评审',        cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+        batch_collection:               { text: '多批次代码评审',        cls: 'bg-purple-50 text-purple-700 border-purple-200' },
+        review_arbitration:             { text: '评审仲裁',               cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+        secret_scan_verify:             { text: '密钥扫描验证',           cls: 'bg-red-50 text-red-700 border-red-200' },
+        security_audit_verify:          { text: '安全审计验证',           cls: 'bg-red-50 text-red-700 border-red-200' },
+        test_suggestion_enrich:         { text: '测试建议增强',           cls: 'bg-green-50 text-green-700 border-green-200' },
+        impact_analysis_enrich:         { text: '影响分析增强',           cls: 'bg-green-50 text-green-700 border-green-200' },
+        retry:                          { text: '解析重试',               cls: 'bg-orange-50 text-orange-700 border-orange-200' },
+        callLLMAPI:                     { text: 'LLM 调用',               cls: 'bg-gray-100 text-gray-600 border-gray-200' },
+        rule_refine:                    { text: '智能提炼',               cls: 'bg-pink-50 text-pink-700 border-pink-200' },
+        sandbox_test:                   { text: '模拟测试',               cls: 'bg-teal-50 text-teal-700 border-teal-200' },
+        similar_check:                  { text: '相似检测',               cls: 'bg-orange-50 text-orange-700 border-orange-200' },
+        score:                          { text: '代码评审',               cls: 'bg-blue-50 text-blue-700 border-blue-200' },
     };
     function renderCallerBadge(caller) {
         const info = CALLER_LABELS[caller] || { text: caller || '-', cls: 'bg-gray-50 text-gray-500 border-gray-200' };

@@ -82,7 +82,8 @@ func (e *SecretScanExecutor) Execute(ctx StageContext) error {
 		if err == nil && len(vres) > 0 {
 			var updated []model.SecretScanFinding
 			for _, vr := range vres {
-				if vr.Result.Confidence >= 0.5 {
+				// LLM 判定为真实泄露且置信度>=50%时才保留
+				if vr.Result.IsLeak && vr.Result.Confidence >= 0.5 {
 					updated = append(updated, vr.Original)
 					verifiedCount++
 				}
