@@ -2243,7 +2243,7 @@ function createPipelineStageNode(stage, index, totalCount) {
 
     // 节点圆点（在时间线上）
     html += `<div class="relative flex items-start gap-4 mb-6 last:mb-0">`;
-    html += `<div class="absolute -left-5 top-0 z-10">`;
+    html += `<div class="absolute -left-5 top-0">`;
     html += `<div class="w-6 h-6 rounded-full border-2 ${sc.node} flex items-center justify-center ${status === 'running' ? 'animate-pulse' : ''}">`;
     if (status === 'running') {
         html += `<div class="w-2.5 h-2.5 bg-white rounded-full"></div>`;
