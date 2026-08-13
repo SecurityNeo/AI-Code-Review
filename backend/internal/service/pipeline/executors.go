@@ -987,12 +987,18 @@ func (e *BatchReviewFrameExecutor) executeBatchPlan(ctx StageContext, task *mode
 		"input_files":         files,
 	})
 
-	// 【新增】保存预算信息到 execution 记录
+	// 【新增】保存预算信息到 execution 记录（使用 Updates 避免覆盖 snapshot 字段）
 	exec.EstimatedOverhead = estimatedOverhead
 	exec.LLMInputBudget = configuredBudget
 	exec.EffectiveBudget = effectiveBudget
 	exec.BudgetWarning = budgetWarning
-	model.DB.Save(exec)
+	model.DB.Model(exec).Updates(map[string]interface{}{
+		"estimated_overhead": estimatedOverhead,
+		"actual_overhead":    0, // batch_plan 阶段无实际开销
+		"llm_input_budget":   configuredBudget,
+		"effective_budget":   effectiveBudget,
+		"budget_warning":     budgetWarning,
+	})
 
 	ctx.MarkSuccess(exec)
 
@@ -1082,7 +1088,7 @@ func (e *BatchReviewFrameExecutor) executeSingleBatchStructured(ctx StageContext
 
 	// 【新增】保存实际开销到 execution 记录，并异步保存校准数据
 	exec.ActualOverhead = result.InputTokens - calcDiffTokens(fileDetails)
-	model.DB.Save(exec)
+	model.DB.Model(exec).Update("actual_overhead", exec.ActualOverhead)
 	go func() {
 		estOH := NewTokenEstimator().EstimateOverheadTokens(BuildBatchContext(ctx))
 		saveOverheadCalibration(
@@ -1259,7 +1265,7 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 		actualOH = 0
 	}
 	exec.ActualOverhead = actualOH
-	model.DB.Save(exec)
+	model.DB.Model(exec).Update("actual_overhead", actualOH)
 	go func() {
 		saveOverheadCalibration(
 			task.ID, exec.ID, exec.StageCode,

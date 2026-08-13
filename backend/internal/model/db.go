@@ -308,6 +308,11 @@ func autoMigrate() error {
 	}
 	initSecurityAuditRules()
 
+	// Token 开销校准记录表
+	if err := DB.AutoMigrate(&OverheadCalibration{}); err != nil {
+		return err
+	}
+
 	// 兼容：移除 object_storage_configs.name 的旧 unique 索引（已改为普通字段允许多个同名配置）
 	if DB.Migrator().HasIndex(&ObjectStorageConfig{}, "idx_object_storage_configs_name") {
 		if err := DB.Migrator().DropIndex(&ObjectStorageConfig{}, "idx_object_storage_configs_name"); err != nil {
