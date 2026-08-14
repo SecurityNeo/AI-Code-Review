@@ -11,7 +11,7 @@ COPY backend/ .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o codeguard ./cmd/main.go
 
 FROM alpine:latest
-RUN apk --no-cache add ca-certificates tzdata wget && \
+RUN apk --no-cache add ca-certificates tzdata wget git && \
     cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
     echo "Asia/Shanghai" > /etc/timezone
 WORKDIR /app

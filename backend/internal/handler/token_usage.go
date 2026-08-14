@@ -449,11 +449,6 @@ func (h *TokenUsageHandler) ListCalls(c *gin.Context) {
 		respondDBError(c, "calls list", err)
 		return
 	}
-	for i := range rows {
-		if label, ok := callerLabelMap[rows[i].Caller]; ok {
-			rows[i].Caller = label
-		}
-	}
 	c.JSON(200, gin.H{
 		"data":      rows,
 		"total":     total,

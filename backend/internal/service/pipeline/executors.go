@@ -875,6 +875,14 @@ func (e *BatchReviewFrameExecutor) Execute(ctx StageContext) error {
 		}
 		ctx.SetOutput("batch_review_results", []*llm.BatchReviewResult{batchResult})
 		ctx.SetOutput("model_id", actualModelID)
+
+		// 单批场景也需要更新批次进度和 output_snapshot，保证前端详情面板能正确显示批次进度
+		ctx.UpdateProgress(nil, 1, plan.BatchCount)
+		ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
+			"plan":        plan,
+			"batch_count": plan.BatchCount,
+			"model_id":    actualModelID,
+		})
 		// 【注意】不再直接组装报告，由 review_arbitration 阶段处理
 		return nil
 	}

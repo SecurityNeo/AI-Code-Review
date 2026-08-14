@@ -514,7 +514,7 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 					}
 					// 收集 IMUserID 用于兜底（IM 链路不依赖 users.id）
 					if st.Member.IMUserID != "" {
-						imMentions = append(imMentions, fmt.Sprintf("<%@s>", st.Member.IMUserID))
+						imMentions = append(imMentions, fmt.Sprintf("<@%s>", st.Member.IMUserID))
 					}
 				}
 				// 最后发送一条 IM 兜底通知（包含所有 steward 的 @mention）

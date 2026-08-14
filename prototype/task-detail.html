@@ -716,8 +716,8 @@ function renderTaskMeta(t) {
         } catch (e) { /* 解析失败忽略，保留 0 */ }
     }
     document.getElementById('detailFiles').textContent = totalFiles || '-';
-    document.getElementById('detailAdditions').textContent = totalAdd > 0 ? '+' + totalAdd : '-';
-    document.getElementById('detailDeletions').textContent = totalDel > 0 ? '-' + totalDel : '-';
+    document.getElementById('detailAdditions').textContent = '+' + totalAdd;
+    document.getElementById('detailDeletions').textContent = '-' + totalDel;
 
     // 文件过滤统计
     const filterStatsEl = document.getElementById('detailFilterStats');
@@ -3361,7 +3361,7 @@ function renderPostProcessDetail(json) {
     if (finalReport) {
         html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5">推送给 GitLab 的评审报告</div>`;
         const reportText = finalReport.substring(0, 5000) + (finalReport.length > 5000 ? '\n\n> 报告较长，请查看「评审报告」Tab 获取完整内容' : '');
-        html += renderCopyableMarkdown(reportText, '20rem');
+        html += renderCopyableMarkdown(reportText, '40rem');
         html += '</div>';
     } else {
         html += `<div class="text-gray-400 text-sm">未生成评审报告</div>`;
