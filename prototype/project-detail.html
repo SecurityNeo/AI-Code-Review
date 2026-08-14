@@ -1069,6 +1069,8 @@ let ruleTotalPages = 1;
             return;
         }
         var typeLabels = { rule_category: '规则分类', language: '语言', default: '默认' };
+        var priorityLabels = {0: '首要', 1: '第二责任人', 2: '第三责任人'};
+        var priorityColors = {0: 'bg-blue-50 text-blue-700 border-blue-200', 1: 'bg-green-50 text-green-700 border-green-200', 2: 'bg-gray-50 text-gray-600 border-gray-200'};
         var html = '';
         for (var i = 0; i < stewards.length; i++) {
             var s = stewards[i] || {};
@@ -1084,14 +1086,17 @@ let ruleTotalPages = 1;
             var imPlatform = (s.im_platform || '-').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
             var imUserId = (s.im_user_id || '-').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
             var priority = s.priority !== undefined ? s.priority : 0;
+            var priorityLabel = priorityLabels[priority] || '首要';
+            var priorityCls = priorityColors[priority] || priorityColors[0];
             
             var scopeBadge = '';
             if (s.scope_type === 'default') {
-                scopeBadge = '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-600">默认</span>';
+                scopeBadge = '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-600 mr-1">默认</span>' +
+                    '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs ' + priorityCls + ' border">' + priorityLabel + '</span>';
             } else {
-                scopeBadge = '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs bg-blue-50 text-blue-600">' + scopeType + '</span>' +
-                    '<span class="ml-1 text-gray-600">' + scopeValue + '</span>' +
-                    '<span class="ml-1 text-xs text-gray-400">(优先级 ' + priority + ')</span>';
+                scopeBadge = '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs bg-blue-50 text-blue-600 mr-1">' + scopeType + '</span>' +
+                    '<span class="text-gray-600 mr-1">' + scopeValue + '</span>' +
+                    '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs ' + priorityCls + ' border">' + priorityLabel + '</span>';
             }
             
             var platformIcon = {

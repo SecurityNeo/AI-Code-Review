@@ -156,11 +156,6 @@
                         </select>
                         <select id="filterCaller" class="px-3 py-2 border rounded-lg text-sm" onchange="loadCalls(1)">
                             <option value="">所有调用方</option>
-                            <option value="runAIReview">AI 评审</option>
-                            <option value="runAIReviewStructured">AI 评审（结构化）</option>
-                            <option value="runAIReviewFallback">AI 评审（分批）</option>
-                            <option value="retry">解析重试</option>
-                            <option value="callLLMAPI">LLM 调用</option>
                         </select>
                         <select id="filterStatus" class="px-3 py-2 border rounded-lg text-sm" onchange="loadCalls(1)">
                             <option value="">所有状态</option>
@@ -264,6 +259,20 @@
         const div = document.createElement('div');
         div.textContent = String(text);
         return div.innerHTML;
+    }
+
+    // 从 CALLER_LABELS 动态生成调用方筛选下拉框（与表格渲染保持同步）
+    function initCallerFilter() {
+        const select = document.getElementById('filterCaller');
+        if (!select) return;
+        // 保留第一个 "所有调用方" 选项
+        select.innerHTML = '<option value="">所有调用方</option>';
+        Object.entries(CALLER_LABELS).forEach(([key, info]) => {
+            const opt = document.createElement('option');
+            opt.value = key;
+            opt.textContent = info.text;
+            select.appendChild(opt);
+        });
     }
 
     function getRange() {
@@ -582,6 +591,7 @@
         const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
         document.getElementById('currentUser').textContent = userInfo.display_name || userInfo.username || '-';
         document.getElementById('currentRole').textContent = userInfo.role === 'admin' ? '管理员' : '开发者';
+        initCallerFilter();  // 动态生成调用方筛选选项
         loadAll();
     });
 </script>

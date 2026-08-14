@@ -2,7 +2,9 @@ package pipeline
 
 import (
 	"fmt"
+	"os"
 	"runtime/debug"
+	"strconv"
 
 	"github.com/ai-optimizer/backend/internal/engine"
 	"github.com/ai-optimizer/backend/internal/model"
@@ -90,8 +92,13 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 		return fmt.Errorf("构建裁决 Prompt 失败: %w", err)
 	}
 
-	// 6. 保存输入快照（prompt 截断至 16KB 避免数据库/对象存储超限）
-	const maxPromptSnapLen = 16384
+	// 6. 保存输入快照（prompt 截断长度支持环境变量配置，默认 256KB）
+	maxPromptSnapLen := 262144 // 256KB
+	if v := os.Getenv("REVIEW_ARBITRATION_MAX_PROMPT_SNAP_LEN"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxPromptSnapLen = n
+		}
+	}
 	promptSnap := userPrompt
 	if len(promptSnap) > maxPromptSnapLen {
 		promptSnap = promptSnap[:maxPromptSnapLen] + "\n\n[... Prompt truncated, total length: " + fmt.Sprintf("%d chars]", len(userPrompt))

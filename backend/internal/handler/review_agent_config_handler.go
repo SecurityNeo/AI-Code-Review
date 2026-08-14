@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/ai-optimizer/backend/internal/engine"
 	"github.com/ai-optimizer/backend/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -74,4 +75,17 @@ func (h *ReviewAgentConfigHandler) Save(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "updated"})
+}
+
+// GetFileFilterDefaults 获取文件过滤默认规则
+// GET /api/v1/review-agent-config/file-filter-defaults
+// 任意登录用户可读（默认规则是只读系统配置）
+func (h *ReviewAgentConfigHandler) GetFileFilterDefaults(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"data": gin.H{
+			"languages": engine.DefaultExcludePatternsByLanguage,
+			"common":    engine.CommonExcludePatterns,
+		},
+	})
 }

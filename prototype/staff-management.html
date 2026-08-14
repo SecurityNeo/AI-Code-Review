@@ -619,14 +619,20 @@ function renderMemberDetail(m) {
             ${resp.map(r => {
                 const project = allProjects.find(p => p.id == r.project_id);
                 const pName = escapeHtml(project?.name || '项目#' + r.project_id);
+                // 防御：scope_type 为空时回退到 'default'
+                const scopeType = r.scope_type || 'default';
                 let scopeCls = 'def', scopeLabel = '默认';
-                if (r.scope_type === 'language') { scopeCls = 'lang'; scopeLabel = '语言'; }
-                else if (r.scope_type === 'rule_category') { scopeCls = 'cat'; scopeLabel = '规则'; }
+                if (scopeType === 'language') { scopeCls = 'lang'; scopeLabel = '语言'; }
+                else if (scopeType === 'rule_category') { scopeCls = 'cat'; scopeLabel = '规则'; }
                 const scopeVal = r.scope_value ? ` / ${escapeHtml(r.scope_value)}` : '';
+                // 增加 priority 展示
+                const priorityLabel = {0: '首要', 1: '第二责任人', 2: '第三责任人'}[r.priority] || '首要';
+                const priorityColor = {0: '#3b82f6', 1: '#22c55e', 2: '#6b7280'}[r.priority] || '#3b82f6';
                 return `<div class="scope-chip">
                     <i class="fas fa-folder-open text-slate-300 text-[0.6rem]"></i>
                     <span class="pname">${pName}</span>
                     <span class="tag ${scopeCls}">${scopeLabel}${scopeVal}</span>
+                    <span class="tag" style="background:${priorityColor}15;color:${priorityColor};border:1px solid ${priorityColor}30;font-size:0.6rem;padding:0.05rem 0.25rem;border-radius:0.2rem;">${priorityLabel}</span>
                     <button class="del" onclick="event.stopPropagation();deleteResponsibility(${r.id})" title="移除"><i class="fas fa-times"></i></button>
                 </div>`;
             }).join('')}
@@ -706,9 +712,12 @@ function renderProjectsGroups(responsibilities) {
             let tagCls = 'def', tagLabel = '默认';
             if (r.scope_type === 'language') { tagCls = 'lang'; tagLabel = r.scope_value || '语言'; }
             else if (r.scope_type === 'rule_category') { tagCls = 'cat'; tagLabel = r.scope_value || '规则'; }
+            const priorityLabel = {0: '首要', 1: '第二责任人', 2: '第三责任人'}[r.priority] || '首要';
+            const priorityColor = {0: '#3b82f6', 1: '#22c55e', 2: '#6b7280'}[r.priority] || '#3b82f6';
             return `<div class="steward-chip" title="${escapeHtml(member.gitlab_username || '')}">
                 <span class="name">${escapeHtml(member.display_name || member.username || '—')}</span>
                 <span class="tag ${tagCls}">${escapeHtml(tagLabel)}</span>
+                <span class="tag" style="background:${priorityColor}15;color:${priorityColor};border-color:${priorityColor}30;">${priorityLabel}</span>
                 <button class="del" onclick="deleteResponsibility(${r.id})" title="移除"><i class="fas fa-times"></i></button>
             </div>`;
         }).join('');
@@ -818,9 +827,12 @@ async function openEditMember(id) {
         if (m.responsibilities?.length > 0) {
             dutyList.innerHTML = m.responsibilities.map(r => {
                 const project = allProjects.find(p => p.id == r.project_id);
+                const priorityLabel = {0: '首要', 1: '第二责任人', 2: '第三责任人'}[r.priority] || '首要';
+                const priorityColor = {0: 'bg-blue-50 text-blue-600', 1: 'bg-green-50 text-green-600', 2: 'bg-gray-50 text-gray-500'}[r.priority] || 'bg-blue-50 text-blue-600';
                 return `<div class="flex items-center gap-2 text-sm text-gray-600 bg-slate-50 px-3 py-2 rounded-md">
                     <span>${escapeHtml(project?.name || '项目#' + r.project_id)}</span>
                     <span class="text-xs bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">${r.scope_type}${r.scope_value ? ':' + r.scope_value : ''}</span>
+                    <span class="text-xs ${priorityColor} px-1.5 py-0.5 rounded">${priorityLabel}</span>
                 </div>`;
             }).join('');
         } else {
@@ -834,6 +846,11 @@ function addDutyRow() {
     const container = document.getElementById('dutyList');
     const id = 'duty_' + Date.now();
     const projectOptions = '<option value="">选择项目</option>' + allProjects.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+    const priorityOptions = `
+        <option value="0">首要责任人</option>
+        <option value="1">第二责任人</option>
+        <option value="2">第三责任人</option>
+    `;
     container.insertAdjacentHTML('beforeend', `<div class="duty-row-input" id="${id}">
         <select class="duty-project form-select" style="flex:2;">${projectOptions}</select>
         <select class="duty-type form-select" style="flex:1;min-width:0;" onchange="onDutyTypeChange(this)">
@@ -843,8 +860,9 @@ function addDutyRow() {
         </select>
         <div class="duty-val-wrap" style="flex:0 0 7rem;display:flex;flex-direction:column;gap:0.1rem;">
             <input type="text" class="duty-value form-input" placeholder="无需填写" style="flex:1;" disabled>
-            <span class="duty-hint text-[0.6rem] text-slate-400 leading-tight">默认职责自动覆盖全部</span>
+            <span class="duty-hint text-[0.6rem] text-slate-400 leading-tight" style="display:none;"></span>
         </div>
+        <select class="duty-priority form-select" style="flex:0 0 7rem;">${priorityOptions}</select>
         <button class="btn-remove" onclick="document.getElementById('${id}').remove()"><i class="fas fa-times"></i></button>
     </div>`);
 }
@@ -856,13 +874,13 @@ function onDutyTypeChange(sel) {
     const wrap = row.querySelector('.duty-val-wrap');
     if (sel.value === 'default') {
         valInput.disabled = true; valInput.value = ''; valInput.placeholder = '无需填写';
-        hint.textContent = '默认职责自动覆盖全部'; wrap.style.flex = '0 0 7rem';
+        hint.style.display = 'none'; wrap.style.flex = '0 0 7rem';
     } else if (sel.value === 'rule_category') {
         valInput.disabled = false; valInput.placeholder = '分类名';
-        hint.textContent = '如：security、performance'; wrap.style.flex = '0 0 8rem';
+        hint.textContent = '如：security、performance'; hint.style.display = ''; wrap.style.flex = '0 0 8rem';
     } else {
         valInput.disabled = false; valInput.placeholder = '语言';
-        hint.textContent = '如：golang、python、java'; wrap.style.flex = '0 0 8rem';
+        hint.textContent = '如：golang、python、java'; hint.style.display = ''; wrap.style.flex = '0 0 8rem';
     }
 }
 
@@ -900,10 +918,11 @@ async function saveMember() {
             const projectId = row.querySelector('.duty-project').value;
             const scopeType = row.querySelector('.duty-type').value;
             const scopeValue = row.querySelector('.duty-value').value.trim();
+            const priority = parseInt(row.querySelector('.duty-priority').value) || 0;
             if (!projectId) continue;
             await apiFetch(`${API_BASE}/team-members/${memberId}/responsibilities`, {
                 method: 'POST',
-                body: JSON.stringify({ project_id: parseInt(projectId), scope_type: scopeType, scope_value: scopeType === 'default' ? '' : scopeValue, priority: 0 })
+                body: JSON.stringify({ project_id: parseInt(projectId), scope_type: scopeType, scope_value: scopeType === 'default' ? '' : scopeValue, priority: priority })
             });
         }
         closeModal('memberModal');

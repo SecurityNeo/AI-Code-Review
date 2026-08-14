@@ -64,7 +64,6 @@ func (m *SnapshotManager) SaveInputSnapshot(execID uint, data map[string]interfa
 		return "", err
 	}
 
-	// 只要对象存储已配置，所有数据都走对象存储
 	if m.storage != nil {
 		key := fmt.Sprintf("pipeline/executions/%d/input_%d.json", execID, time.Now().Unix())
 		url, err := m.storage.Put(context.Background(), key, jsonBytes)
@@ -86,7 +85,7 @@ func (m *SnapshotManager) SaveInputSnapshot(execID uint, data map[string]interfa
 			zap.Uint("exec_id", execID), zap.Error(err))
 	}
 
-	// 未配置对象存储或写入失败，存入数据库
+	// 对象存储未配置或写入失败，存入数据库
 	err = model.DB.Model(&model.TaskPipelineExecution{}).
 		Where("id = ?", execID).
 		Update("input_snapshot", string(jsonBytes)).Error
@@ -103,7 +102,6 @@ func (m *SnapshotManager) SaveOutputSnapshot(execID uint, data map[string]interf
 		return "", err
 	}
 
-	// 只要对象存储已配置，所有数据都走对象存储（不再按 32KB 判断）
 	if m.storage != nil {
 		key := fmt.Sprintf("pipeline/executions/%d/output_%d.json", execID, time.Now().Unix())
 		url, err := m.storage.Put(context.Background(), key, jsonBytes)
@@ -125,7 +123,7 @@ func (m *SnapshotManager) SaveOutputSnapshot(execID uint, data map[string]interf
 			zap.Uint("exec_id", execID), zap.Error(err))
 	}
 
-	// 未配置对象存储或写入失败，存入数据库
+	// 对象存储未配置或写入失败，存入数据库
 	err = model.DB.Model(&model.TaskPipelineExecution{}).
 		Where("id = ?", execID).
 		Update("output_snapshot", string(jsonBytes)).Error

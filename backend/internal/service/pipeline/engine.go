@@ -145,7 +145,10 @@ func (e *Engine) ExecuteTask(taskID uint, inputs map[string]interface{}, broadca
 
 		execImpl, ok := e.executors[stageDef.Code]
 		if !ok {
-			zap.L().Warn("未找到阶段执行器", zap.String("code", stageDef.Code))
+			// 阶段在数据库中存在但代码中未注册（可能是已废弃的阶段），静默跳过，不记录 warn
+			zap.L().Debug("Pipeline 阶段在代码中未注册，已跳过",
+				zap.String("code", stageDef.Code),
+				zap.String("hint", "请检查数据库 review_pipeline_stages 是否存在废弃阶段定义"))
 			continue
 		}
 

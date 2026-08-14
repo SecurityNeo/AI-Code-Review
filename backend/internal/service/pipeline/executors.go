@@ -582,7 +582,12 @@ func (e *DependencyScanExecutor) effectiveEcosystems(ctx StageContext) []string 
 }
 
 func (e *DependencyScanExecutor) Execute(ctx StageContext) error {
-	diffFiles := ctx.GetInput("diff_files")
+	// 优先读取未过滤的原始 diff（包含 go.mod / package.json 等依赖清单）
+	// 如果原始 diff 不存在（如旧任务），则回退到过滤后的 diff_files
+	diffFiles := ctx.GetInput("diff_files_raw")
+	if diffFiles == nil {
+		diffFiles = ctx.GetInput("diff_files")
+	}
 	if diffFiles == nil {
 		ctx.SetOutput("dependency_vulns", []engine.DependencyVuln{})
 		ctx.SetOutput("dependency_risk_score", 100)
@@ -681,33 +686,113 @@ func (e *DependencyScanExecutor) Execute(ctx StageContext) error {
 		"status":                "success",
 		"dependency_vuln_count": depVulnCount,
 		"dependency_risk_score": dependencyRiskScore,
-		"dependency_vulns":      depVulnMatches,
+		"dependency_vulns":      dependencyVulns,
 		"deps_parsed":           len(allDeps),
 		"direct_deps":           directDepCount,
 		"indirect_deps":         indirectDepCount,
-		"ecosystem_filter":      ecofilter,
 	})
+
 	return nil
 }
 
+// getFileContent 获取文件内容：
+// 1. 优先从 context_extract 输出的 file_contents 中获取（完整文件内容）
+// 2. 其次从 diff_files_raw / diff_files 的 "content" 字段获取
+// 3. 最后从 diff 字段解析出完整内容（新增/修改的依赖清单文件通常是完整或近完整内容）
 func (e *DependencyScanExecutor) getFileContent(ctx StageContext, filePath string) string {
+	// 1. 从 context_extract 输出的 file_contents 中查找
 	if fc, ok := ctx.GetOutput("file_contents").(map[string]string); ok {
 		if content, exists := fc[filePath]; exists && content != "" {
 			return content
 		}
 	}
-	if files := ctx.GetInput("diff_files"); files != nil {
-		if fileMaps, ok := files.([]map[string]interface{}); ok {
-			for _, f := range fileMaps {
-				if p, _ := f["path"].(string); p == filePath {
+	// 2. 从 diff 列表的 "content" 字段中查找
+	for _, key := range []string{"diff_files_raw", "diff_files"} {
+		if files := ctx.GetInput(key); files != nil {
+			if fileMaps, ok := files.([]map[string]interface{}); ok {
+				for _, f := range fileMaps {
+					if p, _ := f["path"].(string); p != filePath {
+						continue
+					}
 					if content, ok := f["content"].(string); ok && content != "" {
 						return content
+					}
+					// 3. 从 diff 字段解析完整内容（关键！被过滤后 file_contents 缺失时，diff 中仍有内容）
+					if diffText, ok := f["diff"].(string); ok && diffText != "" {
+						content := extractContentFromDiff(diffText)
+						if content != "" {
+							return content
+						}
 					}
 				}
 			}
 		}
 	}
 	return ""
+}
+
+// extractContentFromDiff 从 unified diff 字符串中提取完整的新文件内容
+// 对于新增文件，diff 中的 + 行去掉 + 后即为完整内容；
+// 对于修改文件，保留上下文行（空格前缀）和 + 行（去掉 +），去掉 - 行和 diff header。
+func extractContentFromDiff(diffText string) string {
+	lines := strings.Split(diffText, "\n")
+	var result []string
+	inHunk := false
+	for _, line := range lines {
+		if len(line) == 0 {
+			// 空行：如果已经进入 hunk，保留作为内容的一部分
+			if inHunk {
+				result = append(result, "")
+			}
+			continue
+		}
+		// diff header 行：跳过
+		if strings.HasPrefix(line, "diff --git") ||
+			strings.HasPrefix(line, "index ") ||
+			strings.HasPrefix(line, "--- ") ||
+			strings.HasPrefix(line, "+++ ") ||
+			strings.HasPrefix(line, "@@") {
+			inHunk = true
+			continue
+		}
+		// new file mode / deleted file mode / old mode / new mode
+		if strings.HasPrefix(line, "new file mode") ||
+			strings.HasPrefix(line, "deleted file mode") ||
+			strings.HasPrefix(line, "old mode") ||
+			strings.HasPrefix(line, "new mode") ||
+			strings.HasPrefix(line, "similarity index") ||
+			strings.HasPrefix(line, "rename from") ||
+			strings.HasPrefix(line, "rename to") ||
+			strings.HasPrefix(line, "Binary files") {
+			continue
+		}
+		if !inHunk {
+			// 不在 hunk 中，遇到非 header 行，可能是 "\\ No newline at end of file"
+			if strings.HasPrefix(line, "\\ No newline") {
+				continue
+			}
+			// 如果还没进入 hunk（如文件没有内容变更但有 mode 变更），也不处理
+			continue
+		}
+		// hunk 内容行
+		switch line[0] {
+		case '+':
+			result = append(result, line[1:])
+		case '-':
+			// 删除行：在新版本中不存在，跳过
+			continue
+		case ' ':
+			// 上下文行：保留（去掉前导空格）
+			result = append(result, line[1:])
+		case '\\':
+			// "\ No newline at end of file"
+			continue
+		default:
+			// 意外情况，保留原行
+			result = append(result, line)
+		}
+	}
+	return strings.Join(result, "\n")
 }
 
 func stringSliceContains(arr []string, s string) bool {
@@ -1304,8 +1389,13 @@ func (e *PostProcessExecutor) Execute(ctx StageContext) error {
 	promptCtx := getPromptContext(ctx)
 	var report string
 	if promptCtx != nil {
+		// 从 dependency_scan 阶段输出获取漏洞结果（prompt_ctx 中的 DependencyVulns 可能为空）
+		var depVulns []engine.DependencyVuln
+		if v, ok := ctx.GetOutput("dependency_vulns").([]engine.DependencyVuln); ok {
+			depVulns = v
+		}
 		var err error
-		report, err = engine.AssembleFullMarkdownReport(result, promptCtx.GitLabCommentTemplate, promptCtx.DependencyVulns)
+		report, err = engine.AssembleFullMarkdownReport(result, promptCtx.GitLabCommentTemplate, depVulns)
 		if err != nil {
 			zap.L().Warn("Pipeline: 组装完整报告失败，回退到简易报告", zap.Error(err))
 			report = fmt.Sprintf("## 🤖 AI 代码评审报告\n\n**综合评分：%d/100**\n\n%s",
@@ -1353,6 +1443,10 @@ func (e *PostProcessExecutor) Execute(ctx StageContext) error {
 
 	// 更新 AIResponse（Markdown 报告）
 	model.DB.Model(&model.Task{}).Where("id = ?", task.ID).Update("ai_response", report)
+
+	// 将报告写入 Pipeline 共享输出，供 engine markTaskSuccess 读取（防止被覆盖为空）
+	ctx.SetOutput("final_report", report)
+	ctx.SetOutput("score", score)
 
 	ctx.SaveInputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
 		"task_id":      task.ID,

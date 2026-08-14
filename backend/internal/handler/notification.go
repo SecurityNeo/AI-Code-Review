@@ -694,6 +694,7 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 		baselineStr = baseline.Format(time.RFC3339)
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{
+		"current_user_id":          user.ID,
 		"notification_baseline_at": baselineStr,
 		"show_legacy":              showLegacy,
 		"pending_count":            pendingCount,

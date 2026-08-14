@@ -77,6 +77,7 @@ type Task struct {
 	AIResponseJSON      string              `gorm:"type:json;column:ai_response_json" json:"ai_response_json"` // 结构化评审原始 JSON
 	DimensionScores     string              `gorm:"type:json;column:dimension_scores" json:"dimension_scores"` // 各维度评分
 	DiffFilesJSON       string              `gorm:"type:json;column:diff_files_json" json:"diff_files_json"`   // diff 文件列表 JSON（用于任务详情展示）
+	DiffFilterStats     string              `gorm:"type:json;column:diff_filter_stats" json:"diff_filter_stats"` // diff 文件过滤统计 JSON
 	IssueCount          int                 `gorm:"default:0;column:issue_count" json:"issue_count"`           // issue 总数
 	RetryCount          int                 `gorm:"default:0" json:"retry_count"`
 	ScoreValue          int                 `gorm:"default:0" json:"score_value"`                      // 评分值（后置校验后，可参考分）
@@ -96,6 +97,9 @@ func (t *Task) BeforeCreate(tx *gorm.DB) error {
 	if t.DiffFilesJSON == "" {
 		t.DiffFilesJSON = "[]"
 	}
+	if t.DiffFilterStats == "" {
+		t.DiffFilterStats = "{}"
+	}
 	if t.DimensionScores == "" {
 		t.DimensionScores = "{}"
 	}
@@ -109,6 +113,9 @@ func (t *Task) BeforeCreate(tx *gorm.DB) error {
 func (t *Task) BeforeUpdate(tx *gorm.DB) error {
 	if t.DiffFilesJSON == "" {
 		t.DiffFilesJSON = "[]"
+	}
+	if t.DiffFilterStats == "" {
+		t.DiffFilterStats = "{}"
 	}
 	if t.DimensionScores == "" {
 		t.DimensionScores = "{}"

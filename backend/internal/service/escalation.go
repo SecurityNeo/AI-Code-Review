@@ -487,27 +487,48 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 					fmt.Sprintf("Issue #%d 已超期 %s\n项目：%s\nMR：%s\n问题：%s\n请立即处理，否则将进一步升级。",
 						issue.ID, dur, project.Name, task.MRTitle, issue.Message))
 			}
-			for _, st := range stewards {
-				s.collectAlert(st.MemberID, level, model.NotificationTypeIssueEscalation,
-					"Issue 协助督促（已超期 "+formatDuration(stage.ThresholdHours)+"）",
-					fmt.Sprintf("协助督促：Issue #%d\n任务ID：%d\n项目：%s\nMR：%s\n开发者：%s\n问题：%s\n请协助督促处理。",
-						issue.ID, task.ID, project.Name, task.MRTitle, task.MRAuthor, issue.Message))
-			}
-			if stage.NotifyIM {
-				mentions := buildStewardMentions(stewards)
-				zap.L().Info("processEscalation Level2 collectIM",
-					zap.Uint("issue_id", issue.ID),
-					zap.Int("mention_count", len(mentions)),
-					zap.Strings("mentions", mentions))
-				s.collectIM(imTarget{
-					project:        project,
-					task:           task,
-					stage:          "72h",
-					level:          level,
-					thresholdHours: stage.ThresholdHours,
-					mentions:       mentions,
-					imTemplate:     stage.IMTemplate,
-				}, issue.ID, issue.Message)
+			// 收集有 IM 的 steward 用于兜底通知（即使映射失败也能通过 IM 通知到）
+			var imMentions []string
+			if len(stewards) > 0 {
+				// 更新 current_owner_id，让 steward 能在 Dashboard 看到
+				primaryUserID, err := s.getUserIDByMemberID(stewards[0].MemberID)
+				if err == nil && primaryUserID > 0 {
+					model.DB.Model(issue).UpdateColumn("current_owner_id", primaryUserID)
+					issue.CurrentOwnerID = &primaryUserID
+				} else if err != nil {
+					zap.L().Error("escalation L2: failed to map primary steward to user id",
+						zap.Uint("member_id", stewards[0].MemberID), zap.Error(err))
+				}
+				for _, st := range stewards {
+					notifyUserID, err := s.getUserIDByMemberID(st.MemberID)
+					if err != nil {
+						zap.L().Warn("escalation L2: skip steward alert, no mapped user id",
+							zap.Uint("member_id", st.MemberID),
+							zap.String("gitlab_username", st.Member.GitlabUsername),
+							zap.Error(err))
+					} else {
+						s.collectAlert(notifyUserID, level, model.NotificationTypeIssueEscalation,
+							"Issue 协助督促（已超期 "+formatDuration(stage.ThresholdHours)+"）",
+							fmt.Sprintf("协助督促：Issue #%d\n任务ID：%d\n项目：%s\nMR：%s\n开发者：%s\n问题：%s\n请协助督促处理。",
+								issue.ID, task.ID, project.Name, task.MRTitle, task.MRAuthor, issue.Message))
+					}
+					// 收集 IMUserID 用于兜底（IM 链路不依赖 users.id）
+					if st.Member.IMUserID != "" {
+						imMentions = append(imMentions, fmt.Sprintf("<%@s>", st.Member.IMUserID))
+					}
+				}
+				// 最后发送一条 IM 兜底通知（包含所有 steward 的 @mention）
+				if len(imMentions) > 0 && stage.NotifyIM {
+					s.collectIM(imTarget{
+						project:        project,
+						task:           task,
+						stage:          "72h",
+						level:          level,
+						thresholdHours: stage.ThresholdHours,
+						mentions:       imMentions,
+						imTemplate:     stage.IMTemplate,
+					}, issue.ID, issue.Message)
+				}
 			}
 
 		case EscalationLevel120hSteward:
@@ -518,12 +539,27 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 				zap.String("category", issue.Category),
 				zap.String("language", project.Language))
 			if len(stewards) > 0 {
-				model.DB.Model(issue).UpdateColumn("current_owner_id", stewards[0].MemberID)
-				// 同步更新内存指针，确保后续归档通知能发给新责任人
-				issue.CurrentOwnerID = &stewards[0].MemberID
+				primaryUserID, err := s.getUserIDByMemberID(stewards[0].MemberID)
+				if err != nil {
+					zap.L().Error("escalation L3: failed to map primary steward to user id",
+						zap.Uint("member_id", stewards[0].MemberID), zap.Error(err))
+					// 不写入错误数据，保持原值
+				} else {
+					model.DB.Model(issue).UpdateColumn("current_owner_id", primaryUserID)
+					// 同步更新内存指针，确保后续归档通知能发给新责任人
+					issue.CurrentOwnerID = &primaryUserID
+				}
 				dur := formatDuration(stage.ThresholdHours)
 				for _, st := range stewards {
-					s.collectAlert(st.MemberID, level, model.NotificationTypeIssueEscalation,
+					notifyUserID, err := s.getUserIDByMemberID(st.MemberID)
+					if err != nil {
+						zap.L().Warn("escalation L3: skip steward alert, no mapped user id",
+							zap.Uint("member_id", st.MemberID),
+							zap.String("gitlab_username", st.Member.GitlabUsername),
+							zap.Error(err))
+						continue
+					}
+					s.collectAlert(notifyUserID, level, model.NotificationTypeIssueEscalation,
 						"Issue 正式升级（已超期 "+dur+"）",
 						fmt.Sprintf("Issue #%d 已升级给您处理\n任务ID：%d\n项目：%s\nMR：%s\n开发者：%s\n问题：%s\n请尽快协助处理。",
 							issue.ID, task.ID, project.Name, task.MRTitle, task.MRAuthor, issue.Message))
@@ -619,6 +655,23 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 
 	// 3. 统一更新已处理层级到最高 level
 	model.DB.Model(issue).Updates(map[string]interface{}{"escalation_level": maxLevel})
+}
+
+// getUserIDByMemberID 将 team_members.id 映射为 users.id
+// 匹配链路：team_members.id → team_members.gitlab_username → users.gitlab_username → users.id
+func (s *EscalationService) getUserIDByMemberID(memberID uint) (uint, error) {
+	var tm model.TeamMember
+	if err := model.DB.First(&tm, memberID).Error; err != nil {
+		return 0, fmt.Errorf("team_member not found id=%d: %w", memberID, err)
+	}
+	if tm.GitlabUsername == "" {
+		return 0, fmt.Errorf("team_member %d has empty gitlab_username", memberID)
+	}
+	var user model.User
+	if err := model.DB.Where("LOWER(gitlab_username) = LOWER(?)", tm.GitlabUsername).First(&user).Error; err != nil {
+		return 0, fmt.Errorf("user not found for gitlab_username=%s: %w", tm.GitlabUsername, err)
+	}
+	return user.ID, nil
 }
 
 // findStewards 查找项目指定维度的负责人（category → language → default）
@@ -734,7 +787,15 @@ func (s *EscalationService) checkBatchAlerts() {
 		}
 		stewards := s.findStewards(r.ProjectID, "", "")
 		for _, st := range stewards {
-			s.notifSvc.SendInbox(st.MemberID, model.NotificationTypeBatchAlert,
+			notifyUserID, err := s.getUserIDByMemberID(st.MemberID)
+			if err != nil {
+				zap.L().Warn("checkBatchAlerts: skip steward alert, no mapped user id",
+					zap.Uint("member_id", st.MemberID),
+					zap.String("gitlab_username", st.Member.GitlabUsername),
+					zap.Error(err))
+				continue
+			}
+			s.notifSvc.SendInbox(notifyUserID, model.NotificationTypeBatchAlert,
 				fmt.Sprintf("【项目告警】%s 积压 %d 条未处理 Issue", project.Name, r.PendingCount),
 				fmt.Sprintf("项目 %s 当前有 %d 条 Issue 待处理，建议关注。", project.Name, r.PendingCount),
 				"",

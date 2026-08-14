@@ -6,3 +6,4 @@ backend/main
 .vscode
 query_minio.py
 docs/*.md
+AGENTS.md

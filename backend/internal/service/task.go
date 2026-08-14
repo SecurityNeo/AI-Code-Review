@@ -1097,6 +1097,49 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 		return s.failReviewTask(task, err.Error())
 	}
 
+	// 【注意】保存原始 diff 副本（用于漏洞扫描读取 go.mod 等依赖清单）
+	var diffFilesRaw []gitlab.DiffFile
+	if len(diffFiles) > 0 {
+		diffFilesRaw = make([]gitlab.DiffFile, len(diffFiles))
+		copy(diffFilesRaw, diffFiles)
+	}
+
+	// 【新增】应用文件过滤规则（依赖文件/第三方代码排除）
+	// 过滤后的 diffFiles 供除 dependency_scan 外的所有阶段共享
+	var filterAgentCfg model.ReviewAgentConfig
+	if err := model.DB.First(&filterAgentCfg, 1).Error; err == nil {
+		filterCfg := engine.LoadFileFilterConfig(filterAgentCfg)
+		lang := ""
+		if task.Project.Language != "" {
+			lang = task.Project.Language
+		}
+		matcher := engine.NewFileMatcher(filterCfg, lang)
+		var stats engine.FilterStats
+		diffFiles, stats = engine.FilterDiffFiles(diffFiles, matcher)
+
+		if stats.Filtered > 0 {
+			zap.L().Info("Pipeline: diff 文件已过滤",
+				zap.Uint("task_id", task.ID),
+				zap.Int("total", stats.Total),
+				zap.Int("kept", stats.Kept),
+				zap.Int("filtered", stats.Filtered),
+				zap.Strings("filtered_paths", stats.FilteredPaths))
+		}
+
+		// 如果所有文件都被过滤，记录警告日志（Pipeline 后续阶段会优雅处理空文件列表）
+		if stats.Total > 0 && stats.Kept == 0 {
+			zap.L().Warn("Pipeline: 所有 diff 文件均已被过滤",
+				zap.Uint("task_id", task.ID),
+				zap.Int("filtered_count", stats.Filtered),
+				zap.Strings("filtered_paths", stats.FilteredPaths))
+		}
+
+		// 持久化过滤统计（供前端展示）
+		if err := model.DB.Model(&task).Update("diff_filter_stats", engine.MarshalFilterStats(stats)).Error; err != nil {
+			zap.L().Warn("Pipeline: 保存 diff 过滤统计失败", zap.Uint("task_id", task.ID), zap.Error(err))
+		}
+	}
+
 	// 限制最多 N 个文件
 	maxDiffFiles := SysCfgMaxDiffFiles()
 	if len(diffFiles) > maxDiffFiles {
@@ -1196,6 +1239,17 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 			"deletions": f.Deletions,
 		})
 	}
+	// 原始未过滤 diff（供 dependency_scan 读取 go.mod / package.json 等依赖清单）
+	var fileMapsRaw []map[string]interface{}
+	for _, f := range diffFilesRaw {
+		fileMapsRaw = append(fileMapsRaw, map[string]interface{}{
+			"path":      f.NewPath,
+			"old_path":  f.OldPath,
+			"diff":      f.Diff,
+			"additions": f.Additions,
+			"deletions": f.Deletions,
+		})
+	}
 
 	// 11. AST 上下文提取
 	lang := detectLanguage(fileMaps)
@@ -1230,7 +1284,8 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 
 	// 14. 注入 Pipeline Context
 	inputs := map[string]interface{}{
-		"diff_files":          fileMaps,
+		"diff_files":          fileMaps,     // 过滤后的 diff，供 review/secret_scan/impact_analysis 等共享
+		"diff_files_raw":      fileMapsRaw,  // 原始未过滤 diff，供 dependency_scan 读取 go.mod/package.json 等
 		"commits_text":        commitsText,
 		"project_template":    projectTemplate.Prompt,
 		"prompt_context":      promptCtx,

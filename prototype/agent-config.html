@@ -88,6 +88,47 @@
                 </label>
             </div>
 
+            <!-- 文件过滤配置 -->
+            <div class="bg-white rounded-xl border p-5 mb-6">
+                <h3 class="text-sm font-semibold text-gray-700 mb-3">文件过滤</h3>
+                <p class="text-xs text-gray-500 mb-4">配置评审时自动排除的依赖文件和第三方代码目录，减少 Token 浪费和误报</p>
+                
+                <div class="form-check mb-3">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="enableDefaultFilters" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500">
+                        <span class="text-sm text-gray-700">启用默认过滤规则（按项目语言自动匹配）</span>
+                    </label>
+                </div>
+                
+                <!-- 默认规则展示面板 -->
+                <div class="mb-4">
+                    <button type="button" onclick="toggleDefaultPatterns()" class="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1">
+                        <i class="fas fa-chevron-down" id="defaultPatternsIcon"></i>
+                        <span id="defaultPatternsText">查看默认排除规则</span>
+                    </button>
+                    <div id="defaultPatternsPanel" class="hidden mt-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                        <div id="defaultPatternsContent" class="text-xs">
+                            <p class="text-gray-400">加载中...</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">自定义排除规则（glob 语法，每行一个）</label>
+                    <textarea id="excludePatterns" rows="4" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="vendor/**
+node_modules/**
+go.sum"></textarea>
+                    <p class="text-[10px] text-gray-400 mt-1">支持 glob 语法：* 匹配任意字符，** 匹配任意层级目录</p>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">自定义包含规则（白名单，覆盖排除规则）</label>
+                    <textarea id="includePatterns" rows="2" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="vendor/mycompany/**
+!*.important.log"></textarea>
+                    <p class="text-[10px] text-gray-400 mt-1">白名单优先级高于排除规则。如果某路径同时匹配排除和白名单，则保留该文件。</p>
+                </div>
+            </div>
+
             <!-- 操作按钮 -->
             <div class="flex gap-3">
                 <button onclick="saveConfig()" class="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 font-medium">
@@ -510,6 +551,11 @@ function loadConfig() {
             });
             renderStages(data.enabled_stages, mergedConfigs, data.trigger_events);
             document.getElementById('showAgentStatus').checked = data.show_agent_status !== false;
+            // 回显文件过滤配置
+            const ffCfg = (data.stage_configs && data.stage_configs['file_filter']) || {};
+            document.getElementById('enableDefaultFilters').checked = ffCfg.enable_default_filters !== false;
+            document.getElementById('excludePatterns').value = (ffCfg.exclude_patterns || []).join('\n');
+            document.getElementById('includePatterns').value = (ffCfg.include_patterns || []).join('\n');
             if (data.updated_at) {
                 const d = new Date(data.updated_at);
                 document.getElementById('lastUpdateInfo').textContent = 
@@ -637,6 +683,16 @@ function saveConfig() {
         }
     });
 
+    // 读取文件过滤配置
+    const fileFilterCfg = {
+        enable_default_filters: document.getElementById('enableDefaultFilters').checked,
+        exclude_patterns: document.getElementById('excludePatterns').value
+            .split('\n').map(s => s.trim()).filter(s => s),
+        include_patterns: document.getElementById('includePatterns').value
+            .split('\n').map(s => s.trim()).filter(s => s)
+    };
+    stageConfigs['file_filter'] = fileFilterCfg;
+
     // 【已移除】不再校验已启用阶段的超时时间之和是否超过系统任务总超时
     // AI 评审类任务的超时控制已转移到后端 TaskService.TimeoutCheck()，
     // 使用各阶段超时之和 + 30 分钟宽裕时间独立计算，不再受系统配置限制。
@@ -676,7 +732,77 @@ function resetToDefault() {
     });
     renderStages(defaultStages, defaultStageConfigs, TRIGGER_EVENT_DEFS.map(e => e.code));
     document.getElementById('showAgentStatus').checked = true;
+    // 重置文件过滤配置为默认
+    document.getElementById('enableDefaultFilters').checked = true;
+    document.getElementById('excludePatterns').value = '';
+    document.getElementById('includePatterns').value = '';
     showToast('已恢复默认配置，请点击保存', 'info');
+}
+
+// ========== 文件过滤：默认规则展示 ==========
+let defaultFilterPatterns = null;
+
+function toggleDefaultPatterns() {
+    const panel = document.getElementById('defaultPatternsPanel');
+    const icon = document.getElementById('defaultPatternsIcon');
+    const text = document.getElementById('defaultPatternsText');
+    
+    if (panel.classList.contains('hidden')) {
+        panel.classList.remove('hidden');
+        icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
+        text.textContent = '隐藏默认排除规则';
+        if (!defaultFilterPatterns) {
+            loadDefaultFilterPatterns();
+        }
+    } else {
+        panel.classList.add('hidden');
+        icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
+        text.textContent = '查看默认排除规则';
+    }
+}
+
+async function loadDefaultFilterPatterns() {
+    const contentEl = document.getElementById('defaultPatternsContent');
+    try {
+        const res = await apiFetch('/api/v1/review-agent-config/file-filter-defaults');
+        if (res.code !== 0 || !res.data) {
+            contentEl.innerHTML = '<p class="text-red-400">加载失败</p>';
+            return;
+        }
+        defaultFilterPatterns = res.data;
+        
+        let html = '';
+        
+        // 通用规则
+        if (res.data.common && res.data.common.length > 0) {
+            html += '<div class="mb-3"><strong class="text-gray-600">通用规则</strong><div class="flex flex-wrap gap-1 mt-1">';
+            res.data.common.forEach(p => {
+                html += `<span class="px-2 py-0.5 bg-gray-200 text-gray-700 rounded text-[10px] font-mono">${escapeHtml(p)}</span>`;
+            });
+            html += '</div></div>';
+        }
+        
+        // 各语言规则
+        if (res.data.languages) {
+            Object.entries(res.data.languages).forEach(([lang, patterns]) => {
+                html += `<div class="mb-3"><strong class="text-gray-600 capitalize">${escapeHtml(lang)}</strong><div class="flex flex-wrap gap-1 mt-1">`;
+                patterns.forEach(p => {
+                    html += `<span class="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-[10px] font-mono border border-blue-100">${escapeHtml(p)}</span>`;
+                });
+                html += '</div></div>';
+            });
+        }
+        
+        contentEl.innerHTML = html || '<p class="text-gray-400">暂无默认规则</p>';
+    } catch (e) {
+        contentEl.innerHTML = '<p class="text-red-400">加载失败: ' + escapeHtml(e.message) + '</p>';
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 </script>
 

@@ -204,6 +204,9 @@
         <div class="flex items-center gap-2">
             <span id="detailTaskTypeBadge" class="task-type-badge review">AI评审</span>
             <span id="detailStatusBadge" class="status-badge status-success">成功</span>
+            <button onclick="refreshTask()" id="refreshBtn" class="px-3 py-2 bg-white border rounded-lg text-sm hover:bg-gray-50 text-gray-600 transition-colors ml-1" title="刷新任务状态">
+                <i class="fas fa-sync-alt mr-1" id="refreshIcon"></i>刷新
+            </button>
         </div>
     </div>
 
@@ -251,6 +254,14 @@
                     <span id="detailAdditions" class="text-green-600">-</span>
                     <span class="text-gray-300 mx-1.5">/</span>
                     <span id="detailDeletions" class="text-red-600">-</span>
+                </div>
+                <span class="text-gray-200">|</span>
+                <div id="detailFilterStats"
+                     class="hidden flex items-center gap-1.5 text-amber-600 cursor-pointer hover:text-amber-700"
+                     title="点击查看已过滤文件"
+                     onclick="showFilteredFilesInDiffTab()">
+                    <i class="fas fa-filter text-amber-500 text-xs"></i>
+                    <span class="text-xs font-medium">已过滤 <span id="detailFilterCount">0</span> 个文件</span>
                 </div>
             </div>
         </div>
@@ -348,6 +359,19 @@
                 <div id="tab-diff" class="tab-pane active">
                     <div class="flex gap-4 h-[600px]">
                         <div class="w-80 flex-shrink-0 border-r pr-4 overflow-y-auto">
+                            <!-- 已过滤文件列表（有数据时显示） -->
+                            <div id="filteredFilesPanel" class="hidden mb-3">
+                                <button type="button" onclick="toggleFilteredFiles()" class="w-full flex items-center justify-between px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700 hover:bg-amber-100 transition-colors">
+                                    <span class="flex items-center gap-1.5">
+                                        <i class="fas fa-filter text-amber-500"></i>
+                                        <span>已过滤 <span id="filteredFilesCountBadge">0</span> 个文件</span>
+                                    </span>
+                                    <i class="fas fa-chevron-down transition-transform" id="filteredFilesIcon"></i>
+                                </button>
+                                <div id="filteredFilesList" class="hidden mt-1 space-y-0.5 max-h-40 overflow-y-auto">
+                                    <!-- 动态填充 -->
+                                </div>
+                            </div>
                             <h4 class="text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wider">变更文件</h4>
                             <div id="diffFileTree" class="space-y-0">
                                 <div class="text-sm text-gray-400 py-8 text-center">加载中...</div>
@@ -574,6 +598,40 @@ async function loadTask() {
     }
 }
 
+async function refreshTask() {
+    const btn = document.getElementById('refreshBtn');
+    const icon = document.getElementById('refreshIcon');
+    if (!btn || btn.disabled) return;
+    btn.disabled = true;
+    icon.classList.add('fa-spin');
+    try {
+        // 重新加载任务主数据
+        await loadTask();
+        // 重新加载 Pipeline executions（如果当前正在展示 Pipeline Tab）
+        const pipelineTab = document.getElementById('pipelineTab');
+        if (pipelineTab && pipelineTab.classList.contains('active')) {
+            await loadPipelineExecutions();
+        }
+        // 重新加载 Token 使用量（如果当前展示的是 Token 开销 Tab）
+        const tokenTab = document.getElementById('tokenTab');
+        if (tokenTab && tokenTab.classList.contains('active')) {
+            await loadTaskTokenUsage(true);
+        }
+        // 重新加载评审规则（如果当前展示的是评审报告 Tab）
+        const reportTab = document.getElementById('reportTab');
+        if (reportTab && reportTab.classList.contains('active') && currentTask && currentTask.task_type === 'review') {
+            loadTaskReviewRules(currentTask.id);
+        }
+        showToast('刷新成功', 'success');
+    } catch (e) {
+        console.error('刷新失败:', e);
+        showToast('刷新失败: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        icon.classList.remove('fa-spin');
+    }
+}
+
 function renderTaskMeta(t) {
     // 顶部标签
     document.getElementById('detailTaskId').textContent = '#' + t.id;
@@ -661,7 +719,42 @@ function renderTaskMeta(t) {
     document.getElementById('detailAdditions').textContent = totalAdd > 0 ? '+' + totalAdd : '-';
     document.getElementById('detailDeletions').textContent = totalDel > 0 ? '-' + totalDel : '-';
 
-    // 失败原因面板：失败/超时/停止 且 error_msg 非空时显示
+    // 文件过滤统计
+    const filterStatsEl = document.getElementById('detailFilterStats');
+    const filterCountEl = document.getElementById('detailFilterCount');
+    const filteredPanel = document.getElementById('filteredFilesPanel');
+    const filteredList = document.getElementById('filteredFilesList');
+    const filteredCountBadge = document.getElementById('filteredFilesCountBadge');
+    
+    if (t.diff_filter_stats && t.diff_filter_stats !== '{}' && t.diff_filter_stats !== 'null') {
+        try {
+            const stats = JSON.parse(t.diff_filter_stats);
+            if (stats.filtered > 0) {
+                filterCountEl.textContent = stats.filtered;
+                filteredCountBadge.textContent = stats.filtered;
+                filterStatsEl.classList.remove('hidden');
+                // 变更 Tab 中展示过滤列表
+                filteredPanel.classList.remove('hidden');
+                if (stats.filtered_paths && Array.isArray(stats.filtered_paths)) {
+                    filteredList.innerHTML = stats.filtered_paths.map(p => `
+                        <div class="px-3 py-1.5 text-[11px] text-gray-500 bg-gray-50 rounded truncate flex items-center gap-1.5" title="${escapeHtml(p)}">
+                            <i class="fas fa-times-circle text-red-400 text-[10px]"></i>
+                            <span class="truncate">${escapeHtml(p)}</span>
+                        </div>
+                    `).join('');
+                }
+            } else {
+                filterStatsEl.classList.add('hidden');
+                filteredPanel.classList.add('hidden');
+            }
+        } catch (e) {
+            filterStatsEl.classList.add('hidden');
+            filteredPanel.classList.add('hidden');
+        }
+    } else {
+        filterStatsEl.classList.add('hidden');
+        filteredPanel.classList.add('hidden');
+    }
     const errorPanel = document.getElementById('detailErrorPanel');
     const errorMsgEl = document.getElementById('detailErrorMsg');
     const showableFail = ['failed', 'timeout', 'stopped'].includes(t.status);
@@ -1924,6 +2017,34 @@ function showToast(message, type="success") {
     setTimeout(() => toast.remove(), 3000);
 }
 
+// ========== 文件过滤展示 ==========
+function toggleFilteredFiles() {
+    const list = document.getElementById('filteredFilesList');
+    const icon = document.getElementById('filteredFilesIcon');
+    if (list.classList.contains('hidden')) {
+        list.classList.remove('hidden');
+        icon.style.transform = 'rotate(180deg)';
+    } else {
+        list.classList.add('hidden');
+        icon.style.transform = '';
+    }
+}
+
+function showFilteredFilesInDiffTab() {
+    switchTab('diff');
+    // 等待 Tab 切换后展开过滤列表
+    setTimeout(() => {
+        const panel = document.getElementById('filteredFilesPanel');
+        if (panel && !panel.classList.contains('hidden')) {
+            const list = document.getElementById('filteredFilesList');
+            const icon = document.getElementById('filteredFilesIcon');
+            if (list && list.classList.contains('hidden')) {
+                toggleFilteredFiles();
+            }
+        }
+    }, 50);
+}
+
 async function showReviewMarkdownModal() {
     // 确保弹窗内容已加载（用户可能未切换到评审报告 tab）
     if (!currentStructuredReview) {
@@ -2086,8 +2207,23 @@ const stageIconMap = {
     'batch_review_frame': 'fa-robot',
     'batch_plan': 'fa-list-ol',
     'batch_summary': 'fa-clipboard-check',
+    'review_arbitration': 'fa-gavel',
     'post_process': 'fa-flag-checkered',
 };
+
+const ALL_STAGE_CODES = [
+    'trigger_check',
+    'git_clone',
+    'context_extract',
+    'dependency_scan',
+    'secret_scan',
+    'security_audit',
+    'test_suggestion',
+    'impact_analysis',
+    'batch_review_frame',
+    'review_arbitration',
+    'post_process',
+];
 
 const stageNameMap = {
     'trigger_check': '触发过滤器',
@@ -2122,10 +2258,36 @@ const stageDescMap = {
 };
 
 function renderPipeline(data) {
-    const stages = data.stages || [];
+    const rawStages = data.stages || [];
+
+    // 将后端返回的阶段按 code 建立映射
+    const rawStageMap = {};
+    rawStages.forEach(s => {
+        rawStageMap[s.stage_code || s.code] = s;
+    });
+
+    // 合并完整阶段列表：始终展示所有阶段，未执行的显示为 pending
+    const mergedStages = ALL_STAGE_CODES.map(code => {
+        if (rawStageMap[code]) {
+            return rawStageMap[code];
+        }
+        // 未执行的阶段：pending 占位
+        return {
+            stage_code: code,
+            status: 'pending',
+            name: stageNameMap[code] || code,
+        };
+    });
+
+    const stages = mergedStages;
+
+    // 从 batch_plan 阶段获取计划总批次数（用于正确的进度统计）
+    const planStage = rawStages.find(s => s.stage_code === 'batch_plan');
+    const batchPlan = planStage?.output_snapshot?.plan || {};
+    const plannedBatchCount = batchPlan.batch_count || 0;
 
     // 计算概览统计
-    // 总阶段数 = 非Group顶层阶段(各算1个) + Group的子阶段(每个算1个)
+    // 总阶段数 = 非Group顶层阶段各算1个 + batch_review_frame 的子阶段按 plan 中计划的批次数算
     let totalStages = 0;
     let completedMain = 0;
     let failedMain = 0;
@@ -2137,8 +2299,27 @@ function renderPipeline(data) {
         totalTokens += (s.input_tokens || 0) + (s.output_tokens || 0);
         totalDuration += s.duration_ms || 0;
 
-        if (s.has_children && s.children && s.children.length > 0) {
-            // Group 阶段（如 batch_review_frame）本身不算阶段数，由其子阶段代替
+        if (s.stage_code === 'batch_review_frame') {
+            // batch_review_frame 的子阶段总数量应按分批计划确定
+            // 因为后端在运行中可能只创建了部分批次的 execution 记录
+            const actualBatchCount = plannedBatchCount > 0
+                ? plannedBatchCount
+                : (s.children?.length || 0);
+
+            totalStages += actualBatchCount;
+
+            // 已完成/失败的子阶段按实际 children 统计
+            if (s.children && s.children.length > 0) {
+                s.children.forEach(c => {
+                    totalTokens += (c.input_tokens || 0) + (c.output_tokens || 0);
+                    totalDuration += c.duration_ms || 0;
+                    if (c.status === 'success') completedMain++;
+                    if (c.status === 'failed' || c.status === 'timeout') failedMain++;
+                    // 运行中的子阶段不归入已完成，但已在 totalStages 中
+                });
+            }
+        } else if (s.has_children && s.children && s.children.length > 0) {
+            // 其它 Group 阶段（如不需要 plan 修正的情况）
             s.children.forEach(c => {
                 totalTokens += (c.input_tokens || 0) + (c.output_tokens || 0);
                 totalDuration += c.duration_ms || 0;
@@ -2385,11 +2566,7 @@ function createBatchReviewSubflow(children, parentStage) {
             html += `<span class="text-[10px] text-gray-400 ml-auto">${batch.duration_ms ? Math.round(batch.duration_ms/1000)+'s' : (isPending ? '待运行' : '-')}</span>`;
             html += `</div>`;
             html += `</div>`;
-            // 箭头
-            html += '<div class="flex items-center flex-shrink-0">';
-            html += '<div class="w-3 h-px bg-gray-300"></div>';
-            html += '<div class="text-gray-300 text-[10px]"><i class="fas fa-chevron-right"></i></div>';
-            html += '</div>';
+            // 移除箭头（用户反馈不需要）
             html += '</div>'; // end row
         });
         html += '</div>';
@@ -2784,7 +2961,7 @@ function renderBatchPlanDetail(json) {
         // 进度条：开销 vs 可用
         html += `<div class="mb-2">`;
         html += `<div class="flex items-center justify-between text-[10px] text-gray-500 mb-1">`;
-        html += `<span>开销 <span class="font-mono font-medium text-orange-600">${estimatedOH.toLocaleString()}</span> · ${ohPct}%</span>`;
+        html += `<span>系统开销 <span class="font-mono font-medium text-orange-600">${estimatedOH.toLocaleString()}</span> · ${ohPct}%</span>`;
         html += `<span>可用 <span class="font-mono font-medium text-green-600">${availableTokens.toLocaleString()}</span> · ${availPct}%</span>`;
         html += `</div>`;
         html += `<div class="w-full h-2.5 rounded-full bg-gray-100 overflow-hidden flex">`;
@@ -2809,10 +2986,10 @@ function renderBatchPlanDetail(json) {
     if (plan.batches && plan.batches.length > 0) {
         html += '<div class="grid grid-cols-2 gap-2">';
         plan.batches.forEach(b => {
-            html += `<div class="rounded-lg border p-2 ${b.is_truncated ? 'border-orange-200 bg-orange-50' : 'bg-gray-50'}">`;
+            html += `<div class="rounded-lg border p-2 flex flex-col ${b.is_truncated ? 'border-orange-200 bg-orange-50' : 'bg-gray-50'}">`;
             html += `<div class="flex justify-between items-center mb-1"><span class="font-semibold text-xs">批次 ${b.index}</span><span class="text-[10px] ${b.is_truncated ? 'text-orange-500' : 'text-gray-400'}">${b.file_count} 文件</span></div>`;
-            html += `<div class="text-[10px] text-gray-500">${b.file_paths.slice(0,2).map(p=>escapeHtml(p)).join(', ')}${b.file_paths.length>2?' ...':''}</div>`;
-            html += `<div class="text-[10px] text-gray-400 mt-0.5">预估 ${(b.token_est||0).toLocaleString()} tokens</div>`;
+            html += `<div class="text-[10px] text-gray-500 flex-1">${b.file_paths.slice(0,2).map(p=>escapeHtml(p)).join(', ')}${b.file_paths.length>2?' ...':''}</div>`;
+            html += `<div class="text-[10px] text-gray-400 mt-auto pt-1">预估 ${(b.token_est||0).toLocaleString()} tokens</div>`;
             html += '</div>';
         });
         html += '</div>';
@@ -2860,10 +3037,10 @@ function renderBatchReviewPanel(json) {
         html += `<div class="text-[11px] text-gray-600 mb-1">策略: <span class="font-medium">${plan.strategy === 'single' ? '单批' : '多批'}</span> · 总文件: ${plan.total_files}个 → 拆分为 <span class="font-medium">${plan.batch_count}</span> 批</div>`;
         html += '<div class="grid grid-cols-2 gap-2 mt-2">';
         plan.batches.forEach(b => {
-            html += `<div class="rounded-lg border p-2 ${b.is_truncated ? 'border-orange-200 bg-orange-50' : 'bg-gray-50'}">`;
+            html += `<div class="rounded-lg border p-2 flex flex-col ${b.is_truncated ? 'border-orange-200 bg-orange-50' : 'bg-gray-50'}">`;
             html += `<div class="flex justify-between items-center mb-1"><span class="font-semibold text-xs">批次 ${b.index}</span><span class="text-[10px] ${b.is_truncated ? 'text-orange-500' : 'text-gray-400'}">${b.file_count} 文件</span></div>`;
-            html += `<div class="text-[10px] text-gray-500 mb-1">${b.file_paths.slice(0,2).map(p=>escapeHtml(p)).join(', ')}${b.file_paths.length>2?' ...':''}</div>`;
-            html += `<div class="flex justify-between"><span class="text-[10px] text-gray-400">预估</span><span class="text-[10px] font-mono">${(b.token_est||0).toLocaleString()} token</span></div>`;
+            html += `<div class="text-[10px] text-gray-500 mb-1 flex-1">${b.file_paths.slice(0,2).map(p=>escapeHtml(p)).join(', ')}${b.file_paths.length>2?' ...':''}</div>`;
+            html += `<div class="flex justify-between mt-auto pt-1"><span class="text-[10px] text-gray-400">预估</span><span class="text-[10px] font-mono">${(b.token_est||0).toLocaleString()} token</span></div>`;
             html += '</div>';
         });
         html += '</div></div>';
@@ -2874,8 +3051,7 @@ function renderBatchReviewPanel(json) {
             html += `<div class="text-sm font-bold text-gray-800 mb-1">AI评分：${out.score}分</div>`;
         }
         if (out.final_report) {
-            const reportText = out.final_report.substring(0, 5000) + (out.final_report.length > 5000 ? '\n\n> 报告较长，请查看「评审报告」Tab 获取完整内容' : '');
-            const reportHtml = typeof marked !== 'undefined' ? marked.parse(reportText) : escapeHtml(reportText);
+            const reportHtml = typeof marked !== 'undefined' ? marked.parse(out.final_report) : escapeHtml(out.final_report);
             html += `<div class="bg-gray-50 p-2 rounded border text-[11px] overflow-auto max-h-80 leading-relaxed markdown-body">${reportHtml}</div>`;
         }
     }
@@ -3191,10 +3367,18 @@ function renderPostProcessDetail(json) {
         html += `<div class="text-gray-400 text-sm">未生成评审报告</div>`;
     }
 
-    // 评论发布状态（comment_posted 为 false，不代表真正未发布；comment_eligible 表示是否具备发布条件）
+    // 评论发布状态
     const eligible = out.comment_eligible || (finalReport && currentTask && currentTask.mr_iid > 0);
-    if (out.comment_posted !== undefined || out.comment_eligible !== undefined) {
-        html += `<div class="mb-2 text-[11px] text-gray-500"><i class="fab fa-gitlab mr-1"></i>GitLab 评论: ${eligible ? '待发布' : '未发布'}</div>`;
+    const isTaskSuccess = currentTask && currentTask.status === 'success';
+    const commentPosted = out.comment_posted === true || (isTaskSuccess && finalReport);
+    if (out.comment_posted !== undefined || out.comment_eligible !== undefined || finalReport) {
+        if (commentPosted) {
+            html += `<div class="mb-2 text-[11px] text-green-600"><i class="fab fa-gitlab mr-1"></i>GitLab 评论: 已发布</div>`;
+        } else if (eligible) {
+            html += `<div class="mb-2 text-[11px] text-gray-500"><i class="fab fa-gitlab mr-1"></i>GitLab 评论: 待发布</div>`;
+        } else {
+            html += `<div class="mb-2 text-[11px] text-gray-500"><i class="fab fa-gitlab mr-1"></i>GitLab 评论: 未发布</div>`;
+        }
     }
 
     return html;
