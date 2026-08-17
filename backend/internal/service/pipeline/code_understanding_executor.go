@@ -729,18 +729,11 @@ func (e *CodeUnderstandingExecutor) formatReportText(report *CodeUnderstandingRe
 		}
 	}
 
-	// 前10个函数列表（只有变更文件的函数）
+	// 变更函数列表（完整注入，不截断）
 	if len(report.FunctionList) > 0 {
 		b.WriteString("\n### 变更函数列表\n")
-		limit := 10
-		if len(report.FunctionList) < limit {
-			limit = len(report.FunctionList)
-		}
-		for i := 0; i < limit; i++ {
-			b.WriteString(fmt.Sprintf("- %s\n", report.FunctionList[i]))
-		}
-		if len(report.FunctionList) > limit {
-			b.WriteString(fmt.Sprintf("- ... 等共 %d 个函数\n", len(report.FunctionList)))
+		for _, fn := range report.FunctionList {
+			b.WriteString(fmt.Sprintf("- %s\n", fn))
 		}
 	}
 
