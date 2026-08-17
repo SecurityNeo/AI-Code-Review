@@ -3457,10 +3457,10 @@ function renderBatchPlanDetail(json) {
         html += `<div class="mb-2 text-sm">策略: <span class="font-medium">${plan.strategy === 'single' ? '单批' : '多批'}</span> · 文件数: ${plan.total_files || '-'} · 批次数: ${plan.batch_count || '-'}</div>`;
     }
     if (plan.batches && plan.batches.length > 0) {
-        html += '<div class="grid grid-cols-2 gap-2">';
+        html += '<div class="flex flex-col gap-2">';
         plan.batches.forEach(b => {
-            html += `<div class="rounded-lg border p-2 flex flex-col ${b.is_truncated ? 'border-orange-200 bg-orange-50' : 'bg-gray-50'}">`;
-            html += `<div class="flex justify-between items-center mb-1"><span class="font-semibold text-xs">批次 ${b.index}</span><span class="text-[10px] ${b.is_truncated ? 'text-orange-500' : 'text-gray-400'}">${b.file_count} 文件</span></div>`;
+            html += `<div class="rounded-lg border p-3 flex flex-col ${b.is_truncated ? 'border-orange-200 bg-orange-50' : 'bg-gray-50'}">`;
+            html += `<div class="flex justify-between items-center mb-2"><span class="font-semibold text-sm">批次 ${b.index}</span><span class="text-xs ${b.is_truncated ? 'text-orange-500' : 'text-gray-400'}">${b.file_count} 文件</span></div>`;
             html += `<div class="text-[10px] text-gray-500 flex-1">${b.file_paths.slice(0,2).map(p=>escapeHtml(p)).join(', ')}${b.file_paths.length>2?' ...':''}</div>`;
             html += `<div class="text-[10px] text-gray-400 mt-auto pt-1">预估 ${(b.token_est||0).toLocaleString()} tokens</div>`;
             html += '</div>';
