@@ -3081,10 +3081,46 @@ function renderCuContextExtractBody(sub, report) {
         html += '</tbody></table></div>';
     }
 
-    // 函数列表
-    if (report.function_list && report.function_list.length > 0) {
-        html += `<div class="mt-3"><div class="text-[11px] font-medium text-gray-700 mb-1">提取函数列表（${report.function_list.length} 个）</div>`;
-        html += `<div class="bg-gray-50 rounded p-2 text-[11px] text-gray-600 max-h-32 overflow-y-auto">${report.function_list.slice(0, 30).map(f => escapeHtml(f)).join(', ')}${report.function_list.length > 30 ? ' ...' : ''}</div></div>`;
+    // 函数列表（含完整签名）
+    var allFuncs = [];
+    var allTypes = [];
+    fileResults.forEach(fr => {
+        if (fr.function_details) allFuncs = allFuncs.concat(fr.function_details);
+        if (fr.type_details) allTypes = allTypes.concat(fr.type_details);
+    });
+
+    if (allFuncs.length > 0) {
+        html += `<div class="mt-3"><div class="text-[11px] font-medium text-gray-700 mb-1">函数签名（${allFuncs.length} 个）</div>`;
+        html += '<div class="overflow-x-auto"><table class="w-full text-[11px] border rounded-lg">';
+        html += '<thead class="bg-gray-50"><tr class="text-gray-500"><th class="text-left px-2 py-1">函数签名</th><th class="text-left px-2 py-1">接收者</th><th class="text-right px-2 py-1">行号</th></tr></thead><tbody>';
+        allFuncs.forEach(fn => {
+            html += `<tr class="border-t"><td class="px-2 py-1 font-mono text-gray-700">${escapeHtml(fn.signature || fn.name + '()')}</td>`;
+            html += `<td class="px-2 py-1 text-gray-500">${fn.receiver ? escapeHtml(fn.receiver) : '-'}</td>`;
+            html += `<td class="px-2 py-1 text-right text-gray-400">${fn.line || 0}</td></tr>`;
+        });
+        html += '</tbody></table></div></div>';
+    }
+
+    // 结构体字段
+    if (allTypes.length > 0) {
+        html += `<div class="mt-3"><div class="text-[11px] font-medium text-gray-700 mb-1">结构体/类型（${allTypes.length} 个）</div>`;
+        html += '<div style="display:flex; flex-direction:column; gap:4px;">';
+        allTypes.forEach(tp => {
+            var fieldsHtml = '';
+            if (tp.fields && tp.fields.length > 0) {
+                fieldsHtml = '<div style="margin-top:4px; padding:4px 6px; background:#f3f4f6; border-radius:4px; font-size:11px; font-family:monospace; color:#374151;">' + tp.fields.slice(0, 8).map(f => escapeHtml(f)).join(', ') + (tp.fields.length > 8 ? ' <span style="color:#9ca3af;">... +' + (tp.fields.length - 8) + '</span>' : '') + '</div>';
+            }
+            html += `<div style="padding:8px 10px; background:#f9fafb; border-radius:6px; border:1px solid #e5e7eb;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <i class="fas fa-layer-group" style="color:#06b6d4; font-size:11px;"></i>
+                    <span style="font-family:monospace; font-size:12px; color:#1f2937; flex:1;">${escapeHtml(tp.name || '')}</span>
+                    <span style="font-size:10px; color:#6b7280; background:#e5e7eb; padding:1px 5px; border-radius:4px;">${escapeHtml(tp.kind || 'struct')}</span>
+                    <span style="font-size:11px; color:#6b7280;">${tp.line || 0}</span>
+                </div>
+                ${fieldsHtml}
+            </div>`;
+        });
+        html += '</div></div>';
     }
 
     if (sub.error) {

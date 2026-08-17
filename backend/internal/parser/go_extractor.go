@@ -228,6 +228,9 @@ func extractCallSites(fset *token.FileSet, filePath string, f *ast.File) []Unifi
 				site.TargetFunc = fn.Sel.Name
 			}
 		}
+		for _, arg := range call.Args {
+			site.Arguments = append(site.Arguments, exprToString(arg))
+		}
 		sites = append(sites, site)
 		return true
 	})

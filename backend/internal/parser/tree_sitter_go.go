@@ -375,6 +375,19 @@ func (e *TreeSitterGoExtractor) extractCallSites(root *sitter.Node, filePath str
 		case "field_identifier":
 			site.TargetFunc = tsText(funcNode, src)
 		}
+
+		// 提取参数
+		argList := findFirstChild(call, "argument_list")
+		if argList != nil {
+			for i := 0; i < int(argList.ChildCount()); i++ {
+				arg := argList.Child(i)
+				if arg == nil || arg.Type() == "," || arg.Type() == "(" || arg.Type() == ")" {
+					continue
+				}
+				site.Arguments = append(site.Arguments, tsText(arg, src))
+			}
+		}
+
 		sites = append(sites, site)
 	}
 	return sites

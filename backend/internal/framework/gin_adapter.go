@@ -37,14 +37,72 @@ func (a *GinAdapter) Detect(ast *parser.UnifiedAST) bool {
 
 // Enrich 提取Gin特有的端点、认证、Sink等
 func (a *GinAdapter) Enrich(ast *parser.UnifiedAST, g *graph.MemorySymbolGraph) {
+	// 1. 优先从结构化 CallSites 提取（不受 BodySnippet 截断影响）
+	found := a.enrichFromCallSites(ast, g)
+	// 2. fallback：BodySnippet 正则兜底
+	if !found {
+		a.enrichFromBodySnippet(ast, g)
+	}
+
+	// 3. 识别认证中间件使用
+	a.enrichAuthMiddleware(ast, g)
+	// 4. 危险Sink
+	a.enrichSinks(ast, g)
+}
+
+// enrichFromCallSites 从结构化调用点提取端点
+func (a *GinAdapter) enrichFromCallSites(ast *parser.UnifiedAST, g *graph.MemorySymbolGraph) bool {
+	methodSet := make(map[string]bool)
+	for _, m := range a.routeMethods {
+		methodSet[m] = true
+	}
+	found := false
+	for _, cs := range ast.CallSites {
+		if !methodSet[cs.TargetFunc] {
+			continue
+		}
+		if len(cs.Arguments) == 0 {
+			continue
+		}
+		path := extractStringLiteral(cs.Arguments[0])
+		if path == "" {
+			continue
+		}
+		var handler string
+		if len(cs.Arguments) >= 2 {
+			handler = strings.TrimSpace(cs.Arguments[1])
+		}
+		node := &graph.MemorySymbolNode{
+			ID:       fmt.Sprintf("endpoint:%s:%s:%s", ast.FilePath, cs.TargetFunc, path),
+			Type:     graph.NodeEndpoint,
+			Name:     path,
+			Language: ast.Language,
+			File:     ast.FilePath,
+			Location: cs.Location,
+			Properties: map[string]interface{}{
+				"method":    cs.TargetFunc,
+				"framework": "gin",
+				"handler":   handler,
+			},
+		}
+		g.AddNode(node)
+		found = true
+	}
+	return found
+}
+
+// enrichFromBodySnippet 基于 BodySnippet 正则提取（兜底）
+func (a *GinAdapter) enrichFromBodySnippet(ast *parser.UnifiedAST, g *graph.MemorySymbolGraph) {
 	for _, fn := range ast.Functions {
-		// 识别路由注册
+		snippet := fn.BodySnippet
+		if snippet == "" {
+			continue
+		}
 		for _, method := range a.routeMethods {
 			re := regexp.MustCompile(fmt.Sprintf(`[^\w]%s\s*\(`, method))
-			if re.MatchString(fn.BodySnippet) {
-				// 提取路径 - 简化处理
+			if re.MatchString(snippet) {
 				pathRe := regexp.MustCompile(fmt.Sprintf(`%s\s*\(\s*["']([^"']+)["']`, method))
-				matches := pathRe.FindAllStringSubmatch(fn.BodySnippet, -1)
+				matches := pathRe.FindAllStringSubmatch(snippet, -1)
 				for _, m := range matches {
 					path := m[1]
 					node := &graph.MemorySymbolNode{
@@ -59,16 +117,19 @@ func (a *GinAdapter) Enrich(ast *parser.UnifiedAST, g *graph.MemorySymbolGraph) 
 							"framework": "gin",
 						},
 					}
-					// 尝试提取handler
-					if h := extractHandlerName(fn.BodySnippet, method); h != "" {
+					if h := extractHandlerName(snippet, method); h != "" {
 						node.Properties["handler"] = h
 					}
 					g.AddNode(node)
 				}
 			}
 		}
+	}
+}
 
-		// 识别认证中间件使用
+// enrichAuthMiddleware 识别认证中间件
+func (a *GinAdapter) enrichAuthMiddleware(ast *parser.UnifiedAST, g *graph.MemorySymbolGraph) {
+	for _, fn := range ast.Functions {
 		if strings.Contains(fn.BodySnippet, "Use(middleware.Auth") ||
 			strings.Contains(fn.BodySnippet, "Use(middleware.JWT") {
 			if n, ok := g.GetNode(fmt.Sprintf("func:%s:%d", ast.FilePath, fn.Location.LineStart)); ok {
@@ -76,8 +137,10 @@ func (a *GinAdapter) Enrich(ast *parser.UnifiedAST, g *graph.MemorySymbolGraph) 
 			}
 		}
 	}
+}
 
-	// 识别危险Sink：exec.Command, sql注入等
+// enrichSinks 识别危险Sink
+func (a *GinAdapter) enrichSinks(ast *parser.UnifiedAST, g *graph.MemorySymbolGraph) {
 	sinkPatterns := []struct {
 		funcName string
 		kind     string
@@ -90,7 +153,6 @@ func (a *GinAdapter) Enrich(ast *parser.UnifiedAST, g *graph.MemorySymbolGraph) 
 		{"fmt.Sprintf", "format_string"},
 		{"os.WriteFile", "path_traversal"},
 	}
-
 	for _, fn := range ast.Functions {
 		for _, p := range sinkPatterns {
 			if strings.Contains(fn.BodySnippet, p.funcName) {
@@ -112,12 +174,21 @@ func (a *GinAdapter) Enrich(ast *parser.UnifiedAST, g *graph.MemorySymbolGraph) 
 }
 
 func extractHandlerName(snippet, method string) string {
-	// 简化：尝试从路由注册中提取handler函数名
-	// 如 r.GET("/path", handlerFunc)
 	re := regexp.MustCompile(fmt.Sprintf(`%s\s*\([^)]*\,\s*(\w+)\s*\)`, method))
 	m := re.FindStringSubmatch(snippet)
 	if len(m) > 1 {
 		return m[1]
+	}
+	return ""
+}
+
+func extractStringLiteral(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`) {
+		return s[1 : len(s)-1]
+	}
+	if strings.HasPrefix(s, "`") && strings.HasSuffix(s, "`") {
+		return s[1 : len(s)-1]
 	}
 	return ""
 }

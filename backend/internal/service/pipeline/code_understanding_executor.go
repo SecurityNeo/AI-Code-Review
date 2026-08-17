@@ -389,11 +389,48 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 		report.TotalFunctions += len(ast.Functions)
 		report.TotalTypes += len(ast.Types)
 
+		// 收集函数签名和结构体字段详情
+		var funcDetails []map[string]interface{}
+		for _, fn := range ast.Functions {
+			sig := fn.Name + "("
+			for i, p := range fn.Params {
+				if i > 0 {
+					sig += ", "
+				}
+				sig += p.Type
+			}
+			sig += ")"
+			if len(fn.Returns) > 0 {
+				sig += " " + strings.Join(fn.Returns, ", ")
+			}
+			funcDetails = append(funcDetails, map[string]interface{}{
+				"name":      fn.Name,
+				"signature": sig,
+				"receiver":  fn.Receiver,
+				"line":      fn.Location.LineStart,
+			})
+		}
+		var typeDetails []map[string]interface{}
+		for _, tp := range ast.Types {
+			var fields []string
+			for _, f := range tp.Fields {
+				fields = append(fields, f.Name+" "+f.Type)
+			}
+			typeDetails = append(typeDetails, map[string]interface{}{
+				"name":   tp.Name,
+				"kind":   tp.Kind,
+				"fields": fields,
+				"line":   tp.Location.LineStart,
+			})
+		}
+
 		report.ASTData.FileResults = append(report.ASTData.FileResults, FileASTResult{
-			Path:      ast.FilePath,
-			Functions: len(ast.Functions),
-			Types:     len(ast.Types),
-			Imports:   len(ast.Imports),
+			Path:            ast.FilePath,
+			Functions:       len(ast.Functions),
+			Types:           len(ast.Types),
+			Imports:         len(ast.Imports),
+			FunctionDetails: funcDetails,
+			TypeDetails:     typeDetails,
 		})
 	}
 
@@ -620,12 +657,14 @@ type ContextExtractResult struct {
 
 // FileASTResult 单文件AST结果
 type FileASTResult struct {
-	Path       string `json:"path"`
-	Size       int    `json:"size"`
-	Functions  int    `json:"functions"`
-	Types      int    `json:"types"`
-	Imports    int    `json:"imports"`
-	ParseError string `json:"parse_error,omitempty"`
+	Path            string                   `json:"path"`
+	Size            int                      `json:"size"`
+	Functions       int                      `json:"functions"`
+	Types           int                      `json:"types"`
+	Imports         int                      `json:"imports"`
+	ParseError      string                   `json:"parse_error,omitempty"`
+	FunctionDetails []map[string]interface{} `json:"function_details,omitempty"`
+	TypeDetails     []map[string]interface{} `json:"type_details,omitempty"`
 }
 
 // SymbolGraphResult 符号图分析结果（子阶段2产出）

@@ -278,18 +278,32 @@ func (s *ScanService) GetGraphOverview(projectID uint64) (map[string]interface{}
 				frameworkSet[fw] = true
 			}
 		case graph.NodeFunc:
-			functions = append(functions, map[string]interface{}{
-				"name":     node.Name,
-				"file":     node.File,
-				"line":     node.Location.LineStart,
-				"language": node.Language,
-			})
+			funcEntry := map[string]interface{}{
+				"name":      node.Name,
+				"signature": node.Signature,
+				"file":      node.File,
+				"line":      node.Location.LineStart,
+				"language":  node.Language,
+			}
+			if node.Package != "" {
+				funcEntry["package"] = node.Package
+			}
+			functions = append(functions, funcEntry)
 		case graph.NodeType:
+			var fields []map[string]interface{}
+			for _, rel := range g.GetRelations(node.ID, graph.RelContains) {
+				if fnode, ok := g.GetNode(rel.To); ok && fnode.Type == graph.NodeField {
+					fields = append(fields, map[string]interface{}{
+						"name": fnode.Name,
+					})
+				}
+			}
 			types = append(types, map[string]interface{}{
 				"name":     node.Name,
 				"file":     node.File,
 				"line":     node.Location.LineStart,
 				"kind":     getStringProp(node.Properties, "kind"),
+				"fields":   fields,
 			})
 		}
 	}
