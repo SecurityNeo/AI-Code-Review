@@ -99,6 +99,7 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 		CodeUnderstandingReport: codeUnderstandingReport,
 		BatchReviewResults:      batchResults,
 		DimensionWeights:        dimWeights,
+		DeductScoreConfig:       deductCfg,
 	}
 
 	// 4.1 读取各智能体预渲染 Markdown
