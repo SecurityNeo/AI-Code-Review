@@ -293,17 +293,20 @@ func (s *ScanService) GetGraphOverview(projectID uint64) (map[string]interface{}
 			var fields []map[string]interface{}
 			for _, rel := range g.GetRelations(node.ID, graph.RelContains) {
 				if fnode, ok := g.GetNode(rel.To); ok && fnode.Type == graph.NodeField {
-					fields = append(fields, map[string]interface{}{
+					fEntry := map[string]interface{}{
 						"name": fnode.Name,
-					})
+						"type": getStringProp(fnode.Properties, "type"),
+						"tag":  getStringProp(fnode.Properties, "tag"),
+					}
+					fields = append(fields, fEntry)
 				}
 			}
 			types = append(types, map[string]interface{}{
-				"name":     node.Name,
-				"file":     node.File,
-				"line":     node.Location.LineStart,
-				"kind":     getStringProp(node.Properties, "kind"),
-				"fields":   fields,
+				"name":   node.Name,
+				"file":   node.File,
+				"line":   node.Location.LineStart,
+				"kind":   getStringProp(node.Properties, "kind"),
+				"fields": fields,
 			})
 		}
 	}
@@ -314,17 +317,17 @@ func (s *ScanService) GetGraphOverview(projectID uint64) (map[string]interface{}
 	}
 
 	return map[string]interface{}{
-		"status":          "completed",
-		"node_count":      len(g.AllNodes()),
-		"relation_count":  g.RelationCount(),
-		"rel_count":       g.RelationCount(),
-		"endpoint_count":  len(endpoints),
-		"function_count":  len(functions),
-		"type_count":      len(types),
-		"frameworks":      frameworks,
-		"endpoints":       endpoints,
-		"functions":       functions[:min(50, len(functions))],
-		"types":           types[:min(50, len(types))],
+		"status":         "completed",
+		"node_count":     len(g.AllNodes()),
+		"relation_count": g.RelationCount(),
+		"rel_count":      g.RelationCount(),
+		"endpoint_count": len(endpoints),
+		"function_count": len(functions),
+		"type_count":     len(types),
+		"frameworks":     frameworks,
+		"endpoints":      endpoints,
+		"functions":      functions[:min(50, len(functions))],
+		"types":          types[:min(50, len(types))],
 	}, nil
 }
 
