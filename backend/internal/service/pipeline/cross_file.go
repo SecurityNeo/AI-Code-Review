@@ -40,31 +40,31 @@ type FileCallContext struct {
 
 // CallerInfo 调用者信息
 type CallerInfo struct {
-	File         string `json:"file"`          // 调用者文件路径
-	Function     string `json:"function"`      // 调用者函数名
-	Line         int    `json:"line"`          // 调用行号
-	CodeSnippet  string `json:"code_snippet"`  // 调用点代码（前后3行）
-	CallExpr     string `json:"call_expr"`     // 调用表达式文本
-	Distance     int    `json:"distance"`      // 调用链距离（0=direct）
+	File        string `json:"file"`         // 调用者文件路径
+	Function    string `json:"function"`     // 调用者函数名
+	Line        int    `json:"line"`         // 调用行号
+	CodeSnippet string `json:"code_snippet"` // 调用点代码（前后3行）
+	CallExpr    string `json:"call_expr"`    // 调用表达式文本
+	Distance    int    `json:"distance"`     // 调用链距离（0=direct）
 }
 
 // DependencyInfo 本文件依赖的外部符号
 type DependencyInfo struct {
-	File        string `json:"file"`         // 被依赖文件路径
-	Symbol      string `json:"symbol"`       // 符号名
-	Package     string `json:"package"`      // 包/模块名
-	SymbolType  string `json:"symbol_type"`  // "func", "type", "var"
-	IsInternal  bool   `json:"is_internal"`  // 是否是项目内部依赖
+	File       string `json:"file"`        // 被依赖文件路径
+	Symbol     string `json:"symbol"`      // 符号名
+	Package    string `json:"package"`     // 包/模块名
+	SymbolType string `json:"symbol_type"` // "func", "type", "var"
+	IsInternal bool   `json:"is_internal"` // 是否是项目内部依赖
 }
 
 // SymbolInfo 符号定义信息
 type SymbolInfo struct {
-	Name       string `json:"name"`
-	Type       string `json:"type"`       // "func", "struct", "interface", "class"
-	Package    string `json:"package"`
-	File       string `json:"file"`
-	Exported   bool   `json:"exported"`
-	Signature  string `json:"signature"`  // 函数签名/类定义等
+	Name      string `json:"name"`
+	Type      string `json:"type"` // "func", "struct", "interface", "class"
+	Package   string `json:"package"`
+	File      string `json:"file"`
+	Exported  bool   `json:"exported"`
+	Signature string `json:"signature"` // 函数签名/类定义等
 }
 
 // ===================== CrossFileAnalyzer =====================
@@ -510,7 +510,7 @@ func (a *CrossFileAnalyzer) findEnclosingFunc(lines []string, idx int) string {
 			parts := strings.Fields(line)
 			if len(parts) >= 2 {
 				namePart := parts[1]
-				// 跳过接收者部分 (recvType) 
+				// 跳过接收者部分 (recvType)
 				if strings.HasPrefix(namePart, "(") {
 					if len(parts) >= 3 {
 						namePart = parts[2]

@@ -78,11 +78,11 @@ func (c *stageContextImpl) Done() <-chan struct{} {
 	return c.Context.Done()
 }
 
-func (c *stageContextImpl) Task() *model.Task                     { return c.task }
-func (c *stageContextImpl) ExecutionID() uint                     { return c.executionID }
-func (c *stageContextImpl) ParentExecutionID() *uint              { return c.parentExecutionID }
-func (c *stageContextImpl) GetInput(key string) interface{}       { return c.inputData[key] }
-func (c *stageContextImpl) SetInput(key string, val interface{})  {
+func (c *stageContextImpl) Task() *model.Task               { return c.task }
+func (c *stageContextImpl) ExecutionID() uint               { return c.executionID }
+func (c *stageContextImpl) ParentExecutionID() *uint        { return c.parentExecutionID }
+func (c *stageContextImpl) GetInput(key string) interface{} { return c.inputData[key] }
+func (c *stageContextImpl) SetInput(key string, val interface{}) {
 	c.inputData[key] = val
 	// 注入取消信号 channel（由 TaskService.executePipelineReviewTask 注册）
 	if key == "_cancel_ch" {

@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
+	"github.com/ai-optimizer/backend/internal/service/graphscan"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -371,6 +373,13 @@ func (h *WebhookHandler) handleMergeRequestHook(c *gin.Context, payload map[stri
 	}
 
 	action, _ := attrs["action"].(string)
+
+	// ===== MR 合入主线：触发图谱增量更新 =====
+	if action == "merge" {
+		h.handleMRMergeEvent(c, payload, attrs)
+		return
+	}
+
 	validActions := map[string]bool{"open": true, "update": true, "reopen": true}
 	if !validActions[action] {
 		zap.L().Info("ignored MR webhook action", zap.String("action", action))
@@ -496,6 +505,62 @@ func (h *WebhookHandler) handleMergeRequestHook(c *gin.Context, payload map[stri
 	}()
 
 	c.JSON(200, gin.H{"message": "review task created", "task_id": task.ID})
+}
+
+// handleMRMergeEvent 处理 MR 合入主线事件：触发图谱基线增量更新
+func (h *WebhookHandler) handleMRMergeEvent(c *gin.Context, payload map[string]interface{}, attrs map[string]interface{}) {
+	projectPath := ""
+	if proj, ok := payload["project"].(map[string]interface{}); ok {
+		if webURL, ok := proj["web_url"].(string); ok {
+			projectPath = webURL
+		} else if httpURL, ok := proj["http_url"].(string); ok {
+			projectPath = strings.TrimSuffix(httpURL, ".git")
+		}
+	}
+	if projectPath == "" {
+		c.JSON(400, gin.H{"error": "cannot get project path"})
+		return
+	}
+
+	var project model.Project
+	if err := model.DB.Where("project_path = ? OR project_path = ?",
+		projectPath, projectPath+".git").First(&project).Error; err != nil {
+		zap.L().Warn("project not found for merge webhook", zap.String("project_path", projectPath))
+		c.JSON(404, gin.H{"error": "project not found"})
+		return
+	}
+
+	targetBranch, _ := attrs["target_branch"].(string)
+	if targetBranch == "" {
+		targetBranch = project.GraphBaseBranch
+	}
+
+	// 仅当合入的是配置的基线分支时才触发更新
+	if targetBranch != project.GraphBaseBranch {
+		zap.L().Info("merge target branch not graph base branch, skipped",
+			zap.String("target", targetBranch),
+			zap.String("base", project.GraphBaseBranch))
+		c.JSON(200, gin.H{"message": "skipped: target branch is not graph base branch"})
+		return
+	}
+
+	// 触发增量扫描（后台异步）
+	workspace := os.Getenv("CODEGUARD_WORKSPACE")
+	if workspace == "" {
+		workspace = "/tmp/codeguard"
+	}
+	scanService := graphscan.NewScanService(model.DB, workspace)
+	_, err := scanService.TriggerScan(uint64(project.ID), targetBranch)
+	if err != nil {
+		zap.L().Warn("trigger graph scan on merge failed", zap.Error(err))
+		c.JSON(200, gin.H{"message": "merge handled, graph scan queued already running"})
+		return
+	}
+
+	zap.L().Info("graph baseline incremental update triggered by MR merge",
+		zap.Uint("project_id", project.ID),
+		zap.String("branch", targetBranch))
+	c.JSON(200, gin.H{"message": "graph baseline update queued", "project_id": project.ID, "branch": targetBranch})
 }
 
 func buildTaskFromTrigger(project model.Project, noteableIID, noteID int, projectPath string,

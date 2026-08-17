@@ -108,6 +108,9 @@ type PromptContext struct {
 	LicenseFindings       []LicenseFinding             `json:"license_findings,omitempty"`
 	TestSuggestions       []TestSuggestionItem         `json:"test_suggestions,omitempty"`
 
+	// 代码理解器产出（AST + 知识图谱 + 数据流分析）
+	CodeUnderstandingReport string `json:"code_understanding_report,omitempty"` // Prompt注入文本
+
 	// 【新增】review_arbitration 阶段使用的聚合数据
 	BatchReviewResults []*llm.BatchReviewResult `json:"batch_review_results,omitempty"` // batch_review 输出结果
 	DimensionCodes     []string                 `json:"dimension_codes,omitempty"`      // 维度代码列表（用于 GetReviewJSONSchema）
@@ -115,9 +118,9 @@ type PromptContext struct {
 
 // TestSuggestionItem 测试建议条目（PromptContext 使用）
 type TestSuggestionItem struct {
-	FunctionName string         `json:"function_name"`
-	FilePath     string         `json:"file_path"`
-	LineNumber   int            `json:"line_number"`
+	FunctionName string             `json:"function_name"`
+	FilePath     string             `json:"file_path"`
+	LineNumber   int                `json:"line_number"`
 	Scenarios    []llm.TestScenario `json:"scenarios"`
 }
 
@@ -682,6 +685,13 @@ func BuildFullStructuredPrompt(ctx *PromptContext) (string, *llm.ResponseFormat)
 	if ctx.CrossFileContext != "" {
 		sb.WriteString(ctx.CrossFileContext)
 		sb.WriteString("\n")
+	}
+
+	// 代码理解器报告（AST + 知识图谱 + 数据流分析）
+	if ctx.CodeUnderstandingReport != "" {
+		sb.WriteString("【代码理解报告】\n")
+		sb.WriteString(ctx.CodeUnderstandingReport)
+		sb.WriteString("\n\n")
 	}
 
 	// 待评审代码

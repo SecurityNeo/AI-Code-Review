@@ -16,7 +16,7 @@ func NewReviewAgentConfigService() *ReviewAgentConfigService {
 
 // 已知阶段编码白名单（前端可配置的阶段）
 var validStageCodes = map[string]bool{
-	"trigger_check": true, "git_clone": true, "context_extract": true,
+	"trigger_check": true, "git_clone": true, "code_understanding": true,
 	"dependency_scan": true,
 	"secret_scan":     true, "security_audit": true,
 	"test_suggestion": true, "impact_analysis": true,
@@ -146,8 +146,9 @@ func (s *ReviewAgentConfigService) Save(
 
 	// 校验 stage_configs 中的数值参数
 	if stageConfigs != nil {
-		if ctxCfg, ok := stageConfigs["context_extract"].(map[string]interface{}); ok {
-			if depth, ok := ctxCfg["depth"]; ok {
+		if cuCfg, ok := stageConfigs["code_understanding"].(map[string]interface{}); ok {
+			// 校验 AST 分析深度
+			if depth, ok := cuCfg["depth"]; ok {
 				var d int
 				switch v := depth.(type) {
 				case float64:
@@ -163,7 +164,29 @@ func (s *ReviewAgentConfigService) Save(
 					d = -1
 				}
 				if d < 0 || d > 2 {
-					return fmt.Errorf("context_extract.depth 必须在 0-2 之间")
+					return fmt.Errorf("code_understanding.depth 必须在 0-2 之间")
+				}
+			}
+			// 校验三阶段超时时间
+			for _, key := range []string{"context_extract_timeout", "symbol_graph_timeout", "report_merge_timeout"} {
+				if t, ok := cuCfg[key]; ok {
+					var tv int
+					switch v := t.(type) {
+					case float64:
+						tv = int(v)
+					case int:
+						tv = v
+					case json.Number:
+						iv, _ := v.Int64()
+						tv = int(iv)
+					case int64:
+						tv = int(v)
+					default:
+						tv = -1
+					}
+					if tv < 1 || tv > 300 {
+						return fmt.Errorf("code_understanding.%s 必须在 1-300 秒之间", key)
+					}
 				}
 			}
 		}
@@ -257,12 +280,14 @@ func defaultReviewAgentConfig() model.ReviewAgentConfig {
 		ShowAgentStatus: true,
 	}
 	cfg.SetEnabledStageCodes([]string{
-		"trigger_check", "git_clone", "context_extract",
+		"trigger_check", "git_clone", "code_understanding",
 		"dependency_scan", "batch_review_frame", "review_arbitration", "post_process",
 	})
-	cfg.SetStageConfig("context_extract", map[string]interface{}{
-		"depth":   1,
-		"timeout": 30,
+	cfg.SetStageConfig("code_understanding", map[string]interface{}{
+		"depth":                     1,
+		"context_extract_timeout":   30,
+		"symbol_graph_timeout":      60,
+		"report_merge_timeout":      10,
 	})
 	cfg.SetStageConfig("git_clone", map[string]interface{}{
 		"timeout": 60,

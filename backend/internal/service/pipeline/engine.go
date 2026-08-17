@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/ai-optimizer/backend/internal/engine"
@@ -28,7 +29,9 @@ func NewEngine(db *gorm.DB, llm LLMService) *Engine {
 	// 注册阶段执行器
 	e.Register(&TriggerCheckExecutor{})
 	e.Register(&GitCloneExecutor{})
-	e.Register(&ContextExtractExecutor{})
+	// 代码理解器：新版 AST+知识图谱+数据流分析
+	codeUnderstandingExec := NewCodeUnderstandingExecutor(getWorkspace())
+	e.Register(codeUnderstandingExec)
 	e.Register(&DependencyScanExecutor{})
 	e.Register(NewSecretScanExecutor(llm, 0))
 	e.Register(NewSecurityAuditExecutor(llm, 0))
@@ -66,6 +69,8 @@ func (e *Engine) ExecuteTask(taskID uint, inputs map[string]interface{}, broadca
 	var agentCfg model.ReviewAgentConfig
 	enabledMap := make(map[string]bool)
 	if err := e.db.First(&agentCfg, 1).Error; err == nil {
+		// 自动迁移旧 context_extract 配置到 code_understanding
+		agentCfg.MigrateContextExtractConfig()
 		for _, code := range agentCfg.EnabledStageCodes() {
 			enabledMap[code] = true
 		}
@@ -85,8 +90,8 @@ func (e *Engine) ExecuteTask(taskID uint, inputs map[string]interface{}, broadca
 		}
 	} else {
 		// 配置未初始化，默认启用核心阶段（扩展阶段默认不启用）
-		defaultEnabled := []string{"trigger_check", "git_clone", "context_extract",
-			"dependency_scan", "batch_review_frame", "review_arbitration", "post_process"}
+		defaultEnabled := []string{"trigger_check", "git_clone",
+			"code_understanding", "dependency_scan", "batch_review_frame", "review_arbitration", "post_process"}
 		for _, code := range defaultEnabled {
 			enabledMap[code] = true
 		}
@@ -97,8 +102,10 @@ func (e *Engine) ExecuteTask(taskID uint, inputs map[string]interface{}, broadca
 	for k, v := range inputs {
 		pipelineInputs[k] = v
 	}
-	// 将 context_extract 深度注入 inputs，供后续阶段读取
-	pipelineInputs["_context_extract_depth"] = agentCfg.ContextExtractDepth()
+	// 注入全局智能体配置，供各阶段读取
+	pipelineInputs["_agent_config"] = agentCfg
+	// 将代码理解器深度配置注入 inputs
+	pipelineInputs["_code_understanding_depth"] = agentCfg.CodeUnderstandingDepth()
 
 	// 将 batch_review_frame 的并行批次上限注入 inputs
 	if brCfg := agentCfg.StageConfig("batch_review_frame"); brCfg != nil {
@@ -107,12 +114,14 @@ func (e *Engine) ExecuteTask(taskID uint, inputs map[string]interface{}, broadca
 		}
 	}
 
-	// 如果代码理解器被禁用，清空 AST 上下文，避免 AI 评审 Prompt 里混入无关内容
-	if !enabledMap["context_extract"] {
+	// 如果代码理解器被禁用，清空 AST 上下文和代码理解报告，避免 AI 评审 Prompt 里混入无关内容
+	if !enabledMap["code_understanding"] {
 		pipelineInputs["ast_context"] = ""
-		// 同时清空 prompt_context 中的 ASTContext 字段（如果存在）
+		pipelineInputs["code_understanding_report"] = ""
+		// 同时清空 prompt_context 中的对应字段（如果存在）
 		if pc, ok := pipelineInputs["prompt_context"].(engine.PromptContext); ok {
 			pc.ASTContext = ""
+			pc.CodeUnderstandingReport = ""
 			pipelineInputs["prompt_context"] = pc
 		}
 	}
@@ -316,4 +325,11 @@ func (e *Engine) markTaskSuccess(taskID uint, ctx *stageContextImpl) {
 		"completed_at": completedAt,
 		"duration_sec": durationSec,
 	})
+}
+
+func getWorkspace() string {
+	if w := os.Getenv("CODEGUARD_WORKSPACE"); w != "" {
+		return w
+	}
+	return "/tmp/codeguard"
 }

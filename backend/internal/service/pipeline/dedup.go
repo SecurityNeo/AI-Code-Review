@@ -15,8 +15,8 @@ import (
 // UnifiedFinding Agent 和 LLM 发现的统一视图
 type UnifiedFinding struct {
 	ID          string
-	Source      string      // "agent" / "llm"
-	AgentSource string      // "secret_scan" / "security_audit" / ""
+	Source      string // "agent" / "llm"
+	AgentSource string // "secret_scan" / "security_audit" / ""
 	RuleCode    string
 	Severity    string
 	Category    string
@@ -360,7 +360,7 @@ func convertAgentFindings(
 			LineEnd:     f.LineNumber,
 			Message:     f.Description,
 			AgentMeta: map[string]interface{}{
-				"rule_code": f.RuleCode,
+				"rule_code":  f.RuleCode,
 				"match_text": f.MatchText,
 			},
 		})
@@ -391,16 +391,16 @@ func convertLLMIssues(batchResults []*llm.BatchReviewResult) []UnifiedFinding {
 	for _, br := range batchResults {
 		for _, issue := range br.Issues {
 			unifieds = append(unifieds, UnifiedFinding{
-				ID:         fmt.Sprintf("llm-%s-%d", issue.File, issue.LineStart),
-				Source:     "llm",
-				RuleCode:   issue.RuleCode,
-				Severity:   issue.Severity,
-				Category:   issue.Category,
-				File:       issue.File,
-				LineStart:  issue.LineStart,
-				LineEnd:    issue.LineEnd,
-				Message:    issue.Message,
-				Suggestion: issue.Suggestion,
+				ID:          fmt.Sprintf("llm-%s-%d", issue.File, issue.LineStart),
+				Source:      "llm",
+				RuleCode:    issue.RuleCode,
+				Severity:    issue.Severity,
+				Category:    issue.Category,
+				File:        issue.File,
+				LineStart:   issue.LineStart,
+				LineEnd:     issue.LineEnd,
+				Message:     issue.Message,
+				Suggestion:  issue.Suggestion,
 				CodeSnippet: issue.CodeSnippet,
 			})
 		}

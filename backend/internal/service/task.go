@@ -2211,7 +2211,7 @@ func buildAgentExecutionStatus(agentCfg model.ReviewAgentConfig) *engine.AgentEx
 	}{
 		{"trigger_check", "触发过滤器"},
 		{"git_clone", "代码克隆"},
-		{"context_extract", "代码理解器"},
+		{"code_understanding", "代码理解器"},
 		{"dependency_scan", "漏洞扫描"},
 		{"secret_scan", "密钥扫描智能体"},
 		{"security_audit", "安全审计智能体"},
@@ -2236,9 +2236,9 @@ func buildAgentExecutionStatus(agentCfg model.ReviewAgentConfig) *engine.AgentEx
 	}
 
 	// 影响说明（根据 skipped 的组合生成）
-	if !enabledMap["context_extract"] {
+	if !enabledMap["code_understanding"] {
 		status.ImpactNotes = append(status.ImpactNotes,
-			"本次评审缺少 AST 上下文，AI 对函数/结构体级别的理解可能受限")
+			"本次评审缺少 AST 上下文和知识图谱分析，AI 对函数/结构体/数据流的理解可能受限")
 	}
 	if !enabledMap["dependency_scan"] {
 		status.ImpactNotes = append(status.ImpactNotes,
@@ -2252,7 +2252,7 @@ func buildAgentExecutionStatus(agentCfg model.ReviewAgentConfig) *engine.AgentEx
 		status.ImpactNotes = append(status.ImpactNotes,
 			"安全审计智能体已启用，SQL 注入/unsafe eval 等安全问题将在评审报告中提示")
 	}
-	if enabledMap["impact_analysis"] && !enabledMap["context_extract"] {
+	if enabledMap["impact_analysis"] && !enabledMap["code_understanding"] {
 		status.ImpactNotes = append(status.ImpactNotes,
 			"影响分析智能体已启用但代码理解器未启用，跨文件影响范围可能不完整")
 	}

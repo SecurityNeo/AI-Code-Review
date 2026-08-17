@@ -19,13 +19,14 @@ type Config struct {
 	DBPassword string `yaml:"db_password"`
 	DBName     string `yaml:"db_name"`
 
-	EncryptKey      string `yaml:"encrypt_key"`
-	SyncInterval    int    `yaml:"sync_interval"`
-	GitlabToken     string `yaml:"gitlab_token"`
-	TaskTimeoutMin  int    `yaml:"task_timeout_min"`
-	MaxParallelTask int    `yaml:"max_parallel_task"`
-	ProjectBaseDir  string `yaml:"project_base_dir"`
-	FrontendPath    string `yaml:"frontend_path"`
+	EncryptKey           string `yaml:"encrypt_key"`
+	SyncInterval         int    `yaml:"sync_interval"`
+	GitlabToken          string `yaml:"gitlab_token"`
+	TaskTimeoutMin       int    `yaml:"task_timeout_min"`
+	MaxParallelTask      int    `yaml:"max_parallel_task"`
+	ProjectBaseDir       string `yaml:"project_base_dir"`
+	FrontendPath         string `yaml:"frontend_path"`
+	GraphCacheTTLMinutes int    `yaml:"graph_cache_ttl_minutes"`
 
 	// GitLab OAuth 配置
 	GitlabOAuthEnabled        bool   `yaml:"gitlab_oauth_enabled"`
@@ -49,13 +50,14 @@ func Load() *Config {
 		DBPassword: getEnv("DB_PASSWORD", ""),
 		DBName:     getEnv("DB_NAME", "ai_optimizer"),
 
-		EncryptKey:      getEnv("ENCRYPTION_KEY", ""),
-		SyncInterval:    getEnvInt("SYNC_INTERVAL", 60),
-		GitlabToken:     getEnv("GITLAB_TOKEN", ""),
-		TaskTimeoutMin:  getEnvInt("TASK_TIMEOUT_MIN", 30),
-		MaxParallelTask: getEnvInt("MAX_PARALLEL_TASK", 20),
-		ProjectBaseDir:  getEnv("PROJECT_BASE_DIR", "/data/gitlab/"),
-		FrontendPath:    getEnv("FRONTEND_PATH", "/app/prototype"),
+		EncryptKey:           getEnv("ENCRYPTION_KEY", ""),
+		SyncInterval:         getEnvInt("SYNC_INTERVAL", 60),
+		GitlabToken:          getEnv("GITLAB_TOKEN", ""),
+		TaskTimeoutMin:       getEnvInt("TASK_TIMEOUT_MIN", 30),
+		MaxParallelTask:      getEnvInt("MAX_PARALLEL_TASK", 20),
+		ProjectBaseDir:       getEnv("PROJECT_BASE_DIR", "/data/gitlab/"),
+		FrontendPath:         getEnv("FRONTEND_PATH", "/app/prototype"),
+		GraphCacheTTLMinutes: getEnvInt("CODEGUARD_GRAPH_CACHE_TTL_MINUTES", 30),
 
 		// GitLab OAuth
 		GitlabOAuthEnabled:        getEnvBool("GITLAB_OAUTH_ENABLED", false),

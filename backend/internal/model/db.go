@@ -263,11 +263,13 @@ func autoMigrate() error {
 	// 兼容：为已有 rule_incubations 补充 similar_passed 默认值（根据 similar_rules 推断）
 	DB.Exec("UPDATE rule_incubations SET similar_passed = true WHERE similar_rules IN ('[]','{}','null') AND similar_passed = false")
 
-	// ========== Pipeline 链路可视化 + 对象存储（新增表）==========
+	// ========== Pipeline 链路可视化 + 对象存储 + 知识图谱（新增表）==========
 	if err := DB.AutoMigrate(
 		&ObjectStorageConfig{},
 		&ReviewPipelineStage{},
 		&TaskPipelineExecution{},
+		&GraphScanTask{},
+		&GraphVersion{},
 	); err != nil {
 		return err
 	}
@@ -853,7 +855,7 @@ func initPipelineStages() {
 	stages := []ReviewPipelineStage{
 		{Code: "trigger_check", Name: "触发条件评估", Description: "检查 MR 是否符合自动审查条件", Icon: "fas fa-filter", SortOrder: 10, TimeoutSec: 5},
 		{Code: "git_clone", Name: "代码获取", Description: "从 Git 仓库获取变更 diff", Icon: "fas fa-code-branch", SortOrder: 20, TimeoutSec: 60},
-		{Code: "context_extract", Name: "上下文提取", Description: "Tree-sitter 解析变更文件结构", Icon: "fas fa-sitemap", SortOrder: 30, TimeoutSec: 30},
+		{Code: "code_understanding", Name: "代码理解器", Description: "AST + 知识图谱 + 数据流分析", Icon: "fas fa-brain", SortOrder: 31, TimeoutSec: 60},
 		{Code: "dependency_scan", Name: "依赖漏洞扫描", Description: "解析依赖文件并匹配本地漏洞库", Icon: "fas fa-shield-alt", SortOrder: 35, TimeoutSec: 30},
 		{Code: "secret_scan", Name: "密钥泄露扫描", Description: "扫描 diff 中泄露的密钥 / Token / 密码", Icon: "fas fa-key", SortOrder: 36, TimeoutSec: 30},
 		{Code: "security_audit", Name: "安全审计", Description: "AST + Regex 双模式安全敏感操作检测", Icon: "fas fa-user-secret", SortOrder: 37, TimeoutSec: 30},
@@ -887,16 +889,16 @@ func initPipelineStages() {
 		} else {
 			// 已存在则更新（允许运行时调整名称、图标、超时）
 			DB.Model(&existing).Updates(map[string]interface{}{
-				"name":              stage.Name,
-				"description":       stage.Description,
-				"icon":              stage.Icon,
-				"is_group":          stage.IsGroup,
-				"is_async":          stage.IsAsync,
-				"timeout_sec":       stage.TimeoutSec,
-				"sort_order":        stage.SortOrder,
-				"is_mandatory":      stage.IsMandatory,
-				"allowed_to_skip":   stage.AllowedToSkip,
-				"required_stages":   stage.RequiredStages,
+				"name":            stage.Name,
+				"description":     stage.Description,
+				"icon":            stage.Icon,
+				"is_group":        stage.IsGroup,
+				"is_async":        stage.IsAsync,
+				"timeout_sec":     stage.TimeoutSec,
+				"sort_order":      stage.SortOrder,
+				"is_mandatory":    stage.IsMandatory,
+				"allowed_to_skip": stage.AllowedToSkip,
+				"required_stages": stage.RequiredStages,
 			})
 		}
 	}
@@ -916,11 +918,14 @@ func initReviewAgentConfig() {
 		ShowAgentStatus: true,
 	}
 	cfg.SetEnabledStageCodes([]string{
-		"trigger_check", "git_clone", "context_extract",
+		"trigger_check", "git_clone", "code_understanding",
 		"dependency_scan", "batch_review_frame", "post_process",
 	})
-	cfg.SetStageConfig("context_extract", map[string]interface{}{
-		"depth": 1,
+	cfg.SetStageConfig("code_understanding", map[string]interface{}{
+		"depth":                     1,
+		"context_extract_timeout":   30,
+		"symbol_graph_timeout":      60,
+		"report_merge_timeout":      10,
 	})
 	cfg.SetTriggerEventCodes([]string{
 		"merge_request_open", "merge_request_update", "merge_request_reopen",
@@ -935,6 +940,7 @@ func initReviewAgentConfig() {
 		zap.L().Info("init review agent config with default stages")
 	}
 }
+
 // initBuiltinVulnSyncSources 初始化内置漏洞库同步源
 func initBuiltinVulnSyncSources() {
 	builtins := []VulnerabilitySyncSource{

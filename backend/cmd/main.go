@@ -14,6 +14,7 @@ import (
 	"github.com/ai-optimizer/backend/internal/middleware"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
+	"github.com/ai-optimizer/backend/internal/service/graphscan"
 	"github.com/ai-optimizer/backend/internal/vectorstore"
 	"github.com/ai-optimizer/backend/pkg/encrypt"
 	"github.com/ai-optimizer/backend/pkg/llmcall"
@@ -21,6 +22,7 @@ import (
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gorm.io/gorm"
 )
 
 var (
@@ -93,6 +95,15 @@ func main() {
 		zap.L().Error("register health_check cron failed", zap.Error(err))
 	} else {
 		zap.L().Sugar().Infow("health_check cron registered", "entryID", entryID, "spec", "0 0 2 * * 1")
+	}
+
+	// 5.3.5b. 启动代码地图定时全量刷新（每天凌晨 3 点）
+	if entryID, err := cronRunner.AddFunc("0 0 3 * * *", func() {
+		startGraphCronScan(model.DB)
+	}); err != nil {
+		zap.L().Error("register graph cron scan failed", zap.Error(err))
+	} else {
+		zap.L().Sugar().Infow("graph_cron_scan registered", "entryID", entryID, "spec", "0 0 3 * * *")
 	}
 
 	// 5.3.6. Issue 治理系统初始化
@@ -297,14 +308,19 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 	r.StaticFile("/project-dashboard.html", frontendPath+"/project-dashboard.html")
 	r.StaticFile("/holiday-management.html", frontendPath+"/holiday-management.html")
 
-		r.GET("/vulnerability-db.html", func(c *gin.Context) {
-			c.File(frontendPath + "/vulnerability-db.html")
-		})
-			r.GET("/agent-config.html", func(c *gin.Context) {
-				c.File(frontendPath + "/agent-config.html")
-			})
+	r.GET("/vulnerability-db.html", func(c *gin.Context) {
+		c.File(frontendPath + "/vulnerability-db.html")
+	})
+	r.GET("/agent-config.html", func(c *gin.Context) {
+		c.File(frontendPath + "/agent-config.html")
+	})
 
-		// 健康检查
+	// graph-admin 页面（位于 backend/web 目录）
+	r.GET("/graph-admin.html", func(c *gin.Context) {
+		c.File("/data/ai-bug-fix/backend/web/graph-admin.html")
+	})
+
+	// 健康检查
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
@@ -644,6 +660,10 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 			sys.GET("/info", h.Info)
 		}
 
+		// 知识图谱管理
+		graphH := handler.NewGraphHandler(model.DB, getWorkspace())
+		graphH.RegisterRoutes(adminOnly)
+
 		// 报表管理
 		report := adminOnly.Group("/reports")
 		{
@@ -681,15 +701,15 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		vulnH := handler.NewVulnerabilityHandler()
 		vulnGroup := adminOnly.Group("/vulnerabilities")
 		{
-		vulnGroup.GET("", vulnH.List)
-		vulnGroup.GET("/stats", vulnH.Stats)
-		vulnGroup.GET("/ecosystems", vulnH.Ecosystems)
-		vulnGroup.POST("/import", vulnH.Import)
-		vulnGroup.POST("/sync", vulnH.Sync)
-		vulnGroup.GET("/:id", vulnH.Get)
-		vulnGroup.POST("", vulnH.Create)
-		vulnGroup.PUT("/:id", vulnH.Update)
-		vulnGroup.DELETE("/:id", vulnH.Delete)
+			vulnGroup.GET("", vulnH.List)
+			vulnGroup.GET("/stats", vulnH.Stats)
+			vulnGroup.GET("/ecosystems", vulnH.Ecosystems)
+			vulnGroup.POST("/import", vulnH.Import)
+			vulnGroup.POST("/sync", vulnH.Sync)
+			vulnGroup.GET("/:id", vulnH.Get)
+			vulnGroup.POST("", vulnH.Create)
+			vulnGroup.PUT("/:id", vulnH.Update)
+			vulnGroup.DELETE("/:id", vulnH.Delete)
 		}
 
 		// 漏洞白名单管理
@@ -718,9 +738,9 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 
 		// AI 评审智能体全局配置
 		agentCfgH := handler.NewReviewAgentConfigHandler()
-		api.GET("/review-agent-config", agentCfgH.Get)                          // GET 任何人可读
+		api.GET("/review-agent-config", agentCfgH.Get)                                        // GET 任何人可读
 		api.GET("/review-agent-config/file-filter-defaults", agentCfgH.GetFileFilterDefaults) // GET 默认过滤规则
-		adminOnly.PUT("/review-agent-config", agentCfgH.Save)                  // PUT 仅 admin 可写
+		adminOnly.PUT("/review-agent-config", agentCfgH.Save)                                 // PUT 仅 admin 可写
 	}
 
 	return r
@@ -745,4 +765,43 @@ func migrateEscalationRules() {
 	} else {
 		zap.L().Info("migrateEscalationRules: no duplicate issue.escalation rules found")
 	}
+}
+
+// startGraphCronScan 定时扫描所有已构建代码地图的项目
+func startGraphCronScan(db *gorm.DB) {
+	var projects []model.Project
+	if err := db.Where("graph_scan_status = ?", "completed").Find(&projects).Error; err != nil {
+		zap.L().Error("graph cron scan: fetch projects failed", zap.Error(err))
+		return
+	}
+	if len(projects) == 0 {
+		zap.L().Info("graph cron scan: no project with built graph")
+		return
+	}
+
+	workspace := getWorkspace()
+	scanService := graphscan.NewScanService(db, workspace)
+	for _, p := range projects {
+		branch := p.GraphBaseBranch
+		if branch == "" {
+			branch = "main"
+		}
+		if _, err := scanService.TriggerScan(uint64(p.ID), branch); err != nil {
+			zap.L().Warn("graph cron scan: trigger failed",
+				zap.Uint("project_id", p.ID),
+				zap.String("branch", branch),
+				zap.Error(err))
+		} else {
+			zap.L().Info("graph cron scan: triggered",
+				zap.Uint("project_id", p.ID),
+				zap.String("branch", branch))
+		}
+	}
+}
+
+func getWorkspace() string {
+	if w := os.Getenv("CODEGUARD_WORKSPACE"); w != "" {
+		return w
+	}
+	return "/tmp/codeguard"
 }

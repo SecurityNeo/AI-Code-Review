@@ -164,13 +164,18 @@ const STAGE_DEFS = [
         timeout: 60
     },
     {
-        code: 'context_extract',
+        code: 'code_understanding',
         name: '代码理解器',
-        desc: 'AST 上下文提取 + 跨文件分析',
-        impact: '关闭后：AI 评审缺少函数/结构体级别的理解',
+        desc: 'AST + 知识图谱 + 数据流分析（三阶段）',
+        impact: '关闭后：AI 评审缺少函数/结构体/数据流的深度理解',
         removable: true,
         depthConfig: true,
-        timeout: 30
+        timeout: 100,
+        subTimeouts: [
+            {key: 'context_extract_timeout', label: 'AST 提取', desc: '解析变更文件结构', default: 30},
+            {key: 'symbol_graph_timeout', label: '知识图谱', desc: '符号图叠加与安全分析', default: 60},
+            {key: 'report_merge_timeout', label: '报告合并', desc: '生成 Prompt 注入文本', default: 10}
+        ]
     },
     {
         code: 'dependency_scan',
@@ -297,7 +302,7 @@ let currentConfig = null;
 function renderStages(enabledStages, stageConfigs, triggerEvents) {
     const container = document.getElementById('stagesContainer');
     const enabledSet = new Set(enabledStages || []);
-    const depth = (stageConfigs && stageConfigs.context_extract && stageConfigs.context_extract.depth) || 1;
+    const depth = (stageConfigs && stageConfigs.code_understanding && stageConfigs.code_understanding.depth) || 1;
     const triggerEventSet = new Set();
     const rawEvents = triggerEvents || TRIGGER_EVENT_DEFS.map(e => e.code);
     // 兼容旧数据：merge_request 总开关包含所有子事件
@@ -447,6 +452,33 @@ function renderStages(enabledStages, stageConfigs, triggerEvents) {
             `;
         }
 
+        let subTimeoutsHtml = '';
+        if (stage.subTimeouts && Array.isArray(stage.subTimeouts)) {
+            const stHtml = stage.subTimeouts.map(st => {
+                const val = (stageCfg[st.key] !== undefined) ? stageCfg[st.key] : st.default;
+                return `<div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 10px; background:#f9fafb; border-radius:6px;">
+                    <div>
+                        <div style="font-size:12px; font-weight:500; color:#374151;">${st.label}</div>
+                        <div style="font-size:11px; color:#9ca3af;">${st.desc}</div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:4px;">
+                        <input type="number" id="${st.key}" value="${val}" min="1" max="300"
+                            class="w-16 px-2 py-1 border rounded text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                            onchange="clampTimeout(this)">
+                        <span style="font-size:11px; color:#9ca3af;">秒</span>
+                    </div>
+                </div>`;
+            }).join('');
+            subTimeoutsHtml = `
+                <div class="mt-2 pl-6 sub-timeouts ${isEnabled ? '' : 'disabled'}" data-stage="${stage.code}">
+                    <div class="text-xs text-gray-500 mb-1.5">子阶段超时配置：</div>
+                    <div style="display:flex; flex-direction:column; gap:6px;">
+                        ${stHtml}
+                    </div>
+                </div>
+            `;
+        }
+
         return `
             <div class="stage-item border rounded-lg p-4 ${isEnabled ? 'bg-white' : 'bg-gray-50'}" data-code="${stage.code}">
                 <div class="flex items-start gap-3">
@@ -472,6 +504,7 @@ function renderStages(enabledStages, stageConfigs, triggerEvents) {
                         ${parallelMaxHtml}
                         ${batchReviewConfigHtml}
                         ${llmEnhanceHtml}
+                        ${subTimeoutsHtml}
                     </div>
                 </div>
             </div>
@@ -494,7 +527,7 @@ function toggleStage(code) {
     }
 
     // 统一联动：该 stage 下的所有子配置区域随启用状态显隐
-    const subPanels = item.querySelectorAll('.depth-options, .trigger-events, .stage-timeout, .stage-parallel-max');
+    const subPanels = item.querySelectorAll('.depth-options, .trigger-events, .stage-timeout, .stage-parallel-max, .sub-timeouts');
     subPanels.forEach(panel => {
         if (checkbox.checked) {
             panel.classList.remove('disabled');
@@ -541,6 +574,11 @@ function loadConfig() {
                 if (s.depthConfig) {
                     defaultStageConfigs[s.code].depth = 1;
                 }
+                if (s.subTimeouts && Array.isArray(s.subTimeouts)) {
+                    s.subTimeouts.forEach(st => {
+                        defaultStageConfigs[s.code][st.key] = st.default;
+                    });
+                }
             });
             // 逐个 stage 合并默认值与保存值（Object.assign 对嵌套对象是浅拷贝）
             const mergedConfigs = {};
@@ -580,6 +618,11 @@ function loadConfig() {
                 }
                 if (s.depthConfig) {
                     defaultStageConfigs[s.code].depth = 1;
+                }
+                if (s.subTimeouts && Array.isArray(s.subTimeouts)) {
+                    s.subTimeouts.forEach(st => {
+                        defaultStageConfigs[s.code][st.key] = st.default;
+                    });
                 }
             });
             renderStages(STAGE_DEFS.map(s => s.code), defaultStageConfigs, TRIGGER_EVENT_DEFS.map(e => e.code));
@@ -676,6 +719,14 @@ function saveConfig() {
         }
         if (stage.depthConfig) {
             cfg.depth = depth;
+        }
+        if (stage.subTimeouts && Array.isArray(stage.subTimeouts)) {
+            stage.subTimeouts.forEach(st => {
+                const el = document.getElementById(st.key);
+                if (el) {
+                    cfg[st.key] = parseInt(el.value, 10) || st.default;
+                }
+            });
         }
         // 仅当存在非空配置时才写入，减少 payload 体积
         if (Object.keys(cfg).length > 0) {

@@ -279,7 +279,7 @@ func (e *ContextExtractExecutor) Execute(ctx StageContext) error {
 	depth := 1
 
 	// 优先从全局配置读取深度参数，fallback 到系统配置
-	if d, ok := ctx.GetInput("_context_extract_depth").(int); ok && d >= 0 {
+	if d, ok := ctx.GetInput("_code_understanding_depth").(int); ok && d >= 0 {
 		depth = d
 	} else if d := SysCfgCallChainDepth(); d > 0 {
 		depth = d
@@ -1482,6 +1482,10 @@ func (e *PostProcessExecutor) Execute(ctx StageContext) error {
 // getPromptContext 从 StageContext 获取 PromptContext
 func getPromptContext(ctx StageContext) *engine.PromptContext {
 	if v, ok := ctx.GetInput("prompt_context").(*engine.PromptContext); ok {
+		// 注入代码理解器报告（如果存在）
+		if r, ok := ctx.GetInput("code_understanding_report").(string); ok && r != "" {
+			v.CodeUnderstandingReport = r
+		}
 		return v
 	}
 	return nil

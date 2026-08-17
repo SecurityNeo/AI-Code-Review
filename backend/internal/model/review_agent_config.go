@@ -100,20 +100,56 @@ func (c *ReviewAgentConfig) SetStageConfig(code string, cfg map[string]interface
 	c.StageConfigs = string(b)
 }
 
-// ContextExtractDepth 便捷方法：读取 context_extract 的深度参数
-func (c *ReviewAgentConfig) ContextExtractDepth() int {
-	cfg := c.StageConfig("context_extract")
+// CodeUnderstandingDepth 便捷方法：读取 code_understanding 的 AST 分析深度参数
+func (c *ReviewAgentConfig) CodeUnderstandingDepth() int {
+	cfg := c.StageConfig("code_understanding")
 	if cfg == nil {
 		return 1 // 默认 1 层
 	}
 	if d, ok := cfg["depth"].(float64); ok {
 		return int(d)
 	}
-	// JSON Number 从 json.Unmarshal 出来都是 float64，int 分支仅在直接赋值时可能命中
 	if d, ok := cfg["depth"].(int); ok {
 		return d
 	}
 	return 1
+}
+
+// CodeUnderstandingTimeouts 便捷方法：读取 code_understanding 三阶段超时配置
+func (c *ReviewAgentConfig) CodeUnderstandingTimeouts() (contextExtractTimeout int, symbolGraphTimeout int, reportMergeTimeout int) {
+	cfg := c.StageConfig("code_understanding")
+	if cfg == nil {
+		return 30, 60, 10 // 默认超时
+	}
+	getInt := func(key string, def int) int {
+		if v, ok := cfg[key].(float64); ok {
+			return int(v)
+		}
+		if v, ok := cfg[key].(int); ok {
+			return v
+		}
+		return def
+	}
+	return getInt("context_extract_timeout", 30), getInt("symbol_graph_timeout", 60), getInt("report_merge_timeout", 10)
+}
+
+// 兼容旧配置：自动将 context_extract 迁移到 code_understanding
+func (c *ReviewAgentConfig) MigrateContextExtractConfig() {
+	if c.StageConfigs == "" || c.StageConfigs == "null" {
+		return
+	}
+	var all map[string]interface{}
+	if err := json.Unmarshal([]byte(c.StageConfigs), &all); err != nil {
+		return
+	}
+	if _, hasOld := all["context_extract"]; hasOld {
+		if _, hasNew := all["code_understanding"]; !hasNew {
+			// 旧配置存在但新配置不存在，自动迁移
+			all["code_understanding"] = all["context_extract"]
+			b, _ := json.Marshal(all)
+			c.StageConfigs = string(b)
+		}
+	}
 }
 
 // TriggerEventCodes 将 JSON 字符串解析为触发事件编码切片

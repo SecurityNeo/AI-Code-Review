@@ -7,3 +7,8 @@
 ## 2. 核心要求
 - 所有设计文档都需以Markdown格式保存于docs目录下
 - 调试过程所产生的脚本、文档等均保存于test目录下
+
+## 3. 开发测试环境Golang代理
+
+- GOPATH='/root/go'
+- GOPROXY='https://mirrors.aliyun.com/goproxy/,direct'

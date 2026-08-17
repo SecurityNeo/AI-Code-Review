@@ -9,32 +9,41 @@ import (
 // --- Project ---
 
 type Project struct {
-	ID              uint            `gorm:"primaryKey" json:"id"`
-	Name            string          `gorm:"size:255;not null" json:"name"`
-	ProjectPath     string          `gorm:"size:255;uniqueIndex" json:"project_path"`
-	GitLabProjectID int             `gorm:"column:gitlab_project_id" json:"gitlab_project_id"`
-	TemplateID      uint            `gorm:"index" json:"template_id"`
-	PoolID          uint            `gorm:"index" json:"pool_id"`
-	DefaultModelID  *uint           `gorm:"index" json:"default_model_id"` // NULL = 未指定，不触发review任务;
-	AIEnabled       bool            `gorm:"default:false" json:"ai_enabled"`
-	Source          string          `gorm:"size:20;default:'manual'" json:"source"`
-	Language        string          `gorm:"size:32;default:'golang'" json:"language"` // 项目主要编程语言
-	AccessToken     string          `gorm:"size:500" json:"access_token"`
-	LastSyncAt      *time.Time      `json:"last_sync_at"`
-	SyncStatus      string          `gorm:"size:20;default:'success'" json:"sync_status"`
-	SyncError       string          `gorm:"size:512" json:"sync_error"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
-	DeletedAt       gorm.DeletedAt  `gorm:"index" json:"deleted_at"`
-	Template        ProjectTemplate `gorm:"foreignKey:TemplateID;references:ID" json:"template,omitempty"`
-	Pool            ResourcePool    `gorm:"foreignKey:PoolID;references:ID" json:"pool,omitempty"`
-	Model           LLMModel        `gorm:"foreignKey:DefaultModelID;references:ID" json:"model,omitempty"`
-	Tasks           []Task          `gorm:"foreignKey:ProjectID" json:"tasks,omitempty"`
+	ID                 uint            `gorm:"primaryKey" json:"id"`
+	Name               string          `gorm:"size:255;not null" json:"name"`
+	ProjectPath        string          `gorm:"size:255;uniqueIndex" json:"project_path"`
+	GitLabProjectID    int             `gorm:"column:gitlab_project_id" json:"gitlab_project_id"`
+	TemplateID         uint            `gorm:"index" json:"template_id"`
+	PoolID             uint            `gorm:"index" json:"pool_id"`
+	DefaultModelID     *uint           `gorm:"index" json:"default_model_id"` // NULL = 未指定，不触发review任务;
+	AIEnabled          bool            `gorm:"default:false" json:"ai_enabled"`
+	Source             string          `gorm:"size:20;default:'manual'" json:"source"`
+	Language           string          `gorm:"size:32;default:'golang'" json:"language"` // 项目主要编程语言
+	AccessToken        string          `gorm:"size:500" json:"access_token"`
+	LastSyncAt         *time.Time      `json:"last_sync_at"`
+	SyncStatus         string          `gorm:"size:20;default:'success'" json:"sync_status"`
+	SyncError          string          `gorm:"size:512" json:"sync_error"`
+	GraphBaseBranch    string          `gorm:"size:255;not null;default:'main'" json:"graph_base_branch"`
+	GraphBuiltAt       *time.Time      `json:"graph_built_at"`
+	GraphNodeCount     int             `gorm:"not null;default:0" json:"graph_node_count"`
+	GraphRelCount      int             `gorm:"not null;default:0" json:"graph_rel_count"`
+	GraphEndpointCount int             `gorm:"not null;default:0" json:"graph_endpoint_count"`
+	GraphFrameworks    string          `gorm:"size:512" json:"graph_frameworks"`                         // JSON数组存储
+	GraphScanStatus    string          `gorm:"size:32;not null;default:'none'" json:"graph_scan_status"` // none | pending | running | completed | failed
+	GraphLastBuildAt   *time.Time      `json:"graph_last_build_at"`
+	GraphScanError     string          `gorm:"size:512" json:"graph_scan_error"`
+	CreatedAt          time.Time       `json:"created_at"`
+	UpdatedAt          time.Time       `json:"updated_at"`
+	DeletedAt          gorm.DeletedAt  `gorm:"index" json:"deleted_at"`
+	Template           ProjectTemplate `gorm:"foreignKey:TemplateID;references:ID" json:"template,omitempty"`
+	Pool               ResourcePool    `gorm:"foreignKey:PoolID;references:ID" json:"pool,omitempty"`
+	Model              LLMModel        `gorm:"foreignKey:DefaultModelID;references:ID" json:"model,omitempty"`
+	Tasks              []Task          `gorm:"foreignKey:ProjectID" json:"tasks,omitempty"`
 
 	// 关联统计（非表字段，仅 API 展示使用）
-	EnabledRuleCount   int `gorm:"-" json:"enabled_rule_count,omitempty"`
-	TotalRuleCount     int `gorm:"-" json:"total_rule_count,omitempty"`
-	PendingIssueCount  int `gorm:"default:0" json:"pending_issue_count"` // 项目中待处理 Issue 的快照计数
+	EnabledRuleCount  int `gorm:"-" json:"enabled_rule_count,omitempty"`
+	TotalRuleCount    int `gorm:"-" json:"total_rule_count,omitempty"`
+	PendingIssueCount int `gorm:"default:0" json:"pending_issue_count"` // 项目中待处理 Issue 的快照计数
 }
 
 type TaskStatus string
@@ -74,11 +83,11 @@ type Task struct {
 	DiffSummary         string              `gorm:"type:text" json:"diff_summary"`
 	AIPrompt            string              `gorm:"type:longtext;column:ai_prompt" json:"ai_prompt"`
 	AIResponse          string              `gorm:"type:longtext" json:"ai_response"`
-	AIResponseJSON      string              `gorm:"type:json;column:ai_response_json" json:"ai_response_json"` // 结构化评审原始 JSON
-	DimensionScores     string              `gorm:"type:json;column:dimension_scores" json:"dimension_scores"` // 各维度评分
-	DiffFilesJSON       string              `gorm:"type:json;column:diff_files_json" json:"diff_files_json"`   // diff 文件列表 JSON（用于任务详情展示）
+	AIResponseJSON      string              `gorm:"type:json;column:ai_response_json" json:"ai_response_json"`   // 结构化评审原始 JSON
+	DimensionScores     string              `gorm:"type:json;column:dimension_scores" json:"dimension_scores"`   // 各维度评分
+	DiffFilesJSON       string              `gorm:"type:json;column:diff_files_json" json:"diff_files_json"`     // diff 文件列表 JSON（用于任务详情展示）
 	DiffFilterStats     string              `gorm:"type:json;column:diff_filter_stats" json:"diff_filter_stats"` // diff 文件过滤统计 JSON
-	IssueCount          int                 `gorm:"default:0;column:issue_count" json:"issue_count"`           // issue 总数
+	IssueCount          int                 `gorm:"default:0;column:issue_count" json:"issue_count"`             // issue 总数
 	RetryCount          int                 `gorm:"default:0" json:"retry_count"`
 	ScoreValue          int                 `gorm:"default:0" json:"score_value"`                      // 评分值（后置校验后，可参考分）
 	RawAIScore          int                 `gorm:"default:0;column:raw_ai_score" json:"raw_ai_score"` // LLM 原始评分（未校验）
@@ -89,7 +98,7 @@ type Task struct {
 	Pool                ResourcePool        `gorm:"foreignKey:PoolID" json:"pool,omitempty"`
 	UsedModel           LLMModel            `gorm:"foreignKey:UsedModelID;references:ID" json:"used_model,omitempty"`
 	PendingIssueCount   int                 `gorm:"default:0;column:pending_issue_count" json:"pending_issue_count"` // 待处理Issue数量（列表页由子查询填充）
-	ExecutionCount      int                 `gorm:"default:0;column:execution_count" json:"execution_count"` // 同一任务第几次运行（首次创建为0，首次保存后变为1）
+	ExecutionCount      int                 `gorm:"default:0;column:execution_count" json:"execution_count"`         // 同一任务第几次运行（首次创建为0，首次保存后变为1）
 }
 
 // BeforeCreate GORM hook: 确保 JSON 字段有合法默认值
@@ -187,8 +196,8 @@ type TaskReviewRule struct {
 type ReviewIssue struct {
 	ID                   uint           `gorm:"primaryKey" json:"id"`
 	TaskID               uint           `gorm:"index" json:"task_id"`
-	MRID                 int            `gorm:"column:mr_id;index:idx_mr_fingerprint" json:"mr_id"`                     // 关联 MR IID
-	RuleID               *uint          `gorm:"index" json:"rule_id"` // NULL=AI自主发现
+	MRID                 int            `gorm:"column:mr_id;index:idx_mr_fingerprint" json:"mr_id"` // 关联 MR IID
+	RuleID               *uint          `gorm:"index" json:"rule_id"`                               // NULL=AI自主发现
 	RuleCode             string         `gorm:"size:64;index:idx_rule_code_created,priority:1" json:"rule_code"`
 	Category             string         `gorm:"size:32" json:"category"`
 	Severity             string         `gorm:"size:16" json:"severity"`
@@ -206,14 +215,14 @@ type ReviewIssue struct {
 	GitlabDiscussionID   string         `gorm:"size:64;column:gitlab_discussion_id" json:"gitlab_discussion_id"`
 	IsResolved           bool           `gorm:"default:false;column:is_resolved" json:"is_resolved"`
 	Fingerprint          string         `gorm:"size:64;index:idx_mr_fingerprint" json:"fingerprint"` // 语义指纹
-	InheritedFromIssueID *uint          `json:"inherited_from_issue_id"`                           // 继承自历史 Issue
-	OwnerID              *uint          `gorm:"index" json:"owner_id"`                             // MR 提交者用户ID（外键至 users）
-	CurrentOwnerID       *uint          `gorm:"index" json:"current_owner_id"`                     // 当前责任人（升级后可能变更）
-	OriginalCreatedAt    *time.Time     `json:"original_created_at"`                               // 首次发现时间（用于升级计时）
-    EscalationLevel      int            `gorm:"default:0" json:"escalation_level"`                 // 当前升级层级
-    CreatedAt            time.Time      `gorm:"index:idx_rule_code_created,priority:2" json:"created_at"`
-    UpdatedAt            time.Time      `gorm:"autoUpdateTime" json:"updated_at"`
-    DeletedAt            gorm.DeletedAt `gorm:"index" json:"-"`
+	InheritedFromIssueID *uint          `json:"inherited_from_issue_id"`                             // 继承自历史 Issue
+	OwnerID              *uint          `gorm:"index" json:"owner_id"`                               // MR 提交者用户ID（外键至 users）
+	CurrentOwnerID       *uint          `gorm:"index" json:"current_owner_id"`                       // 当前责任人（升级后可能变更）
+	OriginalCreatedAt    *time.Time     `json:"original_created_at"`                                 // 首次发现时间（用于升级计时）
+	EscalationLevel      int            `gorm:"default:0" json:"escalation_level"`                   // 当前升级层级
+	CreatedAt            time.Time      `gorm:"index:idx_rule_code_created,priority:2" json:"created_at"`
+	UpdatedAt            time.Time      `gorm:"autoUpdateTime" json:"updated_at"`
+	DeletedAt            gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 // --- TaskReviewComment 任务人工复核意见 ---
@@ -402,7 +411,7 @@ type SystemConfig struct {
 	PipelineEnabled bool `gorm:"default:false;column:pipeline_enabled" json:"pipeline_enabled"`
 
 	// 跨文件调用链分析配置
-	CallChainDepth       int  `gorm:"default:1;column:call_chain_depth" json:"call_chain_depth"`       // 调用链分析深度（默认1层）
+	CallChainDepth       int  `gorm:"default:1;column:call_chain_depth" json:"call_chain_depth"`                // 调用链分析深度（默认1层）
 	CodeWorkspaceEnabled bool `gorm:"default:true;column:code_workspace_enabled" json:"code_workspace_enabled"` // 是否启用持久化代码工作区
 
 	// GitLab OAuth 配置（从环境变量迁移到数据库动态配置）
@@ -550,9 +559,9 @@ type IncubatorConfig struct {
 	ClusterMaxGroupsPerRun        int       `gorm:"default:20" json:"cluster_max_groups_per_run"`
 	ClusterTimeWindowDays         int       `gorm:"default:30" json:"cluster_time_window_days"`
 	RetroMatchEnabled             bool      `gorm:"default:true" json:"retro_match_enabled"`
-	RetroMatchConfidenceThreshold float64  `gorm:"default:0.6" json:"retro_match_confidence_threshold"`
-	SimilarityPassThreshold       float64  `gorm:"default:0.5" json:"similarity_pass_threshold"`
-	RetroMatchMaxDaysLookback     int      `gorm:"default:30" json:"retro_match_max_days_lookback"`
+	RetroMatchConfidenceThreshold float64   `gorm:"default:0.6" json:"retro_match_confidence_threshold"`
+	SimilarityPassThreshold       float64   `gorm:"default:0.5" json:"similarity_pass_threshold"`
+	RetroMatchMaxDaysLookback     int       `gorm:"default:30" json:"retro_match_max_days_lookback"`
 	HealthCheckEnabled            bool      `gorm:"default:true" json:"health_check_enabled"`
 	HealthCheckIntervalDays       int       `gorm:"default:7" json:"health_check_interval_days"`
 	VectorStoreType               string    `gorm:"size:20;default:'mysql'" json:"vector_store_type"`
@@ -578,9 +587,9 @@ type RuleIncubation struct {
 	ConfidenceScore  float64    `gorm:"default:0" json:"confidence_score"`
 	UserAcceptRate   float64    `gorm:"default:0;column:user_accept_rate" json:"user_accept_rate"`
 	MergedIntoRuleID *uint      `gorm:"index" json:"merged_into_rule_id"`
-	SimilarRules     string  `gorm:"type:json" json:"similar_rules"`
-	SimilarPassed    bool    `gorm:"default:false" json:"similar_passed"`
-	TestResults      string  `gorm:"type:json" json:"test_results"`
+	SimilarRules     string     `gorm:"type:json" json:"similar_rules"`
+	SimilarPassed    bool       `gorm:"default:false" json:"similar_passed"`
+	TestResults      string     `gorm:"type:json" json:"test_results"`
 	PublishedRuleID  *uint      `gorm:"index" json:"published_rule_id"`
 	CreatedBy        uint       `gorm:"index" json:"created_by"`
 	ResolvedBy       uint       `json:"resolved_by"`

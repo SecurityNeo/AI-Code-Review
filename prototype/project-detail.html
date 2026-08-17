@@ -137,6 +137,61 @@
                 </div>
             </div>
 
+            <!-- 代码地图区块 -->
+            <div class="bg-white rounded-xl p-6 border">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-2">
+                        <h3 class="font-bold text-gray-800">代码地图</h3>
+                        <span id="graphStatusBadge" class="status-badge" style="background:#f3f4f6;color:#6b7280">未构建</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <select id="graphBaseBranch" class="px-3 py-1 border rounded text-sm">
+                            <option value="main">main</option>
+                            <option value="master">master</option>
+                            <option value="develop">develop</option>
+                        </select>
+                        <button onclick="buildGraph()" id="buildGraphBtn" class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+                            <i class="fas fa-hammer mr-1"></i>构建
+                        </button>
+                        <button onclick="refreshGraph()" id="refreshGraphBtn" class="px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 hidden">
+                            <i class="fas fa-sync-alt mr-1"></i>刷新
+                        </button>
+                        <button onclick="viewGraph()" id="viewGraphBtn" class="px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 hidden">
+                            <i class="fas fa-project-diagram mr-1"></i>查看
+                        </button>
+                    </div>
+                </div>
+                <div id="graphProgressArea" class="hidden mb-4">
+                    <div class="flex items-center justify-between text-sm mb-1">
+                        <span id="graphProgressText">构建中...</span>
+                        <span id="graphProgressPercent">0%</span>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-2">
+                        <div id="graphProgressBar" class="bg-blue-600 h-2 rounded-full" style="width:0%"></div>
+                    </div>
+                </div>
+                <div id="graphErrorArea" class="hidden bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 mb-4"></div>
+                <div id="graphStatsArea" class="hidden grid grid-cols-4 gap-4">
+                    <div class="bg-blue-50 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold text-gray-800" id="graphNodeCount">0</div>
+                        <div class="text-xs text-gray-500">符号节点</div>
+                    </div>
+                    <div class="bg-purple-50 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold text-gray-800" id="graphRelCount">0</div>
+                        <div class="text-xs text-gray-500">关系边</div>
+                    </div>
+                    <div class="bg-green-50 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold text-gray-800" id="graphFrameworks">-</div>
+                        <div class="text-xs text-gray-500">框架</div>
+                    </div>
+                    <div class="bg-orange-50 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold text-gray-800" id="graphEndpointCount">0</div>
+                        <div class="text-xs text-gray-500">API端点</div>
+                    </div>
+                </div>
+                <div id="graphBuiltAt" class="hidden text-xs text-gray-400 mt-3 text-right"></div>
+            </div>
+
             <!-- Tabs -->
             <div class="bg-white rounded-t-xl border-b px-6 flex gap-6">
                 <div class="tab-btn active" onclick="switchTab('tasks', this)">
@@ -431,9 +486,352 @@
         const aiSwitch = document.getElementById('aiEnabled');
         aiSwitch.checked = p.ai_enabled;
         aiSwitch.onchange = () => toggleAI(p.id, aiSwitch.checked);
+        // 代码地图状态
+        if (p.graph_base_branch) {
+            document.getElementById('graphBaseBranch').value = p.graph_base_branch;
+        }
+        renderGraphStatus(p);
         loadProjectStats(p.id);
         loadProjectTasks(p.id);
     }
+
+    function renderGraphStatus(p) {
+        const badge = document.getElementById('graphStatusBadge');
+        const buildBtn = document.getElementById('buildGraphBtn');
+        const refreshBtn = document.getElementById('refreshGraphBtn');
+        const viewBtn = document.getElementById('viewGraphBtn');
+        const progressArea = document.getElementById('graphProgressArea');
+        const errorArea = document.getElementById('graphErrorArea');
+        const statsArea = document.getElementById('graphStatsArea');
+        const builtAt = document.getElementById('graphBuiltAt');
+        const status = p.graph_scan_status || 'none';
+
+        if (status === 'none' || status === '') {
+            badge.textContent = '未构建';
+            badge.style.cssText = 'background:#f3f4f6;color:#6b7280';
+            buildBtn.classList.remove('hidden');
+            refreshBtn.classList.add('hidden');
+            viewBtn.classList.add('hidden');
+            progressArea.classList.add('hidden');
+            errorArea.classList.add('hidden');
+            statsArea.classList.add('hidden');
+            builtAt.classList.add('hidden');
+        } else if (status === 'pending' || status === 'running') {
+            badge.textContent = status === 'pending' ? '排队中' : '构建中';
+            badge.style.cssText = 'background:#dbeafe;color:#1e40af';
+            buildBtn.classList.add('hidden');
+            refreshBtn.classList.add('hidden');
+            viewBtn.classList.add('hidden');
+            progressArea.classList.remove('hidden');
+            errorArea.classList.add('hidden');
+            statsArea.classList.add('hidden');
+            builtAt.classList.add('hidden');
+        } else if (status === 'completed') {
+            badge.textContent = '已完成';
+            badge.style.cssText = 'background:#d1fae5;color:#065f46';
+            buildBtn.classList.add('hidden');
+            refreshBtn.classList.remove('hidden');
+            viewBtn.classList.remove('hidden');
+            progressArea.classList.add('hidden');
+            errorArea.classList.add('hidden');
+            statsArea.classList.remove('hidden');
+            builtAt.classList.remove('hidden');
+            document.getElementById('graphNodeCount').textContent = p.graph_node_count || 0;
+            document.getElementById('graphRelCount').textContent = p.graph_rel_count || 0;
+            document.getElementById('graphEndpointCount').textContent = p.graph_endpoint_count || 0;
+            document.getElementById('graphEndpointCount').textContent = p.graph_endpoint_count || 0;
+            var frameworks = [];
+            try { frameworks = JSON.parse(p.graph_frameworks || '[]'); } catch(e) {}
+            document.getElementById('graphFrameworks').textContent = frameworks.join(', ') || '-';
+            document.getElementById('graphBuiltAt').textContent = '构建于 ' + formatDate(p.graph_built_at);
+        } else {
+            badge.textContent = '失败';
+            badge.style.cssText = 'background:#fee2e2;color:#991b1b';
+            buildBtn.classList.remove('hidden');
+            refreshBtn.classList.add('hidden');
+            viewBtn.classList.add('hidden');
+            progressArea.classList.add('hidden');
+            errorArea.classList.remove('hidden');
+            errorArea.textContent = p.graph_scan_error || '构建失败，请重试';
+            statsArea.classList.add('hidden');
+            builtAt.classList.add('hidden');
+        }
+    }
+
+    async function buildGraph() {
+        const branch = document.getElementById('graphBaseBranch').value;
+        try {
+            const res = await apiFetch(`${API_BASE}/projects/${getProjectId()}/graph/build`, {
+                method: 'POST',
+                body: JSON.stringify({ branch })
+            });
+            if (!res.ok) throw new Error('启动失败');
+            showToast('代码地图构建已启动', 'success');
+            startGraphPolling();
+        } catch (e) { showToast('启动失败: ' + e.message, 'error'); }
+    }
+
+    async function refreshGraph() {
+        try {
+            const res = await apiFetch(`${API_BASE}/projects/${getProjectId()}/graph/refresh`, {
+                method: 'POST'
+            });
+            if (!res.ok) throw new Error('刷新失败');
+            showToast('代码地图刷新已启动', 'success');
+            startGraphPolling();
+        } catch (e) { showToast('刷新失败: ' + e.message, 'error'); }
+    }
+
+    async function viewGraph() {
+        closeGraphModal();
+
+        var overlay = document.createElement('div');
+        overlay.id = 'graphOverlay';
+        overlay.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:9999;';
+        overlay.onclick = function(e) { if (e.target === overlay) closeGraphModal(); };
+
+        // 使用更大的弹框尺寸
+        var box = document.createElement('div');
+        box.style.cssText = 'position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:#fff; border-radius:12px; width:960px; max-width:98vw; max-height:92vh; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 25px 50px rgba(0,0,0,0.3);';
+
+        box.innerHTML =
+            '<div style="display:flex; align-items:center; justify-content:space-between; padding:20px 24px; border-bottom:1px solid #e5e7eb; flex-shrink:0;">' +
+                '<div style="display:flex; align-items:center; gap:10px;">' +
+                    '<div style="width:36px; height:36px; border-radius:10px; background:linear-gradient(135deg, #6366f1, #8b5cf6); color:#fff; display:flex; align-items:center; justify-content:center; font-size:16px;"><i class="fas fa-project-diagram"></i></div>' +
+                    '<div>' +
+                        '<h3 style="font-size:18px; font-weight:bold; color:#1f2937; margin:0;">代码地图详情</h3>' +
+                        '<div style="font-size:12px; color:#6b7280; margin-top:2px;">AST + 知识图谱 + 数据流分析</div>' +
+                    '</div>' +
+                '</div>' +
+                '<button onclick="closeGraphModal()" style="width:32px; height:32px; border-radius:50%; border:none; background:#f3f4f6; cursor:pointer; font-size:14px; color:#6b7280; display:flex; align-items:center; justify-content:center;"><i class="fas fa-times"></i></button>' +
+            '</div>' +
+            '<div style="padding:20px 24px; background:#f9fafb; border-bottom:1px solid #e5e7eb; flex-shrink:0;">' +
+                '<div style="display:grid; grid-template-columns:repeat(6,1fr); gap:12px;">' +
+                    '<div style="background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:12px; text-align:center;">' +
+                        '<div style="font-size:22px; font-weight:bold; color:#1f2937;" id="detailNodeCount">-</div>' +
+                        '<div style="font-size:11px; color:#6b7280; margin-top:2px;">符号节点</div>' +
+                    '</div>' +
+                    '<div style="background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:12px; text-align:center;">' +
+                        '<div style="font-size:22px; font-weight:bold; color:#1f2937;" id="detailRelCount">-</div>' +
+                        '<div style="font-size:11px; color:#6b7280; margin-top:2px;">关系边</div>' +
+                    '</div>' +
+                    '<div style="background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:12px; text-align:center;">' +
+                        '<div style="font-size:22px; font-weight:bold; color:#1f2937;" id="detailEndpointCount">-</div>' +
+                        '<div style="font-size:11px; color:#6b7280; margin-top:2px;">API 端点</div>' +
+                    '</div>' +
+                    '<div style="background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:12px; text-align:center;">' +
+                        '<div style="font-size:22px; font-weight:bold; color:#1f2937;" id="detailFuncCount">-</div>' +
+                        '<div style="font-size:11px; color:#6b7280; margin-top:2px;">函数</div>' +
+                    '</div>' +
+                    '<div style="background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:12px; text-align:center;">' +
+                        '<div style="font-size:22px; font-weight:bold; color:#1f2937;" id="detailTypeCount">-</div>' +
+                        '<div style="font-size:11px; color:#6b7280; margin-top:2px;">类型/结构体</div>' +
+                    '</div>' +
+                    '<div style="background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:12px; text-align:center;">' +
+                        '<div style="font-size:22px; font-weight:bold; color:#1f2937;" id="detailFrameworks">-</div>' +
+                        '<div style="font-size:11px; color:#6b7280; margin-top:2px;">框架</div>' +
+                    '</div>' +
+                '</div>' +
+            '</div>' +
+            '<div style="display:flex; border-bottom:1px solid #e5e7eb; flex-shrink:0; padding:0 24px; background:#fff;">' +
+                '<div class="graph-tab active" data-tab="endpoints" onclick="switchGraphTab(this, \'endpoints\')" style="padding:12px 16px; font-size:13px; color:#6b7280; cursor:pointer; border-bottom:2px solid transparent; font-weight:500;">API 端点</div>' +
+                '<div class="graph-tab" data-tab="functions" onclick="switchGraphTab(this, \'functions\')" style="padding:12px 16px; font-size:13px; color:#6b7280; cursor:pointer; border-bottom:2px solid transparent; font-weight:500;">函数列表</div>' +
+                '<div class="graph-tab" data-tab="types" onclick="switchGraphTab(this, \'types\')" style="padding:12px 16px; font-size:13px; color:#6b7280; cursor:pointer; border-bottom:2px solid transparent; font-weight:500;">类型/结构体</div>' +
+            '</div>' +
+            '<div style="flex:1; overflow-y:auto; padding:20px 24px;" id="detailTabContent">' +
+                '<div style="text-align:center; color:#9ca3af; font-size:14px; padding:40px 0;"><i class="fas fa-spinner fa-spin" style="margin-right:6px;"></i>正在加载代码地图数据...</div>' +
+            '</div>';
+
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+
+        // 加载数据
+        try {
+            const pid = getProjectId();
+            const res = await apiFetch(`${API_BASE}/projects/${pid}/graph/overview`);
+            if (!res.ok) throw new Error('网络错误 ' + res.status);
+            const data = await res.json();
+
+            // 统计数字
+            document.getElementById('detailNodeCount').textContent = data.node_count || 0;
+            document.getElementById('detailRelCount').textContent = data.relation_count || data.rel_count || 0;
+            document.getElementById('detailEndpointCount').textContent = data.endpoint_count || (data.endpoints || []).length;
+            document.getElementById('detailFuncCount').textContent = data.function_count || (data.functions || []).length;
+            document.getElementById('detailTypeCount').textContent = data.type_count || (data.types || []).length;
+            var fw = data.frameworks || [];
+            if (typeof fw === 'string') { try { fw = JSON.parse(fw); } catch(e) {} }
+            document.getElementById('detailFrameworks').textContent = (Array.isArray(fw) && fw.length > 0) ? fw.join(', ') : '-';
+
+            // 存储数据供 tab 切换使用
+            window._graphDetailData = data;
+            renderGraphTab('endpoints');
+        } catch (e) {
+            document.getElementById('detailTabContent').innerHTML = '<div style="text-align:center; color:#ef4444; font-size:14px; padding:40px 0;"><i class="fas fa-exclamation-circle" style="margin-right:6px;"></i>加载失败: ' + escapeHtml(e.message) + '</div>';
+        }
+    }
+
+    function switchGraphTab(el, tab) {
+        document.querySelectorAll('.graph-tab').forEach(function(t) {
+            t.style.color = '#6b7280';
+            t.style.borderBottomColor = 'transparent';
+            t.classList.remove('active');
+        });
+        el.style.color = '#4f46e5';
+        el.style.borderBottomColor = '#4f46e5';
+        el.classList.add('active');
+        renderGraphTab(tab);
+    }
+
+    function renderGraphTab(tab) {
+        var data = window._graphDetailData || {};
+        var container = document.getElementById('detailTabContent');
+        if (!container) return;
+
+        if (tab === 'endpoints') {
+            var endpoints = data.endpoints || [];
+            if (endpoints.length === 0) {
+                container.innerHTML = '<div style="text-align:center; color:#9ca3af; font-size:14px; padding:40px 0;">暂无 API 端点数据</div>';
+                return;
+            }
+            var html = '<div style="font-size:12px; color:#6b7280; margin-bottom:8px;">共 ' + endpoints.length + ' 个端点</div>';
+            html += '<table style="width:100%; border-collapse:collapse; font-size:13px;">' +
+                '<thead><tr style="background:#f9fafb; border-bottom:2px solid #e5e7eb;">' +
+                    '<th style="text-align:left; padding:10px 12px; font-weight:600; color:#374151;">Method</th>' +
+                    '<th style="text-align:left; padding:10px 12px; font-weight:600; color:#374151;">Path</th>' +
+                    '<th style="text-align:left; padding:10px 12px; font-weight:600; color:#374151;">Framework</th>' +
+                    '<th style="text-align:left; padding:10px 12px; font-weight:600; color:#374151;">File</th>' +
+                '</tr></thead><tbody>';
+            endpoints.forEach(function(ep) {
+                var method = (ep.method || 'GET').toUpperCase();
+                var methodStyle = 'display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; background:' + ({GET:'#dcfce7',POST:'#dbeafe',PUT:'#fef9c3',DELETE:'#fee2e2',PATCH:'#f3e8ff'}[method] || '#f3f4f6') + '; color:' + ({GET:'#166534',POST:'#1e40af',PUT:'#854d0e',DELETE:'#991b1b',PATCH:'#6b21a8'}[method] || '#374151') + ';';
+                html += '<tr style="border-bottom:1px solid #f3f4f6;">' +
+                    '<td style="padding:10px 12px;"><span style="' + methodStyle + '">' + method + '</span></td>' +
+                    '<td style="padding:10px 12px; font-family:monospace; color:#1f2937;">' + escapeHtml(ep.path || '') + '</td>' +
+                    '<td style="padding:10px 12px; color:#6b7280;">' + escapeHtml(ep.framework || '') + '</td>' +
+                    '<td style="padding:10px 12px; color:#6b7280; font-size:12px;">' + escapeHtml(ep.file || '') + (ep.line ? ':' + ep.line : '') + '</td>' +
+                    '</tr>';
+            });
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        } else if (tab === 'functions') {
+            var funcs = data.functions || [];
+            if (funcs.length === 0) {
+                container.innerHTML = '<div style="text-align:center; color:#9ca3af; font-size:14px; padding:40px 0;">暂无函数数据</div>';
+                return;
+            }
+            var html = '<div style="font-size:12px; color:#6b7280; margin-bottom:8px;">共 ' + (data.function_count || funcs.length) + ' 个函数（展示前 ' + funcs.length + ' 个）</div>';
+            html += '<div style="display:flex; flex-direction:column; gap:6px;">';
+            funcs.forEach(function(fn) {
+                html += '<div style="display:flex; align-items:center; gap:12px; padding:10px 12px; background:#f9fafb; border-radius:6px; border:1px solid #e5e7eb;">' +
+                    '<i class="fas fa-cube" style="color:#8b5cf6; font-size:12px;"></i>' +
+                    '<span style="font-family:monospace; font-size:13px; color:#1f2937; flex:1;">' + escapeHtml(fn.name || '') + '()</span>' +
+                    '<span style="font-size:12px; color:#6b7280;">' + escapeHtml(fn.file || '') + (fn.line ? ':' + fn.line : '') + '</span>' +
+                    '</div>';
+            });
+            html += '</div>';
+            container.innerHTML = html;
+        } else if (tab === 'types') {
+            var types = data.types || [];
+            if (types.length === 0) {
+                container.innerHTML = '<div style="text-align:center; color:#9ca3af; font-size:14px; padding:40px 0;">暂无类型数据</div>';
+                return;
+            }
+            var html = '<div style="font-size:12px; color:#6b7280; margin-bottom:8px;">共 ' + (data.type_count || types.length) + ' 个类型/结构体（展示前 ' + types.length + ' 个）</div>';
+            html += '<div style="display:flex; flex-direction:column; gap:6px;">';
+            types.forEach(function(tp) {
+                html += '<div style="display:flex; align-items:center; gap:12px; padding:10px 12px; background:#f9fafb; border-radius:6px; border:1px solid #e5e7eb;">' +
+                    '<i class="fas fa-layer-group" style="color:#06b6d4; font-size:12px;"></i>' +
+                    '<span style="font-family:monospace; font-size:13px; color:#1f2937; flex:1;">' + escapeHtml(tp.name || '') + '</span>' +
+                    '<span style="font-size:11px; color:#6b7280; background:#e5e7eb; padding:1px 6px; border-radius:4px;">' + escapeHtml(tp.kind || 'struct') + '</span>' +
+                    '<span style="font-size:12px; color:#6b7280;">' + escapeHtml(tp.file || '') + (tp.line ? ':' + tp.line : '') + '</span>' +
+                    '</div>';
+            });
+            html += '</div>';
+            container.innerHTML = html;
+        }
+    }
+
+    function closeGraphModal() {
+        var o = document.getElementById('graphOverlay');
+        if (o) o.remove();
+        window._graphDetailData = null;
+    }
+
+    let graphPollInterval = null;
+    async function loadGraphStatus() {
+        try {
+            const res = await apiFetch(`${API_BASE}/projects/${getProjectId()}/graph/status`);
+            if (!res.ok) return;
+            const data = (await res.json()).data || {};
+            const badge = document.getElementById('graphStatusBadge');
+            const progressArea = document.getElementById('graphProgressArea');
+            const progressBar = document.getElementById('graphProgressBar');
+            const progressText = document.getElementById('graphProgressText');
+            const progressPercent = document.getElementById('graphProgressPercent');
+
+            if (data.status === 'pending' || data.status === 'running') {
+                badge.textContent = data.status === 'pending' ? '排队中' : '构建中';
+                badge.style.cssText = 'background:#dbeafe;color:#1e40af';
+                progressArea.classList.remove('hidden');
+                const pct = data.progress || 0;
+                progressBar.style.width = pct + '%';
+                progressPercent.textContent = pct + '%';
+                progressText.textContent = data.status === 'pending' ? '排队中...' : `已扫描 ${data.scanned_files || 0}/${data.total_files || 0} 文件`;
+                return true; // 继续轮询
+            } else if (data.status === 'completed') {
+                badge.textContent = '已完成';
+                badge.style.cssText = 'background:#d1fae5;color:#065f46';
+                progressArea.classList.add('hidden');
+                document.getElementById('graphStatsArea').classList.remove('hidden');
+                document.getElementById('graphBuiltAt').classList.remove('hidden');
+                document.getElementById('buildGraphBtn').classList.add('hidden');
+                document.getElementById('refreshGraphBtn').classList.remove('hidden');
+                document.getElementById('viewGraphBtn').classList.remove('hidden');
+                document.getElementById('graphNodeCount').textContent = data.node_count || 0;
+                document.getElementById('graphRelCount').textContent = data.relation_count || 0;
+                loadGraphOverview();
+                return false; // 停止轮询
+            } else if (data.status === 'failed') {
+                badge.textContent = '失败';
+                badge.style.cssText = 'background:#fee2e2;color:#991b1b';
+                progressArea.classList.add('hidden');
+                const errArea = document.getElementById('graphErrorArea');
+                errArea.classList.remove('hidden');
+                errArea.textContent = '构建失败';
+                document.getElementById('buildGraphBtn').classList.remove('hidden');
+                return false;
+            }
+            return false;
+        } catch (e) { return false; }
+    }
+
+    async function loadGraphOverview() {
+        try {
+            const res = await apiFetch(`${API_BASE}/projects/${getProjectId()}/graph/overview`);
+            if (!res.ok) return;
+            const data = await res.json();
+            document.getElementById('graphNodeCount').textContent = data.node_count || 0;
+            document.getElementById('graphRelCount').textContent = data.relation_count || 0;
+            document.getElementById('graphEndpointCount').textContent = data.endpoint_count || 0;
+            document.getElementById('graphFrameworks').textContent = (data.frameworks || []).join(', ') || '-';
+        } catch (e) {}
+    }
+
+    function startGraphPolling() {
+        if (graphPollInterval) clearInterval(graphPollInterval);
+        loadGraphStatus();
+        graphPollInterval = setInterval(async () => {
+            const shouldContinue = await loadGraphStatus();
+            if (!shouldContinue) {
+                clearInterval(graphPollInterval);
+                graphPollInterval = null;
+            }
+        }, 3000);
+    }
+
+    window.addEventListener('beforeunload', () => {
+        if (graphPollInterval) clearInterval(graphPollInterval);
+    });
 
     async function loadProjectStats(projectId) {
         try {

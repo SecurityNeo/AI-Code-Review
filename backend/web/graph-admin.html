@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CodeGuard Code Map</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f5f7fa;color:#333;line-height:1.6}
+.container{max-width:1200px;margin:0 auto;padding:20px}
+h1{font-size:24px;margin-bottom:20px;color:#1a1a2e}
+.card{background:#fff;border-radius:8px;padding:24px;margin-bottom:20px;box-shadow:0 1px 3px rgba(0,0,0,0.1)}
+.card-title{font-size:18px;font-weight:600;margin-bottom:16px;color:#2d3748}
+.status-badge{display:inline-block;padding:4px 12px;border-radius:12px;font-size:12px;font-weight:500}
+.status-none{background:#e2e8f0;color:#4a5568}
+.status-pending{background:#e0e7ff;color:#4338ca}
+.status-running{background:#fef3c7;color:#92400e}
+.status-completed{background:#d1fae5;color:#065f46}
+.status-failed{background:#fee2e2;color:#991b1b}
+.btn-group{display:flex;gap:8px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font-size:14px;font-weight:500;transition:all .2s}
+.btn-primary{background:#3b82f6;color:white}
+.btn-primary:hover{background:#2563eb}
+.btn-secondary{background:#6b7280;color:white}
+.btn-secondary:hover{background:#4b5563}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.form-group{margin-bottom:16px}
+.form-label{display:block;margin-bottom:6px;font-size:14px;font-weight:500;color:#4a5568}
+.form-select{width:100%;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;background:#fff}
+.progress-bar{width:100%;height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;margin-top:12px}
+.progress-fill{height:100%;background:#3b82f6;border-radius:4px;transition:width .3s}
+.endpoint-list{margin-top:16px}
+.endpoint-item{display:flex;align-items:center;padding:12px;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:8px}
+.endpoint-method{padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;margin-right:12px}
+.method-GET{background:#d1fae5;color:#065f46}
+.method-POST{background:#dbeafe;color:#1e40af}
+.method-PUT{background:#fef3c7;color:#92400e}
+.method-DELETE{background:#fee2e2;color:#991b1b}
+.endpoint-path{font-family:monospace;font-size:14px;color:#2d3748}
+.endpoint-meta{margin-left:auto;font-size:12px;color:#718096}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-top:16px}
+.stat-card{background:#f8fafc;padding:16px;border-radius:8px;text-align:center}
+.stat-value{font-size:28px;font-weight:700;color:#1a202c}
+.stat-label{font-size:12px;color:#718096;margin-top:4px}
+.error-box{background:#fee2e2;color:#991b1b;padding:12px;border-radius:6px;margin-top:12px;font-size:13px;display:none}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>Code Map Settings</h1>
+<div class="card">
+<div class="card-title">Baseline Branch Config</div>
+<div class="form-group">
+<label class="form-label">Baseline Branch</label>
+<select class="form-select" id="baseBranch">
+<option value="main">main</option>
+<option value="master">master</option>
+<option value="develop">develop</option>
+</select>
+</div>
+<button class="btn btn-primary" onclick="saveConfig()">Save Config</button>
+</div>
+<div class="card">
+<div class="card-title" style="display:flex;align-items:center;gap:12px;">
+Code Map
+<span class="status-badge status-none" id="statusBadge">none</span>
+</div>
+<p style="color:#718096;font-size:14px;margin-bottom:16px;">Full scan parses all source files and builds symbol graph.</p>
+<div class="btn-group">
+<button class="btn btn-primary" id="buildBtn" onclick="startBuild()">Build Code Map</button>
+<button class="btn btn-secondary" id="refreshBtn" onclick="startRefresh()">Refresh</button>
+</div>
+<div class="progress-bar" id="progressBar" style="display:none;"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+<div id="progressText" style="margin-top:8px;font-size:13px;color:#718096;"></div>
+<div id="errorBox" class="error-box"></div>
+</div>
+<div class="card" id="overviewCard" style="display:none;">
+<div class="card-title">Graph Overview</div>
+<div class="stats-grid">
+<div class="stat-card"><div class="stat-value" id="statNodes">0</div><div class="stat-label">Symbol Nodes</div></div>
+<div class="stat-card"><div class="stat-value" id="statRels">0</div><div class="stat-label">Relations</div></div>
+<div class="stat-card"><div class="stat-value" id="statEndpoints">0</div><div class="stat-label">API Endpoints</div></div>
+</div>
+<div class="endpoint-list" id="endpointList"></div>
+</div>
+</div>
+<script>
+const API_BASE='/api/v1';
+const PROJECT_ID=new URLSearchParams(location.search).get('project_id')||'1';
+class GraphManager{constructor(projectId){this.projectId=projectId;this.pollInterval=null;}
+async loadStatus(){const resp=await fetch(`${API_BASE}/projects/${this.projectId}/graph/status`);return resp.json();}
+async buildGraph(branch){const resp=await fetch(`${API_BASE}/projects/${this.projectId}/graph/build`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch})});return resp.json();}
+async refreshGraph(branch){const resp=await fetch(`${API_BASE}/projects/${this.projectId}/graph/refresh`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch})});return resp.json();}
+async getOverview(){const resp=await fetch(`${API_BASE}/projects/${this.projectId}/graph/overview`);return resp.json();}
+async saveConfig(branch){const resp=await fetch(`${API_BASE}/projects/${this.projectId}/graph/config`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({graph_base_branch:branch})});return resp.json();}
+}
+const manager=new GraphManager(PROJECT_ID);
+function getStatusClass(s){return{none:'status-none',pending:'status-pending',running:'status-running',completed:'status-completed',failed:'status-failed'}[s]||'status-none';}
+function getStatusLabel(s){return{none:'未构建',pending:'等待中',running:'构建中',completed:'已完成',failed:'失败'}[s]||s;}
+async function updateUI(){try{const data=await manager.loadStatus();const badge=document.getElementById('statusBadge');const buildBtn=document.getElementById('buildBtn');const refreshBtn=document.getElementById('refreshBtn');const bar=document.getElementById('progressBar');const fill=document.getElementById('progressFill');const text=document.getElementById('progressText');const errBox=document.getElementById('errorBox');const status=data.status||'none';badge.className='status-badge '+getStatusClass(status);badge.textContent=getStatusLabel(status);if(status==='running'){buildBtn.disabled=true;refreshBtn.disabled=true;bar.style.display='block';errBox.style.display='none';const pct=data.total_files>0?(data.scanned_files/data.total_files*100):0;fill.style.width=pct+'%';text.textContent=(data.scanned_files||0)+'/'+(data.total_files||0)+' files  nodes:'+(data.node_count||0)+' rels:'+(data.relation_count||0);}else if(status==='completed'){buildBtn.disabled=false;refreshBtn.disabled=false;bar.style.display='none';text.textContent='';errBox.style.display='none';loadOverview();}else if(status==='failed'){buildBtn.disabled=false;refreshBtn.disabled=false;bar.style.display='none';text.textContent='';errBox.style.display='block';errBox.textContent=data.error_message||'Build failed';}else{buildBtn.disabled=false;refreshBtn.disabled=false;bar.style.display='none';text.textContent='';errBox.style.display='none';}}catch(e){console.error('fetch status failed',e);}}
+async function startBuild(){const branch=document.getElementById('baseBranch').value;try{await manager.buildGraph(branch);updateUI();if(!manager.pollInterval){manager.pollInterval=setInterval(updateUI,3000);}}catch(e){alert('Build failed: '+e.message);}}
+async function startRefresh(){const branch=document.getElementById('baseBranch').value;try{await manager.refreshGraph(branch);updateUI();if(!manager.pollInterval){manager.pollInterval=setInterval(updateUI,3000);}}catch(e){alert('Refresh failed: '+e.message);}}
+async function loadOverview(){try{const data=await manager.getOverview();document.getElementById('overviewCard').style.display='block';document.getElementById('statNodes').textContent=data.node_count||0;document.getElementById('statRels').textContent=data.rel_count||0;document.getElementById('statEndpoints').textContent=(data.endpoints||[]).length;const list=document.getElementById('endpointList');list.innerHTML='';(data.endpoints||[]).forEach(ep=>{const mc='method-'+(ep.method||'GET');const item=document.createElement('div');item.className='endpoint-item';item.innerHTML=`<span class="endpoint-method ${mc}">${ep.method||'GET'}</span><span class="endpoint-path">${ep.path}</span><span class="endpoint-meta">${ep.framework||''} ${ep.file||''}:${ep.line||''}</span>`;list.appendChild(item);});}catch(e){console.error('load overview failed',e);}}
+async function saveConfig(){const branch=document.getElementById('baseBranch').value;try{await manager.saveConfig(branch);alert('Saved');}catch(e){alert('Save failed: '+e.message);}}
+updateUI();
+setInterval(updateUI,5000);
+</script>
+</body>
+</html>
