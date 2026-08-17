@@ -2818,14 +2818,30 @@ function renderGenericDetail(json) {
         if (prompt) {
             const pid = 'prompt-' + Math.random().toString(36).substr(2, 8);
             html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
-            html += `<span>Prompt 输入</span>`;
+            html += `<span>LLM Prompt</span>`;
             html += `<span class="text-[10px] text-gray-400">${prompt.length} 字符</span>`;
             html += `</div>`;
             html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">`;
-            html += `<summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看 Prompt</summary>`;
+            html += `<summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看 LLM Prompt</summary>`;
             html += `<div class="relative group">`;
             html += `<button onclick="copyTextById('${pid}', this)" class="absolute top-1.5 right-1.5 z-10 bg-white/90 border border-gray-200 rounded px-2 py-0.5 text-[10px] text-gray-400 hover:text-blue-600 hover:border-blue-300 shadow-sm" title="复制内容"><i class="far fa-copy mr-0.5"></i>复制</button>`;
             html += `<pre id="${pid}" class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[24rem] overflow-y-auto">${escapeHtml(prompt)}</pre>`;
+            html += `</div></details></div>`;
+        }
+
+        // 注入到下游 Prompt 的内容（可折叠 + 可复制）
+        const promptInjection = json.output_snapshot.prompt_injection;
+        if (promptInjection) {
+            const pjid = 'pj-' + Math.random().toString(36).substr(2, 8);
+            html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
+            html += `<span>注入到下游 Prompt 的内容</span>`;
+            html += `<span class="text-[10px] text-gray-400">${promptInjection.length} 字符</span>`;
+            html += `</div>`;
+            html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">`;
+            html += `<summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看注入内容</summary>`;
+            html += `<div class="relative group">`;
+            html += `<button onclick="copyTextById('${pjid}', this)" class="absolute top-1.5 right-1.5 z-10 bg-white/90 border border-gray-200 rounded px-2 py-0.5 text-[10px] text-gray-400 hover:text-blue-600 hover:border-blue-300 shadow-sm" title="复制内容"><i class="far fa-copy mr-0.5"></i>复制</button>`;
+            html += `<pre id="${pjid}" class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[24rem] overflow-y-auto">${escapeHtml(promptInjection)}</pre>`;
             html += `</div></details></div>`;
         }
 
@@ -2923,10 +2939,26 @@ function renderImpactAnalysisDetail(json) {
         html += `<span class="text-[10px] text-gray-400">${prompt.length} 字符</span>`;
         html += `</div>`;
         html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">`;
-        html += `<summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看 Prompt</summary>`;
+        html += `<summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看 LLM Prompt</summary>`;
         html += `<div class="relative group">`;
         html += `<button onclick="copyTextById('${pid}', this)" class="absolute top-1.5 right-1.5 z-10 bg-white/90 border border-gray-200 rounded px-2 py-0.5 text-[10px] text-gray-400 hover:text-blue-600 hover:border-blue-300 shadow-sm" title="复制"><i class="far fa-copy mr-0.5"></i>复制</button>`;
         html += `<pre id="${pid}" class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[24rem] overflow-y-auto">${escapeHtml(prompt)}</pre>`;
+        html += `</div></details></div>`;
+    }
+
+    // 注入到下游 Prompt 的内容
+    const promptInjection = outSnap.prompt_injection;
+    if (promptInjection) {
+        const pjid = 'pj-impact-' + Math.random().toString(36).substr(2, 8);
+        html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
+        html += `<span>注入到下游 Prompt 的内容</span>`;
+        html += `<span class="text-[10px] text-gray-400">${promptInjection.length} 字符</span>`;
+        html += `</div>`;
+        html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">`;
+        html += `<summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看注入内容</summary>`;
+        html += `<div class="relative group">`;
+        html += `<button onclick="copyTextById('${pjid}', this)" class="absolute top-1.5 right-1.5 z-10 bg-white/90 border border-gray-200 rounded px-2 py-0.5 text-[10px] text-gray-400 hover:text-blue-600 hover:border-blue-300 shadow-sm" title="复制"><i class="far fa-copy mr-0.5"></i>复制</button>`;
+        html += `<pre id="${pjid}" class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[24rem] overflow-y-auto">${escapeHtml(promptInjection)}</pre>`;
         html += `</div></details></div>`;
     }
 

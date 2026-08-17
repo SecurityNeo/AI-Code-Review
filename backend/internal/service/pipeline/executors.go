@@ -677,6 +677,11 @@ func (e *DependencyScanExecutor) Execute(ctx StageContext) error {
 	ctx.SetOutput("dependency_vulns", dependencyVulns)
 	ctx.SetOutput("dependency_risk_score", dependencyRiskScore)
 
+	depMarkdown := ""
+	if len(dependencyVulns) > 0 {
+		depMarkdown = engine.BuildDependencyVulnsSection(dependencyVulns)
+	}
+
 	ctx.SaveInputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
 		"deps_parsed":   len(allDeps),
 		"direct_deps":   directDepCount,
@@ -690,6 +695,7 @@ func (e *DependencyScanExecutor) Execute(ctx StageContext) error {
 		"deps_parsed":           len(allDeps),
 		"direct_deps":           directDepCount,
 		"indirect_deps":         indirectDepCount,
+		"prompt_injection":      depMarkdown,
 	})
 
 	return nil

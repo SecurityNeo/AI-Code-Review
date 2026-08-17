@@ -116,8 +116,10 @@ func (e *TestSuggestionExecutor) Execute(ctx StageContext) error {
 	// 4. 产出注入
 	ctx.SetOutput("test_suggestions", suggestions)
 
+	testSuggestionMarkdown := ""
 	if len(suggestions) > 0 {
-		ctx.SetOutput("test_suggestion_markdown", buildTestSuggestionMarkdown(suggestions))
+		testSuggestionMarkdown = buildTestSuggestionMarkdown(suggestions)
+		ctx.SetOutput("test_suggestion_markdown", testSuggestionMarkdown)
 	}
 
 	llmPrompt := ""
@@ -147,6 +149,7 @@ func (e *TestSuggestionExecutor) Execute(ctx StageContext) error {
 		"model_name":           modelName,
 		"input_tokens":         inputTokens,
 		"output_tokens":        outputTokens,
+		"prompt_injection":     testSuggestionMarkdown,
 	})
 
 	return nil
@@ -428,8 +431,10 @@ func (e *ImpactAnalysisExecutor) Execute(ctx StageContext) error {
 	// 7. 产出注入
 	ctx.SetOutput("impact_analysis_findings", findings)
 
+	impactAnalysisMarkdown := ""
 	if len(findings) > 0 {
-		ctx.SetOutput("impact_analysis_markdown", buildImpactAnalysisMarkdown(findings))
+		impactAnalysisMarkdown = buildImpactAnalysisMarkdown(findings)
+		ctx.SetOutput("impact_analysis_markdown", impactAnalysisMarkdown)
 	}
 
 	llmPrompt := ""
@@ -460,6 +465,7 @@ func (e *ImpactAnalysisExecutor) Execute(ctx StageContext) error {
 		"model_name":           modelName,
 		"input_tokens":         inputTokens,
 		"output_tokens":        outputTokens,
+		"prompt_injection":     impactAnalysisMarkdown,
 	})
 
 	return nil

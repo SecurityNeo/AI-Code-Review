@@ -322,6 +322,11 @@ func buildDependencyVulnsSection(vulns []DependencyVuln) string {
 	return sb.String()
 }
 
+// BuildDependencyVulnsSection 导出版本：按包汇总渲染依赖漏洞扫描结果（Prompt 注入用）
+func BuildDependencyVulnsSection(vulns []DependencyVuln) string {
+	return buildDependencyVulnsSection(vulns)
+}
+
 // BuildReviewPrompt 组装 AI 评审 Prompt
 func BuildReviewPrompt(ctx *PromptContext) string {
 	var sb strings.Builder

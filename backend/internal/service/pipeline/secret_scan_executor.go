@@ -107,8 +107,10 @@ func (e *SecretScanExecutor) Execute(ctx StageContext) error {
 	ctx.SetOutput("secret_scan_findings", verifiedFindings)
 	ctx.SetOutput("secret_scan_count", len(verifiedFindings))
 
+	secretScanMarkdown := ""
 	if len(verifiedFindings) > 0 {
-		ctx.SetOutput("secret_scan_markdown", buildSecretScanMarkdown(verifiedFindings))
+		secretScanMarkdown = buildSecretScanMarkdown(verifiedFindings)
+		ctx.SetOutput("secret_scan_markdown", secretScanMarkdown)
 	}
 
 	llmPrompt := ""
@@ -140,6 +142,7 @@ func (e *SecretScanExecutor) Execute(ctx StageContext) error {
 		"model_name":           modelName,
 		"input_tokens":         inputTokens,
 		"output_tokens":        outputTokens,
+		"prompt_injection":     secretScanMarkdown,
 	})
 
 	return nil

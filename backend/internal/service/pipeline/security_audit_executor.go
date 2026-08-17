@@ -108,8 +108,10 @@ func (e *SecurityAuditExecutor) Execute(ctx StageContext) error {
 	ctx.SetOutput("security_audit_findings", verifiedFindings)
 	ctx.SetOutput("security_audit_count", len(verifiedFindings))
 
+	securityAuditMarkdown := ""
 	if len(verifiedFindings) > 0 {
-		ctx.SetOutput("security_audit_markdown", buildSecurityAuditMarkdown(verifiedFindings))
+		securityAuditMarkdown = buildSecurityAuditMarkdown(verifiedFindings)
+		ctx.SetOutput("security_audit_markdown", securityAuditMarkdown)
 	}
 
 	llmPrompt := ""
@@ -143,6 +145,7 @@ func (e *SecurityAuditExecutor) Execute(ctx StageContext) error {
 		"model_name":           modelName,
 		"input_tokens":         inputTokens,
 		"output_tokens":        outputTokens,
+		"prompt_injection":     securityAuditMarkdown,
 	})
 
 	return nil
