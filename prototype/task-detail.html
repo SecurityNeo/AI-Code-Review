@@ -3091,7 +3091,7 @@ function renderCodeUnderstandingDetail(json) {
     html += `<div class="bg-gray-50 rounded-lg p-2 text-center"><div class="text-lg font-bold text-gray-800">${summary.total_nodes || snap.node_count || 0}</div><div class="text-[10px] text-gray-500">图谱节点</div></div>`;
     html += `<div class="bg-gray-50 rounded-lg p-2 text-center"><div class="text-lg font-bold text-gray-800">${summary.security_path_count || report.taint_flow_count || 0}</div><div class="text-[10px] text-gray-500">安全路径</div></div>`;
     const fwList = (report.graph_data?.frameworks || report.summary?.frameworks_detected || []);
-    html += `<div class="bg-gray-50 rounded-lg p-2 text-center"><div class="text-lg font-bold text-gray-800">${fwList.length || 0}</div><div class="text-[10px] text-gray-500">检测框架${fwList.length ? '<br><span class="text-gray-400">' + escapeHtml(fwList.slice(0,2).join(', ')) + (fwList.length > 2 ? '...' : '') + '</span>' : ''}</div></div>`;
+    html += `<div class="bg-gray-50 rounded-lg p-2 text-center"><div class="text-lg font-bold text-gray-800">${fwList.length > 0 ? escapeHtml(fwList.slice(0,2).join(', ')) + (fwList.length > 2 ? '...' : '') : '-'}</div><div class="text-[10px] text-gray-500">框架</div></div>`;
     html += '</div>';
 
     // 降级提示
