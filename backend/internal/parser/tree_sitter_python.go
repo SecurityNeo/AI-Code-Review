@@ -104,6 +104,17 @@ func (e *TreeSitterPythonExtractor) parseFunc(n *sitter.Node, filePath string, s
 
 	fn.IsExported = !strings.HasPrefix(fn.Name, "_")
 
+	// 提取装饰器（如 @app.get("/path")）
+	for i := 0; i < int(n.ChildCount()); i++ {
+		c := n.Child(i)
+		if c.Type() == "decorator" {
+			annot := strings.TrimSpace(tsText(c, src))
+			if annot != "" {
+				fn.Annotations = append(fn.Annotations, annot)
+			}
+		}
+	}
+
 	// parameters
 	paramsNode := findFirstChild(n, "parameters")
 	if paramsNode != nil {
@@ -130,6 +141,7 @@ func (e *TreeSitterPythonExtractor) parseParams(n *sitter.Node, src []byte) []Un
 			continue
 		}
 		var name, typ string
+		var annotations []string
 		switch c.Type() {
 		case "identifier":
 			name = tsText(c, src)
@@ -149,11 +161,31 @@ func (e *TreeSitterPythonExtractor) parseParams(n *sitter.Node, src []byte) []Un
 			if nameNode != nil {
 				name = tsText(nameNode, src)
 			}
+			// 提取类型注解和默认值中的注解（如 FastAPI Query/Body/Header）
+			for j := 0; j < int(c.ChildCount()); j++ {
+				child := c.Child(j)
+				switch child.Type() {
+				case "type":
+					typ = tsText(child, src)
+				case "call":
+					// 默认值是函数调用，如 Query(...)、Body(...)
+					funcNode := child.Child(0)
+					if funcNode != nil {
+						annotations = append(annotations, tsText(funcNode, src))
+					}
+				case "identifier":
+					// 默认值是标识符，可能是别名导入的 Query。
+					// 使用 tree-sitter Node.ID() 比较节点身份：跳过参数名自身，只收集其他标识符。
+					if nameNode != nil && child.ID() != nameNode.ID() {
+						annotations = append(annotations, tsText(child, src))
+					}
+				}
+			}
 		}
 		if name == "self" || name == "cls" {
 			continue
 		}
-		params = append(params, UnifiedParam{Name: name, Type: typ})
+		params = append(params, UnifiedParam{Name: name, Type: typ, Annotations: annotations})
 	}
 	return params
 }

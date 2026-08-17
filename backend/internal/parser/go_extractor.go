@@ -86,6 +86,7 @@ func (e *GoExtractor) ParseFile(filePath string, src []byte) (*UnifiedAST, error
 	result.Imports = imports
 	result.Variables = variables
 	result.CallSites = extractCallSites(fset, filePath, f)
+	result.VarBindings = extractVarBindings(fset, filePath, f)
 
 	return result, nil
 }
@@ -161,6 +162,7 @@ func convertTypeSpec(fset *token.FileSet, filePath string, spec *ast.TypeSpec) *
 				ft := UnifiedField{
 					Type:       exprToString(field.Type),
 					IsExported: ast.IsExported(nameOrAnonymous(field.Names)),
+					Location:   SourceLocation{File: filePath, LineStart: fset.Position(field.Pos()).Line},
 				}
 				if len(field.Names) > 0 {
 					ft.Name = field.Names[0].Name
@@ -212,29 +214,70 @@ func extractCallSites(fset *token.FileSet, filePath string, f *ast.File) []Unifi
 		if !ok {
 			return true
 		}
-		site := UnifiedCallSite{
-			Location: SourceLocation{
-				File:      filePath,
-				LineStart: fset.Position(call.Pos()).Line,
-				LineEnd:   fset.Position(call.End()).Line,
-			},
-		}
-		switch fn := call.Fun.(type) {
-		case *ast.Ident:
-			site.TargetFunc = fn.Name
-		case *ast.SelectorExpr:
-			if ident, ok := fn.X.(*ast.Ident); ok {
-				site.TargetPkg = ident.Name
-				site.TargetFunc = fn.Sel.Name
-			}
-		}
-		for _, arg := range call.Args {
-			site.Arguments = append(site.Arguments, exprToString(arg))
-		}
-		sites = append(sites, site)
+		sites = append(sites, callSiteFromExpr(fset, filePath, call))
 		return true
 	})
 	return sites
+}
+
+func callSiteFromExpr(fset *token.FileSet, filePath string, call *ast.CallExpr) UnifiedCallSite {
+	site := UnifiedCallSite{
+		Location: SourceLocation{
+			File:      filePath,
+			LineStart: fset.Position(call.Pos()).Line,
+			LineEnd:   fset.Position(call.End()).Line,
+		},
+	}
+	switch fn := call.Fun.(type) {
+	case *ast.Ident:
+		site.TargetFunc = fn.Name
+	case *ast.SelectorExpr:
+		site.TargetFunc = fn.Sel.Name
+		if ident, ok := fn.X.(*ast.Ident); ok {
+			site.TargetPkg = ident.Name
+			site.ReceiverVar = ident.Name
+		}
+	}
+	for _, arg := range call.Args {
+		site.Arguments = append(site.Arguments, exprToString(arg))
+	}
+	return site
+}
+
+func extractVarBindings(fset *token.FileSet, filePath string, f *ast.File) []UnifiedVarBinding {
+	var bindings []UnifiedVarBinding
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch stmt := n.(type) {
+		case *ast.AssignStmt:
+			if len(stmt.Lhs) == 0 || len(stmt.Rhs) == 0 {
+				return true
+			}
+			if ident, ok := stmt.Lhs[0].(*ast.Ident); ok {
+				binding := UnifiedVarBinding{VarName: ident.Name}
+				if call, ok := stmt.Rhs[0].(*ast.CallExpr); ok {
+					cs := callSiteFromExpr(fset, filePath, call)
+					binding.CallSite = &cs
+				} else {
+					binding.Literal = exprToString(stmt.Rhs[0])
+				}
+				bindings = append(bindings, binding)
+			}
+		case *ast.ValueSpec:
+			if len(stmt.Names) == 0 || len(stmt.Values) == 0 {
+				return true
+			}
+			binding := UnifiedVarBinding{VarName: stmt.Names[0].Name}
+			if call, ok := stmt.Values[0].(*ast.CallExpr); ok {
+				cs := callSiteFromExpr(fset, filePath, call)
+				binding.CallSite = &cs
+			} else {
+				binding.Literal = exprToString(stmt.Values[0])
+			}
+			bindings = append(bindings, binding)
+		}
+		return true
+	})
+	return bindings
 }
 
 func extractFieldList(list *ast.FieldList) []UnifiedParam {

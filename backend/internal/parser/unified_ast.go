@@ -11,15 +11,16 @@ type SourceLocation struct {
 
 // UnifiedAST 单次解析结果（所有语言共用）
 type UnifiedAST struct {
-	Language  string            `json:"language"`
-	FilePath  string            `json:"file_path"`
-	Functions []UnifiedFunction `json:"functions"`
-	Types     []UnifiedType     `json:"types"`
-	Imports   []UnifiedImport   `json:"imports"`
-	Variables []UnifiedVariable `json:"variables,omitempty"`
-	Constants []UnifiedConstant `json:"constants,omitempty"`
-	Endpoints []UnifiedEndpoint `json:"endpoints,omitempty"`  // 框架适配器产出
-	CallSites []UnifiedCallSite `json:"call_sites,omitempty"` // 本文件内的调用点
+	Language    string              `json:"language"`
+	FilePath    string              `json:"file_path"`
+	Functions   []UnifiedFunction   `json:"functions"`
+	Types       []UnifiedType       `json:"types"`
+	Imports     []UnifiedImport     `json:"imports"`
+	Variables   []UnifiedVariable   `json:"variables,omitempty"`
+	Constants   []UnifiedConstant   `json:"constants,omitempty"`
+	Endpoints   []UnifiedEndpoint   `json:"endpoints,omitempty"`    // 框架适配器产出
+	CallSites   []UnifiedCallSite   `json:"call_sites,omitempty"`   // 本文件内的调用点
+	VarBindings []UnifiedVarBinding `json:"var_bindings,omitempty"` // 变量赋值绑定
 }
 
 // UnifiedFunction 函数定义
@@ -42,10 +43,11 @@ type UnifiedFunction struct {
 
 // UnifiedParam 参数
 type UnifiedParam struct {
-	Name       string `json:"name"`
-	Type       string `json:"type"`
-	Optional   bool   `json:"optional"`
-	IsVariadic bool   `json:"is_variadic"`
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Optional    bool     `json:"optional"`
+	IsVariadic  bool     `json:"is_variadic"`
+	Annotations []string `json:"annotations,omitempty"` // 参数级注解（Java @RequestParam / Python FastAPI Body/Query 等）
 }
 
 // UnifiedType 类型定义
@@ -73,13 +75,14 @@ type UnifiedMethodSignature struct {
 
 // UnifiedField 字段定义
 type UnifiedField struct {
-	Name         string `json:"name"`
-	Type         string `json:"type"`
-	Tag          string `json:"tag,omitempty"` // Go json tag, Java annotation
-	DefaultValue string `json:"default_value,omitempty"`
-	IsExported   bool   `json:"is_exported"`
-	IsStatic     bool   `json:"is_static"`
-	IsFinal      bool   `json:"is_final"`
+	Name         string         `json:"name"`
+	Type         string         `json:"type"`
+	Tag          string         `json:"tag,omitempty"` // Go json tag, Java annotation
+	DefaultValue string         `json:"default_value,omitempty"`
+	IsExported   bool           `json:"is_exported"`
+	IsStatic     bool           `json:"is_static"`
+	IsFinal      bool           `json:"is_final"`
+	Location     SourceLocation `json:"location,omitempty"`
 }
 
 // UnifiedImport 导入
@@ -91,11 +94,19 @@ type UnifiedImport struct {
 
 // UnifiedCallSite 调用点
 type UnifiedCallSite struct {
-	CallerFunc string         `json:"caller_func"`
-	TargetPkg  string         `json:"target_pkg,omitempty"`
-	TargetFunc string         `json:"target_func"`
-	Arguments  []string       `json:"arguments,omitempty"`
-	Location   SourceLocation `json:"location"`
+	CallerFunc  string         `json:"caller_func"`
+	TargetPkg   string         `json:"target_pkg,omitempty"`
+	TargetFunc  string         `json:"target_func"`
+	Arguments   []string       `json:"arguments,omitempty"`
+	ReceiverVar string         `json:"receiver_var,omitempty"` // selector_expression 的 receiver 对象变量名
+	Location    SourceLocation `json:"location"`
+}
+
+// UnifiedVarBinding 变量赋值绑定（用于推导路由 Group 前缀等）
+type UnifiedVarBinding struct {
+	VarName  string           `json:"var_name"`
+	CallSite *UnifiedCallSite `json:"call_site,omitempty"`
+	Literal  string           `json:"literal,omitempty"`
 }
 
 // UnifiedEndpoint 端点（框架适配器产出）

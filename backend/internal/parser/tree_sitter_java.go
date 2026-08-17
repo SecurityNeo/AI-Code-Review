@@ -202,11 +202,20 @@ func (e *TreeSitterJavaExtractor) parseMethod(n *sitter.Node, filePath string, s
 
 	fn.IsExported = isExported(fn.Name)
 
-	// modifiers
-	modifiers := findChildren(n, "modifiers")
-	if len(modifiers) > 0 {
-		modText := tsText(modifiers[0], src)
+	// modifiers & annotations
+	modifiersNode := findFirstChild(n, "modifiers")
+	if modifiersNode != nil {
+		modText := tsText(modifiersNode, src)
 		fn.IsStatic = strings.Contains(modText, "static")
+		for i := 0; i < int(modifiersNode.ChildCount()); i++ {
+			c := modifiersNode.Child(i)
+			if c.Type() == "marker_annotation" || c.Type() == "annotation" {
+				annot := strings.TrimSpace(tsText(c, src))
+				if annot != "" {
+					fn.Annotations = append(fn.Annotations, annot)
+				}
+			}
+		}
 	}
 
 	// params
@@ -240,6 +249,19 @@ func (e *TreeSitterJavaExtractor) parseConstructor(n *sitter.Node, filePath stri
 		Location:   SourceLocation{File: filePath, LineStart: tsLine(n)},
 		IsExported: true,
 	}
+	// modifiers & annotations
+	modifiersNode := findFirstChild(n, "modifiers")
+	if modifiersNode != nil {
+		for i := 0; i < int(modifiersNode.ChildCount()); i++ {
+			c := modifiersNode.Child(i)
+			if c.Type() == "marker_annotation" || c.Type() == "annotation" {
+				annot := strings.TrimSpace(tsText(c, src))
+				if annot != "" {
+					fn.Annotations = append(fn.Annotations, annot)
+				}
+			}
+		}
+	}
 	paramList := findFirstChild(n, "formal_parameters")
 	if paramList != nil {
 		fn.Params = e.parseParams(paramList, src)
@@ -262,6 +284,7 @@ func (e *TreeSitterJavaExtractor) parseParams(n *sitter.Node, src []byte) []Unif
 			continue
 		}
 		var name, typ string
+		var annotations []string
 		for j := 0; j < int(c.ChildCount()); j++ {
 			child := c.Child(j)
 			switch child.Type() {
@@ -271,9 +294,19 @@ func (e *TreeSitterJavaExtractor) parseParams(n *sitter.Node, src []byte) []Unif
 				typ = tsText(child, src)
 			case "array_type":
 				typ = tsText(child, src)
+			case "annotation":
+				annotations = append(annotations, tsText(child, src))
+			case "modifiers":
+				// modifiers 中可能包含 annotation
+				for k := 0; k < int(child.ChildCount()); k++ {
+					modChild := child.Child(k)
+					if modChild.Type() == "annotation" {
+						annotations = append(annotations, tsText(modChild, src))
+					}
+				}
 			}
 		}
-		params = append(params, UnifiedParam{Name: name, Type: typ})
+		params = append(params, UnifiedParam{Name: name, Type: typ, Annotations: annotations})
 	}
 	return params
 }

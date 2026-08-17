@@ -2,7 +2,6 @@ package framework
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/ai-optimizer/backend/internal/graph"
@@ -37,26 +36,22 @@ func (a *GinAdapter) Detect(ast *parser.UnifiedAST) bool {
 
 // Enrich 提取Gin特有的端点、认证、Sink等
 func (a *GinAdapter) Enrich(ast *parser.UnifiedAST, g *graph.MemorySymbolGraph) {
-	// 1. 优先从结构化 CallSites 提取（不受 BodySnippet 截断影响）
-	found := a.enrichFromCallSites(ast, g)
-	// 2. fallback：BodySnippet 正则兜底
-	if !found {
-		a.enrichFromBodySnippet(ast, g)
-	}
-
-	// 3. 识别认证中间件使用
+	// 1. 从结构化 CallSites + VarBindings 推导完整路由（彻底去 BodySnippet 化）
+	a.enrichFromCallSites(ast, g)
+	// 2. 识别认证中间件使用
 	a.enrichAuthMiddleware(ast, g)
-	// 4. 危险Sink
+	// 3. 危险Sink
 	a.enrichSinks(ast, g)
 }
 
-// enrichFromCallSites 从结构化调用点提取端点
-func (a *GinAdapter) enrichFromCallSites(ast *parser.UnifiedAST, g *graph.MemorySymbolGraph) bool {
+// enrichFromCallSites 从结构化调用点 + 变量绑定推导端点
+func (a *GinAdapter) enrichFromCallSites(ast *parser.UnifiedAST, g *graph.MemorySymbolGraph) {
+	groupMap := buildGroupMap(ast.VarBindings)
 	methodSet := make(map[string]bool)
 	for _, m := range a.routeMethods {
 		methodSet[m] = true
 	}
-	found := false
+
 	for _, cs := range ast.CallSites {
 		if !methodSet[cs.TargetFunc] {
 			continue
@@ -65,66 +60,83 @@ func (a *GinAdapter) enrichFromCallSites(ast *parser.UnifiedAST, g *graph.Memory
 			continue
 		}
 		path := extractStringLiteral(cs.Arguments[0])
-		if path == "" {
+		prefix := ""
+		if cs.ReceiverVar != "" {
+			prefix = resolveVarPrefix(groupMap, cs.ReceiverVar)
+		}
+		fullPath := prefix + path
+		if fullPath == "" {
 			continue
 		}
-		var handler string
-		if len(cs.Arguments) >= 2 {
-			handler = strings.TrimSpace(cs.Arguments[1])
-		}
+
 		node := &graph.MemorySymbolNode{
-			ID:       fmt.Sprintf("endpoint:%s:%s:%s", ast.FilePath, cs.TargetFunc, path),
+			ID:       fmt.Sprintf("endpoint:%s:%s:%s", ast.FilePath, cs.TargetFunc, fullPath),
 			Type:     graph.NodeEndpoint,
-			Name:     path,
+			Name:     fullPath,
 			Language: ast.Language,
 			File:     ast.FilePath,
 			Location: cs.Location,
 			Properties: map[string]interface{}{
 				"method":    cs.TargetFunc,
 				"framework": "gin",
-				"handler":   handler,
 			},
 		}
-		g.AddNode(node)
-		found = true
-	}
-	return found
-}
-
-// enrichFromBodySnippet 基于 BodySnippet 正则提取（兜底）
-func (a *GinAdapter) enrichFromBodySnippet(ast *parser.UnifiedAST, g *graph.MemorySymbolGraph) {
-	for _, fn := range ast.Functions {
-		snippet := fn.BodySnippet
-		if snippet == "" {
-			continue
-		}
-		for _, method := range a.routeMethods {
-			re := regexp.MustCompile(fmt.Sprintf(`[^\w]%s\s*\(`, method))
-			if re.MatchString(snippet) {
-				pathRe := regexp.MustCompile(fmt.Sprintf(`%s\s*\(\s*["']([^"']+)["']`, method))
-				matches := pathRe.FindAllStringSubmatch(snippet, -1)
-				for _, m := range matches {
-					path := m[1]
-					node := &graph.MemorySymbolNode{
-						ID:       fmt.Sprintf("endpoint:%s:%s:%s", ast.FilePath, method, path),
-						Type:     graph.NodeEndpoint,
-						Name:     path,
-						Language: ast.Language,
-						File:     ast.FilePath,
-						Location: fn.Location,
-						Properties: map[string]interface{}{
-							"method":    method,
-							"framework": "gin",
-						},
-					}
-					if h := extractHandlerName(snippet, method); h != "" {
-						node.Properties["handler"] = h
-					}
-					g.AddNode(node)
-				}
+		if len(cs.Arguments) >= 2 {
+			handler := strings.TrimSpace(cs.Arguments[1])
+			if handler != "" {
+				node.Properties["handler"] = handler
 			}
 		}
+		g.AddNode(node)
 	}
+}
+
+// buildGroupMap 从变量绑定中构建 Group 前缀映射，支持链式分组
+func buildGroupMap(bindings []parser.UnifiedVarBinding) map[string]string {
+	groupBindings := make(map[string]*parser.UnifiedVarBinding)
+	for i := range bindings {
+		b := &bindings[i]
+		if b.CallSite != nil && b.CallSite.TargetFunc == "Group" && len(b.CallSite.Arguments) > 0 {
+			groupBindings[b.VarName] = b
+		}
+	}
+
+	cache := make(map[string]string)
+	var resolve func(string) string
+	resolve = func(varName string) string {
+		if varName == "" || varName == "r" || varName == "router" || varName == "engine" {
+			return ""
+		}
+		if prefix, ok := cache[varName]; ok {
+			return prefix
+		}
+		b, ok := groupBindings[varName]
+		if !ok {
+			cache[varName] = ""
+			return ""
+		}
+		ownPrefix := extractStringLiteral(b.CallSite.Arguments[0])
+		parentPrefix := resolve(b.CallSite.ReceiverVar)
+		full := parentPrefix + ownPrefix
+		cache[varName] = full
+		return full
+	}
+
+	for name := range groupBindings {
+		_ = resolve(name)
+	}
+	return cache
+}
+
+// resolveVarPrefix 解析变量的路由前缀
+func resolveVarPrefix(groupMap map[string]string, varName string) string {
+	if varName == "" || varName == "r" || varName == "router" || varName == "engine" {
+		return ""
+	}
+	if prefix, ok := groupMap[varName]; ok {
+		return prefix
+	}
+	return ""
 }
 
 // enrichAuthMiddleware 识别认证中间件
@@ -171,24 +183,4 @@ func (a *GinAdapter) enrichSinks(ast *parser.UnifiedAST, g *graph.MemorySymbolGr
 			}
 		}
 	}
-}
-
-func extractHandlerName(snippet, method string) string {
-	re := regexp.MustCompile(fmt.Sprintf(`%s\s*\([^)]*\,\s*(\w+)\s*\)`, method))
-	m := re.FindStringSubmatch(snippet)
-	if len(m) > 1 {
-		return m[1]
-	}
-	return ""
-}
-
-func extractStringLiteral(s string) string {
-	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`) {
-		return s[1 : len(s)-1]
-	}
-	if strings.HasPrefix(s, "`") && strings.HasSuffix(s, "`") {
-		return s[1 : len(s)-1]
-	}
-	return ""
 }

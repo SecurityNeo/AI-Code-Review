@@ -78,6 +78,8 @@ func (e *TreeSitterGoExtractor) ParseFile(filePath string, src []byte) (*Unified
 
 	// Extract call sites
 	result.CallSites = e.extractCallSites(root, filePath, src)
+	// Extract variable bindings (for route group prefix derivation etc.)
+	result.VarBindings = e.extractVarBindings(root, filePath, src)
 
 	return result, nil
 }
@@ -244,7 +246,7 @@ func (e *TreeSitterGoExtractor) parseTypeSpec(n *sitter.Node, filePath string, s
 				if f.Type() != "field_declaration" {
 					continue
 				}
-				field := e.parseField(f, src)
+				field := e.parseField(f, filePath, src)
 				if field != nil {
 					t.Fields = append(t.Fields, *field)
 				}
@@ -290,33 +292,73 @@ func (e *TreeSitterGoExtractor) parseTypeSpec(n *sitter.Node, filePath string, s
 	return t
 }
 
-func (e *TreeSitterGoExtractor) parseField(n *sitter.Node, src []byte) *UnifiedField {
-	var names []string
-	var typ string
-	var tag string
-	for i := 0; i < int(n.ChildCount()); i++ {
-		c := n.Child(i)
-		switch c.Type() {
-		case "field_identifier":
-			names = append(names, tsText(c, src))
-		case "type_identifier", "qualified_type", "pointer_type", "slice_type", "array_type", "map_type":
-			typ = tsText(c, src)
-		case "tag":
-			tag = strings.Trim(tsText(c, src), "`")
-		}
-	}
-	if len(names) == 0 && typ == "" {
+func (e *TreeSitterGoExtractor) parseField(n *sitter.Node, filePath string, src []byte) *UnifiedField {
+	// 直接从 field_declaration 原始文本解析，不再依赖子节点类型匹配
+	// tree-sitter-go 不同版本中子节点命名差异极大（如 field/identifier/primitive_type/tag 等节点有无/命名不定）
+	text := strings.TrimSpace(tsText(n, src))
+	if text == "" {
 		return nil
 	}
-	name := ""
-	if len(names) > 0 {
-		name = names[0]
+
+	// 提取 tag（反引号包裹的部分）
+	var tag string
+	if backIdx := strings.LastIndex(text, "`"); backIdx > 0 {
+		if startIdx := strings.LastIndex(text[:backIdx], "`"); startIdx >= 0 {
+			tag = text[startIdx+1 : backIdx]
+			text = strings.TrimSpace(text[:startIdx])
+		}
 	}
+
+	// 逗号分隔的多字段声明：Name1, Name2 Type
+	if commaIdx := strings.Index(text, ","); commaIdx > 0 && !strings.Contains(text[:commaIdx], " ") {
+		beforeComma := strings.TrimSpace(text[:commaIdx])
+		afterComma := strings.TrimSpace(text[commaIdx+1:])
+		typeStart := strings.IndexFunc(afterComma, func(r rune) bool { return r == ' ' || r == '\t' })
+		if typeStart >= 0 {
+			typ := strings.TrimSpace(afterComma[typeStart:])
+			return &UnifiedField{
+				Name:       beforeComma,
+				Type:       typ,
+				Tag:        tag,
+				IsExported: isExported(beforeComma),
+				Location:   SourceLocation{File: filePath, LineStart: tsLine(n)},
+			}
+		}
+		return &UnifiedField{
+			Name:       beforeComma,
+			Type:       afterComma,
+			Tag:        tag,
+			IsExported: isExported(beforeComma),
+			Location:   SourceLocation{File: filePath, LineStart: tsLine(n)},
+		}
+	}
+
+	// 找到第一个空白符，前面是名字，后面是类型
+	firstSpace := strings.IndexFunc(text, func(r rune) bool { return r == ' ' || r == '\t' })
+	if firstSpace < 0 {
+		// 单 token：匿名嵌入字段（如 jwt.StandardClaims）
+		typ := text
+		name := text
+		if idx := strings.LastIndex(text, "."); idx >= 0 {
+			name = text[idx+1:]
+		}
+		return &UnifiedField{
+			Name:       name,
+			Type:       typ,
+			Tag:        tag,
+			IsExported: isExported(name),
+			Location:   SourceLocation{File: filePath, LineStart: tsLine(n)},
+		}
+	}
+
+	name := strings.TrimSpace(text[:firstSpace])
+	typ := strings.TrimSpace(text[firstSpace:])
 	return &UnifiedField{
 		Name:       name,
 		Type:       typ,
 		Tag:        tag,
 		IsExported: isExported(name),
+		Location:   SourceLocation{File: filePath, LineStart: tsLine(n)},
 	}
 }
 
@@ -367,6 +409,7 @@ func (e *TreeSitterGoExtractor) extractCallSites(root *sitter.Node, filePath str
 			pkgNode := findFirstChild(funcNode, "identifier")
 			if pkgNode != nil {
 				site.TargetPkg = tsText(pkgNode, src)
+				site.ReceiverVar = site.TargetPkg
 			}
 			selNode := findFirstChild(funcNode, "field_identifier")
 			if selNode != nil {
@@ -405,4 +448,147 @@ func truncateBody(body string) string {
 		return body[:5000] + "..."
 	}
 	return body
+}
+
+func (e *TreeSitterGoExtractor) extractVarBindings(root *sitter.Node, filePath string, src []byte) []UnifiedVarBinding {
+	var bindings []UnifiedVarBinding
+	for _, stmt := range findChildren(root, "short_var_declaration") {
+		bindings = append(bindings, e.parseVarBinding(stmt, filePath, src)...)
+	}
+	for _, decl := range findChildren(root, "var_declaration") {
+		for _, spec := range findChildren(decl, "var_spec") {
+			bindings = append(bindings, e.parseVarSpecBinding(spec, filePath, src)...)
+		}
+	}
+	for _, stmt := range findChildren(root, "assignment_statement") {
+		bindings = append(bindings, e.parseAssignmentBinding(stmt, filePath, src)...)
+	}
+	return bindings
+}
+
+func (e *TreeSitterGoExtractor) parseVarBinding(n *sitter.Node, filePath string, src []byte) []UnifiedVarBinding {
+	var leftExpr, rightExpr *sitter.Node
+	for i := 0; i < int(n.ChildCount()); i++ {
+		c := n.Child(i)
+		if c.Type() == "expression_list" {
+			if leftExpr == nil {
+				leftExpr = c
+			} else {
+				rightExpr = c
+			}
+		}
+	}
+	if leftExpr == nil || rightExpr == nil {
+		return nil
+	}
+	return e.bindingsFromExprLists(leftExpr, rightExpr, filePath, src)
+}
+
+func (e *TreeSitterGoExtractor) parseAssignmentBinding(n *sitter.Node, filePath string, src []byte) []UnifiedVarBinding {
+	var leftExpr, rightExpr *sitter.Node
+	for i := 0; i < int(n.ChildCount()); i++ {
+		c := n.Child(i)
+		if c.Type() == "expression_list" {
+			if leftExpr == nil {
+				leftExpr = c
+			} else {
+				rightExpr = c
+			}
+		}
+	}
+	if leftExpr == nil || rightExpr == nil {
+		return nil
+	}
+	return e.bindingsFromExprLists(leftExpr, rightExpr, filePath, src)
+}
+
+func (e *TreeSitterGoExtractor) parseVarSpecBinding(n *sitter.Node, filePath string, src []byte) []UnifiedVarBinding {
+	var name string
+	var rightNode *sitter.Node
+	for i := 0; i < int(n.ChildCount()); i++ {
+		c := n.Child(i)
+		if c.Type() == "identifier" && name == "" {
+			name = tsText(c, src)
+		}
+		if c.Type() == "call_expression" || c.Type() == "expression_list" {
+			rightNode = c
+		}
+	}
+	if name == "" || rightNode == nil {
+		return nil
+	}
+	b := UnifiedVarBinding{VarName: name}
+	if rightNode.Type() == "call_expression" {
+		b.CallSite = e.callSiteFromNode(rightNode, filePath, src)
+	} else {
+		b.Literal = tsText(rightNode, src)
+	}
+	return []UnifiedVarBinding{b}
+}
+
+func (e *TreeSitterGoExtractor) bindingsFromExprLists(left, right *sitter.Node, filePath string, src []byte) []UnifiedVarBinding {
+	var bindings []UnifiedVarBinding
+	li, ri := 0, 0
+	for li < int(left.ChildCount()) && ri < int(right.ChildCount()) {
+		lc := left.Child(li)
+		rc := right.Child(ri)
+		if lc == nil || lc.Type() == "," {
+			li++
+			continue
+		}
+		if rc == nil || rc.Type() == "," {
+			ri++
+			continue
+		}
+		if lc.Type() == "identifier" {
+			name := tsText(lc, src)
+			b := UnifiedVarBinding{VarName: name}
+			if rc.Type() == "call_expression" {
+				b.CallSite = e.callSiteFromNode(rc, filePath, src)
+			} else {
+				b.Literal = tsText(rc, src)
+			}
+			bindings = append(bindings, b)
+		}
+		li++
+		ri++
+	}
+	return bindings
+}
+
+func (e *TreeSitterGoExtractor) callSiteFromNode(call *sitter.Node, filePath string, src []byte) *UnifiedCallSite {
+	funcNode := call.Child(0)
+	if funcNode == nil {
+		return nil
+	}
+	site := &UnifiedCallSite{
+		Location: SourceLocation{File: filePath, LineStart: tsLine(call)},
+	}
+	switch funcNode.Type() {
+	case "identifier":
+		site.TargetFunc = tsText(funcNode, src)
+	case "selector_expression":
+		pkgNode := findFirstChild(funcNode, "identifier")
+		if pkgNode != nil {
+			site.TargetPkg = tsText(pkgNode, src)
+			site.ReceiverVar = site.TargetPkg
+		}
+		selNode := findFirstChild(funcNode, "field_identifier")
+		if selNode != nil {
+			site.TargetFunc = tsText(selNode, src)
+		}
+	case "field_identifier":
+		site.TargetFunc = tsText(funcNode, src)
+	}
+	argList := findFirstChild(call, "argument_list")
+	if argList != nil {
+		for i := 0; i < int(argList.ChildCount()); i++ {
+			arg := argList.Child(i)
+			if arg == nil || arg.Type() == "," || arg.Type() == "(" || arg.Type() == ")" {
+				continue
+			}
+			site.Arguments = append(site.Arguments, tsText(arg, src))
+		}
+	}
+	return site
 }
