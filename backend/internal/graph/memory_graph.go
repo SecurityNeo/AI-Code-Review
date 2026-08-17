@@ -245,12 +245,17 @@ func (g *MemorySymbolGraph) ingestAST(ast *parser.UnifiedAST) {
 		// 字段关系
 		for _, f := range tp.Fields {
 			fieldNode := &MemorySymbolNode{
-				ID:       fmt.Sprintf("field:%s:%s.%s", ast.FilePath, tp.Name, f.Name),
+				ID:       fmt.Sprintf("field:%s:%s:%s", ast.FilePath, tp.Name, f.Name),
 				Type:     NodeField,
 				Name:     f.Name,
 				Language: ast.Language,
 				File:     ast.FilePath,
 				Package:  pkg,
+				Location: f.Location,
+				Properties: map[string]interface{}{
+					"type": f.Type,
+					"tag":  f.Tag,
+				},
 			}
 			g.AddNode(fieldNode)
 			g.AddRelation(MemoryRelation{

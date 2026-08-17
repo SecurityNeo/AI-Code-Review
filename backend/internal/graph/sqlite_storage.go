@@ -237,7 +237,6 @@ func (s *SQLiteGraphStorage) Load(projectID uint64) (*MemorySymbolGraph, error) 
 			return nil, err
 		}
 		node := &MemorySymbolNode{
-			ID:       fmt.Sprintf("%s:%s:%d", nodeType, filePath, lineStart),
 			Type:     nodeType,
 			File:     filePath,
 			Location: parser.SourceLocation{File: filePath, LineStart: lineStart, LineEnd: lineEnd},
@@ -253,6 +252,14 @@ func (s *SQLiteGraphStorage) Load(projectID uint64) (*MemorySymbolGraph, error) 
 				node.IsExported = v == true
 			}
 			node.Properties = props
+			// 优先恢复原始 ID，避免基于 lineStart 重新生成导致冲突
+			if origID := getStringPropFromMap(props, "__original_id"); origID != "" {
+				node.ID = origID
+			} else {
+				node.ID = fmt.Sprintf("%s:%s:%d", nodeType, filePath, lineStart)
+			}
+		} else {
+			node.ID = fmt.Sprintf("%s:%s:%d", nodeType, filePath, lineStart)
 		}
 		graph.AddNode(node)
 		nodeIDMap[id] = node.ID
@@ -310,11 +317,12 @@ func (s *SQLiteGraphStorage) Exists(projectID uint64) bool {
 // nodeToProps 将节点转换为属性 map
 func nodeToProps(node *MemorySymbolNode) map[string]interface{} {
 	props := map[string]interface{}{
-		"name":        node.Name,
-		"language":    node.Language,
-		"package":     node.Package,
-		"signature":   node.Signature,
-		"is_exported": node.IsExported,
+		"name":          node.Name,
+		"language":      node.Language,
+		"package":       node.Package,
+		"signature":     node.Signature,
+		"is_exported":   node.IsExported,
+		"__original_id": node.ID,
 	}
 	if node.Properties != nil {
 		for k, v := range node.Properties {

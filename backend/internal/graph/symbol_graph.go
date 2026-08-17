@@ -220,6 +220,12 @@ func (sg *SymbolGraph) inferRelations(graph *MemorySymbolGraph, asts []*parser.U
 	}
 
 	// 推断接口实现关系（Go）
+	// TODO: 当前逻辑基于不准确的假设（funcNodes map 的 key 是方法名而非 "Type.Method"），
+	// 实际上 ingestAST 中 generateFuncID 会将方法名存储为 func:file:Receiver.Method 或 func:file:Method，
+	// 而 funcNodes 的 key 仅为 Name 字段（即方法名，不含接收者前缀）。
+	// 这导致 strings.Contains(fn.Name, node.Name+".") 几乎永远为 false，接口推断关系从未真正建立。
+	// 正确做法应在 ingestAST 时就为 receiver 方法统一记录 "Struct.Method" 格式的 name，
+	// 或在构建 funcNodes 时额外维护一个 receiver→methods 的映射。
 	for _, node := range graph.AllNodes() {
 		if node.Type != NodeType || node.Language != "golang" {
 			continue
@@ -236,6 +242,9 @@ func (sg *SymbolGraph) inferRelations(graph *MemorySymbolGraph, asts []*parser.U
 		structMethods := make(map[string]bool)
 		for _, fnNode := range funcNodes {
 			for _, fn := range fnNode {
+				// BUG: fn.Name 此处为纯方法名，node.Name 为类型名，
+				// strings.Contains("GetUser", "UserService.") → false
+				// 正确的匹配需要 fn.Name 为 "UserService.GetUser" 或基于 ID 模式匹配
 				if fn.Package == node.Package && strings.Contains(fn.Name, node.Name+".") {
 					parts := strings.Split(fn.Name, ".")
 					if len(parts) >= 2 {
