@@ -3816,11 +3816,6 @@ function renderPostProcessDetail(json) {
     const inp = json.input_snapshot || {};
     let html = renderMetaBar(json);
 
-    // 后处理阶段的状态提示
-    if (out.status) {
-        html += `<div class="mb-3"><span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${out.status==='completed'?'bg-green-100 text-green-700':'bg-gray-100 text-gray-600'}">${out.status === 'completed' ? '已完成' : out.status}</span></div>`;
-    }
-
     // 评分信息
     if (out.score !== undefined || inp.score !== undefined) {
         const score = out.score ?? inp.score;
