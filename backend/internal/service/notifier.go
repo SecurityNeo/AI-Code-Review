@@ -85,7 +85,7 @@ func (s *NotifierService) Test(id uint) (bool, string, error) {
 
 	message := "测试消息 - CodeGuard 通知配置成功！"
 	if notifier.MessageTemplate != "" {
-		message = buildMessageFromRule("task.completed", notifier.MessageTemplate, &mockTask, notifier.ID)
+		message = buildMessageFromRule("task.completed", notifier.MessageTemplate, &mockTask, notifier.ID, "")
 	}
 
 	return s.SendMessage(notifier.WebhookUrl, message, "")
@@ -107,6 +107,8 @@ func (s *NotifierService) SendMessage(webhookUrl, message string, mentionUserId 
 	}
 
 	// 如果指定了 @ 人员，在 markdown 末尾追加
+	// 注意：保留此行为供 backward-compatible 使用（如 issue 升级逻辑直接传入 mentionUserId）
+	// 任务完成通知中的 @ 已经通过 {{AT_RECIPIENT}} 模板变量控制，不再依赖此硬编码追加
 	if mentionUserId != "" {
 		message = message + "\n\n<@" + mentionUserId + ">"
 	}
@@ -196,9 +198,10 @@ func (s *NotifierService) NotifyAIReviewCompleted(task model.Task) {
 	}
 
 	for _, notifier := range notifiers {
-		message := buildMessageFromRule("task.completed", notifier.MessageTemplate, &task, notifier.ID)
+		message := buildMessageFromRule("task.completed", notifier.MessageTemplate, &task, notifier.ID, mentionUserId)
 
-		success, msg, err := s.SendMessage(notifier.WebhookUrl, message, mentionUserId)
+		// @ 行为已统一由模板变量 {{AT_RECIPIENT}} 控制，不再由发送层硬编码追加
+		success, msg, err := s.SendMessage(notifier.WebhookUrl, message, "")
 		status := "success"
 		errMsg := ""
 		if err != nil || !success {
@@ -237,7 +240,7 @@ func (s *NotifierService) NotifyAIReviewCompleted(task model.Task) {
 }
 
 // buildMessageFromRule 优先读取通知规则模板，其次 fallback 模板，最后默认模板
-func buildMessageFromRule(trigger string, fallbackTemplate string, task *model.Task, notifierID uint) string {
+func buildMessageFromRule(trigger string, fallbackTemplate string, task *model.Task, notifierID uint, mentionUserId string) string {
 	templateStr := GetNotificationRuleTemplate(trigger)
 	source := "notification_rule"
 	if templateStr == "" {
@@ -301,7 +304,7 @@ func buildMessageFromRule(trigger string, fallbackTemplate string, task *model.T
 		Additions: additions,
 		Deletions: deletions,
 		DeadlineHours: 120 - stats.Pending*2,
-		AtRecipient: "",
+		AtRecipient: mentionUserId,
 	}
 	return RenderMessage(templateStr, ctx)
 }
