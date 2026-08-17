@@ -111,6 +111,7 @@ func (e *CodeUnderstandingExecutor) Execute(ctx StageContext) error {
 	if fullFileMap == nil {
 		fullFileMap = make(map[string]string)
 	}
+	var callChainText string
 
 	// 2. 阶段一：context_extract
 	ctxStage := subStageInfo{
@@ -179,7 +180,7 @@ func (e *CodeUnderstandingExecutor) Execute(ctx StageContext) error {
 			analyzer := NewCrossFileAnalyzer(repoDir, lang, depth)
 			crossFileCtx, crossErr := analyzer.Analyze(changedPaths)
 			if crossErr == nil && crossFileCtx != nil {
-				callChainText := buildCrossFileCallChainText(crossFileCtx)
+				callChainText = buildCrossFileCallChainText(crossFileCtx)
 				ctx.SetInput("cross_file_call_chain", callChainText)
 			}
 		}
@@ -265,7 +266,7 @@ func (e *CodeUnderstandingExecutor) Execute(ctx StageContext) error {
 		},
 		StartAt: time.Now().Format(time.RFC3339),
 	}
-	report := e.buildReport(asts, graphResult, reviewView, parsedCount, len(files), lang)
+	report := e.buildReport(asts, graphResult, reviewView, parsedCount, len(files), lang, callChainText)
 	reportStage.EndAt = time.Now().Format(time.RFC3339)
 	reportStage.Status = "success"
 	reportStage.Output = map[string]interface{}{
@@ -447,7 +448,7 @@ func (e *CodeUnderstandingExecutor) buildReviewView(ctx StageContext, projectID 
 }
 
 // buildReport 阶段三：生成报告
-func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graphResult *graph.SymbolGraphResult, reviewView *graph.ReviewView, parsedCount, totalCount int, lang string) *CodeUnderstandingReport {
+func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graphResult *graph.SymbolGraphResult, reviewView *graph.ReviewView, parsedCount, totalCount int, lang string, crossFileCallChain string) *CodeUnderstandingReport {
 	report := &CodeUnderstandingReport{
 		Status:        "success",
 		ReportVersion: "1.0",
@@ -681,6 +682,7 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 	}
 
 	// Prompt注入文本（只展示与变更文件相关的端点和污点流）
+	report.CrossFileCallChain = crossFileCallChain
 	report.ReportText = e.formatReportText(report, report.FileList)
 	report.PromptInjection = report.ReportText
 	return report
@@ -742,6 +744,12 @@ func (e *CodeUnderstandingExecutor) formatReportText(report *CodeUnderstandingRe
 		}
 	}
 
+	// 跨文件调用链上下文
+	if report.CrossFileCallChain != "" {
+		b.WriteString("\n### 跨文件调用链上下文\n")
+		b.WriteString(report.CrossFileCallChain)
+	}
+
 	return b.String()
 }
 
@@ -786,8 +794,9 @@ type CodeUnderstandingReport struct {
 	Endpoints          []EndpointSummary        `json:"endpoints,omitempty"`
 	TaintFlowCount     int                      `json:"taint_flow_count"`
 	TaintFlows         []TaintFlowSummary       `json:"taint_flows,omitempty"`
-	ReportText         string                   `json:"report_text,omitempty"` // Prompt注入文本
-	PromptInjection    string                   `json:"prompt_injection"`      // 同上，兼容命名
+	CrossFileCallChain string                   `json:"cross_file_call_chain,omitempty"` // 跨文件调用链文本
+	ReportText         string                   `json:"report_text,omitempty"`         // Prompt注入文本
+	PromptInjection    string                   `json:"prompt_injection"`              // 同上，兼容命名
 	Summary            CodeUnderstandingSummary `json:"summary"`
 }
 
