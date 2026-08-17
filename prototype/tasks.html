@@ -164,7 +164,7 @@
                             <tr>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">任务ID</th>
                                 <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500">类型</th>
-                                <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500">触发方式</th>
+                                <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500">评审分数</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">所属项目</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">MR ID</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">开发人员</th>
@@ -221,7 +221,7 @@
                         </div>
                         <div>
                             <label class="text-xs text-gray-400">触发方式</label>
-                            <div class="font-medium text-sm" id="detailTrigger">-</div>
+                            <div class="font-medium text-sm" id="detailTriggerInfo">-</div>
                         </div>
                     </div>
                 </div>
@@ -527,7 +527,7 @@ function renderTasks(tasks) {
                 return `<tr class="hover:bg-gray-50">
                     <td class="px-4 py-3 text-sm font-mono text-gray-600 cursor-pointer" onclick="openTaskDetail(${t.id})">#${t.id}</td>
                     <td class="px-4 py-3 text-center cursor-pointer" onclick="openTaskDetail(${t.id})"><span class="task-type-badge ${isReview ? 'review' : 'chat'}">${getTaskTypeText(t.task_type)}</span></td>
-                    <td class="px-4 py-3 text-center cursor-pointer" onclick="openTaskDetail(${t.id})">${getTriggerSourceBadge(t.trigger_source, t.score_value)}</td>
+                    <td class="px-4 py-3 text-center cursor-pointer" onclick="openTaskDetail(${t.id})">${t.status === 'running' ? '<span class="text-gray-400 text-xs">--</span>' : getScoreBadge(t.score_value)}</td>
                     <td class="px-4 py-3 text-sm cursor-pointer" onclick="openTaskDetail(${t.id})">${t.project?.name || '-'}</td>
                     <td class="px-4 py-3 text-sm cursor-pointer" onclick="openTaskDetail(${t.id})">${t.mr_iid ? '<a href="' + (t.mr_url || '#') + '" target="_blank" class="text-blue-600 hover:underline">' + t.mr_iid + '</a>' : '-'}</td>
                     <td class="px-4 py-3 text-sm cursor-pointer" onclick="openTaskDetail(${t.id})">${t.author || '-'}</td>
@@ -561,17 +561,13 @@ function renderTasks(tasks) {
             return map[status] || status;
         }
 
-        function getTriggerSourceBadge(source, score) {
-            if (source === 'score_threshold') {
-                return `<span class="bg-red-50 text-red-600 px-2 py-0.5 rounded text-xs">评分阈值${score ? ' · ' + score + '分' : ''}</span>`;
-            }
-            if (source === 'merge_request' || source === 'merge_request_open' || source === 'merge_request_update' || source === 'merge_request_reopen') {
-                return `<span class="bg-purple-50 text-purple-600 px-2 py-0.5 rounded text-xs">代码合并</span>`;
-            }
-            if (source === 'manual') {
-                return `<span class="bg-blue-50 text-blue-600 px-2 py-0.5 rounded text-xs">用户召唤</span>`;
-            }
-            return `<span class="bg-gray-50 text-gray-500 px-2 py-0.5 rounded text-xs">${source || '未知'}</span>`;
+        function getScoreBadge(score) {
+            if (!score && score !== 0) return '<span class="text-gray-400 text-xs">-</span>';
+            var colorClass = 'bg-gray-50 text-gray-600';
+            if (score >= 80) colorClass = 'bg-green-50 text-green-600';
+            else if (score >= 60) colorClass = 'bg-yellow-50 text-yellow-600';
+            else colorClass = 'bg-red-50 text-red-600';
+            return `<span class="${colorClass} px-2 py-0.5 rounded text-xs font-medium">${score}分</span>`;
         }
 
         function getModelTag(model) {

@@ -154,6 +154,9 @@
                             <i class="fas fa-hammer mr-1"></i>构建
                         </button>
                         <button onclick="refreshGraph()" id="refreshGraphBtn" class="px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 hidden">
+                            <i class="fas fa-redo mr-1"></i>重新构建
+                        </button>
+                        <button onclick="reloadGraphData()" id="reloadGraphBtn" class="px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 hidden">
                             <i class="fas fa-sync-alt mr-1"></i>刷新
                         </button>
                         <button onclick="viewGraph()" id="viewGraphBtn" class="px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 hidden">
@@ -499,6 +502,7 @@
         const badge = document.getElementById('graphStatusBadge');
         const buildBtn = document.getElementById('buildGraphBtn');
         const refreshBtn = document.getElementById('refreshGraphBtn');
+        const reloadBtn = document.getElementById('reloadGraphBtn');
         const viewBtn = document.getElementById('viewGraphBtn');
         const progressArea = document.getElementById('graphProgressArea');
         const errorArea = document.getElementById('graphErrorArea');
@@ -511,6 +515,7 @@
             badge.style.cssText = 'background:#f3f4f6;color:#6b7280';
             buildBtn.classList.remove('hidden');
             refreshBtn.classList.add('hidden');
+            reloadBtn.classList.add('hidden');
             viewBtn.classList.add('hidden');
             progressArea.classList.add('hidden');
             errorArea.classList.add('hidden');
@@ -521,6 +526,7 @@
             badge.style.cssText = 'background:#dbeafe;color:#1e40af';
             buildBtn.classList.add('hidden');
             refreshBtn.classList.add('hidden');
+            reloadBtn.classList.add('hidden');
             viewBtn.classList.add('hidden');
             progressArea.classList.remove('hidden');
             errorArea.classList.add('hidden');
@@ -531,6 +537,7 @@
             badge.style.cssText = 'background:#d1fae5;color:#065f46';
             buildBtn.classList.add('hidden');
             refreshBtn.classList.remove('hidden');
+            reloadBtn.classList.remove('hidden');
             viewBtn.classList.remove('hidden');
             progressArea.classList.add('hidden');
             errorArea.classList.add('hidden');
@@ -549,6 +556,7 @@
             badge.style.cssText = 'background:#fee2e2;color:#991b1b';
             buildBtn.classList.remove('hidden');
             refreshBtn.classList.add('hidden');
+            reloadBtn.classList.add('hidden');
             viewBtn.classList.add('hidden');
             progressArea.classList.add('hidden');
             errorArea.classList.remove('hidden');
@@ -579,6 +587,16 @@
             if (!res.ok) throw new Error('刷新失败');
             showToast('代码地图刷新已启动', 'success');
             startGraphPolling();
+        } catch (e) { showToast('刷新失败: ' + e.message, 'error'); }
+    }
+
+    async function reloadGraphData() {
+        try {
+            const res = await apiFetch(`${API_BASE}/projects/${getProjectId()}`);
+            if (!res.ok) throw new Error('获取数据失败');
+            const json = await res.json();
+            const p = json.data;
+            renderGraphStatus(p);
         } catch (e) { showToast('刷新失败: ' + e.message, 'error'); }
     }
 
@@ -644,6 +662,14 @@
 
         overlay.appendChild(box);
         document.body.appendChild(overlay);
+
+        // 默认选中第一个 tab
+        var firstTab = box.querySelector('.graph-tab[data-tab="endpoints"]');
+        if (firstTab) {
+            firstTab.style.color = '#4f46e5';
+            firstTab.style.borderBottomColor = '#4f46e5';
+            firstTab.classList.add('active');
+        }
 
         // 加载数据
         try {
@@ -742,30 +768,59 @@
             }
             var html = '<div style="font-size:12px; color:#6b7280; margin-bottom:8px;">共 ' + (data.type_count || types.length) + ' 个类型/结构体（展示前 ' + types.length + ' 个）</div>';
             html += '<div style="display:flex; flex-direction:column; gap:6px;">';
-            types.forEach(function(tp) {
+            types.forEach(function(tp, idx) {
+                var fieldCount = (tp.fields || []).length;
+                var fieldsVisibleId = 'type-fields-' + idx;
                 var fieldsHtml = '';
-                if (tp.fields && tp.fields.length > 0) {
-                    fieldsHtml = '<div style="margin-top:6px; padding:6px 8px; background:#f3f4f6; border-radius:4px; font-size:12px; font-family:monospace; color:#374151;">';
-                    fieldsHtml += tp.fields.slice(0, 8).map(function(f) {
-                        return escapeHtml(f.name || f);
-                    }).join(', ');
-                    if (tp.fields.length > 8) {
-                        fieldsHtml += ' <span style="color:#9ca3af;">... +' + (tp.fields.length - 8) + ' 字段</span>';
-                    }
-                    fieldsHtml += '</div>';
+                if (fieldCount > 0) {
+                    // 构建字段列表表格（默认折叠）
+                    var rows = '';
+                    tp.fields.forEach(function(f) {
+                        var fName = (typeof f === 'object' ? (f.name || '') : f);
+                        var fType = (typeof f === 'object' ? (f.type || '') : '');
+                        var fTag = (typeof f === 'object' ? (f.tag || '') : '');
+                        rows += '<tr style="border-bottom:1px solid #f3f4f6;">' +
+                            '<td style="padding:6px 8px; font-family:monospace; font-size:12px; color:#1f2937; white-space:nowrap;">' + escapeHtml(fName) + '</td>' +
+                            '<td style="padding:6px 8px; font-family:monospace; font-size:12px; color:#6b7280;">' + escapeHtml(fType) + '</td>' +
+                            '<td style="padding:6px 8px; font-family:monospace; font-size:11px; color:#9ca3af;">' + escapeHtml(fTag) + '</td>' +
+                            '</tr>';
+                    });
+                    fieldsHtml = '<div id="' + fieldsVisibleId + '" style="display:none; margin-top:8px;">' +
+                        '<table style="width:100%; border-collapse:collapse; font-size:12px;">' +
+                        '<thead><tr style="background:#f3f4f6; color:#6b7280; font-size:11px;">' +
+                        '<th style="text-align:left; padding:6px 8px; font-weight:600;">字段</th>' +
+                        '<th style="text-align:left; padding:6px 8px; font-weight:600;">类型</th>' +
+                        '<th style="text-align:left; padding:6px 8px; font-weight:600;">标签</th>' +
+                        '</tr></thead><tbody>' + rows + '</tbody></table>' +
+                        '</div>';
                 }
                 html += '<div style="padding:10px 12px; background:#f9fafb; border-radius:6px; border:1px solid #e5e7eb;">' +
-                    '<div style="display:flex; align-items:center; gap:12px;">' +
+                    '<div style="display:flex; align-items:center; gap:12px; cursor:pointer;" onclick="toggleTypeFields(\'' + fieldsVisibleId + '\', this)">' +
                     '<i class="fas fa-layer-group" style="color:#06b6d4; font-size:12px;"></i>' +
                     '<span style="font-family:monospace; font-size:13px; color:#1f2937; flex:1;">' + escapeHtml(tp.name || '') + '</span>' +
                     '<span style="font-size:11px; color:#6b7280; background:#e5e7eb; padding:1px 6px; border-radius:4px;">' + escapeHtml(tp.kind || 'struct') + '</span>' +
-                    '<span style="font-size:12px; color:#6b7280;">' + escapeHtml(tp.file || '') + (tp.line ? ':' + tp.line : '') + '</span>' +
+                    (fieldCount > 0 ? '<span style="font-size:11px; color:#4f46e5; background:#eef2ff; padding:1px 8px; border-radius:4px;">' + fieldCount + ' 字段</span>' : '') +
+                    '<i class="fas fa-chevron-down toggle-icon" style="font-size:10px; color:#9ca3af; transition:transform 0.2s;"></i>' +
+                    '<span style="font-size:12px; color:#6b7280; white-space:nowrap;">' + escapeHtml(tp.file || '') + (tp.line ? ':' + tp.line : '') + '</span>' +
                     '</div>' +
                     fieldsHtml +
                     '</div>';
             });
             html += '</div>';
             container.innerHTML = html;
+        }
+    }
+
+    function toggleTypeFields(id, el) {
+        var panel = document.getElementById(id);
+        if (!panel) return;
+        var icon = el.querySelector('.toggle-icon');
+        if (panel.style.display === 'none') {
+            panel.style.display = 'block';
+            if (icon) icon.style.transform = 'rotate(180deg)';
+        } else {
+            panel.style.display = 'none';
+            if (icon) icon.style.transform = 'rotate(0deg)';
         }
     }
 

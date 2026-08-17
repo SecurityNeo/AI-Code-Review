@@ -2239,7 +2239,7 @@ const stageNameMap = {
     'batch_plan': '分批决策',
     'batch_summary': '汇总评审',
     'review_arbitration': '评审裁决',
-    'post_process': '发布智能体',
+    'post_process': '报告发布',
 };
 
 const stageDescMap = {
@@ -2710,6 +2710,8 @@ async function showPipelineDetail(execId) {
             body.innerHTML = renderPostProcessDetail(json);
         } else if (stageCode === 'code_understanding') {
             body.innerHTML = renderCodeUnderstandingDetail(json);
+        } else if (stageCode === 'impact_analysis') {
+            body.innerHTML = renderImpactAnalysisDetail(json);
         } else if (stageCode === 'review_arbitration') {
             body.innerHTML = renderReviewArbitrationDetail(json);
         } else {
@@ -2846,6 +2848,103 @@ function renderGenericDetail(json) {
         }
     }
     if (!html) html = '<div class="text-gray-400 text-sm">无详细数据</div>';
+    return html;
+}
+
+function renderImpactAnalysisDetail(json) {
+    const outSnap = json.output_snapshot || {};
+    let html = '';
+
+    // Status + Duration + Model
+    const metaItems = [];
+    if (json.status) metaItems.push(`<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${json.status==='success'?'bg-green-100 text-green-700':json.status==='running'?'bg-blue-100 text-blue-700':'bg-gray-100 text-gray-600'}">${getStatusText(json.status)}</span>`);
+    if (json.duration_ms) metaItems.push(`<span class="text-gray-500 text-xs">⏱ ${Math.round(json.duration_ms/1000)}s</span>`);
+    if (outSnap.model_name || json.model_name) metaItems.push(`<span class="text-gray-500 text-xs">🤖 ${escapeHtml(outSnap.model_name || json.model_name)}</span>`);
+    if (metaItems.length) html += `<div class="flex flex-wrap gap-2 mb-3">${metaItems.join('')}</div>`;
+
+    // Token usage
+    const inputTokens  = outSnap.input_tokens  || json.input_tokens  || 0;
+    const outputTokens = outSnap.output_tokens || json.output_tokens || 0;
+    if (inputTokens || outputTokens) {
+        html += `<div class="mb-3 bg-blue-50 border border-blue-100 rounded-lg p-2 flex justify-between items-center">`;
+        html += `<span class="text-xs text-blue-700 font-medium">Token 用量</span>`;
+        html += `<span class="text-[11px] font-mono text-blue-600">in: ${(inputTokens).toLocaleString()} / out: ${(outputTokens).toLocaleString()}</span>`;
+        html += `</div>`;
+    }
+
+    // Skipped reason
+    const skippedReason = outSnap.skipped_reason;
+    if (skippedReason) {
+        html += `<div class="mb-3 bg-yellow-50 border border-yellow-200 rounded-lg p-3">`;
+        html += `<div class="text-xs text-yellow-700 font-medium mb-1"><i class="fas fa-exclamation-triangle mr-1"></i>阶段被跳过</div>`;
+        html += `<div class="text-xs text-yellow-600">${escapeHtml(skippedReason)}</div>`;
+        html += `</div>`;
+    }
+
+    // Findings
+    const findings = outSnap.findings || [];
+    const findingCount = outSnap.finding_count !== undefined ? outSnap.finding_count : findings.length;
+
+    html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-2 flex items-center gap-1">`;
+    html += `<i class="fas fa-project-diagram text-blue-500"></i>影响分析结果</div>`;
+
+    if (findingCount === 0) {
+        html += `<div class="text-sm text-gray-500 bg-gray-50 rounded-lg p-3 border border-gray-200">未检测到 Breaking Change 或跨模块影响</div>`;
+    } else {
+        html += `<div class="space-y-2">`;
+        findings.forEach((f, idx) => {
+            const severityCls = f.Type === 'breaking_change' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-yellow-50 border-yellow-200 text-yellow-700';
+            const severityIcon = f.Type === 'breaking_change' ? 'fa-exclamation-circle text-red-500' : 'fa-info-circle text-yellow-500';
+            html += `<div class="border rounded-lg p-3 ${severityCls}">`;
+            html += `<div class="flex items-start gap-2 mb-1">`;
+            html += `<i class="fas ${severityIcon} mt-0.5"></i>`;
+            html += `<div class="flex-1 min-w-0">`;
+            html += `<div class="text-xs font-semibold">${escapeHtml(f.SymbolName || f.symbol_name || '未知')}</div>`;
+            html += `<div class="text-[11px] text-gray-600">${escapeHtml(f.FilePath || f.file_path || '')}</div>`;
+            html += `</div></div>`;
+            html += `<div class="text-[11px] text-gray-700">`;
+            if (f.ChangeDesc || f.change_desc) html += `<div class="mb-1">变更: ${escapeHtml(f.ChangeDesc || f.change_desc)}</div>`;
+            if (f.Suggestion || f.suggestion) html += `<div class="mb-1">建议: ${escapeHtml(f.Suggestion || f.suggestion)}</div>`;
+            if (f.AffectedFiles && f.AffectedFiles.length > 0) {
+                html += `<div class="text-gray-500">影响文件: ${f.AffectedFiles.map(a => escapeHtml(a)).join(', ')}</div>`;
+            }
+            html += `</div></div>`;
+        });
+        html += `</div>`;
+    }
+    html += `</div>`;
+
+    // LLM Prompt
+    const prompt = outSnap.llm_prompt;
+    if (prompt) {
+        const pid = 'prompt-impact-' + Math.random().toString(36).substr(2, 8);
+        html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
+        html += `<span>LLM Prompt</span>`;
+        html += `<span class="text-[10px] text-gray-400">${prompt.length} 字符</span>`;
+        html += `</div>`;
+        html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">`;
+        html += `<summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看 Prompt</summary>`;
+        html += `<div class="relative group">`;
+        html += `<button onclick="copyTextById('${pid}', this)" class="absolute top-1.5 right-1.5 z-10 bg-white/90 border border-gray-200 rounded px-2 py-0.5 text-[10px] text-gray-400 hover:text-blue-600 hover:border-blue-300 shadow-sm" title="复制"><i class="far fa-copy mr-0.5"></i>复制</button>`;
+        html += `<pre id="${pid}" class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[24rem] overflow-y-auto">${escapeHtml(prompt)}</pre>`;
+        html += `</div></details></div>`;
+    }
+
+    // Raw Output
+    const raw = outSnap.llm_raw_output;
+    if (raw) {
+        const rid = 'raw-impact-' + Math.random().toString(36).substr(2, 8);
+        html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5">大模型原始输出</div>`;
+        html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">`;
+        html += `<summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看 JSON</summary>`;
+        html += `<div class="relative group">`;
+        html += `<button onclick="copyTextById('${rid}', this)" class="absolute top-1.5 right-1.5 z-10 bg-white/90 border border-gray-200 rounded px-2 py-0.5 text-[10px] text-gray-400 hover:text-blue-600 hover:border-blue-300 shadow-sm" title="复制"><i class="far fa-copy mr-0.5"></i>复制</button>`;
+        let jsonStr = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
+        try { const parsed = JSON.parse(jsonStr); jsonStr = JSON.stringify(parsed, null, 2); } catch (_) {}
+        html += `<pre id="${rid}" class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[28rem] overflow-y-auto">${escapeHtml(jsonStr)}</pre>`;
+        html += `</div></details></div>`;
+    }
+
     return html;
 }
 
@@ -2988,18 +3087,7 @@ function renderCodeUnderstandingDetail(json) {
 
     // 端点摘要
     if (report.endpoints && report.endpoints.length > 0) {
-        html += `<div class="mb-2"><div class="text-[11px] font-medium text-gray-700 mb-1">识别的 API 端点（${report.endpoints.length} 个）</div>`;
-        html += '<div class="overflow-x-auto"><table class="w-full text-[11px] border rounded-lg">';
-        html += '<thead class="bg-gray-50"><tr class="text-gray-500"><th class="text-left px-2 py-1">Method</th><th class="text-left px-2 py-1">Path</th><th class="text-left px-2 py-1">文件</th><th class="text-left px-2 py-1">框架</th></tr></thead><tbody>';
-        report.endpoints.forEach(ep => {
-            html += `<tr class="border-t">
-                <td class="px-2 py-1 font-mono text-blue-600">${escapeHtml(ep.method || '-')}</td>
-                <td class="px-2 py-1">${escapeHtml(ep.path)}</td>
-                <td class="px-2 py-1 font-mono text-gray-500">${escapeHtml(ep.file || '-')}<span class="text-gray-300">:${ep.line || 0}</span></td>
-                <td class="px-2 py-1"><span class="px-1 py-0.5 rounded bg-indigo-50 text-indigo-600 text-[10px]">${escapeHtml(ep.framework || '-')}</span></td>
-            </tr>`;
-        });
-        html += '</tbody></table></div></div>';
+        html += `<div class="mb-2"><div class="text-[11px] font-medium text-gray-700 mb-1">检测框架: ${escapeHtml((report.graph_data?.frameworks || []).join(', ') || '-')}</div></div>`;
     }
 
     return html;
@@ -3268,20 +3356,6 @@ function renderCuReportMergeBody(sub, report) {
             <div class="text-xs font-semibold text-gray-700 mb-1">代码理解报告文本</div>
             <div class="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 whitespace-pre-wrap max-h-48 overflow-y-auto border">${escapeHtml(report.report_text.substring(0, 3000))}${report.report_text.length > 3000 ? '\n\n... [已截断]' : ''}</div>
         </div>`;
-    }
-
-    // 端点摘要（如果 Prompt 中没有直观展示）
-    if (report.endpoints && report.endpoints.length > 0) {
-        html += `<div class="mb-2"><div class="text-[11px] font-medium text-gray-700 mb-1">识别的 API 端点</div>`;
-        report.endpoints.forEach(ep => {
-            html += `<div class="text-[11px] py-0.5 border-t first:border-0">
-                <span class="font-mono text-blue-600">${escapeHtml(ep.method || '-')}</span>
-                <span class="text-gray-700">${escapeHtml(ep.path)}</span>
-                <span class="text-gray-400">→ ${escapeHtml(ep.file || '-')}<span class="text-gray-300">:${ep.line || 0}</span></span>
-                ${ep.framework ? `<span class="ml-1 px-1 rounded bg-indigo-50 text-indigo-600 text-[10px]">${escapeHtml(ep.framework)}</span>` : ''}
-            </div>`;
-        });
-        html += '</div>';
     }
 
     if (sub.error) {
