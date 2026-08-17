@@ -198,13 +198,15 @@ func (p *PromptContext) GetDimensionCodes() []string {
 	return codes
 }
 
-// AgentFindingsJSON 将 4 类 Agent Finding 统一序列化为 JSON（用于结构化 Prompt 注入）
+// AgentFindingsJSON 将 6 类 Agent Finding 统一序列化为 JSON（用于结构化 Prompt 注入）
 func (p *PromptContext) AgentFindingsJSON() ([]byte, error) {
 	data := map[string]interface{}{
-		"secret_scan":     p.SecretScanFindings,
-		"security_audit":  p.SecurityAuditFindings,
-		"test_suggestion": p.TestSuggestions,
-		"impact_analysis": p.ImpactFindings,
+		"secret_scan":       p.SecretScanFindings,
+		"security_audit":    p.SecurityAuditFindings,
+		"test_suggestion":   p.TestSuggestions,
+		"impact_analysis":   p.ImpactFindings,
+		"dependency_scan":   p.DependencyVulns,
+		"code_understanding": p.CodeUnderstandingReport,
 	}
 	return json.Marshal(data)
 }

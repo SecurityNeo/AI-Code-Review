@@ -54,6 +54,20 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 		agentData.ImpactFindings = findings
 	}
 
+	// 1.1 读取依赖漏洞扫描结果（dependency_scan 阶段产出）
+	var depVulns []engine.DependencyVuln
+	if v, ok := ctx.GetOutput("dependency_vulns").([]engine.DependencyVuln); ok && len(v) > 0 {
+		depVulns = v
+	}
+
+	// 1.2 读取代码理解器报告（code_understanding 阶段产出）
+	var codeUnderstandingReport string
+	if r, ok := ctx.GetOutput("code_understanding_report").(string); ok && r != "" {
+		codeUnderstandingReport = r
+	} else if r, ok := ctx.GetOutput("code_understanding_prompt").(string); ok && r != "" {
+		codeUnderstandingReport = r
+	}
+
 	// 2. 读取 Batch Review Results
 	batchResults, ok := ctx.GetOutput("batch_review_results").([]*llm.BatchReviewResult)
 	if !ok || len(batchResults) == 0 {
@@ -77,11 +91,13 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 
 	// 4. 组装 PromptContext（用于 Builder 构建结构化 Prompt）
 	promptCtx := &engine.PromptContext{
-		SecretScanFindings:    agentData.SecretScan,
-		SecurityAuditFindings: agentData.SecurityAudit,
-		TestSuggestions:       agentData.TestSuggestions,
-		ImpactFindings:        agentData.ImpactFindings,
-		BatchReviewResults:    batchResults,
+		SecretScanFindings:      agentData.SecretScan,
+		SecurityAuditFindings:   agentData.SecurityAudit,
+		TestSuggestions:         agentData.TestSuggestions,
+		ImpactFindings:          agentData.ImpactFindings,
+		DependencyVulns:         depVulns,
+		CodeUnderstandingReport: codeUnderstandingReport,
+		BatchReviewResults:      batchResults,
 		DimensionWeights:      dimWeights,
 		DeductScoreConfig:     deductCfg,
 	}
@@ -106,10 +122,12 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 	inputSnapshot := map[string]interface{}{
 		"prompt": promptSnap,
 		"agent_findings": map[string]int{
-			"secret_scan":     len(agentData.SecretScan),
-			"security_audit":  len(agentData.SecurityAudit),
-			"test_suggestion": len(agentData.TestSuggestions),
-			"impact_analysis": len(agentData.ImpactFindings),
+			"secret_scan":        len(agentData.SecretScan),
+			"security_audit":     len(agentData.SecurityAudit),
+			"test_suggestion":    len(agentData.TestSuggestions),
+			"impact_analysis":    len(agentData.ImpactFindings),
+			"dependency_scan":    len(depVulns),
+			"code_understanding": len(codeUnderstandingReport),
 		},
 		"batch_results_count":  len(batchResults),
 		"total_raw_llm_issues": countTotalIssues(batchResults),
