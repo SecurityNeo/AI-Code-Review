@@ -1,9 +1,8 @@
 package dataflow
 
 import (
-	"strings"
-
 	"github.com/ai-optimizer/backend/internal/graph"
+	"github.com/ai-optimizer/backend/internal/parser"
 )
 
 // SourceKind 数据源类型
@@ -15,6 +14,7 @@ const (
 	SourceQueryParam = "query_param"
 	SourceDB         = "db"
 	SourceFile       = "file"
+	SourceEnv        = "env"
 )
 
 // SinkKind 危险Sink类型
@@ -63,197 +63,41 @@ type SinkInfo struct {
 	NodeID   string `json:"node_id,omitempty"`
 }
 
-// PathNode 路径节点
+// PathNode 路径节点（污点传播链中的节点）
 type PathNode struct {
 	Function string `json:"function"`
 	File     string `json:"file"`
 	Line     int    `json:"line"`
+	VarName  string `json:"var_name,omitempty"` // 传播到该节点的变量名
 }
 
-// DefaultTaintConfig 默认污点配置
-type DefaultTaintConfig struct {
-	Sources []string            // 例如 gin.Context.Query, req.GetParameter
-	Sinks   map[string][]string // sink kind -> function patterns
-}
-
-// Engine 数据流分析引擎
+// Engine v2 污点分析引擎入口
+// 使用方式:
+//
+//	engine := dataflow.NewEngineV2(lang, asts, graph)
+//	result := engine.Analyze()
 type Engine struct {
-	config DefaultTaintConfig
+	lang  string
+	asts  []*parser.UnifiedAST
+	graph *graph.MemorySymbolGraph
 }
 
-// NewEngine 创建数据流分析引擎
-func NewEngine() *Engine {
+// NewEngineV2 创建新的污点分析引擎
+func NewEngineV2(lang string, asts []*parser.UnifiedAST, graph *graph.MemorySymbolGraph) *Engine {
 	return &Engine{
-		config: DefaultTaintConfig{
-			Sources: []string{
-				"Query", "Param", "PostForm", "GetHeader", "Cookie",
-				"GetQuery", "GetParam", "Body", "FormValue",
-			},
-			Sinks: map[string][]string{
-				SinkSQLInjection:     {"Exec", "Raw", "ExecContext", "QueryContext"},
-				SinkCommandInjection: {"Command", "CommandContext", "Start", "Run"},
-				SinkXSS:              {"WriteString", `Write\(`, `Fprintf\(`, `Sprintf\(`},
-				SinkPathTraversal:    {"OpenFile", "WriteFile", "Create", "Mkdir", "ReadFile"},
-				SinkSSRF:             {"Get", "Post", "Do", "Dial", "DialContext"},
-			},
-		},
+		lang:  normalizeLang(lang),
+		asts:  asts,
+		graph: graph,
 	}
 }
 
-// Analyze 分析评审视图中的污点路径
-func (e *Engine) Analyze(view ReviewViewIface) *DataFlowResult {
-	result := &DataFlowResult{Flows: make([]TaintFlow, 0)}
-
-	// 获取所有函数节点
-	for _, node := range view.GetGraph().AllNodes() {
-		if node.Type != graph.NodeFunc {
-			continue
-		}
-		// 识别污点源
-		sources := e.identifySources(node)
-		if len(sources) == 0 {
-			continue
-		}
-
-		// 对每个源，查找可达的Sink
-		for _, src := range sources {
-			sinks := e.findReachableSinks(view.GetGraph(), node, src)
-			for _, sink := range sinks {
-				flow := TaintFlow{
-					Source:    src,
-					Sink:      sink,
-					Path:      []PathNode{{Function: node.Name, File: node.File, Line: node.Location.LineStart}},
-					RiskLevel: "high",
-					Category:  sink.Kind,
-				}
-				result.Flows = append(result.Flows, flow)
-			}
-		}
-	}
-
-	return result
+// Analyze 执行污点分析（v2，基于 AST）
+func (e *Engine) Analyze() *DataFlowResult {
+	analyzer := NewTaintAnalyzer(e.lang, e.asts, e.graph)
+	return analyzer.Analyze()
 }
 
-// identifySources 识别函数中的污点源
-func (e *Engine) identifySources(node *graph.MemorySymbolNode) []SourceInfo {
-	var sources []SourceInfo
-	if node.Properties == nil {
-		return sources
-	}
-	snippet, _ := node.Properties["body_snippet"].(string)
-	if snippet == "" {
-		return sources
-	}
-	for _, src := range e.config.Sources {
-		if strings.Contains(snippet, src) {
-			sources = append(sources, SourceInfo{
-				Kind:     SourceHTTPParam,
-				Name:     src,
-				Function: node.Name,
-				File:     node.File,
-				Line:     node.Location.LineStart,
-				NodeID:   node.ID,
-			})
-		}
-	}
-	return sources
-}
-
-// findReachableSinks 从某函数查找可达的Sink
-func (e *Engine) findReachableSinks(g *graph.MemorySymbolGraph, startNode *graph.MemorySymbolNode, src SourceInfo) []SinkInfo {
-	var sinks []SinkInfo
-	visited := make(map[string]bool)
-
-	// BFS遍历调用图
-	var queue []*graph.MemorySymbolNode
-	queue = append(queue, startNode)
-
-	for len(queue) > 0 {
-		curr := queue[0]
-		queue = queue[1:]
-		if visited[curr.ID] {
-			continue
-		}
-		visited[curr.ID] = true
-
-		// 检查当前节点是否有Sink
-		if sinkMatches := e.findSinksInNode(curr); len(sinkMatches) > 0 {
-			for _, s := range sinkMatches {
-				// 检查是否有sanitizer
-				if !e.hasSanitizer(curr, src) {
-					sinks = append(sinks, s)
-				}
-			}
-		}
-
-		// 基础 def-use 参数流分析：如果源变量在函数参数中，且函数体内有 sink 函数调用，增强置信度
-		if analyzer := NewDefUseAnalyzer(); analyzer != nil {
-			chain := analyzer.AnalyzeFunction(curr.Name, curr.Properties["body_snippet"].(string))
-			if len(chain.Defs) > 0 && len(chain.Uses) > 0 {
-				// 简化的参数流：参数被赋值后流向 sink
-				for _, def := range chain.Defs {
-					for _, use := range chain.Uses {
-						if def.VarName == use.VarName && use.Line > def.Line {
-							// 标记为参数流增强
-							_ = def
-						}
-					}
-				}
-			}
-		}
-
-		// 继续BFS到调用的函数
-		for _, rel := range g.GetRelations(curr.ID, graph.RelCalls) {
-			if next, ok := g.GetNode(rel.To); ok && !visited[next.ID] {
-				queue = append(queue, next)
-			}
-		}
-	}
-
-	return sinks
-}
-
-// findSinksInNode 在单个函数中查找Sink
-func (e *Engine) findSinksInNode(node *graph.MemorySymbolNode) []SinkInfo {
-	var sinks []SinkInfo
-	snippet, _ := node.Properties["body_snippet"].(string)
-	if snippet == "" {
-		return sinks
-	}
-
-	for kind, patterns := range e.config.Sinks {
-		for _, pattern := range patterns {
-			// 简化匹配：字符串包含
-			if strings.Contains(snippet, pattern) {
-				sinks = append(sinks, SinkInfo{
-					Kind:     kind,
-					Function: pattern,
-					File:     node.File,
-					Line:     node.Location.LineStart,
-					NodeID:   node.ID,
-				})
-			}
-		}
-	}
-	return sinks
-}
-
-// hasSanitizer 检查是否有sanitizer（简化版）
-func (e *Engine) hasSanitizer(node *graph.MemorySymbolNode, src SourceInfo) bool {
-	snippet, _ := node.Properties["body_snippet"].(string)
-	if snippet == "" {
-		return false
-	}
-	sanitizers := []string{"validate", "sanitize", "escape", "html.EscapeString", "sql.Quote", "Prepare"}
-	for _, san := range sanitizers {
-		if strings.Contains(snippet, san) {
-			return true
-		}
-	}
-	return false
-}
-
-// ReviewViewIface 评审视图接口（避免循环依赖）
+// ReviewViewIface 评审视图接口（兼容旧代码，保留用于 symbol_graph 等 consumers）
 type ReviewViewIface interface {
 	GetGraph() *graph.MemorySymbolGraph
 	FindEndpoints() []graph.MemorySymbolNode
