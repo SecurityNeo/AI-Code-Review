@@ -852,6 +852,7 @@ func (e *BatchReviewFrameExecutor) Execute(ctx StageContext) error {
 	}
 
 	// 注入 Phase C 扩展智能体产出
+	promptCtx.AgentMarkdowns = make(map[string]string)
 	if secretFindings, ok := ctx.GetOutput("secret_scan_findings").([]model.SecretScanFinding); ok && len(secretFindings) > 0 {
 		promptCtx.SecretScanFindings = secretFindings
 	}
@@ -863,6 +864,26 @@ func (e *BatchReviewFrameExecutor) Execute(ctx StageContext) error {
 	}
 	if testSuggestions, ok := ctx.GetOutput("test_suggestions").([]engine.TestSuggestionItem); ok && len(testSuggestions) > 0 {
 		promptCtx.TestSuggestions = testSuggestions
+	}
+
+	// 读取各智能体预渲染 Markdown
+	if md, ok := ctx.GetOutput("secret_scan_markdown").(string); ok && md != "" {
+		promptCtx.AgentMarkdowns["secret_scan"] = md
+	}
+	if md, ok := ctx.GetOutput("security_audit_markdown").(string); ok && md != "" {
+		promptCtx.AgentMarkdowns["security_audit"] = md
+	}
+	if md, ok := ctx.GetOutput("impact_analysis_markdown").(string); ok && md != "" {
+		promptCtx.AgentMarkdowns["impact_analysis"] = md
+	}
+	if md, ok := ctx.GetOutput("test_suggestion_markdown").(string); ok && md != "" {
+		promptCtx.AgentMarkdowns["test_suggestion"] = md
+	}
+	if md, ok := ctx.GetOutput("dependency_vulns_markdown").(string); ok && md != "" {
+		promptCtx.AgentMarkdowns["dependency_scan"] = md
+	}
+	if r, ok := ctx.GetOutput("code_understanding_report").(string); ok && r != "" {
+		promptCtx.AgentMarkdowns["code_understanding"] = r
 	}
 
 	// ==================== 场景 A：单批直接结构化评审 ====================

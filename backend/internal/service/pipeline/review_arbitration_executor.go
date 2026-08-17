@@ -98,8 +98,28 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 		DependencyVulns:         depVulns,
 		CodeUnderstandingReport: codeUnderstandingReport,
 		BatchReviewResults:      batchResults,
-		DimensionWeights:      dimWeights,
-		DeductScoreConfig:     deductCfg,
+		DimensionWeights:        dimWeights,
+	}
+
+	// 4.1 读取各智能体预渲染 Markdown
+	promptCtx.AgentMarkdowns = make(map[string]string)
+	if md, ok := ctx.GetOutput("secret_scan_markdown").(string); ok && md != "" {
+		promptCtx.AgentMarkdowns["secret_scan"] = md
+	}
+	if md, ok := ctx.GetOutput("security_audit_markdown").(string); ok && md != "" {
+		promptCtx.AgentMarkdowns["security_audit"] = md
+	}
+	if md, ok := ctx.GetOutput("test_suggestion_markdown").(string); ok && md != "" {
+		promptCtx.AgentMarkdowns["test_suggestion"] = md
+	}
+	if md, ok := ctx.GetOutput("impact_analysis_markdown").(string); ok && md != "" {
+		promptCtx.AgentMarkdowns["impact_analysis"] = md
+	}
+	if len(depVulns) > 0 {
+		promptCtx.AgentMarkdowns["dependency_scan"] = engine.BuildDependencyVulnsSection(depVulns)
+	}
+	if codeUnderstandingReport != "" {
+		promptCtx.AgentMarkdowns["code_understanding"] = codeUnderstandingReport
 	}
 
 	// 5. 构建结构化 Prompt

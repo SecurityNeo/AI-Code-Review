@@ -111,6 +111,9 @@ type PromptContext struct {
 	// 代码理解器产出（AST + 知识图谱 + 数据流分析）
 	CodeUnderstandingReport string `json:"code_understanding_report,omitempty"` // Prompt注入文本
 
+	// 【新增】各智能体预渲染的 Markdown（直接拼接进 Prompt，避免重复渲染）
+	AgentMarkdowns map[string]string `json:"-"` // key: secret_scan/security_audit/test_suggestion/impact_analysis/dependency_scan/code_understanding
+
 	// 【新增】review_arbitration 阶段使用的聚合数据
 	BatchReviewResults []*llm.BatchReviewResult `json:"batch_review_results,omitempty"` // batch_review 输出结果
 	DimensionCodes     []string                 `json:"dimension_codes,omitempty"`      // 维度代码列表（用于 GetReviewJSONSchema）
@@ -407,34 +410,37 @@ func BuildReviewPrompt(ctx *PromptContext) string {
 	}
 	sb.WriteString("对于未在规则列表中的其他问题，也可以一并指出，此时 `rule_code` 填空字符串。\n\n")
 
-	// 4. 依赖漏洞扫描结果
-	if len(ctx.DependencyVulns) > 0 {
-		sb.WriteString(buildDependencyVulnsSection(ctx.DependencyVulns))
+	// 4. 各智能体预渲染 Markdown（直接拼接，避免重复渲染）
+	// 优先级：AgentMarkdowns > 重新渲染（兼容旧路径）
+	hasAgentContent := false
+	for _, key := range []string{"dependency_scan", "secret_scan", "security_audit", "impact_analysis", "test_suggestion", "code_understanding"} {
+		if md, ok := ctx.AgentMarkdowns[key]; ok && md != "" {
+			sb.WriteString(md)
+			sb.WriteString("\n")
+			hasAgentContent = true
+		}
 	}
 
-	// 4.1 密钥泄露扫描结果
-	if len(ctx.SecretScanFindings) > 0 {
-		sb.WriteString(buildSecretScanSection(ctx.SecretScanFindings))
-	}
-
-	// 4.2 敏感操作审计结果
-	if len(ctx.SecurityAuditFindings) > 0 {
-		sb.WriteString(buildSecurityAuditSection(ctx.SecurityAuditFindings))
-	}
-
-	// 4.3 License 合规检查
-	if len(ctx.LicenseFindings) > 0 {
-		sb.WriteString(buildLicenseSection(ctx.LicenseFindings))
-	}
-
-	// 4.4 变更影响分析
-	if len(ctx.ImpactFindings) > 0 {
-		sb.WriteString(buildImpactSection(ctx.ImpactFindings))
-	}
-
-	// 4.5 测试建议
-	if len(ctx.TestSuggestions) > 0 {
-		sb.WriteString(buildTestSuggestionSection(ctx.TestSuggestions))
+	// 兼容旧路径：如果 AgentMarkdowns 未设置，回退到原始 render 逻辑
+	if !hasAgentContent {
+		if len(ctx.DependencyVulns) > 0 {
+			sb.WriteString(buildDependencyVulnsSection(ctx.DependencyVulns))
+		}
+		if len(ctx.SecretScanFindings) > 0 {
+			sb.WriteString(buildSecretScanSection(ctx.SecretScanFindings))
+		}
+		if len(ctx.SecurityAuditFindings) > 0 {
+			sb.WriteString(buildSecurityAuditSection(ctx.SecurityAuditFindings))
+		}
+		if len(ctx.LicenseFindings) > 0 {
+			sb.WriteString(buildLicenseSection(ctx.LicenseFindings))
+		}
+		if len(ctx.ImpactFindings) > 0 {
+			sb.WriteString(buildImpactSection(ctx.ImpactFindings))
+		}
+		if len(ctx.TestSuggestions) > 0 {
+			sb.WriteString(buildTestSuggestionSection(ctx.TestSuggestions))
+		}
 	}
 
 	// 5. 待评审代码
@@ -780,24 +786,35 @@ func BuildBatchCollectionPrompt(ctx *PromptContext, batchIndex, totalBatches int
 	sb.WriteString(buildRulesSection(ctx.Rules, ctx.DimensionWeights))
 
 	if isLastBatch {
-		// 依赖漏洞扫描结果（仅最后一批，避免 Token 浪费）
-		if len(ctx.DependencyVulns) > 0 {
-			sb.WriteString(buildDependencyVulnsSection(ctx.DependencyVulns))
+		// 各智能体预渲染 Markdown（仅最后一批注入，避免 Token 浪费）
+		hasAgentContent := false
+		for _, key := range []string{"dependency_scan", "secret_scan", "security_audit", "impact_analysis", "test_suggestion", "code_understanding"} {
+			if md, ok := ctx.AgentMarkdowns[key]; ok && md != "" {
+				sb.WriteString(md)
+				sb.WriteString("\n")
+				hasAgentContent = true
+			}
 		}
 
-		// 扩展智能体产出（Phase C）- 仅最后一批提供参考
-		if len(ctx.SecretScanFindings) > 0 {
-			sb.WriteString(buildSecretScanSection(ctx.SecretScanFindings))
-		}
-		if len(ctx.SecurityAuditFindings) > 0 {
-			sb.WriteString(buildSecurityAuditSection(ctx.SecurityAuditFindings))
-		}
-		if len(ctx.TestSuggestions) > 0 {
-			sb.WriteString(buildTestSuggestionSection(ctx.TestSuggestions))
+		// 兼容旧路径
+		if !hasAgentContent {
+			if len(ctx.DependencyVulns) > 0 {
+				sb.WriteString(buildDependencyVulnsSection(ctx.DependencyVulns))
+			}
+			if len(ctx.SecretScanFindings) > 0 {
+				sb.WriteString(buildSecretScanSection(ctx.SecretScanFindings))
+			}
+			if len(ctx.SecurityAuditFindings) > 0 {
+				sb.WriteString(buildSecurityAuditSection(ctx.SecurityAuditFindings))
+			}
+			if len(ctx.TestSuggestions) > 0 {
+				sb.WriteString(buildTestSuggestionSection(ctx.TestSuggestions))
+			}
 		}
 
 		// 当存在 Agent 发现时，注入禁止重复指令
-		if len(ctx.SecretScanFindings) > 0 || len(ctx.SecurityAuditFindings) > 0 {
+		agentFindingCount := len(ctx.SecretScanFindings) + len(ctx.SecurityAuditFindings) + len(ctx.ImpactFindings)
+		if agentFindingCount > 0 {
 			sb.WriteString(buildNoRepeatInstruction())
 		}
 
@@ -972,12 +989,17 @@ func BuildArbitrationPrompt(ctx *PromptContext) (string, *llm.ResponseFormat, er
 	sb.WriteString("- ImpactAnalysis → impact_notes[]（不得放入 Issues[]）\n")
 	sb.WriteString("- SecurityFinding → security_findings[]（仅展示用，已在 Issues[] 中体现扣分）\n\n")
 
-	// 5. 构建结构化 User Prompt（JSON 格式数据注入）
-	agentJSON, err := ctx.AgentFindingsJSON()
-	if err != nil {
-		return "", nil, fmt.Errorf("Agent findings 序列化失败: %w", err)
+	// 5. 各智能体预渲染 Markdown（直接拼接）
+	hasMarkdown := false
+	for _, key := range []string{"dependency_scan", "secret_scan", "security_audit", "impact_analysis", "test_suggestion", "code_understanding"} {
+		if md, ok := ctx.AgentMarkdowns[key]; ok && md != "" {
+			sb.WriteString(md)
+			sb.WriteString("\n")
+			hasMarkdown = true
+		}
 	}
 
+	// 6. 构建结构化 User Prompt（JSON 格式数据，仅含 batch_results，避免与 markdown 重复）
 	batchJSON, err := json.Marshal(ctx.BatchReviewResults)
 	if err != nil {
 		return "", nil, fmt.Errorf("Batch results 序列化失败: %w", err)
@@ -987,10 +1009,17 @@ func BuildArbitrationPrompt(ctx *PromptContext) (string, *llm.ResponseFormat, er
 	dimJSON, _ := json.Marshal(dimConfig)
 	dscJSON, _ := json.Marshal(ctx.GetDeductScoreConfig())
 
-	// 使用 struct 而非 map[string]interface{}，确保 json.RawMessage 的
-	// MarshalJSON 被正确调用（避免被误识别为 []byte 而 base64 编码）
+	// 如 markdown 未注入，fallback 到精简 agent JSON（向后兼容）
+	var agentJSON []byte
+	if !hasMarkdown {
+		agentJSON, err = ctx.AgentFindingsJSON()
+		if err != nil {
+			return "", nil, fmt.Errorf("Agent findings 序列化失败: %w", err)
+		}
+	}
+
 	type arbitrationInputData struct {
-		AgentFindings     json.RawMessage `json:"agent_findings"`
+		AgentFindings     json.RawMessage `json:"agent_findings,omitempty"`
 		BatchResults      json.RawMessage `json:"batch_results"`
 		DimensionConfig   json.RawMessage `json:"dimension_config"`
 		DeductScoreConfig json.RawMessage `json:"deduct_score_config"`
