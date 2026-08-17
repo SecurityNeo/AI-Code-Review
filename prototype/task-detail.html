@@ -3508,10 +3508,10 @@ function renderBatchReviewPanel(json) {
     if (plan.batches && plan.batches.length > 0) {
         html += '<div class="mb-3 bg-white rounded-lg border border-gray-200 p-3"><div class="font-semibold text-gray-700 text-xs mb-2">分批决策</div>';
         html += `<div class="text-[11px] text-gray-600 mb-1">策略: <span class="font-medium">${plan.strategy === 'single' ? '单批' : '多批'}</span> · 总文件: ${plan.total_files}个 → 拆分为 <span class="font-medium">${plan.batch_count}</span> 批</div>`;
-        html += '<div class="grid grid-cols-2 gap-2 mt-2">';
+        html += '<div class="flex flex-col gap-2 mt-2">';
         plan.batches.forEach(b => {
-            html += `<div class="rounded-lg border p-2 flex flex-col ${b.is_truncated ? 'border-orange-200 bg-orange-50' : 'bg-gray-50'}">`;
-            html += `<div class="flex justify-between items-center mb-1"><span class="font-semibold text-xs">批次 ${b.index}</span><span class="text-[10px] ${b.is_truncated ? 'text-orange-500' : 'text-gray-400'}">${b.file_count} 文件</span></div>`;
+            html += `<div class="rounded-lg border p-3 flex flex-col ${b.is_truncated ? 'border-orange-200 bg-orange-50' : 'bg-gray-50'}">`;
+            html += `<div class="flex justify-between items-center mb-2"><span class="font-semibold text-sm">批次 ${b.index}</span><span class="text-xs ${b.is_truncated ? 'text-orange-500' : 'text-gray-400'}">${b.file_count} 文件</span></div>`;
             html += `<div class="text-[10px] text-gray-500 mb-1 flex-1">${b.file_paths.slice(0,2).map(p=>escapeHtml(p)).join(', ')}${b.file_paths.length>2?' ...':''}</div>`;
             html += `<div class="flex justify-between mt-auto pt-1"><span class="text-[10px] text-gray-400">预估</span><span class="text-[10px] font-mono">${(b.token_est||0).toLocaleString()} token</span></div>`;
             html += '</div>';
