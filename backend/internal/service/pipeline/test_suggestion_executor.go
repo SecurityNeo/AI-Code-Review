@@ -631,9 +631,24 @@ func buildImpactAnalysisMarkdown(findings []engine.ImpactFinding) string {
 	}
 
 	if len(others) > 0 {
-		sb.WriteString("### 其他变更提示\n\n")
+		// 按 (Type, ChangeDesc) 分组，避免重复描述浪费 Token
+		type groupKey struct {
+			Type       string
+			ChangeDesc string
+		}
+		groups := make(map[groupKey][]engine.ImpactFinding)
 		for _, f := range others {
-			sb.WriteString(fmt.Sprintf("- **%s** `%s` — %s\n", f.Type, f.FilePath, f.ChangeDesc))
+			k := groupKey{Type: f.Type, ChangeDesc: f.ChangeDesc}
+			groups[k] = append(groups[k], f)
+		}
+
+		sb.WriteString("### 其他变更提示\n\n")
+		for k, items := range groups {
+			sb.WriteString(fmt.Sprintf("以下%s：\n", k.ChangeDesc))
+			for _, f := range items {
+				sb.WriteString(fmt.Sprintf("- **%s** `%s` (`%s`)\n", k.Type, f.SymbolName, f.FilePath))
+			}
+			sb.WriteString("\n")
 		}
 	}
 
