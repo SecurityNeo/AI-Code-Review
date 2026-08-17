@@ -80,6 +80,10 @@ func (e *CodeUnderstandingExecutor) Execute(ctx StageContext) error {
 	}
 
 	task := ctx.Task()
+	lang := "golang"
+	if task != nil && task.Project.Language != "" {
+		lang = task.Project.Language
+	}
 	var subStages []subStageInfo
 
 	if task == nil {
@@ -110,11 +114,11 @@ func (e *CodeUnderstandingExecutor) Execute(ctx StageContext) error {
 
 	// 2. 阶段一：context_extract
 	ctxStage := subStageInfo{
-		Name:  "context_extract",
+		Name:   "context_extract",
 		Status: "running",
 		Input: map[string]interface{}{
-			"file_count": len(files),
-			"repo_dir":   repoDir,
+			"file_count":  len(files),
+			"repo_dir":    repoDir,
 			"timeout_sec": ctxTimeout.Seconds(),
 		},
 		StartAt: time.Now().Format(time.RFC3339),
@@ -142,9 +146,44 @@ func (e *CodeUnderstandingExecutor) Execute(ctx StageContext) error {
 	ctxStage.Output = map[string]interface{}{
 		"parsed_files": parsedCount,
 		"total_files":  len(files),
-		"language":     func() string { if task != nil { return task.Project.Language }; return "golang" }(),
+		"language": func() string {
+			if task != nil {
+				return task.Project.Language
+			}
+			return "golang"
+		}(),
 	}
 	subStages = append(subStages, ctxStage)
+
+	// 2.4 将 AST 结果转换为 ASTContext，供下游 impact_analysis / batch_algorithm 使用
+	astCtx := e.buildASTContext(asts, lang)
+	astText := formatASTContext(astCtx)
+	ctx.SetInput("ast_context", astText)
+	ctx.SetInput("ast_structured", astCtx)
+
+	// 2.5 跨文件调用链分析（供后续 impact_analysis 等阶段使用）
+	if repoDir != "" {
+		changedPaths := make([]string, 0, len(files))
+		for _, f := range files {
+			if p, ok := f["path"].(string); ok && p != "" {
+				changedPaths = append(changedPaths, p)
+			}
+		}
+		depth := 1
+		if d, ok := ctx.GetInput("_code_understanding_depth").(int); ok && d > 0 {
+			depth = d
+		} else if d := SysCfgCallChainDepth(); d > 0 {
+			depth = d
+		}
+		if len(changedPaths) > 0 && depth > 0 {
+			analyzer := NewCrossFileAnalyzer(repoDir, lang, depth)
+			crossFileCtx, crossErr := analyzer.Analyze(changedPaths)
+			if crossErr == nil && crossFileCtx != nil {
+				callChainText := buildCrossFileCallChainText(crossFileCtx)
+				ctx.SetInput("cross_file_call_chain", callChainText)
+			}
+		}
+	}
 
 	// 3. 阶段二：symbol_graph
 	graphStage := subStageInfo{
@@ -199,11 +238,11 @@ func (e *CodeUnderstandingExecutor) Execute(ctx StageContext) error {
 			graphStage.Output = map[string]interface{}{"graph_built": false, "error": err.Error()}
 		} else {
 			graphStage.Output = map[string]interface{}{
-				"graph_built":     true,
-				"node_count":      graphResult.NodeCount,
-				"relation_count":  graphResult.RelCount,
-				"endpoint_count":  len(graphResult.Endpoints),
-				"frameworks":      graphResult.Frameworks,
+				"graph_built":    true,
+				"node_count":     graphResult.NodeCount,
+				"relation_count": graphResult.RelCount,
+				"endpoint_count": len(graphResult.Endpoints),
+				"frameworks":     graphResult.Frameworks,
 			}
 		}
 	}
@@ -221,12 +260,12 @@ func (e *CodeUnderstandingExecutor) Execute(ctx StageContext) error {
 		Name:   "report_merge",
 		Status: "running",
 		Input: map[string]interface{}{
-			"ast_count":    len(asts),
-			"timeout_sec":  reportTimeout.Seconds(),
+			"ast_count":   len(asts),
+			"timeout_sec": reportTimeout.Seconds(),
 		},
 		StartAt: time.Now().Format(time.RFC3339),
 	}
-	report := e.buildReport(asts, graphResult, reviewView, parsedCount, len(files))
+	report := e.buildReport(asts, graphResult, reviewView, parsedCount, len(files), lang)
 	reportStage.EndAt = time.Now().Format(time.RFC3339)
 	reportStage.Status = "success"
 	reportStage.Output = map[string]interface{}{
@@ -245,15 +284,15 @@ func (e *CodeUnderstandingExecutor) Execute(ctx StageContext) error {
 	ctx.SetInput("code_understanding_report", report.ReportText)
 
 	ctx.SaveOutputSnapshot(exec, map[string]interface{}{
-		"status":          "success",
-		"mode":            report.Mode,
-		"parsed_files":    parsedCount,
-		"total_files":     len(files),
-		"node_count":      report.SymbolGraphSummary.NodeCount,
-		"endpoint_count":  report.EndpointCount,
-		"taint_flow_count": report.TaintFlowCount,
-		"sub_stages":      subStages,
-		"summary":         report.Summary,
+		"status":                        "success",
+		"mode":                          report.Mode,
+		"parsed_files":                  parsedCount,
+		"total_files":                   len(files),
+		"node_count":                    report.SymbolGraphSummary.NodeCount,
+		"endpoint_count":                report.EndpointCount,
+		"taint_flow_count":              report.TaintFlowCount,
+		"sub_stages":                    subStages,
+		"summary":                       report.Summary,
 		"code_understanding_structured": report,
 	})
 
@@ -357,6 +396,50 @@ func (e *CodeUnderstandingExecutor) contextExtract(ctx StageContext, files []map
 	return asts, parsedCount, nil
 }
 
+// buildASTContext 将 []*parser.UnifiedAST 转换为下游阶段需要的 *ASTContext
+func (e *CodeUnderstandingExecutor) buildASTContext(asts []*parser.UnifiedAST, lang string) *ASTContext {
+	astCtx := &ASTContext{
+		Language: lang,
+	}
+	importSet := make(map[string]bool)
+	for _, ast := range asts {
+		for _, fn := range ast.Functions {
+			params := make([]string, 0, len(fn.Params))
+			for _, p := range fn.Params {
+				params = append(params, p.Type)
+			}
+			astCtx.Functions = append(astCtx.Functions, FunctionSignature{
+				Name:       fn.Name,
+				Receiver:   fn.Receiver,
+				Params:     params,
+				Returns:    fn.Returns,
+				IsExported: fn.IsExported,
+				FilePath:   ast.FilePath,
+				LineStart:  fn.Location.LineStart,
+				Body:       fn.BodySnippet,
+			})
+		}
+		for _, tp := range ast.Types {
+			astCtx.Structs = append(astCtx.Structs, TypeSignature{
+				Name:       tp.Name,
+				Kind:       tp.Kind,
+				IsExported: tp.IsExported,
+				FilePath:   ast.FilePath,
+			})
+		}
+		for _, im := range ast.Imports {
+			if !importSet[im.Path] {
+				importSet[im.Path] = true
+				astCtx.Imports = append(astCtx.Imports, im.Path)
+			}
+		}
+		for _, cs := range ast.CallSites {
+			astCtx.Callers = append(astCtx.Callers, cs.TargetFunc)
+		}
+	}
+	return astCtx
+}
+
 // buildReviewView 构建评审视图
 func (e *CodeUnderstandingExecutor) buildReviewView(ctx StageContext, projectID uint64, changedFiles map[string][]byte) (*graph.ReviewView, error) {
 	sg := graph.NewSymbolGraph(e.graphStorage, e.graphCache, zap.L(), "")
@@ -364,7 +447,7 @@ func (e *CodeUnderstandingExecutor) buildReviewView(ctx StageContext, projectID 
 }
 
 // buildReport 阶段三：生成报告
-func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graphResult *graph.SymbolGraphResult, reviewView *graph.ReviewView, parsedCount, totalCount int) *CodeUnderstandingReport {
+func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graphResult *graph.SymbolGraphResult, reviewView *graph.ReviewView, parsedCount, totalCount int, lang string) *CodeUnderstandingReport {
 	report := &CodeUnderstandingReport{
 		Status:        "success",
 		ReportVersion: "1.0",
@@ -495,6 +578,8 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 				if node.Type == graph.NodeEndpoint {
 					report.Endpoints = append(report.Endpoints, EndpointSummary{
 						Path:      node.Name,
+						Method:    getStringProp(node.Properties, "method"),
+						Handler:   getStringProp(node.Properties, "handler"),
 						File:      node.File,
 						Line:      node.Location.LineStart,
 						Framework: getStringProp(node.Properties, "framework"),
@@ -530,6 +615,8 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 			for _, ep := range endpoints {
 				report.Endpoints = append(report.Endpoints, EndpointSummary{
 					Path:      ep.Name,
+					Method:    getStringProp(ep.Properties, "method"),
+					Handler:   getStringProp(ep.Properties, "handler"),
 					File:      ep.File,
 					Line:      ep.Location.LineStart,
 					Framework: getStringProp(ep.Properties, "framework"),
@@ -537,13 +624,16 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 			}
 		}
 
-		engine := dataflow.NewEngine()
-		dfResult := engine.Analyze(&reviewViewAdapter{view: reviewView})
+		// 使用 v2 污点分析引擎（基于 AST，更精确）
+		engine := dataflow.NewEngineV2(lang, asts, reviewView.GetGraph())
+		dfResult := engine.Analyze()
 		report.TaintFlowCount = len(dfResult.Flows)
 		for _, flow := range dfResult.Flows {
 			report.TaintFlows = append(report.TaintFlows, TaintFlowSummary{
 				SourceFunc: flow.Source.Function,
+				SourceFile: flow.Source.File,
 				SinkFunc:   flow.Sink.Function,
+				SinkFile:   flow.Sink.File,
 				Category:   flow.Category,
 				RiskLevel:  flow.RiskLevel,
 			})
@@ -551,8 +641,23 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 		if report.GraphData != nil {
 			report.GraphData.SecurityPaths = make([]string, 0, len(dfResult.Flows))
 			for _, f := range dfResult.Flows {
-				report.GraphData.SecurityPaths = append(report.GraphData.SecurityPaths,
-					fmt.Sprintf("%s: %s -> %s", f.Category, f.Source.Function, f.Sink.Function))
+				// 利用 Path 字段格式化完整的变量流转链
+				if len(f.Path) > 0 {
+					var chain []string
+					for _, p := range f.Path {
+						if p.VarName != "" {
+							chain = append(chain, p.VarName)
+						} else {
+							chain = append(chain, p.Function)
+						}
+					}
+					report.GraphData.SecurityPaths = append(report.GraphData.SecurityPaths,
+						fmt.Sprintf("%s: %s", f.Category, strings.Join(chain, " \u2192 ")))
+				} else {
+					// 无传播路径时回退到两点式
+					report.GraphData.SecurityPaths = append(report.GraphData.SecurityPaths,
+						fmt.Sprintf("%s: %s \u2192 %s", f.Category, f.Source.Function, f.Sink.Function))
+				}
 			}
 		}
 	}
@@ -575,37 +680,54 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 		report.Status = "partial"
 	}
 
-	// Prompt注入文本
-	report.ReportText = e.formatReportText(report)
+	// Prompt注入文本（只展示与变更文件相关的端点和污点流）
+	report.ReportText = e.formatReportText(report, report.FileList)
 	report.PromptInjection = report.ReportText
 	return report
 }
 
 // formatReportText 格式化报告文本，用于Prompt注入
-func (e *CodeUnderstandingExecutor) formatReportText(report *CodeUnderstandingReport) string {
+// changedFiles: 本次变更的文件列表，只展示与变更相关的端点和污点流
+func (e *CodeUnderstandingExecutor) formatReportText(report *CodeUnderstandingReport, changedFiles []string) string {
+	changedSet := make(map[string]bool)
+	for _, f := range changedFiles {
+		changedSet[f] = true
+	}
+
 	var b strings.Builder
 	b.WriteString("## 代码理解报告\n\n")
 	b.WriteString(fmt.Sprintf("- **解析文件数**: %d / %d\n", report.ParsedFiles, report.TotalFiles))
 	b.WriteString(fmt.Sprintf("- **函数总数**: %d\n", report.TotalFunctions))
 	b.WriteString(fmt.Sprintf("- **类型总数**: %d\n", report.TotalTypes))
-	b.WriteString(fmt.Sprintf("- **API端点**: %d\n", report.EndpointCount))
-	b.WriteString(fmt.Sprintf("- **污点流**: %d\n", report.TaintFlowCount))
 
-	if len(report.Endpoints) > 0 {
-		b.WriteString("\n### API端点\n")
-		for _, ep := range report.Endpoints {
-			b.WriteString(fmt.Sprintf("- `%s %s` (%s:%d) 框架: %s\n", ep.Method, ep.Path, ep.File, ep.Line, ep.Framework))
+	// 只统计与变更文件相关的端点
+	changedEndpoints := filterEndpointsByFiles(report.Endpoints, changedSet)
+	b.WriteString(fmt.Sprintf("- **API端点**: %d (变更文件中 %d)\n", report.EndpointCount, len(changedEndpoints)))
+
+	// 只统计与变更文件相关的污点流
+	changedFlows := filterTaintFlowsByFiles(report.TaintFlows, changedSet)
+	b.WriteString(fmt.Sprintf("- **污点流**: %d (涉及变更文件 %d)\n", report.TaintFlowCount, len(changedFlows)))
+
+	if report.GraphData != nil && len(report.GraphData.Frameworks) > 0 {
+		b.WriteString(fmt.Sprintf("- **框架**: %s\n", strings.Join(report.GraphData.Frameworks, ", ")))
+	}
+
+	if len(changedEndpoints) > 0 {
+		b.WriteString("\n### API端点 (变更相关)\n")
+		for _, ep := range changedEndpoints {
+			b.WriteString(fmt.Sprintf("- `%s %s` (%s:%d)\n", ep.Method, ep.Path, ep.File, ep.Line))
 		}
 	}
 
-	if len(report.TaintFlows) > 0 {
-		b.WriteString("\n### 潜在数据流风险\n")
-		for _, tf := range report.TaintFlows {
-			b.WriteString(fmt.Sprintf("- **%s**: %s → %s (风险: %s)\n", tf.Category, tf.SourceFunc, tf.SinkFunc, tf.RiskLevel))
+	if len(changedFlows) > 0 {
+		b.WriteString("\n### 潜在数据流风险 (变更相关)\n")
+		for _, tf := range changedFlows {
+			b.WriteString(fmt.Sprintf("- **%s**: %s (%s) → %s (%s) (风险: %s)\n",
+				tf.Category, tf.SourceFunc, tf.SourceFile, tf.SinkFunc, tf.SinkFile, tf.RiskLevel))
 		}
 	}
 
-	// 前10个函数列表
+	// 前10个函数列表（只有变更文件的函数）
 	if len(report.FunctionList) > 0 {
 		b.WriteString("\n### 变更函数列表\n")
 		limit := 10
@@ -621,6 +743,28 @@ func (e *CodeUnderstandingExecutor) formatReportText(report *CodeUnderstandingRe
 	}
 
 	return b.String()
+}
+
+// filterEndpointsByFiles 过滤出与变更文件相关的端点
+func filterEndpointsByFiles(endpoints []EndpointSummary, changedSet map[string]bool) []EndpointSummary {
+	var result []EndpointSummary
+	for _, ep := range endpoints {
+		if changedSet[ep.File] {
+			result = append(result, ep)
+		}
+	}
+	return result
+}
+
+// filterTaintFlowsByFiles 过滤出与变更文件相关的污点流
+func filterTaintFlowsByFiles(flows []TaintFlowSummary, changedSet map[string]bool) []TaintFlowSummary {
+	var result []TaintFlowSummary
+	for _, tf := range flows {
+		if changedSet[tf.SourceFile] || changedSet[tf.SinkFile] {
+			result = append(result, tf)
+		}
+	}
+	return result
 }
 
 // CodeUnderstandingReport 代码理解报告
@@ -710,7 +854,9 @@ type EndpointSummary struct {
 // TaintFlowSummary 污点流摘要
 type TaintFlowSummary struct {
 	SourceFunc string `json:"source_func"`
+	SourceFile string `json:"source_file"`
 	SinkFunc   string `json:"sink_func"`
+	SinkFile   string `json:"sink_file"`
 	Category   string `json:"category"`
 	RiskLevel  string `json:"risk_level"`
 }

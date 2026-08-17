@@ -32,7 +32,7 @@ func TestCodeUnderstandingExecutor_buildReport(t *testing.T) {
 		},
 	}
 
-	report := exec.buildReport(asts, graphResult, nil, 1, 1)
+	report := exec.buildReport(asts, graphResult, nil, 1, 1, "golang")
 
 	if report.Mode != "full" {
 		t.Errorf("mode = %q, want full", report.Mode)
@@ -68,10 +68,10 @@ func TestCodeUnderstandingExecutor_buildReport_nilGraphResult(t *testing.T) {
 		},
 	}
 
-	report := exec.buildReport(asts, nil, nil, 1, 1)
+	report := exec.buildReport(asts, nil, nil, 1, 1, "golang")
 
-	if report.Mode != "full" {
-		t.Errorf("mode = %q, want full", report.Mode)
+	if report.Mode != "ast_only" {
+		t.Errorf("mode = %q, want ast_only", report.Mode)
 	}
 	if report.SymbolGraphSummary.NodeCount != 0 {
 		t.Errorf("node count = %d, want 0", report.SymbolGraphSummary.NodeCount)
@@ -83,7 +83,7 @@ func TestCodeUnderstandingExecutor_buildReport_nilGraphResult(t *testing.T) {
 
 func TestCodeUnderstandingExecutor_buildReport_emptyASTs(t *testing.T) {
 	exec := NewCodeUnderstandingExecutor("/tmp/test")
-	report := exec.buildReport(nil, nil, nil, 0, 0)
+	report := exec.buildReport(nil, nil, nil, 0, 0, "golang")
 
 	if report.ParsedFiles != 0 {
 		t.Errorf("parsed files = %d, want 0", report.ParsedFiles)

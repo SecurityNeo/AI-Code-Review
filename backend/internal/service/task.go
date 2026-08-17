@@ -1284,8 +1284,8 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 
 	// 14. 注入 Pipeline Context
 	inputs := map[string]interface{}{
-		"diff_files":          fileMaps,     // 过滤后的 diff，供 review/secret_scan/impact_analysis 等共享
-		"diff_files_raw":      fileMapsRaw,  // 原始未过滤 diff，供 dependency_scan 读取 go.mod/package.json 等
+		"diff_files":          fileMaps,    // 过滤后的 diff，供 review/secret_scan/impact_analysis 等共享
+		"diff_files_raw":      fileMapsRaw, // 原始未过滤 diff，供 dependency_scan 读取 go.mod/package.json 等
 		"commits_text":        commitsText,
 		"project_template":    projectTemplate.Prompt,
 		"prompt_context":      promptCtx,
@@ -2218,7 +2218,7 @@ func buildAgentExecutionStatus(agentCfg model.ReviewAgentConfig) *engine.AgentEx
 		{"test_suggestion", "测试建议智能体"},
 		{"impact_analysis", "影响分析智能体"},
 		{"batch_review_frame", "AI代码评审智能体"},
-		{"post_process", "发布智能体"},
+		{"post_process", "报告发布"},
 	}
 
 	enabled := agentCfg.EnabledStageCodes()
@@ -2235,7 +2235,7 @@ func buildAgentExecutionStatus(agentCfg model.ReviewAgentConfig) *engine.AgentEx
 		}
 	}
 
-	// 影响说明（根据 skipped 的组合生成）
+	// 影响说明（根据 skipped 的组合生成，仅说明未启用智能体的影响）
 	if !enabledMap["code_understanding"] {
 		status.ImpactNotes = append(status.ImpactNotes,
 			"本次评审缺少 AST 上下文和知识图谱分析，AI 对函数/结构体/数据流的理解可能受限")
@@ -2244,15 +2244,11 @@ func buildAgentExecutionStatus(agentCfg model.ReviewAgentConfig) *engine.AgentEx
 		status.ImpactNotes = append(status.ImpactNotes,
 			"本次评审未执行依赖漏洞扫描，建议对涉及依赖变更的 MR 启用该智能体")
 	}
-	if enabledMap["secret_scan"] {
+	if !enabledMap["impact_analysis"] {
 		status.ImpactNotes = append(status.ImpactNotes,
-			"密钥扫描智能体已启用，diff 中发现的敏感信息将在评审报告中提示")
-	}
-	if enabledMap["security_audit"] {
-		status.ImpactNotes = append(status.ImpactNotes,
-			"安全审计智能体已启用，SQL 注入/unsafe eval 等安全问题将在评审报告中提示")
-	}
-	if enabledMap["impact_analysis"] && !enabledMap["code_understanding"] {
+			"本次评审未执行跨模块影响分析，可能存在未识别的 Breaking Change")
+	} else if !enabledMap["code_understanding"] {
+		// 影响分析已启用但缺少代码理解器支撑
 		status.ImpactNotes = append(status.ImpactNotes,
 			"影响分析智能体已启用但代码理解器未启用，跨文件影响范围可能不完整")
 	}

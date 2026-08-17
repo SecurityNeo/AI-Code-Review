@@ -338,16 +338,34 @@ func NewImpactAnalysisExecutor(llm LLMService, modelID uint) *ImpactAnalysisExec
 func (e *ImpactAnalysisExecutor) Code() string { return "impact_analysis" }
 
 func (e *ImpactAnalysisExecutor) Execute(ctx StageContext) error {
-	// 1. 获取跨文件调用链（依赖 context_extract 的产出）
+	// 1. 获取跨文件调用链（依赖 context_extract / code_understanding 的产出）
 	crossFileText := getCrossFileCallChainText(ctx)
 	if crossFileText == "" {
-		ctx.SetOutput("impact_analysis_skipped_reason", "缺少跨文件调用链数据（代码理解器未启用或深度为0）")
+		// 保存快照说明跳过原因，避免前端详情为空
+		ctx.SaveInputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
+			"cross_file_available": false,
+			"reason":               "缺少跨文件调用链数据（代码理解器未启用或深度为0）",
+		})
+		ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
+			"finding_count":        0,
+			"findings":             []engine.ImpactFinding{},
+			"skipped_reason":       "缺少跨文件调用链数据（代码理解器未启用或深度为0）",
+		})
 		return nil
 	}
 
 	// 2. 获取 AST 上下文
 	astCtx := getASTContextFromStage(ctx)
 	if astCtx == nil {
+		ctx.SaveInputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
+			"cross_file_available": true,
+			"reason":               "缺少 AST 上下文",
+		})
+		ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
+			"finding_count":        0,
+			"findings":             []engine.ImpactFinding{},
+			"skipped_reason":       "缺少 AST 上下文",
+		})
 		return nil
 	}
 
