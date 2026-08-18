@@ -3243,7 +3243,7 @@ function renderCodeUnderstandingDetail(json) {
         html += `<div class="mb-3"><div class="text-xs font-semibold text-gray-500 mb-1"><i class="fas fa-file-alt mr-1"></i>代码分析报告</div><div class="bg-gray-50 rounded-lg border border-gray-200 p-3 text-[11px] text-gray-400 italic">未生成报告内容</div></div>`;
     }
 
-    // 跨文件调用链上下文（P0-4 结构化解析）
+    // 跨文件调用链上下文（P0-4 增强：结构化解析 + 文件高亮 + 函数加粗 + 折叠展开）
     let crossFileChainText = report.cross_file_call_chain || '';
     if (!crossFileChainText && promptText) {
         const match = promptText.match(/#{1,3}\s*跨文件调用链上下文[\s\S]*?(?=\n#{1,3}\s|$)/);
@@ -3252,21 +3252,76 @@ function renderCodeUnderstandingDetail(json) {
     if (crossFileChainText) {
         const lines = crossFileChainText.split('\n').map(s => s.trim()).filter(s => s.length > 0 && !s.match(/^(\-{3,}|\*{3,})$/));
         if (lines.length > 0) {
+            // 构建变更文件集合用于高亮
+            const changedFiles = new Set(report.file_list || []);
+            
             html += `<div class="mb-3">`;
-            html += `<div class="text-xs font-semibold text-indigo-700 mb-1"><i class="fas fa-project-diagram mr-1"></i>跨文件调用链</div>`;
-            html += `<div class="bg-gray-50 rounded-lg border border-gray-200 p-2 text-[11px]">`;
+            html += `<div class="flex items-center justify-between mb-1">`;
+            html += `<div class="text-xs font-semibold text-indigo-700"><i class="fas fa-project-diagram mr-1"></i>跨文件调用链</div>`;
+            html += `<span class="text-[10px] text-gray-400">${lines.length} 行</span>`;
+            html += `</div>`;
+            html += `<div class="bg-gray-50 rounded-lg border border-gray-200 p-2 text-[11px] space-y-1">`;
+            
+            let currentFile = '';
             lines.forEach((line, idx) => {
-                const isArrow = line.match(/^[\-=>\s]+$/);
+                const isArrow = line.match(/^[\-=\>\s]+$/);
                 if (isArrow) {
                     html += `<div class="flex justify-center py-0.5"><i class="fas fa-arrow-down text-gray-300 text-[10px]"></i></div>`;
+                    return;
+                }
+                
+                // 解析文件路径和函数调用
+                const cleanLine = line.replace(/^[→\->\s]+/, '');
+                // 匹配 "file.go:line FuncName(...)" 或 "FuncName(...) file.go:line" 格式
+                const fileMatch = cleanLine.match(/([^\s()]+\.go):(\d+)/);
+                const funcMatch = cleanLine.match(/(\w+)\s*\(/);
+                
+                let filePath = '';
+                let lineNum = '';
+                let funcName = '';
+                let restText = cleanLine;
+                
+                if (fileMatch) {
+                    filePath = fileMatch[1];
+                    lineNum = fileMatch[2];
+                    restText = cleanLine.replace(fileMatch[0], '').trim();
+                }
+                if (funcMatch) {
+                    funcName = funcMatch[1];
+                }
+                
+                const isChangedFile = filePath && changedFiles.has(filePath);
+                const bgClass = isChangedFile ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-100';
+                const fileColor = isChangedFile ? 'text-blue-700' : 'text-gray-400';
+                
+                html += `<div class="flex items-start gap-2 py-1 px-2 rounded border ${bgClass}">`;
+                html += `<span class="text-[10px] text-gray-300 font-mono w-5 pt-0.5">${idx + 1}</span>`;
+                html += `<div class="flex-1 min-w-0">`;
+                
+                if (funcName) {
+                    // 函数名加粗展示
+                    const funcEndIdx = restText.indexOf(')') + 1;
+                    const funcSig = funcEndIdx > 0 ? restText.substring(0, funcEndIdx) : restText;
+                    const afterFunc = funcEndIdx > 0 ? restText.substring(funcEndIdx).trim() : '';
+                    html += `<span class="font-mono font-semibold text-gray-800">${escapeHtml(funcSig)}</span>`;
+                    if (afterFunc) {
+                        html += ` <span class="text-gray-500">${escapeHtml(afterFunc)}</span>`;
+                    }
                 } else {
-                    const indentClass = line.startsWith('→') || line.startsWith('->') ? 'pl-3' : '';
-                    const cleanLine = line.replace(/^[→\->\s]+/, '');
-                    html += `<div class="flex items-center gap-2 py-0.5 rounded px-1 ${indentClass}">`;
-                    html += `<span class="text-[10px] text-gray-400 font-mono w-4">${idx + 1}</span>`;
-                    html += `<span class="font-mono text-gray-700">${escapeHtml(cleanLine)}</span>`;
+                    html += `<span class="font-mono text-gray-700">${escapeHtml(restText)}</span>`;
+                }
+                
+                if (filePath) {
+                    html += `<div class="mt-0.5 flex items-center gap-1">`;
+                    html += `<i class="fas fa-file-code ${fileColor} text-[8px]"></i>`;
+                    html += `<span class="text-[10px] font-mono ${fileColor}">${escapeHtml(filePath)}${lineNum ? ':' + lineNum : ''}</span>`;
+                    if (isChangedFile) {
+                        html += `<span class="text-[10px] px-1 rounded bg-blue-100 text-blue-600">变更</span>`;
+                    }
                     html += `</div>`;
                 }
+                
+                html += `</div></div>`;
             });
             html += `</div></div>`;
         }

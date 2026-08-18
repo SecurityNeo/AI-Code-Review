@@ -972,17 +972,46 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 
 	// P0-3: Breaking Changes 检测（对比基线图中的导出符号与当前 AST）
 	if reviewView != nil {
-		baselineNodes := reviewView.GetGraph().AllNodes()
-		// 收集基线中所有导出函数和类型的签名
+		baselineGraph := reviewView.GetGraph()
+		baselineNodes := baselineGraph.AllNodes()
+		baselineRelations := baselineGraph.GetAllRelations()
+
+		// 构建基线导出符号映射
 		baselineExported := make(map[string]bool)
+		baselineFuncSigs := make(map[string]string)                    // key -> signature
+		baselineTypeFields := make(map[string]map[string]string)       // key -> fieldName -> "type:tag"
+
 		for _, node := range baselineNodes {
-			if node.IsExported {
-				key := fmt.Sprintf("%s:%s:%s", node.Type, node.Name, node.File)
-				baselineExported[key] = true
+			if !node.IsExported {
+				continue
+			}
+			key := fmt.Sprintf("%s:%s:%s", node.Type, node.Name, node.File)
+			baselineExported[key] = true
+
+			if node.Type == "function" {
+				baselineFuncSigs[key] = node.Signature
+			} else if node.Type == "type" {
+				fieldMap := make(map[string]string)
+				// 遍历 contains 关系获取 fieldNode 的详细信息
+				for _, rel := range baselineRelations {
+					if rel.Type == "contains" && rel.From == node.ID {
+						if fieldNode, ok := baselineGraph.GetNode(rel.To); ok {
+							fname := fieldNode.Name
+							ftype, _ := fieldNode.Properties["type"].(string)
+							ftag, _ := fieldNode.Properties["tag"].(string)
+							fieldMap[fname] = fmt.Sprintf("%s:%s", ftype, ftag)
+						}
+					}
+				}
+				baselineTypeFields[key] = fieldMap
 			}
 		}
-		// 收集当前 AST 中所有导出函数和类型
+
+		// 收集当前 AST 中的导出信息
 		currentExported := make(map[string]bool)
+		currentFuncSigs := make(map[string]string)
+		currentTypeFields := make(map[string]map[string]string)
+
 		if report.ASTData != nil {
 			for _, fr := range report.ASTData.FileResults {
 				for _, fd := range fr.FunctionDetails {
@@ -990,6 +1019,7 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 						name, _ := fd["name"].(string)
 						key := fmt.Sprintf("function:%s:%s", name, fr.Path)
 						currentExported[key] = true
+						currentFuncSigs[key] = buildFuncSignatureFromDetails(fd)
 					}
 				}
 				for _, td := range fr.TypeDetails {
@@ -997,11 +1027,26 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 						name, _ := td["name"].(string)
 						key := fmt.Sprintf("type:%s:%s", name, fr.Path)
 						currentExported[key] = true
+						fieldMap := make(map[string]string)
+						if details, ok := td["field_details"].([]map[string]interface{}); ok {
+							for _, f := range details {
+								fname, _ := f["name"].(string)
+								ftype, _ := f["type"].(string)
+								ftag, _ := f["tag"].(string)
+								fieldMap[fname] = fmt.Sprintf("%s:%s", ftype, ftag)
+							}
+						} else if fields, ok := td["fields"].([]string); ok {
+							for _, f := range fields {
+								fieldMap[f] = f
+							}
+						}
+						currentTypeFields[key] = fieldMap
 					}
 				}
 			}
 		}
-		// 检测被删除的导出符号
+
+		// 阶段1: 检测导出符号的删除/更名
 		for key := range baselineExported {
 			if !currentExported[key] {
 				parts := strings.SplitN(key, ":", 3)
@@ -1010,6 +1055,51 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 						Description: fmt.Sprintf("导出%s `%s` 在变更中被删除或更名", parts[0], parts[1]),
 						File:        parts[2],
 					})
+				}
+			}
+		}
+
+		// 阶段2: 检测函数签名变更（参数数量/类型/返回值变化）
+		for key, baseSig := range baselineFuncSigs {
+			if currSig, ok := currentFuncSigs[key]; ok {
+				if baseSig != "" && currSig != "" && baseSig != currSig {
+					parts := strings.SplitN(key, ":", 3)
+					if len(parts) == 3 {
+						report.BreakingChanges = append(report.BreakingChanges, BreakingChange{
+							Description: fmt.Sprintf("导出函数 `%s` 签名变更: %s → %s", parts[1], baseSig, currSig),
+							File:        parts[2],
+						})
+					}
+				}
+			}
+		}
+
+		// 阶段3: 检测结构体字段变更（字段增删/类型变化/Tag变化）
+		for key, baseFields := range baselineTypeFields {
+			if currFields, ok := currentTypeFields[key]; ok {
+				// 字段删除
+				for fname := range baseFields {
+					if _, exists := currFields[fname]; !exists {
+						parts := strings.SplitN(key, ":", 3)
+						if len(parts) == 3 {
+							report.BreakingChanges = append(report.BreakingChanges, BreakingChange{
+								Description: fmt.Sprintf("导出类型 `%s` 字段 `%s` 被删除", parts[1], fname),
+								File:        parts[2],
+							})
+						}
+					}
+				}
+				// 字段类型/Tag变更
+				for fname, currVal := range currFields {
+					if baseVal, exists := baseFields[fname]; exists && baseVal != currVal {
+						parts := strings.SplitN(key, ":", 3)
+						if len(parts) == 3 {
+							report.BreakingChanges = append(report.BreakingChanges, BreakingChange{
+								Description: fmt.Sprintf("导出类型 `%s` 字段 `%s` 类型/Tag变更: %s → %s", parts[1], fname, baseVal, currVal),
+								File:        parts[2],
+							})
+						}
+					}
 				}
 			}
 		}
@@ -1542,6 +1632,31 @@ func extractPackageFromImport(impPath string) string {
 		return impPath[idx+1:]
 	}
 	return impPath
+}
+
+// buildFuncSignatureFromDetails 从 funcDetails 构建函数签名字符串，用于 Breaking Change 对比
+func buildFuncSignatureFromDetails(fd map[string]interface{}) string {
+	name, _ := fd["name"].(string)
+	params := getStringSliceProp(fd, "params")
+	returns := getStringSliceProp(fd, "returns")
+
+	var b strings.Builder
+	b.WriteString("func ")
+	b.WriteString(name)
+	b.WriteString("(")
+	b.WriteString(strings.Join(params, ", "))
+	b.WriteString(")")
+	if len(returns) > 0 {
+		b.WriteString(" ")
+		if len(returns) > 1 {
+			b.WriteString("(")
+			b.WriteString(strings.Join(returns, ", "))
+			b.WriteString(")")
+		} else {
+			b.WriteString(returns[0])
+		}
+	}
+	return b.String()
 }
 
 func init() {
