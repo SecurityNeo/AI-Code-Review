@@ -519,14 +519,24 @@ func extractRelevantTaintFlows(ctx StageContext, findings []model.SecurityAuditF
 			b.WriteString(fmt.Sprintf("- Source: %s (%s)\n", tf.SourceFunc, tf.SourceFile))
 			// P1-1 升级：展示完整传播路径步骤
 			for i, step := range tf.Path {
-				if step != "" {
-					b.WriteString(fmt.Sprintf("  → Step %d: %s\n", i+1, step))
+				label := step.Function
+				if label == "" {
+					label = step.VarName
+				}
+				if label != "" {
+					b.WriteString(fmt.Sprintf("  → Step %d: %s (%s:%d)\n", i+1, label, step.File, step.Line))
 				}
 			}
 			b.WriteString(fmt.Sprintf("  → SINK: %s (%s) [风险: %s]\n", tf.SinkFunc, tf.SinkFile, tf.RiskLevel))
 			// P1-2 升级：展示净化信息
 			if len(tf.Sanitizers) > 0 {
-				b.WriteString(fmt.Sprintf("  → 净化: %s [已净化 ✓]\n", strings.Join(tf.Sanitizers, ", ")))
+				var sanNames []string
+				for _, s := range tf.Sanitizers {
+					if s.Function != "" {
+						sanNames = append(sanNames, fmt.Sprintf("%s (%s:%d)", s.Function, s.File, s.Line))
+					}
+				}
+				b.WriteString(fmt.Sprintf("  → 净化: %s [已净化 ✓]\n", strings.Join(sanNames, ", ")))
 			}
 			entry := b.String()
 			if existing, ok := result[key]; ok {

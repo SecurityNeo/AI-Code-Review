@@ -560,11 +560,12 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 		var callSites []map[string]interface{}
 		for _, cs := range ast.CallSites {
 			callSites = append(callSites, map[string]interface{}{
-				"caller_func": cs.CallerFunc,
-				"target_func": cs.TargetFunc,
-				"target_pkg":  cs.TargetPkg,
-				"arguments":   cs.Arguments,
-				"line":        cs.Location.LineStart,
+				"caller_func":  cs.CallerFunc,
+				"target_func":  cs.TargetFunc,
+				"target_pkg":   cs.TargetPkg,
+				"arguments":    cs.Arguments,
+				"receiver_var": cs.ReceiverVar,
+				"line":         cs.Location.LineStart,
 			})
 		}
 
@@ -576,6 +577,7 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 				"type":          v.Type,
 				"default_value": v.DefaultValue,
 				"is_exported":   v.IsExported,
+				"line":          v.Location.LineStart,
 			})
 		}
 		var constants []map[string]interface{}
@@ -585,6 +587,7 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 				"type":        c.Type,
 				"value":       c.Value,
 				"is_exported": c.IsExported,
+				"line":        c.Location.LineStart,
 			})
 		}
 
@@ -881,18 +884,26 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 		dfResult = engine.Analyze()
 		report.TaintFlowCount = len(dfResult.Flows)
 		for _, flow := range dfResult.Flows {
-			var path []string
+			var path []TaintPathStep
 			for _, p := range flow.Path {
-				if p.Function != "" {
-					path = append(path, p.Function)
-				} else if p.VarName != "" {
-					path = append(path, p.VarName)
+				if p.Function != "" || p.VarName != "" {
+					path = append(path, TaintPathStep{
+						Function: p.Function,
+						File:     p.File,
+						Line:     p.Line,
+						VarName:  p.VarName,
+					})
 				}
 			}
-			var sanitizers []string
+			var sanitizers []TaintPathStep
 			for _, s := range flow.Sanitizers {
 				if s.Function != "" {
-					sanitizers = append(sanitizers, s.Function)
+					sanitizers = append(sanitizers, TaintPathStep{
+						Function: s.Function,
+						File:     s.File,
+						Line:     s.Line,
+						VarName:  s.VarName,
+					})
 				}
 			}
 		report.TaintFlows = append(report.TaintFlows, TaintFlowSummary{
@@ -1258,14 +1269,24 @@ func formatReportText(report *CodeUnderstandingReport, changedFiles []string) st
 			// P1-1: 展示完整传播路径步骤
 			if len(tf.Path) > 0 {
 				for i, step := range tf.Path {
-					if step != "" {
-						b.WriteString(fmt.Sprintf("  → Step %d: %s\n", i+1, step))
+					label := step.Function
+					if label == "" {
+						label = step.VarName
+					}
+					if label != "" {
+						b.WriteString(fmt.Sprintf("  → Step %d: %s (%s:%d)\n", i+1, label, step.File, step.Line))
 					}
 				}
 			}
 			// P1-1: 展示净化信息
 			if tf.IsSanitized && len(tf.Sanitizers) > 0 {
-				b.WriteString(fmt.Sprintf("  → 净化: %s [已净化 ✓]\n", strings.Join(tf.Sanitizers, ", ")))
+				var sanNames []string
+				for _, s := range tf.Sanitizers {
+					if s.Function != "" {
+						sanNames = append(sanNames, fmt.Sprintf("%s (%s:%d)", s.Function, s.File, s.Line))
+					}
+				}
+				b.WriteString(fmt.Sprintf("  → 净化: %s [已净化 ✓]\n", strings.Join(sanNames, ", ")))
 			}
 		}
 	}
@@ -1529,17 +1550,25 @@ type EndpointSummary struct {
 	ConsumesContentType []string `json:"consumes_content_type,omitempty"` // P2-6
 }
 
+// TaintPathStep 污点传播步骤
+type TaintPathStep struct {
+	Function string `json:"function"`
+	File     string `json:"file"`
+	Line     int    `json:"line"`
+	VarName  string `json:"var_name,omitempty"`
+}
+
 // TaintFlowSummary 污点流摘要
 type TaintFlowSummary struct {
-	SourceFunc  string   `json:"source_func"`
-	SourceFile  string   `json:"source_file"`
-	SinkFunc    string   `json:"sink_func"`
-	SinkFile    string   `json:"sink_file"`
-	Category    string   `json:"category"`
-	RiskLevel   string   `json:"risk_level"`
-	Path        []string `json:"path,omitempty"`       // P1-1 结构化路径（步骤函数名列表）
-	Sanitizers  []string `json:"sanitizers,omitempty"` // P1-1 净化函数列表
-	IsSanitized bool     `json:"is_sanitized"`         // P1-1 是否已净化
+	SourceFunc  string          `json:"source_func"`
+	SourceFile  string          `json:"source_file"`
+	SinkFunc    string          `json:"sink_func"`
+	SinkFile    string          `json:"sink_file"`
+	Category    string          `json:"category"`
+	RiskLevel   string          `json:"risk_level"`
+	Path        []TaintPathStep `json:"path,omitempty"`       // P1-1 结构化路径（步骤列表）
+	Sanitizers  []TaintPathStep `json:"sanitizers,omitempty"` // P1-1 净化步骤列表
+	IsSanitized bool            `json:"is_sanitized"`         // P1-1 是否已净化
 }
 
 // reviewViewAdapter 适配graph.ReviewView到dataflow.ReviewViewIface

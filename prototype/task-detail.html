@@ -3658,14 +3658,15 @@ function renderCuSymbolGraphBody(sub, report) {
                 tf.path.forEach((step, idx) => {
                     const isFirst = idx === 0;
                     const isLast = idx === tf.path.length - 1;
-                    const isSink = /sink|exec|danger|unsafe|write|save|delete|remove|update/i.test(step);
-                    const isSanitizer = /sanitizer|filter|validate|clean|escape|encode|sanitize|check|verify/i.test(step);
+                    const label = step.function || step.var_name || '';
+                    const isSink = /sink|exec|danger|unsafe|write|save|delete|remove|update/i.test(label);
+                    const isSanitizer = /sanitizer|filter|validate|clean|escape|encode|sanitize|check|verify/i.test(label);
                     let stepCls = 'bg-gray-100 text-gray-700 border-gray-200';
                     if (isFirst) stepCls = 'bg-blue-50 text-blue-700 border-blue-200';
                     if (isLast && isSink) stepCls = 'bg-red-50 text-red-700 border-red-200';
                     if (isSanitizer) stepCls = 'bg-emerald-50 text-emerald-700 border-emerald-200';
-                    const label = isFirst ? '📥' : (isLast && isSink) ? '🔴' : isSanitizer ? '🛡' : '';
-                    html += `<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[10px] font-mono ${stepCls}">${label ? '<span class="text-[8px]">' + label + '</span>' : ''}${escapeHtml(step)}</span>`;
+                    const icon = isFirst ? '📥' : (isLast && isSink) ? '🔴' : isSanitizer ? '🛡' : '';
+                    html += `<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[10px] font-mono ${stepCls}" title="${escapeHtml(step.file || '')}:${step.line || 0}">${icon ? '<span class="text-[8px]">' + icon + '</span>' : ''}${escapeHtml(label)}</span>`;
                     if (!isLast) {
                         html += `<i class="fas fa-chevron-right text-gray-300 text-[8px]"></i>`;
                     }
@@ -3677,7 +3678,8 @@ function renderCuSymbolGraphBody(sub, report) {
                 html += `<div class="flex flex-wrap items-center gap-1 py-0.5 pl-2">`;
                 html += `<span class="text-[10px] text-emerald-600 font-medium"><i class="fas fa-shield-alt mr-0.5"></i>净化:</span>`;
                 tf.sanitizers.forEach(s => {
-                    html += `<span class="inline-flex items-center px-1.5 py-0.5 rounded border text-[10px] font-mono bg-emerald-50 text-emerald-700 border-emerald-200">${escapeHtml(s)}</span>`;
+                    const label = s.function || '';
+                    html += `<span class="inline-flex items-center px-1.5 py-0.5 rounded border text-[10px] font-mono bg-emerald-50 text-emerald-700 border-emerald-200" title="${escapeHtml(s.file || '')}:${s.line || 0}">${escapeHtml(label)}</span>`;
                 });
                 html += `</div>`;
             }

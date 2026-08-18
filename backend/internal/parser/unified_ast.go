@@ -140,18 +140,20 @@ type UnifiedEndpoint struct {
 
 // UnifiedVariable 变量
 type UnifiedVariable struct {
-	Name         string `json:"name"`
-	Type         string `json:"type"`
-	DefaultValue string `json:"default_value,omitempty"`
-	IsExported   bool   `json:"is_exported"`
+	Name         string            `json:"name"`
+	Type         string            `json:"type"`
+	DefaultValue string            `json:"default_value,omitempty"`
+	IsExported   bool              `json:"is_exported"`
+	Location     SourceLocation    `json:"location,omitempty"`
 }
 
 // UnifiedConstant 常量
 type UnifiedConstant struct {
-	Name       string `json:"name"`
-	Type       string `json:"type,omitempty"`
-	Value      string `json:"value"`
-	IsExported bool   `json:"is_exported"`
+	Name       string         `json:"name"`
+	Type       string         `json:"type,omitempty"`
+	Value      string         `json:"value"`
+	IsExported bool           `json:"is_exported"`
+	Location   SourceLocation `json:"location,omitempty"`
 }
 
 // UnifiedSink 危险Sink（框架适配器产出）
