@@ -1638,14 +1638,25 @@ func extractPackageFromImport(impPath string) string {
 // buildFuncSignatureFromDetails 从 funcDetails 构建函数签名字符串，用于 Breaking Change 对比
 func buildFuncSignatureFromDetails(fd map[string]interface{}) string {
 	name, _ := fd["name"].(string)
-	params := getStringSliceProp(fd, "params")
 	returns := getStringSliceProp(fd, "returns")
+
+	// params 是 []map[string]interface{}{{"name": ..., "type": ...}}
+	var paramTypes []string
+	if raw, ok := fd["params"]; ok {
+		if paramsSlice, ok := raw.([]map[string]interface{}); ok {
+			for _, p := range paramsSlice {
+				if pt, ok := p["type"].(string); ok && pt != "" {
+					paramTypes = append(paramTypes, pt)
+				}
+			}
+		}
+	}
 
 	var b strings.Builder
 	b.WriteString("func ")
 	b.WriteString(name)
 	b.WriteString("(")
-	b.WriteString(strings.Join(params, ", "))
+	b.WriteString(strings.Join(paramTypes, ", "))
 	b.WriteString(")")
 	if len(returns) > 0 {
 		b.WriteString(" ")
