@@ -252,7 +252,7 @@ func buildSecretScanMarkdown(findings []model.SecretScanFinding) string {
 		return ""
 	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("## 密钥泄露扫描结果\n\n发现 %d 处潜在密钥泄露：\n\n", len(findings)))
+	sb.WriteString(fmt.Sprintf("## 密钥扫描报告\n\n发现 %d 处潜在密钥泄露：\n\n", len(findings)))
 	sb.WriteString("| 文件 | 行号 | 类型 | 严重级别 |\n")
 	sb.WriteString("|:---|:---:|:---|:---:|\n")
 

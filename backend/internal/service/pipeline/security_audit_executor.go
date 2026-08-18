@@ -318,7 +318,7 @@ func buildSecurityAuditMarkdown(findings []model.SecurityAuditFinding) string {
 		return ""
 	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("## 敏感操作审计结果\n\n发现 %d 处安全敏感操作：\n\n", len(findings)))
+	sb.WriteString(fmt.Sprintf("## 安全审计报告\n\n发现 %d 处安全敏感操作：\n\n", len(findings)))
 	sb.WriteString("| 文件 | 行号 | 规则 | 级别 | 建议 |\n")
 	sb.WriteString("|:---|:---:|:---|:---:|:---|\n")
 

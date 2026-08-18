@@ -310,7 +310,7 @@ func buildTestSuggestionMarkdown(suggestions []engine.TestSuggestionItem) string
 		return ""
 	}
 	var sb strings.Builder
-	sb.WriteString("## 测试建议\n\n以下函数建议补充测试场景：\n\n")
+	sb.WriteString("## 测试建议报告\n\n以下函数建议补充测试场景：\n\n")
 	sb.WriteString("| 函数 | 文件 | 建议测试场景 |\n")
 	sb.WriteString("|:---|:---|:---|\n")
 
@@ -622,7 +622,7 @@ func buildImpactAnalysisMarkdown(findings []engine.ImpactFinding) string {
 	}
 
 	if len(breakingChanges) > 0 {
-		sb.WriteString(fmt.Sprintf("## 变更影响分析\n\n⚠️ 发现 %d 处潜在 Breaking Change：\n\n", len(breakingChanges)))
+		sb.WriteString(fmt.Sprintf("## 变更影响分析报告\n\n⚠️ 发现 %d 处潜在 Breaking Change：\n\n", len(breakingChanges)))
 		for _, f := range breakingChanges {
 			sb.WriteString(fmt.Sprintf("**`%s`** 在 `%s` 发生变更\n", f.SymbolName, f.FilePath))
 			sb.WriteString(fmt.Sprintf("- 影响范围：%s\n", strings.Join(f.AffectedFiles, ", ")))

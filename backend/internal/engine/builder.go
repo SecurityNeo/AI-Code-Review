@@ -301,7 +301,7 @@ func buildDependencyVulnsSection(vulns []DependencyVuln) string {
 	})
 
 	var sb strings.Builder
-	sb.WriteString("### 依赖漏洞扫描结果\n")
+	sb.WriteString("## 依赖漏洞扫描报告\n")
 	sb.WriteString("本次变更涉及以下依赖存在已知漏洞，请在评审时特别关注其影响范围和修复建议：\n\n")
 
 	for _, g := range groups {
@@ -989,9 +989,9 @@ func BuildArbitrationPrompt(ctx *PromptContext) (string, *llm.ResponseFormat, er
 	sb.WriteString("- ImpactAnalysis → impact_notes[]（不得放入 Issues[]）\n")
 	sb.WriteString("- SecurityFinding → security_findings[]（仅展示用，已在 Issues[] 中体现扣分）\n\n")
 
-	// 5. 各智能体预渲染 Markdown（直接拼接）
+	// 5. 各智能体预渲染 Markdown（直接拼接，代码理解器除外）
 	hasMarkdown := false
-	for _, key := range []string{"dependency_scan", "secret_scan", "security_audit", "impact_analysis", "test_suggestion", "code_understanding"} {
+	for _, key := range []string{"dependency_scan", "secret_scan", "security_audit", "impact_analysis", "test_suggestion"} {
 		if md, ok := ctx.AgentMarkdowns[key]; ok && md != "" {
 			sb.WriteString(md)
 			sb.WriteString("\n")
@@ -1120,7 +1120,7 @@ func buildRulesSection(rules []model.ReviewRule, dimWeights map[string]Dimension
 // buildSecretScanSection 密钥泄露扫描 Prompt 段落
 func buildSecretScanSection(findings []model.SecretScanFinding) string {
 	var sb strings.Builder
-	sb.WriteString("## 密钥泄露扫描结果\n\n")
+	sb.WriteString("## 密钥扫描报告\n\n")
 	sb.WriteString(fmt.Sprintf("发现 %d 处潜在密钥泄露：\n\n", len(findings)))
 	sb.WriteString("| 文件 | 行号 | 类型 | 严重级别 |\n")
 	sb.WriteString("|:---|:---:|:---|:---:|\n")
@@ -1134,7 +1134,7 @@ func buildSecretScanSection(findings []model.SecretScanFinding) string {
 // buildSecurityAuditSection 敏感操作审计 Prompt 段落
 func buildSecurityAuditSection(findings []model.SecurityAuditFinding) string {
 	var sb strings.Builder
-	sb.WriteString("## 敏感操作审计结果\n\n")
+	sb.WriteString("## 安全审计报告\n\n")
 	sb.WriteString(fmt.Sprintf("发现 %d 处安全敏感操作：\n\n", len(findings)))
 	sb.WriteString("| 文件 | 行号 | 规则 | 级别 | 建议 |\n")
 	sb.WriteString("|:---|:---:|:---|:---:|:---|\n")
@@ -1204,7 +1204,7 @@ func buildImpactSection(findings []ImpactFinding) string {
 // buildTestSuggestionSection 测试建议 Prompt 段落
 func buildTestSuggestionSection(suggestions []TestSuggestionItem) string {
 	var sb strings.Builder
-	sb.WriteString("## 测试建议\n\n")
+	sb.WriteString("## 测试建议报告\n\n")
 	sb.WriteString("以下函数建议补充测试场景：\n\n")
 	sb.WriteString("| 函数 | 文件 | 建议测试场景 |\n")
 	sb.WriteString("|:---|:---|:---|\n")

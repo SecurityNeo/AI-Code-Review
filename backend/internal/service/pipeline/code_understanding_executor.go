@@ -697,7 +697,7 @@ func (e *CodeUnderstandingExecutor) formatReportText(report *CodeUnderstandingRe
 	}
 
 	var b strings.Builder
-	b.WriteString("## 代码理解报告\n\n")
+	b.WriteString("## 基于AST与知识图谱的代码变更分析报告\n\n")
 	b.WriteString(fmt.Sprintf("- **解析文件数**: %d / %d\n", report.ParsedFiles, report.TotalFiles))
 	b.WriteString(fmt.Sprintf("- **函数总数**: %d\n", report.TotalFunctions))
 	b.WriteString(fmt.Sprintf("- **类型总数**: %d\n", report.TotalTypes))
