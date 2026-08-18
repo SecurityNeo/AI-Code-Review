@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ai-optimizer/backend/internal/engine"
 	"github.com/ai-optimizer/backend/internal/model"
@@ -25,6 +26,14 @@ type AgentVerificator struct {
 	lastModelName    string // 最近一次 LLM 模型名称
 	lastInputTokens  int    // 最近一次 LLM 输入 token
 	lastOutputTokens int    // 最近一次 LLM 输出 token
+
+	// 【新增】Prompt 限制参数
+	functionBodyMaxLen   int
+	matchTextMaxLen      int
+	contextLinesBefore   int
+	contextLinesAfter    int
+	triggerSnippetMaxLen int
+	confidenceThreshold  float64
 }
 
 // NewAgentVerificator 创建 AgentVerificator
@@ -33,6 +42,14 @@ type VerificatorConfig struct {
 	ModelID       uint
 	MaxTokens     int
 	VerifyTimeout time.Duration
+
+	// 【新增】Prompt 限制参数（由 Executor 从配置读取后传入）
+	FunctionBodyMaxLen   int
+	MatchTextMaxLen      int
+	ContextLinesBefore   int
+	ContextLinesAfter    int
+	TriggerSnippetMaxLen int
+	ConfidenceThreshold  float64
 }
 
 func NewAgentVerificator(svc LLMService, cfg VerificatorConfig) *AgentVerificator {
@@ -43,10 +60,16 @@ func NewAgentVerificator(svc LLMService, cfg VerificatorConfig) *AgentVerificato
 		cfg.VerifyTimeout = 300 * time.Second
 	}
 	return &AgentVerificator{
-		llmService:    svc,
-		modelID:       cfg.ModelID,
-		maxTokens:     cfg.MaxTokens,
-		verifyTimeout: cfg.VerifyTimeout,
+		llmService:           svc,
+		modelID:              cfg.ModelID,
+		maxTokens:            cfg.MaxTokens,
+		verifyTimeout:        cfg.VerifyTimeout,
+		functionBodyMaxLen:   cfg.FunctionBodyMaxLen,
+		matchTextMaxLen:      cfg.MatchTextMaxLen,
+		contextLinesBefore:   cfg.ContextLinesBefore,
+		contextLinesAfter:    cfg.ContextLinesAfter,
+		triggerSnippetMaxLen: cfg.TriggerSnippetMaxLen,
+		confidenceThreshold:  cfg.ConfidenceThreshold,
 	}
 }
 
@@ -177,6 +200,7 @@ func (v *AgentVerificator) fallbackVerify(findings []model.SecretScanFinding) []
 }
 
 // buildSecretVerifyPrompt 构建 SecretScan 验证 Prompt
+// 使用 RawMatchText（原始值）和完整函数体上下文，提升 LLM 判断准确性
 func (v *AgentVerificator) buildSecretVerifyPrompt(findings []model.SecretScanFinding, fileContents map[string]string) string {
 	var sb strings.Builder
 	sb.WriteString("你是一名安全专家。以下是通过正则引擎从代码 diff 中提取的密钥泄露候选位置。\n")
@@ -186,30 +210,55 @@ func (v *AgentVerificator) buildSecretVerifyPrompt(findings []model.SecretScanFi
 		sb.WriteString(fmt.Sprintf("候选 %d:\n", i+1))
 		sb.WriteString(fmt.Sprintf("  文件: %s (第 %d 行)\n", f.FilePath, f.LineNumber))
 		sb.WriteString(fmt.Sprintf("  规则: %s\n", f.RuleCode))
-		mask := f.MatchText
-		if len(mask) > 60 {
-			mask = mask[:25] + "..." + mask[len(mask)-20:]
-		}
-		sb.WriteString(fmt.Sprintf("  匹配文本(脱敏): %s\n", mask))
 
-		// 注入 ±5 行上下文
+		// 优先使用原始值，fallback 到脱敏值（兼容旧数据）
+		raw := f.RawMatchText
+		if raw == "" {
+			raw = f.MatchText
+		}
+		maxLen := v.matchTextMaxLen
+		if maxLen <= 0 {
+			maxLen = 80
+		}
+		if utf8.RuneCountInString(raw) > maxLen {
+			raw = truncateRunes(raw, maxLen)
+		}
+		sb.WriteString(fmt.Sprintf("  匹配文本: %s\n", raw))
+
+		// 注入完整函数体上下文（上限由配置控制，超限回退到 ±N 行）
 		if content, ok := fileContents[f.FilePath]; ok {
-			lines := strings.Split(content, "\n")
-			start := f.LineNumber - 6
-			if start < 0 {
-				start = 0
-			}
-			end := f.LineNumber + 4
-			if end > len(lines) {
-				end = len(lines)
-			}
-			sb.WriteString("  上下文:\n")
-			for j := start; j < end && j < len(lines); j++ {
-				prefix := "    "
-				if j == f.LineNumber-1 {
-					prefix = "  >>>"
+			funcBody := extractFunctionBodyByLine(content, f.LineNumber, v.functionBodyMaxLen)
+			if funcBody != "" {
+				sb.WriteString("  所在函数上下文:\n```\n")
+				sb.WriteString(funcBody)
+				sb.WriteString("\n```\n")
+			} else {
+				// fallback：±N 行上下文
+				lines := strings.Split(content, "\n")
+				ctxBefore := v.contextLinesBefore
+				if ctxBefore <= 0 {
+					ctxBefore = 6
 				}
-				sb.WriteString(fmt.Sprintf("%s %d: %s\n", prefix, j+1, strings.TrimRight(lines[j], "\r")))
+				ctxAfter := v.contextLinesAfter
+				if ctxAfter <= 0 {
+					ctxAfter = 4
+				}
+				start := f.LineNumber - ctxBefore - 1
+				if start < 0 {
+					start = 0
+				}
+				end := f.LineNumber + ctxAfter - 1
+				if end > len(lines) {
+					end = len(lines)
+				}
+				sb.WriteString("  上下文:\n")
+				for j := start; j < end && j < len(lines); j++ {
+					prefix := "    "
+					if j == f.LineNumber-1 {
+						prefix = "  >>>"
+					}
+					sb.WriteString(fmt.Sprintf("%s %d: %s\n", prefix, j+1, strings.TrimRight(lines[j], "\r")))
+				}
 			}
 		}
 		sb.WriteString("\n")
@@ -298,6 +347,7 @@ func (v *AgentVerificator) fallbackVerifySecurityAudit(findings []model.Security
 }
 
 // buildSecurityAuditVerifyPrompt 构建 SecurityAudit 验证 Prompt
+// 使用完整函数体上下文 + 污点路径，提升 LLM 判断准确性
 func (v *AgentVerificator) buildSecurityAuditVerifyPrompt(findings []model.SecurityAuditFinding, fileContents map[string]string) string {
 	var sb strings.Builder
 	sb.WriteString("你是一名应用安全专家。以下是通过静态分析发现的潜在安全问题。\n")
@@ -308,24 +358,56 @@ func (v *AgentVerificator) buildSecurityAuditVerifyPrompt(findings []model.Secur
 		sb.WriteString(fmt.Sprintf("  文件: %s (第 %d 行)\n", f.FilePath, f.LineNumber))
 		sb.WriteString(fmt.Sprintf("  规则: %s\n", f.RuleCode))
 		sb.WriteString(fmt.Sprintf("  描述: %s\n", f.Message))
+
+		// 注入触发规则的精确语句
+		if f.TriggerSnippet != "" {
+			sb.WriteString("  触发语句:\n```\n")
+			sb.WriteString(f.TriggerSnippet)
+			sb.WriteString("\n```\n")
+		}
+
+		// 注入完整函数体上下文（上限由配置控制，超限回退到 ±N 行）
 		if content, ok := fileContents[f.FilePath]; ok {
-			lines := strings.Split(content, "\n")
-			start := f.LineNumber - 6
-			if start < 0 {
-				start = 0
-			}
-			end := f.LineNumber + 4
-			if end > len(lines) {
-				end = len(lines)
-			}
-			sb.WriteString("  上下文:\n")
-			for j := start; j < end && j < len(lines); j++ {
-				prefix := "    "
-				if j == f.LineNumber-1 {
-					prefix = "  >>>"
+			funcBody := extractFunctionBodyByLine(content, f.LineNumber, v.functionBodyMaxLen)
+			if funcBody != "" {
+				sb.WriteString("  所在函数:\n```\n")
+				sb.WriteString(funcBody)
+				sb.WriteString("\n```\n")
+			} else {
+				// fallback：±N 行上下文
+				lines := strings.Split(content, "\n")
+				ctxBefore := v.contextLinesBefore
+				if ctxBefore <= 0 {
+					ctxBefore = 6
 				}
-				sb.WriteString(fmt.Sprintf("%s %d: %s\n", prefix, j+1, strings.TrimRight(lines[j], "\r")))
+				ctxAfter := v.contextLinesAfter
+				if ctxAfter <= 0 {
+					ctxAfter = 4
+				}
+				start := f.LineNumber - ctxBefore - 1
+				if start < 0 {
+					start = 0
+				}
+				end := f.LineNumber + ctxAfter - 1
+				if end > len(lines) {
+					end = len(lines)
+				}
+				sb.WriteString("  上下文:\n")
+				for j := start; j < end && j < len(lines); j++ {
+					prefix := "    "
+					if j == f.LineNumber-1 {
+						prefix = "  >>>"
+					}
+					sb.WriteString(fmt.Sprintf("%s %d: %s\n", prefix, j+1, strings.TrimRight(lines[j], "\r")))
+				}
 			}
+		}
+
+		// 注入污点分析路径（如果存在）
+		if taintContext, ok := fileContents[f.FilePath+"_taint"]; ok && taintContext != "" {
+			sb.WriteString("  相关数据流路径:\n")
+			sb.WriteString(taintContext)
+			sb.WriteString("\n")
 		}
 		sb.WriteString("\n")
 	}
@@ -348,6 +430,13 @@ type AgentEnricher struct {
 	lastModelName    string // 最近一次 LLM 模型名称
 	lastInputTokens  int    // 最近一次 LLM 输入 token
 	lastOutputTokens int    // 最近一次 LLM 输出 token
+
+	// 【新增】Prompt 限制参数
+	functionBodyMaxLen   int
+	contextLinesBefore   int
+	contextLinesAfter    int
+	callerSnippetMaxLen  int
+	maxCallersPerFinding int
 }
 
 // NewAgentEnricher 创建 AgentEnricher
@@ -355,6 +444,13 @@ type EnricherConfig struct {
 	ModelID       uint
 	MaxTokens     int
 	EnrichTimeout time.Duration
+
+	// 【新增】Prompt 限制参数
+	FunctionBodyMaxLen   int
+	ContextLinesBefore   int
+	ContextLinesAfter    int
+	CallerSnippetMaxLen  int
+	MaxCallersPerFinding int
 }
 
 func NewAgentEnricher(svc LLMService, cfg EnricherConfig) *AgentEnricher {
@@ -365,10 +461,15 @@ func NewAgentEnricher(svc LLMService, cfg EnricherConfig) *AgentEnricher {
 		cfg.EnrichTimeout = 300 * time.Second
 	}
 	return &AgentEnricher{
-		llmService:    svc,
-		modelID:       cfg.ModelID,
-		maxTokens:     cfg.MaxTokens,
-		enrichTimeout: cfg.EnrichTimeout,
+		llmService:           svc,
+		modelID:              cfg.ModelID,
+		maxTokens:            cfg.MaxTokens,
+		enrichTimeout:        cfg.EnrichTimeout,
+		functionBodyMaxLen:   cfg.FunctionBodyMaxLen,
+		contextLinesBefore:   cfg.ContextLinesBefore,
+		contextLinesAfter:    cfg.ContextLinesAfter,
+		callerSnippetMaxLen:  cfg.CallerSnippetMaxLen,
+		maxCallersPerFinding: cfg.MaxCallersPerFinding,
 	}
 }
 
@@ -508,20 +609,46 @@ func (e *AgentEnricher) buildTestEnrichPrompt(items []engine.TestSuggestionItem,
 
 	for i, item := range items {
 		sb.WriteString(fmt.Sprintf("函数 %d: %s @ %s:%d\n", i+1, item.FunctionName, item.FilePath, item.LineNumber))
+
+		// 注入完整函数体（上限由配置控制，超限回退到 ±N 行）
 		if content, ok := fileContents[item.FilePath]; ok {
-			lines := strings.Split(content, "\n")
-			start := item.LineNumber - 3
-			if start < 0 {
-				start = 0
-			}
-			end := item.LineNumber + 10
-			if end > len(lines) {
-				end = len(lines)
-			}
-			for j := start; j < end && j < len(lines); j++ {
-				sb.WriteString(fmt.Sprintf("  %d: %s\n", j+1, strings.TrimRight(lines[j], "\r")))
+			funcBody := extractFunctionBodyByLine(content, item.LineNumber, e.functionBodyMaxLen)
+			if funcBody != "" {
+				sb.WriteString("  完整函数体:\n```\n")
+				sb.WriteString(funcBody)
+				sb.WriteString("\n```\n")
+			} else {
+				// fallback：±N 行
+				lines := strings.Split(content, "\n")
+				ctxBefore := e.contextLinesBefore
+				if ctxBefore <= 0 {
+					ctxBefore = 3
+				}
+				ctxAfter := e.contextLinesAfter
+				if ctxAfter <= 0 {
+					ctxAfter = 10
+				}
+				start := item.LineNumber - ctxBefore - 1
+				if start < 0 {
+					start = 0
+				}
+				end := item.LineNumber + ctxAfter - 1
+				if end > len(lines) {
+					end = len(lines)
+				}
+				for j := start; j < end && j < len(lines); j++ {
+					sb.WriteString(fmt.Sprintf("  %d: %s\n", j+1, strings.TrimRight(lines[j], "\r")))
+				}
 			}
 		}
+
+		// 已有测试覆盖信息
+		if item.ExistingTests != "" {
+			sb.WriteString("  已有测试覆盖:\n")
+			sb.WriteString(item.ExistingTests)
+			sb.WriteString("\n")
+		}
+
 		if len(item.Scenarios) > 0 {
 			sb.WriteString("  已有启发式场景:\n")
 			for _, sc := range item.Scenarios {
@@ -547,8 +674,43 @@ func (e *AgentEnricher) buildImpactEnrichPrompt(findings []engine.ImpactFinding,
 		sb.WriteString(fmt.Sprintf("变更 %d: %s @ %s\n", i+1, f.SymbolName, f.FilePath))
 		sb.WriteString(fmt.Sprintf("  类型: %s\n", f.Type))
 		sb.WriteString(fmt.Sprintf("  描述: %s\n", f.ChangeDesc))
+
+		// 结构化 diff（函数签名对比）
+		if f.BeforeSig != "" || f.AfterSig != "" {
+			sb.WriteString("  签名对比:\n")
+			if f.BeforeSig != "" {
+				sb.WriteString(fmt.Sprintf("    变更前: %s\n", f.BeforeSig))
+			}
+			if f.AfterSig != "" {
+				sb.WriteString(fmt.Sprintf("    变更后: %s\n", f.AfterSig))
+			}
+		}
+
+		// 结构化 diff（结构体字段对比）
+		if len(f.BeforeFields) > 0 || len(f.AfterFields) > 0 {
+			sb.WriteString("  字段对比:\n")
+			if len(f.BeforeFields) > 0 {
+				sb.WriteString(fmt.Sprintf("    变更前字段: %s\n", strings.Join(f.BeforeFields, ", ")))
+			}
+			if len(f.AfterFields) > 0 {
+				sb.WriteString(fmt.Sprintf("    变更后字段: %s\n", strings.Join(f.AfterFields, ", ")))
+			}
+		}
+
 		if callers, ok := callChains[f.SymbolName]; ok && len(callers) > 0 {
 			sb.WriteString(fmt.Sprintf("  下游调用者: %s\n", strings.Join(callers, ", ")))
+			// 注入调用者代码片段（限制数量和长度）
+			limit := e.maxCallersPerFinding
+			if limit <= 0 {
+				limit = 3
+			}
+			for j, caller := range callers {
+				if j >= limit {
+					sb.WriteString(fmt.Sprintf("    ... 还有 %d 个调用者 ...\n", len(callers)-limit))
+					break
+				}
+				sb.WriteString(fmt.Sprintf("    - 调用者 %d: %s\n", j+1, caller))
+			}
 		}
 		sb.WriteString("\n")
 	}
@@ -704,4 +866,123 @@ func getImpactEnrichJSONSchema() map[string]interface{} {
 			"required": []string{"is_breaking", "breaking_type", "compatibility", "affected_scope", "migration_needed"},
 		},
 	}
+}
+
+// extractFunctionBodyByLine 从完整文件内容中提取指定行号所在函数的完整函数体。
+// 实现方式：从目标行向前扫描到最近的 "func" 关键字，然后向后匹配大括号深度到 0。
+// 注意：函数会尝试排除字符串字面量和注释中的大括号，但在复杂嵌套场景下仍可能产生近似结果。
+// maxLen 限制返回的最大 rune 数，超限则截断并追加 "[truncated]"。
+func extractFunctionBodyByLine(content string, lineNumber int, maxLen int) string {
+	if content == "" || lineNumber <= 0 {
+		return ""
+	}
+	if maxLen <= 0 {
+		maxLen = 800
+	}
+
+	lines := strings.Split(content, "\n")
+	if lineNumber > len(lines) {
+		return ""
+	}
+
+	// 从目标行向前扫描，找到最近的 "func" 关键字所在行
+	funcStart := -1
+	for i := lineNumber - 1; i >= 0; i-- {
+		trimmed := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(trimmed, "func ") || strings.HasPrefix(trimmed, "func(") || strings.HasPrefix(trimmed, "func (") {
+			funcStart = i
+			break
+		}
+	}
+	if funcStart < 0 {
+		return ""
+	}
+
+	// 从 func 行开始向后扫描，找到函数体的起始大括号 "{"
+	braceStart := -1
+	for i := funcStart; i < len(lines); i++ {
+		if idx := strings.Index(lines[i], "{"); idx >= 0 {
+			braceStart = i
+			break
+		}
+	}
+	if braceStart < 0 {
+		return ""
+	}
+
+	// 从 braceStart 行开始，基于大括号深度匹配找到函数体结束
+	// 同时跟踪引号状态，跳过字符串字面量中的大括号
+	depth := strings.Count(lines[braceStart][strings.Index(lines[braceStart], "{"):], "{")
+	depth -= strings.Count(lines[braceStart][strings.Index(lines[braceStart], "{"):], "}")
+	if depth <= 0 {
+		depth = 1
+	}
+
+	inDoubleQuote := false
+	inSingleQuote := false
+	inBacktick := false
+
+	funcEnd := braceStart
+	for i := braceStart + 1; i < len(lines) && depth > 0; i++ {
+		line := lines[i]
+		for j := 0; j < len(line) && depth > 0; j++ {
+			c := line[j]
+			// 行注释：//（仅前缀，简单处理）
+			if j < len(line)-1 && line[j] == '/' && line[j+1] == '/' && !inDoubleQuote && !inSingleQuote && !inBacktick {
+				break
+			}
+			if c == '`' && !inDoubleQuote && !inSingleQuote {
+				inBacktick = !inBacktick
+			} else if !inBacktick {
+				if c == '"' && !inSingleQuote && !isEscaped(line, j) {
+					inDoubleQuote = !inDoubleQuote
+				} else if c == '\'' && !inDoubleQuote && !isEscaped(line, j) {
+					inSingleQuote = !inSingleQuote
+				} else if !inDoubleQuote && !inSingleQuote {
+					switch c {
+					case '{':
+						depth++
+					case '}':
+						depth--
+					}
+				}
+			}
+		}
+		funcEnd = i
+	}
+
+	// 拼接函数体文本
+	var sb strings.Builder
+	for i := funcStart; i <= funcEnd && i < len(lines); i++ {
+		sb.WriteString(lines[i])
+		sb.WriteString("\n")
+	}
+
+	result := sb.String()
+	if utf8.RuneCountInString(result) > maxLen {
+		result = truncateRunes(result, maxLen) + "\n// [truncated...]"
+	}
+	return result
+}
+
+// truncateRunes 按 rune 数量安全截断字符串，避免切在多字节 UTF-8 字符中间。
+func truncateRunes(s string, maxLen int) string {
+	if utf8.RuneCountInString(s) <= maxLen {
+		return s
+	}
+	runes := []rune(s)
+	if maxLen <= 3 {
+		return string(runes[:maxLen])
+	}
+	return string(runes[:maxLen-3]) + "..."
+}
+
+// isEscaped 判断字符串 s 中位置 pos 的字符是否被连续的反斜杠转义。
+// 例如：s[pos] = '"'，前面有奇数个反斜杠则为被转义。
+func isEscaped(s string, pos int) bool {
+	backslashes := 0
+	for i := pos - 1; i >= 0 && s[i] == '\\'; i-- {
+		backslashes++
+	}
+	return backslashes%2 == 1
 }

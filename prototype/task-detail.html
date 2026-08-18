@@ -296,7 +296,9 @@
                         <div id="pipelineCards" class="hidden max-w-4xl mx-auto"></div>
                     </div>
                     <!-- 详情抽屉面板 -->
-                    <div id="pipelineDetailDrawer" class="fixed top-0 right-0 bottom-0 w-[520px] bg-white shadow-2xl transform translate-x-full transition-transform duration-300 ease-in-out z-50 border-l hidden">
+                    <div id="pipelineDetailDrawer" class="fixed top-0 right-0 bottom-0 bg-white shadow-2xl transform translate-x-full transition-transform duration-300 ease-in-out z-50 border-l hidden" style="width:520px;">
+                        <!-- 左侧拖拽手柄（调整宽度） -->
+                        <div id="pipelineDrawerResizeHandle" style="position:absolute;left:0;top:0;bottom:0;width:6px;cursor:col-resize;z-index:60;background:transparent;" title="按住拖动调整宽度"></div>
                         <div class="flex items-center justify-between px-5 py-3 border-b bg-gray-50">
                             <h4 class="text-sm font-semibold text-gray-800" id="pipelineDetailTitle">阶段详情</h4>
                             <button onclick="closePipelineDetail()" class="w-8 h-8 rounded-full hover:bg-gray-200 flex items-center justify-center text-gray-400 transition-colors"><i class="fas fa-times"></i></button>
@@ -2645,7 +2647,7 @@ function createCodeUnderstandingSubflow(subStages, parentStage) {
         const labelMap = {
             'context_extract': 'AST 上下文提取',
             'symbol_graph': '知识图谱分析',
-            'report_merge': '报告合并与 Prompt 生成'
+            'report_merge': '报告合并'
         };
         const label = labelMap[sub.name] || sub.name;
 
@@ -2672,10 +2674,86 @@ function createCodeUnderstandingSubflow(subStages, parentStage) {
 function closePipelineDetail() {
     const panel = document.getElementById('pipelineDetailDrawer');
     if (panel) {
+        panel.style.transform = ''; // 清除拖动残留的 transform
         panel.classList.add('translate-x-full');
         setTimeout(() => { panel.classList.add('hidden'); }, 300);
     }
 }
+
+// 初始化 Pipeline 详情 Drawer 左侧拖拽手柄（调整宽度）
+function initPipelineDrawerResize() {
+    const panel = document.getElementById('pipelineDetailDrawer');
+    const handle = document.getElementById('pipelineDrawerResizeHandle');
+    if (!panel || !handle) return;
+
+    let isResizing = false;
+    let startX = 0;
+    let startWidth = 520;
+    const MIN_WIDTH = 400;
+    const DEFAULT_WIDTH = 520;
+
+    function getMaxWidth() {
+        return Math.min(1600, window.innerWidth * 0.98);
+    }
+
+    function onStart(e) {
+        // 只响应主鼠标按键（左键）
+        if (e.type === 'mousedown' && e.button !== 0) return;
+        // 面板未展开时不能调整
+        if (panel.classList.contains('hidden') || panel.classList.contains('translate-x-full')) return;
+
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        startX = clientX;
+        startWidth = panel.offsetWidth;
+        isResizing = true;
+
+        // 防止拖拽期间文本被选中
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'col-resize';
+    }
+
+    function onMove(e) {
+        if (!isResizing) return;
+        e.preventDefault(); // 防止触摸设备滚动
+
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const deltaX = startX - clientX; // 向左拖动：startX > clientX → deltaX > 0 → 宽度增加
+        let newWidth = startWidth + deltaX;
+
+        const maxW = getMaxWidth();
+        if (newWidth < MIN_WIDTH) newWidth = MIN_WIDTH;
+        if (newWidth > maxW) newWidth = maxW;
+
+        panel.style.width = newWidth + 'px';
+    }
+
+    function onEnd(e) {
+        if (!isResizing) return;
+        isResizing = false;
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+    }
+
+    handle.addEventListener('mousedown', onStart);
+    handle.addEventListener('touchstart', onStart);
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('touchmove', onMove);
+
+    window.addEventListener('mouseup', onEnd);
+    window.addEventListener('touchend', onEnd);
+
+    // 关闭面板时恢复默认宽度
+    const origClose = closePipelineDetail;
+    closePipelineDetail = function() {
+        // 先恢复原宽度（避免下次打开时保持上次拖动的宽度）
+        panel.style.width = DEFAULT_WIDTH + 'px';
+        origClose();
+    };
+}
+
+// 页面加载后初始化调整大小
+initPipelineDrawerResize();
 
 async function showPipelineDetail(execId) {
     const panel = document.getElementById('pipelineDetailDrawer');
@@ -2782,8 +2860,9 @@ function renderGenericDetail(json) {
         html += `<div class="text-red-600 bg-red-50 p-2 rounded text-xs mb-3">❌ ${escapeHtml(json.error_message)}</div>`;
     }
 
+    const stageCode = json.stage_code || '';
+
     // 状态行（状态 + 耗时 + 模型名称）
-    // 扩展智能体数据在 output_snapshot 中，batch_review 等在顶层，均需兼容
     const outSnap = json.output_snapshot || {};
     const modelName = outSnap.model_name || json.model_name || '';
     const inputTokens = outSnap.input_tokens || json.input_tokens || 0;
@@ -2795,7 +2874,7 @@ function renderGenericDetail(json) {
     if (modelName) metaItems.push(`<span class="text-gray-500 text-xs">🤖 ${escapeHtml(modelName)}</span>`);
     if (metaItems.length) html += `<div class="flex flex-wrap gap-2 mb-2">${metaItems.join('')}</div>`;
 
-    // Token 用量（放在状态行下方，参考 batch detail 样式）
+    // Token 用量
     if (inputTokens || outputTokens) {
         html += `<div class="mb-3 bg-blue-50 border border-blue-100 rounded-lg p-2 flex justify-between items-center">`;
         html += `<span class="text-xs text-blue-700 font-medium">Token 用量</span>`;
@@ -2803,34 +2882,43 @@ function renderGenericDetail(json) {
         html += `</div>`;
     }
 
+    // 输入快照（默认折叠）
     if (json.input_snapshot) {
-        html += '<div class="mb-3"><div class="font-medium text-gray-600 mb-1 text-xs">输入快照</div>';
+        const iid = 'inp-snap-' + Math.random().toString(36).substr(2, 8);
+        html += `<div class="mb-3"><div class="font-medium text-gray-600 mb-1 text-xs">输入快照</div>`;
+        html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden"><summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看输入快照</summary>`;
         html += renderJsonSnapshot(json.input_snapshot);
-        html += '</div>';
+        html += `</details></div>`;
     }
-    if (json.output_snapshot) {
-        html += '<div class="mb-3"><div class="font-medium text-gray-600 mb-1 text-xs">输出快照</div>';
-        html += renderJsonSnapshot(json.output_snapshot);
-        html += '</div>';
 
-        // LLM Prompt（可折叠 + 可复制）
-        const prompt = json.output_snapshot.llm_prompt || '';
-        html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
-        html += `<span>LLM Prompt</span>`;
-        if (prompt) html += `<span class="text-[10px] text-gray-400">${prompt.length} 字符</span>`;
-        html += `</div>`;
-        if (prompt) {
-            const pid = 'prompt-' + Math.random().toString(36).substr(2, 8);
-            html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">`;
-            html += `<summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看 LLM Prompt</summary>`;
-            html += `<div class="relative group">`;
-            html += `<button onclick="copyTextById('${pid}', this)" class="absolute top-1.5 right-1.5 z-10 bg-white/90 border border-gray-200 rounded px-2 py-0.5 text-[10px] text-gray-400 hover:text-blue-600 hover:border-blue-300 shadow-sm" title="复制内容"><i class="far fa-copy mr-0.5"></i>复制</button>`;
-            html += `<pre id="${pid}" class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[24rem] overflow-y-auto">${escapeHtml(prompt)}</pre>`;
-            html += `</div></details>`;
-        } else {
-            html += `<div class="bg-gray-50 rounded-lg border border-gray-200 p-3 text-[11px] text-gray-400 italic">未生成 LLM Prompt（未触发 LLM 验证/增强）</div>`;
+    // 输出快照（默认折叠）
+    if (json.output_snapshot) {
+        const oid = 'out-snap-' + Math.random().toString(36).substr(2, 8);
+        html += `<div class="mb-3"><div class="font-medium text-gray-600 mb-1 text-xs">输出快照</div>`;
+        html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden"><summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看输出快照</summary>`;
+        html += renderJsonSnapshot(json.output_snapshot);
+        html += `</details></div>`;
+
+        // LLM Prompt（git_clone、dependency_scan、trigger_check 不展示）
+        if (stageCode !== 'git_clone' && stageCode !== 'dependency_scan' && stageCode !== 'trigger_check') {
+            const prompt = json.output_snapshot.llm_prompt || '';
+            html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
+            html += `<span>LLM Prompt</span>`;
+            if (prompt) html += `<span class="text-[10px] text-gray-400">${prompt.length} 字符</span>`;
+            html += `</div>`;
+            if (prompt) {
+                const pid = 'prompt-' + Math.random().toString(36).substr(2, 8);
+                html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">`;
+                html += `<summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看 LLM Prompt</summary>`;
+                html += `<div class="relative group">`;
+                html += `<button onclick="copyTextById('${pid}', this)" class="absolute top-1.5 right-1.5 z-10 bg-white/90 border border-gray-200 rounded px-2 py-0.5 text-[10px] text-gray-400 hover:text-blue-600 hover:border-blue-300 shadow-sm" title="复制内容"><i class="far fa-copy mr-0.5"></i>复制</button>`;
+                html += `<pre id="${pid}" class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[24rem] overflow-y-auto">${escapeHtml(prompt)}</pre>`;
+                html += `</div></details>`;
+            } else {
+                html += `<div class="bg-gray-50 rounded-lg border border-gray-200 p-3 text-[11px] text-gray-400 italic">未生成 LLM Prompt（未触发 LLM 验证/增强）</div>`;
+            }
+            html += `</div>`;
         }
-        html += `</div>`;
 
         // 大模型原始输出（JSON）（可折叠 + 可复制）
         const raw = json.output_snapshot.llm_raw_output;
@@ -2850,15 +2938,36 @@ function renderGenericDetail(json) {
             html += `</div></details></div>`;
         }
 
-        // 注入 Prompt 预览
-        const promptInjection = json.output_snapshot.prompt_injection || '';
-        html += `<div class="mb-3">
-            <div class="flex items-center justify-between mb-1">
-                <div class="text-xs font-semibold text-indigo-700"><i class="fas fa-paper-plane mr-1"></i>注入 Prompt 预览</div>
-                ${promptInjection ? `<span class="text-[10px] text-gray-400">${promptInjection.length.toLocaleString()} 字符</span>` : ''}
-            </div>
-            <div class="bg-gray-900 rounded-lg p-3 text-xs text-gray-100 font-mono whitespace-pre-wrap max-h-[32rem] overflow-y-auto border border-gray-700 leading-relaxed">${promptInjection ? escapeHtml(promptInjection) : '<span class="text-gray-500 italic">未生成可注入内容</span>'}</div>
-        </div>`;
+        // 注入 Prompt 预览（git_clone 和 trigger_check 不展示）
+        if (stageCode !== 'git_clone' && stageCode !== 'trigger_check') {
+            const promptInjection = json.output_snapshot.prompt_injection || '';
+            // 根据 stage 确定标题
+            const injectionTitles = {
+                'dependency_scan': '漏洞扫描报告',
+                'secret_scan':     '密钥扫描报告',
+                'security_audit':  '安全审计报告',
+                'test_suggestion': '测试建议报告'
+            };
+            const injectionTitle = injectionTitles[stageCode] || '注入 Prompt 预览';
+            const injectionIcon = injectionTitles[stageCode] ? 'fa-file-alt' : 'fa-paper-plane';
+
+            html += `<div class="mb-3">`;
+            html += `<div class="flex items-center justify-between mb-1">`;
+            html += `<div class="text-xs font-semibold text-indigo-700"><i class="fas ${injectionIcon} mr-1"></i>${escapeHtml(injectionTitle)}</div>`;
+            if (promptInjection) html += `<span class="text-[10px] text-gray-400">${promptInjection.length.toLocaleString()} 字符</span>`;
+            html += `</div>`;
+            if (promptInjection) {
+                // 对于已知 stage，使用 Markdown 渲染；未知 stage 保持原样
+                if (injectionTitles[stageCode]) {
+                    html += renderCopyableMarkdown(promptInjection, '32rem');
+                } else {
+                    html += `<div class="bg-gray-900 rounded-lg p-3 text-xs text-gray-100 font-mono whitespace-pre-wrap max-h-[32rem] overflow-y-auto border border-gray-700 leading-relaxed">${escapeHtml(promptInjection)}</div>`;
+                }
+            } else {
+                html += `<div class="bg-gray-50 rounded-lg border border-gray-200 p-3 text-[11px] text-gray-400 italic">未生成报告内容</div>`;
+            }
+            html += `</div>`;
+        }
     }
     if (!html) html = '<div class="text-gray-400 text-sm">无详细数据</div>';
     return html;
@@ -2960,16 +3069,6 @@ function renderImpactAnalysisDetail(json) {
         html += `<pre id="${rid}" class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[28rem] overflow-y-auto">${escapeHtml(jsonStr)}</pre>`;
         html += `</div></details></div>`;
     }
-
-    // 注入 Prompt 预览
-    const promptInjection = outSnap.prompt_injection || '';
-    html += `<div class="mb-3">
-        <div class="flex items-center justify-between mb-1">
-            <div class="text-xs font-semibold text-indigo-700"><i class="fas fa-paper-plane mr-1"></i>注入 Prompt 预览</div>
-            ${promptInjection ? `<span class="text-[10px] text-gray-400">${promptInjection.length.toLocaleString()} 字符</span>` : ''}
-        </div>
-        <div class="bg-gray-900 rounded-lg p-3 text-xs text-gray-100 font-mono whitespace-pre-wrap max-h-64 overflow-y-auto border border-gray-700 leading-relaxed">${promptInjection ? escapeHtml(promptInjection.substring(0, 3000)) + (promptInjection.length > 3000 ? '<br><br>[已截断，点击下方子阶段查看完整内容]' : '') : '<span class="text-gray-500 italic">未生成可注入内容</span>'}</div>
-    </div>`;
 
     return html;
 }
@@ -3101,15 +3200,19 @@ function renderCodeUnderstandingDetail(json) {
         </div>`;
     }
 
-    // 报告合并生成的 Prompt（总览展示）
+    // 代码分析报告（Markdown 渲染）
     const promptText = report.prompt_injection || report.report_text || '';
-    html += `<div class="mb-3">
-        <div class="flex items-center justify-between mb-1">
-            <div class="text-xs font-semibold text-indigo-700"><i class="fas fa-paper-plane mr-1"></i>注入 Prompt 预览</div>
-            ${promptText ? `<span class="text-[10px] text-gray-400">${promptText.length.toLocaleString()} 字符</span>` : ''}
-        </div>
-        <div class="bg-gray-900 rounded-lg p-3 text-xs text-gray-100 font-mono whitespace-pre-wrap max-h-[32rem] overflow-y-auto border border-gray-700 leading-relaxed">${promptText ? escapeHtml(promptText) : '<span class="text-gray-500 italic">未生成可注入内容</span>'}</div>
-    </div>`;
+    if (promptText) {
+        html += `<div class="mb-3">`;
+        html += `<div class="flex items-center justify-between mb-1">`;
+        html += `<div class="text-xs font-semibold text-indigo-700"><i class="fas fa-file-alt mr-1"></i>代码分析报告</div>`;
+        html += `<span class="text-[10px] text-gray-400">${promptText.length.toLocaleString()} 字符</span>`;
+        html += `</div>`;
+        html += renderCopyableMarkdown(promptText, '32rem');
+        html += `</div>`;
+    } else {
+        html += `<div class="mb-3"><div class="text-xs font-semibold text-gray-500 mb-1"><i class="fas fa-file-alt mr-1"></i>代码分析报告</div><div class="bg-gray-50 rounded-lg border border-gray-200 p-3 text-[11px] text-gray-400 italic">未生成报告内容</div></div>`;
+    }
 
     return html;
 }
@@ -3354,21 +3457,16 @@ function renderCuReportMergeBody(sub, report) {
     </div>`;
     html += '</div>';
 
-    // Prompt 注入文本（必须展示，完整内容）
+    // 代码分析报告（Markdown 渲染）
     const promptText = report.prompt_injection || report.report_text || '';
     if (promptText) {
-        const pid = 'cu_prompt_' + Math.random().toString(36).substr(2, 6);
-        const isLong = promptText.length > 5000;
-        html += `<div class="mb-3">
-            <div class="flex items-center justify-between mb-1">
-                <div class="text-xs font-semibold text-indigo-700"><i class="fas fa-paper-plane mr-1"></i>最终注入给大模型的 Prompt 文本</div>
-                <span class="text-[10px] text-gray-400">${promptText.length.toLocaleString()} 字符</span>
-            </div>
-            <div class="bg-gray-900 rounded-lg p-3 text-xs text-gray-100 font-mono whitespace-pre-wrap max-h-96 overflow-y-auto border border-gray-700 leading-relaxed" id="${pid}_pre">${escapeHtml(isLong ? promptText.substring(0, 5000) : promptText)}${isLong ? '\n\n[已截断，点击下方按钮查看完整内容]' : ''}</div>`;
-        if (isLong) {
-            html += `<button onclick="document.getElementById('${pid}_pre').textContent=${JSON.stringify(promptText)};this.classList.add('hidden')" class="mt-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium">查看完整 Prompt（${(promptText.length/1024).toFixed(1)} KB）</button>`;
-        }
-        html += '</div>';
+        html += `<div class="mb-3">`;
+        html += `<div class="flex items-center justify-between mb-1">`;
+        html += `<div class="text-xs font-semibold text-indigo-700"><i class="fas fa-file-alt mr-1"></i>代码分析报告</div>`;
+        html += `<span class="text-[10px] text-gray-400">${promptText.length.toLocaleString()} 字符</span>`;
+        html += `</div>`;
+        html += renderCopyableMarkdown(promptText, '24rem');
+        html += `</div>`;
     }
 
     // 结构化报告文本
@@ -3497,10 +3595,15 @@ function renderBatchReviewPanel(json) {
     const pct = batchCount > 0 ? Math.round((json.batch_completed / batchCount) * 100) : 0;
     html += `<div class="mb-3"><div class="text-xs font-medium text-gray-700 mb-1">批次进度 ${json.batch_completed || 0}/${batchCount}</div>`;
     html += `<div class="w-full bg-gray-200 rounded-full h-2 overflow-hidden"><div class="bg-blue-500 h-2 rounded-full transition-all" style="width:${pct}%"></div></div>`;
-    if (totalTokens > 0) {
-        html += `<div class="text-[10px] text-gray-400 mt-0.5">总Token: ${totalTokens.toLocaleString()} (in: ${totalInputTokens.toLocaleString()} / out: ${totalOutputTokens.toLocaleString()})</div>`;
-    }
     html += '</div>';
+
+    // Token 用量（统一为蓝底卡片样式，参考其它智能体）
+    if (totalTokens > 0) {
+        html += `<div class="mb-3 bg-blue-50 border border-blue-100 rounded-lg p-2 flex justify-between items-center">`;
+        html += `<span class="text-xs text-blue-700 font-medium">Token 用量</span>`;
+        html += `<span class="text-[11px] font-mono text-blue-600">in: ${totalInputTokens.toLocaleString()} / out: ${totalOutputTokens.toLocaleString()}</span>`;
+        html += `</div>`;
+    }
 
     if (plan.batches && plan.batches.length > 0) {
         html += '<div class="mb-3 bg-white rounded-lg border border-gray-200 p-3"><div class="font-semibold text-gray-700 text-xs mb-2">分批决策</div>';
@@ -3727,6 +3830,16 @@ function renderReviewArbitrationDetail(json) {
     const out = json.output_snapshot || {};
     const inp = json.input_snapshot || {};
     let html = renderMetaBar(json);
+
+    // Token 用量
+    const inputTokens = out.input_tokens || json.input_tokens || 0;
+    const outputTokens = out.output_tokens || json.output_tokens || 0;
+    if (inputTokens || outputTokens) {
+        html += `<div class="mb-3 bg-blue-50 border border-blue-100 rounded-lg p-2 flex justify-between items-center">`;
+        html += `<span class="text-xs text-blue-700 font-medium">Token 用量</span>`;
+        html += `<span class="text-[11px] font-mono text-blue-600">in: ${(inputTokens).toLocaleString()} / out: ${(outputTokens).toLocaleString()}</span>`;
+        html += `</div>`;
+    }
 
     // 总体评分与建议
     if (out.total_score !== undefined || out.overall_suggestion) {

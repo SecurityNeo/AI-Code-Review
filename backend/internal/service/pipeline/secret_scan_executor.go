@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/ai-optimizer/backend/internal/model"
 	"go.uber.org/zap"
@@ -34,6 +35,26 @@ func (e *SecretScanExecutor) Execute(ctx StageContext) error {
 	task := ctx.Task()
 	if task == nil {
 		return fmt.Errorf("task is nil")
+	}
+
+	// 读取智能体配置
+	var cfg *model.ReviewAgentConfig
+	if v, ok := ctx.GetInput("_agent_config").(model.ReviewAgentConfig); ok {
+		cfg = &v
+	}
+
+	// 读取本阶段可配置参数（均有默认值）
+	llmMaxTokens := 2000
+	llmTimeoutSec := 300
+	matchTextMaxLen := 80
+	functionBodyMaxLen := 800
+	confidenceThreshold := 0.5
+	if cfg != nil {
+		llmMaxTokens = cfg.GetStageParam("secret_scan", "llm_max_tokens", llmMaxTokens)
+		llmTimeoutSec = cfg.GetStageParam("secret_scan", "llm_timeout_sec", llmTimeoutSec)
+		matchTextMaxLen = cfg.GetStageParam("secret_scan", "match_text_max_len", matchTextMaxLen)
+		functionBodyMaxLen = cfg.GetStageParam("secret_scan", "function_body_max_len", functionBodyMaxLen)
+		confidenceThreshold = cfg.GetStageParamFloat("secret_scan", "verify_confidence_threshold", confidenceThreshold)
 	}
 
 	// 1. 加载启用规则
@@ -72,18 +93,22 @@ func (e *SecretScanExecutor) Execute(ctx StageContext) error {
 			modelID = task.UsedModelID
 		}
 		// modelID 可以为 0（LLMService.ChatCompletionStructured 会走全局主备链路获取主模型）
-		verifyTimeout := getStageLLMEnhanceTimeout("secret_scan")
 		verificator = NewAgentVerificator(e.llmService, VerificatorConfig{
-			ModelID:       modelID,
-			MaxTokens:     2000,
-			VerifyTimeout: verifyTimeout,
+			ModelID:             modelID,
+			MaxTokens:           llmMaxTokens,
+			VerifyTimeout:       time.Duration(llmTimeoutSec) * time.Second,
+			FunctionBodyMaxLen:  functionBodyMaxLen,
+			MatchTextMaxLen:     matchTextMaxLen,
+			ContextLinesBefore:  6,
+			ContextLinesAfter:   4,
+			ConfidenceThreshold: confidenceThreshold,
 		})
 		vres, err := verificator.VerifySecretScan(context.Background(), &task.ID, modelID, findings, fileContents)
 		if err == nil && len(vres) > 0 {
 			var updated []model.SecretScanFinding
 			for _, vr := range vres {
-				// LLM 判定为真实泄露且置信度>=50%时才保留
-				if vr.Result.IsLeak && vr.Result.Confidence >= 0.5 {
+				// LLM 判定为真实泄露且置信度达到阈值时才保留
+				if vr.Result.IsLeak && vr.Result.Confidence >= confidenceThreshold {
 					updated = append(updated, vr.Original)
 					verifiedCount++
 				}
@@ -210,13 +235,14 @@ func (d *SecretDetector) Scan(lines []string, filePath string, taskID uint) []mo
 					maskedText := maskSecret(matchText)
 
 					findings = append(findings, model.SecretScanFinding{
-						TaskID:      taskID,
-						RuleCode:    rule.Code,
-						FilePath:    filePath,
-						LineNumber:  lineNum + 1,
-						MatchText:   maskedText,
-						Severity:    rule.Severity,
-						Description: rule.Description,
+						TaskID:       taskID,
+						RuleCode:     rule.Code,
+						FilePath:     filePath,
+						LineNumber:   lineNum + 1,
+						MatchText:    maskedText,
+						RawMatchText: matchText, // 【新增】保留原始值供 LLM 验证使用
+						Severity:     rule.Severity,
+						Description:  rule.Description,
 					})
 				}
 			}

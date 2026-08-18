@@ -60,14 +60,6 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 		depVulns = v
 	}
 
-	// 1.2 读取代码理解器报告（code_understanding 阶段产出）
-	var codeUnderstandingReport string
-	if r, ok := ctx.GetOutput("code_understanding_report").(string); ok && r != "" {
-		codeUnderstandingReport = r
-	} else if r, ok := ctx.GetOutput("code_understanding_prompt").(string); ok && r != "" {
-		codeUnderstandingReport = r
-	}
-
 	// 2. 读取 Batch Review Results
 	batchResults, ok := ctx.GetOutput("batch_review_results").([]*llm.BatchReviewResult)
 	if !ok || len(batchResults) == 0 {
@@ -96,31 +88,9 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 		TestSuggestions:         agentData.TestSuggestions,
 		ImpactFindings:          agentData.ImpactFindings,
 		DependencyVulns:         depVulns,
-		CodeUnderstandingReport: codeUnderstandingReport,
 		BatchReviewResults:      batchResults,
 		DimensionWeights:        dimWeights,
 		DeductScoreConfig:       deductCfg,
-	}
-
-	// 4.1 读取各智能体预渲染 Markdown
-	promptCtx.AgentMarkdowns = make(map[string]string)
-	if md, ok := ctx.GetOutput("secret_scan_markdown").(string); ok && md != "" {
-		promptCtx.AgentMarkdowns["secret_scan"] = md
-	}
-	if md, ok := ctx.GetOutput("security_audit_markdown").(string); ok && md != "" {
-		promptCtx.AgentMarkdowns["security_audit"] = md
-	}
-	if md, ok := ctx.GetOutput("test_suggestion_markdown").(string); ok && md != "" {
-		promptCtx.AgentMarkdowns["test_suggestion"] = md
-	}
-	if md, ok := ctx.GetOutput("impact_analysis_markdown").(string); ok && md != "" {
-		promptCtx.AgentMarkdowns["impact_analysis"] = md
-	}
-	if len(depVulns) > 0 {
-		promptCtx.AgentMarkdowns["dependency_scan"] = engine.BuildDependencyVulnsSection(depVulns)
-	}
-	if codeUnderstandingReport != "" {
-		promptCtx.AgentMarkdowns["code_understanding"] = codeUnderstandingReport
 	}
 
 	// 5. 构建结构化 Prompt
@@ -148,7 +118,7 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 			"test_suggestion":    len(agentData.TestSuggestions),
 			"impact_analysis":    len(agentData.ImpactFindings),
 			"dependency_scan":    len(depVulns),
-			"code_understanding": len(codeUnderstandingReport),
+			"code_understanding": 0,
 		},
 		"batch_results_count":  len(batchResults),
 		"total_raw_llm_issues": countTotalIssues(batchResults),

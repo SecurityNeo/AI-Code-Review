@@ -27,18 +27,19 @@ func (SecurityAuditRule) TableName() string {
 
 // SecurityAuditFinding 安全审计发现记录
 type SecurityAuditFinding struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	TaskID      uint      `gorm:"index;not null" json:"task_id"`
-	RuleCode    string    `gorm:"size:64;not null" json:"rule_code"`
-	FilePath    string    `gorm:"size:512;not null" json:"file_path"`
-	LineNumber  int       `json:"line_number"`
-	ColumnStart int       `json:"column_start"`
-	ColumnEnd   int       `json:"column_end"`
-	Snippet     string    `gorm:"type:text" json:"snippet"` // 代码片段
-	Severity    string    `gorm:"size:16" json:"severity"`
-	Message     string    `gorm:"type:text" json:"message"`    // 发现问题描述
-	Suggestion  string    `gorm:"type:text" json:"suggestion"` // 修复建议（快照）
-	CreatedAt   time.Time `json:"created_at"`
+	ID             uint      `gorm:"primaryKey" json:"id"`
+	TaskID         uint      `gorm:"index;not null" json:"task_id"`
+	RuleCode       string    `gorm:"size:64;not null" json:"rule_code"`
+	FilePath       string    `gorm:"size:512;not null" json:"file_path"`
+	LineNumber     int       `json:"line_number"`
+	ColumnStart    int       `json:"column_start"`
+	ColumnEnd      int       `json:"column_end"`
+	Snippet        string    `gorm:"type:text" json:"snippet"` // 代码片段（函数签名或单行摘要）
+	TriggerSnippet string    `json:"trigger_snippet" gorm:"-"` // 触发规则的具体语句块（仅内存，不入库）
+	Severity       string    `gorm:"size:16" json:"severity"`
+	Message        string    `gorm:"type:text" json:"message"`    // 发现问题描述
+	Suggestion     string    `gorm:"type:text" json:"suggestion"` // 修复建议（快照）
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 func (SecurityAuditFinding) TableName() string {

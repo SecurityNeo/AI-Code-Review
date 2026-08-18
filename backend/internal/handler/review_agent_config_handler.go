@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/ai-optimizer/backend/internal/engine"
@@ -30,6 +31,9 @@ func (h *ReviewAgentConfigHandler) Get(c *gin.Context) {
 		_ = json.Unmarshal([]byte(cfg.StageConfigs), &stageConfigs)
 	}
 
+	// 运行依赖校验，让前端一进入配置页就能看到哪些卡片不满足依赖
+	_, violations := cfg.ValidateEnabledStages()
+
 	c.JSON(http.StatusOK, gin.H{"data": map[string]interface{}{
 		"id":                cfg.ID,
 		"enabled_stages":    cfg.EnabledStageCodes(),
@@ -39,6 +43,7 @@ func (h *ReviewAgentConfigHandler) Get(c *gin.Context) {
 		"created_at":        cfg.CreatedAt,
 		"updated_at":        cfg.UpdatedAt,
 		"updated_by":        cfg.UpdatedBy,
+		"violations":        violations,
 	}})
 }
 
@@ -71,6 +76,15 @@ func (h *ReviewAgentConfigHandler) Save(c *gin.Context) {
 	}
 
 	if err := h.svc.Save(req.EnabledStages, req.StageConfigs, req.TriggerEvents, req.ShowAgentStatus, userID); err != nil {
+		// 依赖校验失败时返回 422 + 结构化 violations，方便前端精确定位标红卡片
+		var depErr *service.DependencyViolationError
+		if errors.As(err, &depErr) {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{
+				"error":      "dependency_violation",
+				"violations": depErr.Violations,
+			})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

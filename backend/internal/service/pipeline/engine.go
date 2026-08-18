@@ -88,6 +88,26 @@ func (e *Engine) ExecuteTask(taskID uint, inputs map[string]interface{}, broadca
 		if agentCfg.ImpactAnalysisEnabled && !enabledMap["impact_analysis"] {
 			enabledMap["impact_analysis"] = true
 		}
+		// 依赖自动补齐：如果开启了下游 Agent，必须同步开启 code_understanding
+		// （save 时已有校验，但运行时从数据库读取时仍需保证一致性）
+		needsCodeUnderstanding := enabledMap["security_audit"] || enabledMap["test_suggestion"] || enabledMap["impact_analysis"]
+		if needsCodeUnderstanding && !enabledMap["code_understanding"] {
+			enabledMap["code_understanding"] = true
+			zap.L().Info("Pipeline 自动补齐上游依赖", zap.String("dependency", "code_understanding"),
+				zap.Strings("triggered_by", func() []string {
+					var stages []string
+					if enabledMap["security_audit"] {
+						stages = append(stages, "security_audit")
+					}
+					if enabledMap["test_suggestion"] {
+						stages = append(stages, "test_suggestion")
+					}
+					if enabledMap["impact_analysis"] {
+						stages = append(stages, "impact_analysis")
+					}
+					return stages
+				}()))
+		}
 	} else {
 		// 配置未初始化，默认启用核心阶段（扩展阶段默认不启用）
 		defaultEnabled := []string{"trigger_check", "git_clone",

@@ -683,14 +683,14 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 
 	// Prompt注入文本（只展示与变更文件相关的端点和污点流）
 	report.CrossFileCallChain = crossFileCallChain
-	report.ReportText = e.formatReportText(report, report.FileList)
+	report.ReportText = formatReportText(report, report.FileList)
 	report.PromptInjection = report.ReportText
 	return report
 }
 
-// formatReportText 格式化报告文本，用于Prompt注入
-// changedFiles: 本次变更的文件列表，只展示与变更相关的端点和污点流
-func (e *CodeUnderstandingExecutor) formatReportText(report *CodeUnderstandingReport, changedFiles []string) string {
+// formatReportText 格式化报告文本，用于 Prompt 注入
+// changedFiles: 本次变更的文件列表，只展示与变更相关的端点、污点流和函数列表
+func formatReportText(report *CodeUnderstandingReport, changedFiles []string) string {
 	changedSet := make(map[string]bool)
 	for _, f := range changedFiles {
 		changedSet[f] = true
@@ -698,9 +698,23 @@ func (e *CodeUnderstandingExecutor) formatReportText(report *CodeUnderstandingRe
 
 	var b strings.Builder
 	b.WriteString("## 基于AST与知识图谱的代码变更分析报告\n\n")
-	b.WriteString(fmt.Sprintf("- **解析文件数**: %d / %d\n", report.ParsedFiles, report.TotalFiles))
-	b.WriteString(fmt.Sprintf("- **函数总数**: %d\n", report.TotalFunctions))
-	b.WriteString(fmt.Sprintf("- **类型总数**: %d\n", report.TotalTypes))
+
+	// 按 changedFiles 重算统计数据（防御性检查 ASTData）
+	batchFileCount := 0
+	batchFuncCount := 0
+	batchTypeCount := 0
+	if report.ASTData != nil {
+		for _, fr := range report.ASTData.FileResults {
+			if changedSet[fr.Path] {
+				batchFileCount++
+				batchFuncCount += fr.Functions
+				batchTypeCount += fr.Types
+			}
+		}
+	}
+	b.WriteString(fmt.Sprintf("- **解析文件数**: %d / %d\n", batchFileCount, report.TotalFiles))
+	b.WriteString(fmt.Sprintf("- **函数总数**: %d\n", batchFuncCount))
+	b.WriteString(fmt.Sprintf("- **类型总数**: %d\n", batchTypeCount))
 
 	// 只统计与变更文件相关的端点
 	changedEndpoints := filterEndpointsByFiles(report.Endpoints, changedSet)
@@ -729,10 +743,23 @@ func (e *CodeUnderstandingExecutor) formatReportText(report *CodeUnderstandingRe
 		}
 	}
 
-	// 变更函数列表（完整注入，不截断）
-	if len(report.FunctionList) > 0 {
+	// 按 changedFiles 过滤函数列表（从 ASTData 精确提取）
+	var batchFunctions []string
+	if report.ASTData != nil {
+		for _, fr := range report.ASTData.FileResults {
+			if !changedSet[fr.Path] {
+				continue
+			}
+			for _, fd := range fr.FunctionDetails {
+				if name, ok := fd["name"].(string); ok && name != "" {
+					batchFunctions = append(batchFunctions, name)
+				}
+			}
+		}
+	}
+	if len(batchFunctions) > 0 {
 		b.WriteString("\n### 变更函数列表\n")
-		for _, fn := range report.FunctionList {
+		for _, fn := range batchFunctions {
 			b.WriteString(fmt.Sprintf("- %s\n", fn))
 		}
 	}
@@ -768,6 +795,47 @@ func filterTaintFlowsByFiles(flows []TaintFlowSummary, changedSet map[string]boo
 	return result
 }
 
+// formatReportTextForBatch 按批次文件路径生成过滤后的 code_understanding Markdown
+// 复用 formatReportText 的核心逻辑，按 batchPaths 过滤统计和函数列表
+func formatReportTextForBatch(report *CodeUnderstandingReport, batchPaths []string) string {
+	return formatReportText(report, batchPaths)
+}
+
+// filterCodeUnderstandingMarkdownByFiles 从全局 Markdown 文本中提取仅与批次文件相关的内容
+// 这是无结构化数据时的 fallback 方案，利用 "### 文件: path" 标记做简单文本过滤。
+// 注意：只有 "### 文件: " 是段落分隔符，其他 "### " 开头（如 "### API端点"）保留在段落内部。
+func filterCodeUnderstandingMarkdownByFiles(markdown string, batchPaths []string) string {
+	if markdown == "" || len(batchPaths) == 0 {
+		return markdown
+	}
+	batchSet := make(map[string]bool, len(batchPaths))
+	for _, p := range batchPaths {
+		batchSet[p] = true
+	}
+
+	var b strings.Builder
+	lines := strings.Split(markdown, "\n")
+	inRelevantSection := false
+	for _, line := range lines {
+		if strings.HasPrefix(line, "### 文件: ") {
+			filePath := strings.TrimPrefix(line, "### 文件: ")
+			inRelevantSection = batchSet[filePath]
+			if !inRelevantSection {
+				continue
+			}
+		}
+		if inRelevantSection {
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
+	}
+	result := strings.TrimSpace(b.String())
+	if result == "" {
+		return ""
+	}
+	return result
+}
+
 // CodeUnderstandingReport 代码理解报告
 type CodeUnderstandingReport struct {
 	Status             string                   `json:"status"`         // success | degraded | ast_only
@@ -788,8 +856,8 @@ type CodeUnderstandingReport struct {
 	TaintFlowCount     int                      `json:"taint_flow_count"`
 	TaintFlows         []TaintFlowSummary       `json:"taint_flows,omitempty"`
 	CrossFileCallChain string                   `json:"cross_file_call_chain,omitempty"` // 跨文件调用链文本
-	ReportText         string                   `json:"report_text,omitempty"`         // Prompt注入文本
-	PromptInjection    string                   `json:"prompt_injection"`              // 同上，兼容命名
+	ReportText         string                   `json:"report_text,omitempty"`           // Prompt注入文本
+	PromptInjection    string                   `json:"prompt_injection"`                // 同上，兼容命名
 	Summary            CodeUnderstandingSummary `json:"summary"`
 }
 

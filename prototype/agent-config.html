@@ -27,6 +27,25 @@
         .stage-timeout.disabled { opacity: 0.4; pointer-events: none; }
         .stage-parallel-max { transition: all 0.2s; }
         .stage-parallel-max.disabled { opacity: 0.4; pointer-events: none; }
+        .stage-item--error { border: 1px solid #f56c6c !important; }
+        .stage-item--error .stage-error-msg { color: #f56c6c; font-size: 12px; margin-top: 8px; display: flex; align-items: center; gap: 6px; }
+        .stage-item--dep-warning { border: 1px solid #e6a23c !important; }
+        .stage-dep-badge {
+            position: absolute; top: 8px; right: 8px; width: 22px; height: 22px;
+            background: #f56c6c; border-radius: 50%; display: flex; align-items: center;
+            justify-content: center; color: #fff; font-size: 12px; cursor: pointer; z-index: 2;
+        }
+        .stage-dep-tooltip {
+            display: none; position: absolute; top: 34px; right: 0; background: #333;
+            color: #fff; font-size: 12px; padding: 8px 12px; border-radius: 6px;
+            white-space: nowrap; z-index: 10; max-width: 280px; line-height: 1.5;
+        }
+        .stage-dep-badge:hover .stage-dep-tooltip { display: block; }
+        .stage-dep-tooltip::after {
+            content: ''; position: absolute; top: -5px; right: 8px;
+            border-width: 5px; border-style: solid; border-color: transparent transparent #333 transparent;
+        }
+        .stage-item { position: relative; transition: all 0.2s; }
     </style>
 </head>
 <body class="bg-gray-50 font-sans">
@@ -143,6 +162,26 @@ go.sum"></textarea>
 </div>
 
 <script>
+const STAGE_DEPENDENCIES = {
+    'security_audit':  ['code_understanding'],
+    'test_suggestion': ['code_understanding'],
+    'impact_analysis': ['code_understanding'],
+};
+
+const STAGE_NAMES = {
+    'security_audit':     '安全审计',
+    'test_suggestion':    '测试建议',
+    'impact_analysis':    '影响分析',
+    'code_understanding': '代码理解器',
+    'secret_scan':        '密钥扫描',
+    'dependency_scan':    '漏洞扫描',
+    'batch_review_frame': 'AI代码评审',
+    'review_arbitration': '评审裁决',
+    'trigger_check':      '触发过滤器',
+    'git_clone':          '代码克隆',
+    'post_process':       '发布',
+};
+
 // ========== 阶段定义 ==========
 const STAGE_DEFS = [
     {
@@ -498,6 +537,13 @@ function renderStages(enabledStages, stageConfigs, triggerEvents) {
                             ${isDisabled ? '<span class="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">不可禁用</span>' : ''}
                         </label>
                         ${stage.impact ? `<p class="text-xs text-gray-400 mt-1">${stage.impact}</p>` : ''}
+                        ${STAGE_DEPENDENCIES[stage.code] ? `
+                        <div class="flex flex-wrap gap-1.5 mt-2">
+                            <span class="text-[10px] text-gray-400">依赖：</span>
+                            ${STAGE_DEPENDENCIES[stage.code].map(dep => `
+                                <span class="text-[10px] px-1.5 py-0.5 rounded border ${enabledSet.has(dep) ? 'border-green-200 bg-green-50 text-green-700' : 'border-red-200 bg-red-50 text-red-700'}">${STAGE_NAMES[dep] || dep}</span>
+                            `).join('')}
+                        </div>` : ''}
                         ${depthHtml}
                         ${triggerEventsHtml}
                         ${timeoutHtml}
@@ -512,6 +558,77 @@ function renderStages(enabledStages, stageConfigs, triggerEvents) {
     }).join('');
 }
 
+// ========== 依赖校验 ==========
+let currentViolations = [];
+
+function recalcViolations() {
+    const enabledSet = new Set();
+    document.querySelectorAll('#stagesContainer input[type="checkbox"][id^="stage_"]').forEach(cb => {
+        if (cb.checked) enabledSet.add(cb.id.replace('stage_', ''));
+    });
+
+    const violations = [];
+    for (const [stage, deps] of Object.entries(STAGE_DEPENDENCIES)) {
+        if (!enabledSet.has(stage)) continue;
+        const missing = deps.filter(dep => !enabledSet.has(dep));
+        if (missing.length > 0) {
+            const stageName = STAGE_NAMES[stage] || stage;
+            const depNames = missing.map(d => STAGE_NAMES[d] || d).join('、');
+            violations.push({ stage, missing_deps: missing, message: `开启「${stageName}」必须同时启用「${depNames}」` });
+        }
+    }
+    currentViolations = violations;
+    renderViolationBadges();
+}
+
+function renderViolationBadges() {
+    // 清除所有旧状态
+    document.querySelectorAll('.stage-item').forEach(el => {
+        el.classList.remove('stage-item--error', 'stage-item--dep-warning');
+        const badge = el.querySelector('.stage-dep-badge');
+        if (badge) badge.remove();
+        const msg = el.querySelector('.stage-error-msg');
+        if (msg) msg.remove();
+    });
+
+    if (!currentViolations.length) return;
+
+    const enabledSet = new Set();
+    document.querySelectorAll('#stagesContainer input[type="checkbox"][id^="stage_"]').forEach(cb => {
+        if (cb.checked) enabledSet.add(cb.id.replace('stage_', ''));
+    });
+
+    for (const v of currentViolations) {
+        // 下游智能体自身标红
+        const stageEl = document.querySelector('.stage-item[data-code="' + v.stage + '"]');
+        if (stageEl) {
+            stageEl.classList.add('stage-item--error');
+            // 在卡片内追加错误文案（如果不存在）
+            if (!stageEl.querySelector('.stage-error-msg')) {
+                const msgDiv = document.createElement('div');
+                msgDiv.className = 'stage-error-msg';
+                msgDiv.innerHTML = '<i class="fas fa-exclamation-circle"></i><span>' + escapeHtml(v.message) + '</span>';
+                stageEl.querySelector('.flex-1').appendChild(msgDiv);
+            }
+        }
+        // 被依赖但未开启的上游智能体：边框标黄 + 右上角感叹号
+        for (const dep of v.missing_deps) {
+            const depEl = document.querySelector('.stage-item[data-code="' + dep + '"]');
+            if (depEl && !enabledSet.has(dep)) {
+                depEl.classList.add('stage-item--dep-warning');
+                if (!depEl.querySelector('.stage-dep-badge')) {
+                    const stageName = STAGE_NAMES[v.stage] || v.stage;
+                    const badge = document.createElement('div');
+                    badge.className = 'stage-dep-badge';
+                    badge.innerHTML = '<i class="fas fa-exclamation"></i>' +
+                        '<div class="stage-dep-tooltip">被「' + escapeHtml(stageName) + '」依赖，必须开启才能正常使用</div>';
+                    depEl.appendChild(badge);
+                }
+            }
+        }
+    }
+}
+
 function toggleStage(code) {
     const checkbox = document.getElementById('stage_' + code);
     if (!checkbox) return;
@@ -521,12 +638,38 @@ function toggleStage(code) {
     if (checkbox.checked) {
         item.classList.remove('bg-gray-50');
         item.classList.add('bg-white');
+        // 级联开启上游依赖
+        for (const [downStage, deps] of Object.entries(STAGE_DEPENDENCIES)) {
+            if (downStage === code) {
+                for (const dep of deps) {
+                    const depCb = document.getElementById('stage_' + dep);
+                    if (depCb && !depCb.checked) {
+                        depCb.checked = true;
+                        toggleStage(dep);
+                        showToast('已自动开启「' + (STAGE_NAMES[dep] || dep) + '」', 'info');
+                    }
+                }
+            }
+        }
     } else {
         item.classList.remove('bg-white');
         item.classList.add('bg-gray-50');
+        // 关闭上游时：检查是否有下游依赖它
+        if (Object.values(STAGE_DEPENDENCIES).some(deps => deps.includes(code))) {
+            const dependents = Object.entries(STAGE_DEPENDENCIES)
+                .filter(([_, deps]) => deps.includes(code))
+                .map(([stage, _]) => stage)
+                .filter(stage => {
+                    const cb = document.getElementById('stage_' + stage);
+                    return cb && cb.checked;
+                });
+            if (dependents.length > 0) {
+                const names = dependents.map(c => STAGE_NAMES[c] || c).join('、');
+                showToast('关闭「' + (STAGE_NAMES[code] || code) + '」将导致「' + names + '」失效', 'error');
+            }
+        }
     }
 
-    // 统一联动：该 stage 下的所有子配置区域随启用状态显隐
     const subPanels = item.querySelectorAll('.depth-options, .trigger-events, .stage-timeout, .stage-parallel-max, .sub-timeouts');
     subPanels.forEach(panel => {
         if (checkbox.checked) {
@@ -535,6 +678,8 @@ function toggleStage(code) {
             panel.classList.add('disabled');
         }
     });
+
+    recalcViolations();
 }
 
 // ========== 输入框校验 ==========
@@ -557,7 +702,7 @@ function loadConfig() {
         .then(res => {
             const data = res.data || {};
             currentConfig = data;
-            // fallback stage_configs 默认值（从 STAGE_DEFS 中合并）
+            currentViolations = data.violations || [];
             const defaultStageConfigs = {};
             STAGE_DEFS.forEach(s => {
                 defaultStageConfigs[s.code] = { timeout: s.timeout };
@@ -580,7 +725,6 @@ function loadConfig() {
                     });
                 }
             });
-            // 逐个 stage 合并默认值与保存值（Object.assign 对嵌套对象是浅拷贝）
             const mergedConfigs = {};
             STAGE_DEFS.forEach(s => {
                 const def = defaultStageConfigs[s.code];
@@ -588,8 +732,9 @@ function loadConfig() {
                 mergedConfigs[s.code] = Object.assign({}, def, saved);
             });
             renderStages(data.enabled_stages, mergedConfigs, data.trigger_events);
+            // 首次渲染完成后立即渲染 violations（标红+感叹号）
+            renderViolationBadges();
             document.getElementById('showAgentStatus').checked = data.show_agent_status !== false;
-            // 回显文件过滤配置
             const ffCfg = (data.stage_configs && data.stage_configs['file_filter']) || {};
             document.getElementById('enableDefaultFilters').checked = ffCfg.enable_default_filters !== false;
             document.getElementById('excludePatterns').value = (ffCfg.exclude_patterns || []).join('\n');
@@ -602,7 +747,6 @@ function loadConfig() {
         })
         .catch(err => {
             showToast('加载配置失败: ' + err.message, 'error');
-            // fallback 到默认
             const defaultStageConfigs = {};
             STAGE_DEFS.forEach(s => {
                 defaultStageConfigs[s.code] = { timeout: s.timeout };
@@ -648,12 +792,12 @@ function applyPreset(type) {
 
     showToast(type === 'full' ? '已应用全量评审预设' : 
                type === 'standard' ? '已应用标准评审预设' : '已应用极速安全预设', 'info');
+    recalcViolations();
 }
 
 // ========== 保存配置 ==========
 function saveConfig() {
     const enabledStages = [];
-    // 只选择阶段主 checkbox（id 以 stage_ 开头），避开内部 trigger_event 等子 checkbox
     const checkboxes = document.querySelectorAll('#stagesContainer input[type="checkbox"][id^="stage_"]');
     checkboxes.forEach(cb => {
         if (cb.checked) {
@@ -728,13 +872,11 @@ function saveConfig() {
                 }
             });
         }
-        // 仅当存在非空配置时才写入，减少 payload 体积
         if (Object.keys(cfg).length > 0) {
             stageConfigs[stage.code] = cfg;
         }
     });
 
-    // 读取文件过滤配置
     const fileFilterCfg = {
         enable_default_filters: document.getElementById('enableDefaultFilters').checked,
         exclude_patterns: document.getElementById('excludePatterns').value
@@ -744,10 +886,6 @@ function saveConfig() {
     };
     stageConfigs['file_filter'] = fileFilterCfg;
 
-    // 【已移除】不再校验已启用阶段的超时时间之和是否超过系统任务总超时
-    // AI 评审类任务的超时控制已转移到后端 TaskService.TimeoutCheck()，
-    // 使用各阶段超时之和 + 30 分钟宽裕时间独立计算，不再受系统配置限制。
-
     const payload = {
         enabled_stages: enabledStages,
         stage_configs: stageConfigs,
@@ -755,15 +893,37 @@ function saveConfig() {
         show_agent_status: document.getElementById('showAgentStatus').checked
     };
 
-    apiFetch('/api/v1/review-agent-config', {
+    const token = localStorage.getItem('auth_token') || '';
+    fetch(API_BASE + '/api/v1/review-agent-config', {
         method: 'PUT',
+        headers: {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json'
+        },
         body: JSON.stringify(payload)
     })
-    .then(() => {
+    .then(async r => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+            if (r.status === 422 && data.error === 'dependency_violation' && Array.isArray(data.violations)) {
+                currentViolations = data.violations;
+                renderViolationBadges();
+                const msgs = data.violations.map(v => v.message).join('；');
+                showToast('配置保存失败：' + msgs, 'error');
+                // 滚动到第一个违规卡片
+                const first = document.querySelector('.stage-item--error, .stage-item--dep-warning');
+                if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } else {
+                showToast(data.error || ('保存失败 HTTP ' + r.status), 'error');
+            }
+            return;
+        }
         showToast('配置保存成功');
+        currentViolations = [];
+        renderViolationBadges();
         loadConfig();
     })
-    .catch(err => showToast(err.message, 'error'));
+    .catch(err => showToast(err.message || '保存失败', 'error'));
 }
 
 // ========== 重置 ==========

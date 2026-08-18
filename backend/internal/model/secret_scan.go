@@ -24,16 +24,17 @@ func (SecretScanRule) TableName() string {
 
 // SecretScanFinding 密钥扫描发现记录
 type SecretScanFinding struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	TaskID      uint      `gorm:"index;not null" json:"task_id"`
-	RuleCode    string    `gorm:"size:64;not null" json:"rule_code"`
-	FilePath    string    `gorm:"size:512;not null" json:"file_path"`
-	LineNumber  int       `json:"line_number"`
-	MatchText   string    `gorm:"type:text" json:"match_text"` // 匹配到的原始文本（脱敏存储）
-	Severity    string    `gorm:"size:16" json:"severity"`
-	Description string    `gorm:"type:text" json:"description"`      // 规则描述（快照）
-	IsConfirmed bool      `gorm:"default:false" json:"is_confirmed"` // 管理员是否已确认（白名单功能预留）
-	CreatedAt   time.Time `json:"created_at"`
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	TaskID       uint      `gorm:"index;not null" json:"task_id"`
+	RuleCode     string    `gorm:"size:64;not null" json:"rule_code"`
+	FilePath     string    `gorm:"size:512;not null" json:"file_path"`
+	LineNumber   int       `json:"line_number"`
+	MatchText    string    `gorm:"type:text" json:"match_text"` // 匹配到的原始文本（脱敏存储，用于展示和下游 Markdown）
+	RawMatchText string    `json:"raw_match_text" gorm:"-"`     // 原始匹配文本（仅内存，不入库，用于 LLM 验证 Prompt）
+	Severity     string    `gorm:"size:16" json:"severity"`
+	Description  string    `gorm:"type:text" json:"description"`      // 规则描述（快照）
+	IsConfirmed  bool      `gorm:"default:false" json:"is_confirmed"` // 管理员是否已确认（白名单功能预留）
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 func (SecretScanFinding) TableName() string {

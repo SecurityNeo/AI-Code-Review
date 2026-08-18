@@ -322,12 +322,13 @@ func ExtractFilePaths(files []interface{}) []string {
 	return paths
 }
 
-// TruncateString 截断字符串用于预览（DB/对象存储展示用，不用于 LLM prompt）
+// TruncateString 截断字符串用于预览（DB/对象存储展示用，不用于 LLM prompt）。
+// 按 rune 数量安全截断，避免切在多字节 UTF-8 字符中间。
 func TruncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	if utf8.RuneCountInString(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + " ... [展示截断，完整内容请在代码库查看]"
+	return truncateRunes(s, maxLen) + " ... [展示截断，完整内容请在代码库查看]"
 }
 
 // ParseDiffFilesToMap 将 service 层的 diff files 转换为 map 列表（简化接口）

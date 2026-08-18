@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/ai-optimizer/backend/internal/model"
 )
@@ -101,6 +102,20 @@ func (s *ReviewAgentConfigService) GetOrDefault() model.ReviewAgentConfig {
 			})
 	}
 	return cfg
+}
+
+// DependencyViolationError 依赖校验失败时返回的自定义错误类型
+// 携带结构化的违规列表，供前端精确定位标红卡片
+type DependencyViolationError struct {
+	Violations []model.StageDependencyViolation
+}
+
+func (e *DependencyViolationError) Error() string {
+	msgs := make([]string, len(e.Violations))
+	for i, v := range e.Violations {
+		msgs[i] = v.Message
+	}
+	return fmt.Sprintf("智能体配置依赖校验失败：%s", strings.Join(msgs, "；"))
 }
 
 // Save 保存智能体全局配置（整表覆盖更新）
@@ -237,6 +252,17 @@ func (s *ReviewAgentConfigService) Save(
 	// AI 评审类任务的超时控制已转移到 TaskService.TimeoutCheck()，
 	// 使用各阶段超时之和 + 30 分钟宽裕时间独立计算。
 
+	// 构造临时配置对象进行依赖校验
+	tmpCfg := model.ReviewAgentConfig{}
+	tmpCfg.SetEnabledStageCodes(stages)
+	tmpCfg.SecretScanEnabled = contains(stages, "secret_scan")
+	tmpCfg.SecurityAuditEnabled = contains(stages, "security_audit")
+	tmpCfg.TestSuggestionEnabled = contains(stages, "test_suggestion")
+	tmpCfg.ImpactAnalysisEnabled = contains(stages, "impact_analysis")
+	if ok, violations := tmpCfg.ValidateEnabledStages(); !ok {
+		return &DependencyViolationError{Violations: violations}
+	}
+
 	jsonBytes, err := json.Marshal(stageConfigs)
 	if err != nil {
 		return fmt.Errorf("序列化 stage_configs 失败: %w", err)
@@ -284,10 +310,10 @@ func defaultReviewAgentConfig() model.ReviewAgentConfig {
 		"dependency_scan", "batch_review_frame", "review_arbitration", "post_process",
 	})
 	cfg.SetStageConfig("code_understanding", map[string]interface{}{
-		"depth":                     1,
-		"context_extract_timeout":   30,
-		"symbol_graph_timeout":      60,
-		"report_merge_timeout":      10,
+		"depth":                   1,
+		"context_extract_timeout": 30,
+		"symbol_graph_timeout":    60,
+		"report_merge_timeout":    10,
 	})
 	cfg.SetStageConfig("git_clone", map[string]interface{}{
 		"timeout": 60,

@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // ASTContext AST 上下文信息（注入 Prompt 的摘要）
@@ -31,12 +32,43 @@ type FunctionSignature struct {
 	Body       string   `json:"body,omitempty"`       // 函数体文本摘要
 }
 
+// Signature 生成函数签名字符串，格式如 "(receiver) Name(params) (returns)"。
+func (f FunctionSignature) Signature() string {
+	var sb strings.Builder
+	if f.Receiver != "" {
+		sb.WriteString("(")
+		sb.WriteString(f.Receiver)
+		sb.WriteString(") ")
+	}
+	sb.WriteString(f.Name)
+	sb.WriteString("(")
+	for i, p := range f.Params {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(p)
+	}
+	sb.WriteString(")")
+	if len(f.Returns) > 0 {
+		sb.WriteString(" (")
+		for i, r := range f.Returns {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(r)
+		}
+		sb.WriteString(")")
+	}
+	return sb.String()
+}
+
 // TypeSignature 类型签名（struct/interface）
 type TypeSignature struct {
-	Name       string `json:"name"`
-	Kind       string `json:"kind"` // "struct" | "interface"
-	IsExported bool   `json:"is_exported"`
-	FilePath   string `json:"file_path,omitempty"` // 所在文件路径
+	Name       string   `json:"name"`
+	Kind       string   `json:"kind"` // "struct" | "interface"
+	IsExported bool     `json:"is_exported"`
+	FilePath   string   `json:"file_path,omitempty"` // 所在文件路径
+	Fields     []string `json:"fields,omitempty"`    // 字段列表（仅 struct 时填充）
 }
 
 // ASTExtractor AST 提取器
@@ -789,14 +821,16 @@ func extractFuncBodyFromSource(fset *token.FileSet, body *ast.BlockStmt, source 
 		return ""
 	}
 	bodyText := source[start:end]
-	if len(bodyText) > maxLen {
-		bodyText = bodyText[:maxLen] + "..."
+	if utf8.RuneCountInString(bodyText) > maxLen {
+		bodyText = truncateRunes(bodyText, maxLen)
 	}
 	return bodyText
 }
 
 // extractGoBodyByBraces 从代码字符串中基于大括号匹配提取函数体。
-// 用于 extractGoByRegex 回退路径，仅做近似提取（不处理字符串字面量中的大括号）。
+// 注意：此函数不处理字符串字面量、注释或反引号字符串中的大括号，
+// 遇到包含大括号的字符串/注释时会计数偏差。若函数体来自 Tree-sitter 等
+// 精确解析器，应优先使用精确节点范围而非本函数。
 func extractGoBodyByBraces(code string, funcStartIdx int, maxLen int) string {
 	braceIdx := strings.Index(code[funcStartIdx:], "{")
 	if braceIdx < 0 {
@@ -804,13 +838,30 @@ func extractGoBodyByBraces(code string, funcStartIdx int, maxLen int) string {
 	}
 	braceIdx += funcStartIdx
 	depth := 1
+	inDoubleQuote := false
+	inSingleQuote := false
+	inBacktick := false
 	i := braceIdx + 1
 	for i < len(code) && depth > 0 {
-		switch code[i] {
-		case '{':
-			depth++
-		case '}':
-			depth--
+		c := code[i]
+		// 反引号字符串（raw string）
+		if c == '`' && !inDoubleQuote && !inSingleQuote {
+			inBacktick = !inBacktick
+		} else if !inBacktick {
+			// 双引号字符串
+			if c == '"' && !inSingleQuote && !isEscaped(code, i) {
+				inDoubleQuote = !inDoubleQuote
+			} else if c == '\'' && !inDoubleQuote && !isEscaped(code, i) {
+				// 单引号字符（Go 不支持单引号字符串，但做防御性处理）
+				inSingleQuote = !inSingleQuote
+			} else if !inDoubleQuote && !inSingleQuote {
+				switch c {
+				case '{':
+					depth++
+				case '}':
+					depth--
+				}
+			}
 		}
 		i++
 	}
@@ -818,8 +869,8 @@ func extractGoBodyByBraces(code string, funcStartIdx int, maxLen int) string {
 		return "" // 未找到匹配的大括号
 	}
 	body := code[braceIdx:i]
-	if len(body) > maxLen {
-		body = body[:maxLen] + "..."
+	if utf8.RuneCountInString(body) > maxLen {
+		body = truncateRunes(body, maxLen)
 	}
 	return body
 }

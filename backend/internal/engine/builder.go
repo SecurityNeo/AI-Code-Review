@@ -72,6 +72,12 @@ type ImpactFinding struct {
 	AffectedFiles []string `json:"affected_files"` // 受影响的下游文件（基于调用链）
 	Severity      string   `json:"severity"`       // critical / high / medium
 	Suggestion    string   `json:"suggestion"`     // 建议操作
+
+	// 【新增】基线对比结构化 diff 字段
+	BeforeSig    string   `json:"before_sig,omitempty"`    // 变更前签名
+	AfterSig     string   `json:"after_sig,omitempty"`     // 变更后签名
+	BeforeFields []string `json:"before_fields,omitempty"` // 变更前字段列表
+	AfterFields  []string `json:"after_fields,omitempty"`  // 变更后字段列表
 }
 
 // LicenseFinding 许可证检查单条结果
@@ -121,10 +127,11 @@ type PromptContext struct {
 
 // TestSuggestionItem 测试建议条目（PromptContext 使用）
 type TestSuggestionItem struct {
-	FunctionName string             `json:"function_name"`
-	FilePath     string             `json:"file_path"`
-	LineNumber   int                `json:"line_number"`
-	Scenarios    []llm.TestScenario `json:"scenarios"`
+	FunctionName  string             `json:"function_name"`
+	FilePath      string             `json:"file_path"`
+	LineNumber    int                `json:"line_number"`
+	Scenarios     []llm.TestScenario `json:"scenarios"`
+	ExistingTests string             `json:"existing_tests,omitempty"` // 已有测试覆盖信息（仅内存，不入库）
 }
 
 // AgentStatusSection 生成报告尾部的智能体配置段落
@@ -204,11 +211,11 @@ func (p *PromptContext) GetDimensionCodes() []string {
 // AgentFindingsJSON 将 6 类 Agent Finding 统一序列化为 JSON（用于结构化 Prompt 注入）
 func (p *PromptContext) AgentFindingsJSON() ([]byte, error) {
 	data := map[string]interface{}{
-		"secret_scan":       p.SecretScanFindings,
-		"security_audit":    p.SecurityAuditFindings,
-		"test_suggestion":   p.TestSuggestions,
-		"impact_analysis":   p.ImpactFindings,
-		"dependency_scan":   p.DependencyVulns,
+		"secret_scan":        p.SecretScanFindings,
+		"security_audit":     p.SecurityAuditFindings,
+		"test_suggestion":    p.TestSuggestions,
+		"impact_analysis":    p.ImpactFindings,
+		"dependency_scan":    p.DependencyVulns,
 		"code_understanding": p.CodeUnderstandingReport,
 	}
 	return json.Marshal(data)
@@ -410,38 +417,8 @@ func BuildReviewPrompt(ctx *PromptContext) string {
 	}
 	sb.WriteString("对于未在规则列表中的其他问题，也可以一并指出，此时 `rule_code` 填空字符串。\n\n")
 
-	// 4. 各智能体预渲染 Markdown（直接拼接，避免重复渲染）
-	// 优先级：AgentMarkdowns > 重新渲染（兼容旧路径）
-	hasAgentContent := false
-	for _, key := range []string{"dependency_scan", "secret_scan", "security_audit", "impact_analysis", "test_suggestion", "code_understanding"} {
-		if md, ok := ctx.AgentMarkdowns[key]; ok && md != "" {
-			sb.WriteString(md)
-			sb.WriteString("\n")
-			hasAgentContent = true
-		}
-	}
-
-	// 兼容旧路径：如果 AgentMarkdowns 未设置，回退到原始 render 逻辑
-	if !hasAgentContent {
-		if len(ctx.DependencyVulns) > 0 {
-			sb.WriteString(buildDependencyVulnsSection(ctx.DependencyVulns))
-		}
-		if len(ctx.SecretScanFindings) > 0 {
-			sb.WriteString(buildSecretScanSection(ctx.SecretScanFindings))
-		}
-		if len(ctx.SecurityAuditFindings) > 0 {
-			sb.WriteString(buildSecurityAuditSection(ctx.SecurityAuditFindings))
-		}
-		if len(ctx.LicenseFindings) > 0 {
-			sb.WriteString(buildLicenseSection(ctx.LicenseFindings))
-		}
-		if len(ctx.ImpactFindings) > 0 {
-			sb.WriteString(buildImpactSection(ctx.ImpactFindings))
-		}
-		if len(ctx.TestSuggestions) > 0 {
-			sb.WriteString(buildTestSuggestionSection(ctx.TestSuggestions))
-		}
-	}
+	// 4. 各智能体预渲染 Markdown（Batch Review 独立评审，不再前置注入 Agent 结论）
+	// 已由 review_arbitration 阶段统一汇总，避免 Token 浪费和限制 LLM 发散能力
 
 	// 5. 待评审代码
 	sb.WriteString("【待评审的代码变更】\n")
@@ -688,21 +665,15 @@ func BuildFullStructuredPrompt(ctx *PromptContext) (string, *llm.ResponseFormat)
 	// 维度 + 权重 + 规则
 	sb.WriteString(buildRulesSection(ctx.Rules, ctx.DimensionWeights))
 
-	// AST 上下文
-	if ctx.ASTContext != "" {
+	// AST 上下文（仅在 code_understanding 报告不可用时作为降级，避免两者重复注入造成 token 浪费）
+	if ctx.CodeUnderstandingReport == "" && ctx.ASTContext != "" {
 		sb.WriteString(ctx.ASTContext)
 		sb.WriteString("\n")
 	}
 
-	// 跨文件调用链
-	if ctx.CrossFileContext != "" {
-		sb.WriteString(ctx.CrossFileContext)
-		sb.WriteString("\n")
-	}
-
-	// 代码理解器报告（AST + 知识图谱 + 数据流分析）
+	// 代码理解器报告（AST + 知识图谱 + 数据流分析 + 跨文件调用链）
+	// 注：跨文件调用链已包含在 CodeUnderstandingReport 中，此处不再单独注入
 	if ctx.CodeUnderstandingReport != "" {
-		sb.WriteString("【代码理解报告】\n")
 		sb.WriteString(ctx.CodeUnderstandingReport)
 		sb.WriteString("\n\n")
 	}
@@ -785,39 +756,13 @@ func BuildBatchCollectionPrompt(ctx *PromptContext, batchIndex, totalBatches int
 	// 维度 + 权重 + 规则
 	sb.WriteString(buildRulesSection(ctx.Rules, ctx.DimensionWeights))
 
+	// code_understanding 每批都注入（内容由上游按批次文件过滤后传入）
+	if md, ok := ctx.AgentMarkdowns["code_understanding"]; ok && md != "" {
+		sb.WriteString(md)
+		sb.WriteString("\n\n")
+	}
+
 	if isLastBatch {
-		// 各智能体预渲染 Markdown（仅最后一批注入，避免 Token 浪费）
-		hasAgentContent := false
-		for _, key := range []string{"dependency_scan", "secret_scan", "security_audit", "impact_analysis", "test_suggestion", "code_understanding"} {
-			if md, ok := ctx.AgentMarkdowns[key]; ok && md != "" {
-				sb.WriteString(md)
-				sb.WriteString("\n")
-				hasAgentContent = true
-			}
-		}
-
-		// 兼容旧路径
-		if !hasAgentContent {
-			if len(ctx.DependencyVulns) > 0 {
-				sb.WriteString(buildDependencyVulnsSection(ctx.DependencyVulns))
-			}
-			if len(ctx.SecretScanFindings) > 0 {
-				sb.WriteString(buildSecretScanSection(ctx.SecretScanFindings))
-			}
-			if len(ctx.SecurityAuditFindings) > 0 {
-				sb.WriteString(buildSecurityAuditSection(ctx.SecurityAuditFindings))
-			}
-			if len(ctx.TestSuggestions) > 0 {
-				sb.WriteString(buildTestSuggestionSection(ctx.TestSuggestions))
-			}
-		}
-
-		// 当存在 Agent 发现时，注入禁止重复指令
-		agentFindingCount := len(ctx.SecretScanFindings) + len(ctx.SecurityAuditFindings) + len(ctx.ImpactFindings)
-		if agentFindingCount > 0 {
-			sb.WriteString(buildNoRepeatInstruction())
-		}
-
 		// Commit 信息（仅最后一批）
 		if ctx.CommitsText != "" {
 			sb.WriteString(fmt.Sprintf("\ncommits：\n%s\n", ctx.CommitsText))
@@ -989,17 +934,8 @@ func BuildArbitrationPrompt(ctx *PromptContext) (string, *llm.ResponseFormat, er
 	sb.WriteString("- ImpactAnalysis → impact_notes[]（不得放入 Issues[]）\n")
 	sb.WriteString("- SecurityFinding → security_findings[]（仅展示用，已在 Issues[] 中体现扣分）\n\n")
 
-	// 5. 各智能体预渲染 Markdown（直接拼接，代码理解器除外）
-	hasMarkdown := false
-	for _, key := range []string{"dependency_scan", "secret_scan", "security_audit", "impact_analysis", "test_suggestion"} {
-		if md, ok := ctx.AgentMarkdowns[key]; ok && md != "" {
-			sb.WriteString(md)
-			sb.WriteString("\n")
-			hasMarkdown = true
-		}
-	}
-
-	// 6. 构建结构化 User Prompt（JSON 格式数据，仅含 batch_results，避免与 markdown 重复）
+	// 5. 构建结构化 User Prompt（JSON 格式数据，注入 agent_findings + batch_results + 维度配置 + 扣分规则）
+	// 各智能体的核心数据已包含在 agent_findings JSON 中，不再重复注入 Markdown 格式，避免 Token 浪费和数据冗余
 	batchJSON, err := json.Marshal(ctx.BatchReviewResults)
 	if err != nil {
 		return "", nil, fmt.Errorf("Batch results 序列化失败: %w", err)
@@ -1009,13 +945,10 @@ func BuildArbitrationPrompt(ctx *PromptContext) (string, *llm.ResponseFormat, er
 	dimJSON, _ := json.Marshal(dimConfig)
 	dscJSON, _ := json.Marshal(ctx.GetDeductScoreConfig())
 
-	// 如 markdown 未注入，fallback 到精简 agent JSON（向后兼容）
-	var agentJSON []byte
-	if !hasMarkdown {
-		agentJSON, err = ctx.AgentFindingsJSON()
-		if err != nil {
-			return "", nil, fmt.Errorf("Agent findings 序列化失败: %w", err)
-		}
+	// 始终注入结构化 Agent findings（与 Markdown 互补，供精确去重和评分）
+	agentJSON, err := ctx.AgentFindingsJSON()
+	if err != nil {
+		return "", nil, fmt.Errorf("Agent findings 序列化失败: %w", err)
 	}
 
 	type arbitrationInputData struct {
@@ -1039,7 +972,7 @@ func BuildArbitrationPrompt(ctx *PromptContext) (string, *llm.ResponseFormat, er
 	sb.Write(userJSON)
 	sb.WriteString("\n```\n")
 
-	// 6. ResponseFormat（使用 review_arbitration 扩展 Schema）
+	// 7. ResponseFormat（使用 review_arbitration 扩展 Schema）
 	dimensions := ctx.GetDimensionCodes()
 	schema := llm.GetReviewArbitrationJSONSchema(dimensions)
 	responseFormat := &llm.ResponseFormat{

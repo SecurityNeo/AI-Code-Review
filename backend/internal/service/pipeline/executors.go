@@ -1298,6 +1298,25 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 	batchPromptCtx := *promptCtx
 	batchPromptCtx.CrossFileContext = filterCrossFileContextForBatch(promptCtx.CrossFileContext, detail.FilePaths)
 
+	// 【新增】按批次文件过滤 code_understanding 内容，每批仅注入当前批次相关的 AST/图谱摘要
+	// 注意：AgentMarkdowns 是 map（引用类型），必须深拷贝以避免并发写入 panic
+	batchAgentMarkdowns := make(map[string]string, len(promptCtx.AgentMarkdowns)+1)
+	for k, v := range promptCtx.AgentMarkdowns {
+		batchAgentMarkdowns[k] = v
+	}
+
+	if codeReport, ok := ctx.GetOutput("code_understanding_structured").(*CodeUnderstandingReport); ok && codeReport != nil {
+		batchMarkdown := formatReportTextForBatch(codeReport, detail.FilePaths)
+		batchAgentMarkdowns["code_understanding"] = batchMarkdown
+	} else if fullMarkdown, ok := ctx.GetOutput("code_understanding_report").(string); ok && fullMarkdown != "" {
+		// fallback：从全局 Markdown 文本中按文件路径做简单过滤
+		batchMarkdown := filterCodeUnderstandingMarkdownByFiles(fullMarkdown, detail.FilePaths)
+		if batchMarkdown != "" {
+			batchAgentMarkdowns["code_understanding"] = batchMarkdown
+		}
+	}
+	batchPromptCtx.AgentMarkdowns = batchAgentMarkdowns
+
 	isLastBatch := detail.Index == plan.BatchCount
 	userPrompt := engine.BuildBatchCollectionPrompt(&batchPromptCtx, detail.Index, plan.BatchCount, batchFileMaps, isLastBatch)
 
