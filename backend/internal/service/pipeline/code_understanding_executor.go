@@ -410,14 +410,16 @@ func (e *CodeUnderstandingExecutor) buildASTContext(asts []*parser.UnifiedAST, l
 				params = append(params, p.Type)
 			}
 			astCtx.Functions = append(astCtx.Functions, FunctionSignature{
-				Name:       fn.Name,
-				Receiver:   fn.Receiver,
-				Params:     params,
-				Returns:    fn.Returns,
-				IsExported: fn.IsExported,
-				FilePath:   ast.FilePath,
-				LineStart:  fn.Location.LineStart,
-				Body:       fn.BodySnippet,
+				Name:         fn.Name,
+				Receiver:     fn.Receiver,
+				Params:       params,
+				Returns:      fn.Returns,
+				IsExported:   fn.IsExported,
+				SecurityRole: fn.SecurityRole,
+				Complexity:   fn.Complexity,
+				FilePath:     ast.FilePath,
+				LineStart:    fn.Location.LineStart,
+				Body:         fn.BodySnippet,
 			})
 		}
 		for _, tp := range ast.Types {
@@ -473,7 +475,7 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 		report.TotalFunctions += len(ast.Functions)
 		report.TotalTypes += len(ast.Types)
 
-		// 收集函数签名和结构体字段详情
+		// 收集函数签名和结构体字段详情（P1）
 		var funcDetails []map[string]interface{}
 		for _, fn := range ast.Functions {
 			sig := fn.Name + "("
@@ -487,25 +489,105 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 			if len(fn.Returns) > 0 {
 				sig += " " + strings.Join(fn.Returns, ", ")
 			}
+			var paramList []map[string]interface{}
+			for _, p := range fn.Params {
+				paramList = append(paramList, map[string]interface{}{
+					"name": p.Name,
+					"type": p.Type,
+				})
+			}
 			funcDetails = append(funcDetails, map[string]interface{}{
-				"name":      fn.Name,
-				"signature": sig,
-				"receiver":  fn.Receiver,
-				"line":      fn.Location.LineStart,
+				"name":          fn.Name,
+				"signature":     sig,
+				"receiver":      fn.Receiver,
+				"line":          fn.Location.LineStart,
+				"doc_comment":   fn.DocComment,
+				"is_exported":   fn.IsExported,
+				"params":        paramList,
+				"returns":       fn.Returns,
+				"security_role": fn.SecurityRole,
+				"complexity":    fn.Complexity,
 			})
 		}
 		var typeDetails []map[string]interface{}
 		for _, tp := range ast.Types {
-			var fields []string
+			var fieldDetails []map[string]interface{}
 			for _, f := range tp.Fields {
-				fields = append(fields, f.Name+" "+f.Type)
+				fieldDetails = append(fieldDetails, map[string]interface{}{
+					"name":        f.Name,
+					"type":        f.Type,
+					"tag":         f.Tag,
+					"is_exported": f.IsExported,
+				})
 			}
 			typeDetails = append(typeDetails, map[string]interface{}{
-				"name":   tp.Name,
-				"kind":   tp.Kind,
-				"fields": fields,
-				"line":   tp.Location.LineStart,
+				"name":        tp.Name,
+				"kind":        tp.Kind,
+				"fields":      fieldDetails,
+				"line":        tp.Location.LineStart,
+				"doc_comment": tp.DocComment,
+				"implements":  tp.Implements,
+				"extends":     tp.Extends,
+				"is_exported": tp.IsExported,
 			})
+		}
+
+		// Import 包路径明细（P1-2）
+		var importList []map[string]interface{}
+		for _, imp := range ast.Imports {
+			importList = append(importList, map[string]interface{}{
+				"path":      imp.Path,
+				"alias":     imp.Alias,
+				"is_stdlib": imp.IsStdLib,
+			})
+		}
+
+		// 调用站点（P1-7）
+		var callSites []map[string]interface{}
+		for _, cs := range ast.CallSites {
+			callSites = append(callSites, map[string]interface{}{
+				"caller_func": cs.CallerFunc,
+				"target_func": cs.TargetFunc,
+				"target_pkg":  cs.TargetPkg,
+				"arguments":   cs.Arguments,
+				"line":        cs.Location.LineStart,
+			})
+		}
+
+		// 变量/常量列表（P1-8）
+		var variables []map[string]interface{}
+		for _, v := range ast.Variables {
+			variables = append(variables, map[string]interface{}{
+				"name":          v.Name,
+				"type":          v.Type,
+				"default_value": v.DefaultValue,
+				"is_exported":   v.IsExported,
+			})
+		}
+		var constants []map[string]interface{}
+		for _, c := range ast.Constants {
+			constants = append(constants, map[string]interface{}{
+				"name":        c.Name,
+				"type":        c.Type,
+				"value":       c.Value,
+				"is_exported": c.IsExported,
+			})
+		}
+
+		// TODO 注释（P2-3）
+		var todoComments []map[string]interface{}
+		for _, td := range ast.TODOComments {
+			todoComments = append(todoComments, map[string]interface{}{
+				"text":     td.Text,
+				"type":     td.Type,
+				"line":     td.Line,
+				"function": td.Function,
+			})
+		}
+		// 文件级复杂度（P2-5）
+		fileComplexity := 0
+		for _, fn := range ast.Functions {
+			fileComplexity += fn.Complexity
 		}
 
 		report.ASTData.FileResults = append(report.ASTData.FileResults, FileASTResult{
@@ -515,7 +597,98 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 			Imports:         len(ast.Imports),
 			FunctionDetails: funcDetails,
 			TypeDetails:     typeDetails,
+			ImportList:      importList,
+			CallSites:       callSites,
+			Variables:       variables,
+			Constants:       constants,
+			TODOComments:    todoComments,
+			ComplexityScore: fileComplexity,
 		})
+	}
+
+	// P2-2: 反向调用索引
+	reverseIndex := make(map[string][]string)
+	for _, ast := range asts {
+		for _, cs := range ast.CallSites {
+			if cs.TargetFunc == "" || cs.CallerFunc == "" {
+				continue
+			}
+			if _, ok := reverseIndex[cs.TargetFunc]; !ok {
+				reverseIndex[cs.TargetFunc] = []string{}
+			}
+			// 去重
+			found := false
+			for _, c := range reverseIndex[cs.TargetFunc] {
+				if c == cs.CallerFunc {
+					found = true
+					break
+				}
+			}
+			if !found {
+				reverseIndex[cs.TargetFunc] = append(reverseIndex[cs.TargetFunc], cs.CallerFunc)
+			}
+		}
+	}
+	if len(reverseIndex) > 0 {
+		report.ReverseCallIndex = reverseIndex
+	}
+
+	// P2-4: Import 依赖网络
+	depMap := make(map[string]map[string]bool)
+	for _, ast := range asts {
+		pkg := extractPackageFromPath(ast.FilePath)
+		if pkg == "" {
+			continue
+		}
+		if depMap[pkg] == nil {
+			depMap[pkg] = make(map[string]bool)
+		}
+		for _, imp := range ast.Imports {
+			if !imp.IsStdLib {
+				depPkg := extractPackageFromImport(imp.Path)
+				if depPkg != "" && depPkg != pkg {
+					depMap[pkg][depPkg] = true
+				}
+			}
+		}
+	}
+	for pkg, deps := range depMap {
+		var depList []string
+		for d := range deps {
+			depList = append(depList, d)
+		}
+		report.ImportDependencyNet = append(report.ImportDependencyNet, map[string]interface{}{
+			"package":      pkg,
+			"dependencies": depList,
+		})
+	}
+
+	// P3-2: 简单代码重复检测（基于函数签名）
+	sigMap := make(map[string][]map[string]interface{})
+	for _, ast := range asts {
+		for _, fn := range ast.Functions {
+			var params []string
+			for _, p := range fn.Params {
+				params = append(params, p.Type)
+			}
+			key := fn.Receiver + "." + fn.Name + "(" + strings.Join(params, ",") + ")" + strings.Join(fn.Returns, ",")
+			sigMap[key] = append(sigMap[key], map[string]interface{}{
+				"name":      fn.Name,
+				"receiver":  fn.Receiver,
+				"file":      ast.FilePath,
+				"line":      fn.Location.LineStart,
+				"signature": key,
+			})
+		}
+	}
+	for key, dups := range sigMap {
+		if len(dups) > 1 {
+			report.DuplicatedFunctions = append(report.DuplicatedFunctions, map[string]interface{}{
+				"signature":   key,
+				"count":       len(dups),
+				"occurrences": dups,
+			})
+		}
 	}
 
 	// 符号图摘要
@@ -578,12 +751,17 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 			for _, node := range nodes {
 				if node.Type == graph.NodeEndpoint {
 					report.Endpoints = append(report.Endpoints, EndpointSummary{
-						Path:      node.Name,
-						Method:    getStringProp(node.Properties, "method"),
-						Handler:   getStringProp(node.Properties, "handler"),
-						File:      node.File,
-						Line:      node.Location.LineStart,
-						Framework: getStringProp(node.Properties, "framework"),
+						Path:                node.Name,
+						Method:              getStringProp(node.Properties, "method"),
+						Handler:             getStringProp(node.Properties, "handler"),
+						File:                node.File,
+						Line:                node.Location.LineStart,
+						Framework:           getStringProp(node.Properties, "framework"),
+						AuthRequired:        getBoolProp(node.Properties, "auth"),
+						AuthzPolicy:         getStringProp(node.Properties, "authz_policy"),
+						RateLimit:           getStringProp(node.Properties, "rate_limit"),
+						ProducesContentType: getStringSliceProp(node.Properties, "produces_content_type"),
+						ConsumesContentType: getStringSliceProp(node.Properties, "consumes_content_type"),
 					})
 					if fw := getStringProp(node.Properties, "framework"); fw != "" {
 						found := false
@@ -614,14 +792,33 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 			report.EndpointCount = len(endpoints)
 			report.Endpoints = nil // 清空之前从 baseline 提取的，重新填充
 			for _, ep := range endpoints {
-				report.Endpoints = append(report.Endpoints, EndpointSummary{
-					Path:      ep.Name,
-					Method:    getStringProp(ep.Properties, "method"),
-					Handler:   getStringProp(ep.Properties, "handler"),
-					File:      ep.File,
-					Line:      ep.Location.LineStart,
-					Framework: getStringProp(ep.Properties, "framework"),
-				})
+			report.Endpoints = append(report.Endpoints, EndpointSummary{
+				Path:                ep.Name,
+				Method:              getStringProp(ep.Properties, "method"),
+				Handler:             getStringProp(ep.Properties, "handler"),
+				File:                ep.File,
+				Line:                ep.Location.LineStart,
+				Framework:           getStringProp(ep.Properties, "framework"),
+				AuthRequired:        getBoolProp(ep.Properties, "auth"),
+				AuthzPolicy:         getStringProp(ep.Properties, "authz_policy"),
+				RateLimit:           getStringProp(ep.Properties, "rate_limit"),
+				ProducesContentType: getStringSliceProp(ep.Properties, "produces_content_type"),
+				ConsumesContentType: getStringSliceProp(ep.Properties, "consumes_content_type"),
+			})
+			}
+		}
+
+		// P2-7: Graph 关系序列化
+		if report.GraphData != nil {
+			g := reviewView.GetGraph()
+			if g != nil {
+				for _, rel := range g.GetAllRelations() {
+					report.GraphData.Relations = append(report.GraphData.Relations, map[string]interface{}{
+						"from": rel.From,
+						"to":   rel.To,
+						"type": rel.Type,
+					})
+				}
 			}
 		}
 
@@ -630,6 +827,20 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 		dfResult := engine.Analyze()
 		report.TaintFlowCount = len(dfResult.Flows)
 		for _, flow := range dfResult.Flows {
+			var path []string
+			for _, p := range flow.Path {
+				if p.Function != "" {
+					path = append(path, p.Function)
+				} else if p.VarName != "" {
+					path = append(path, p.VarName)
+				}
+			}
+			var sanitizers []string
+			for _, s := range flow.Sanitizers {
+				if s.Function != "" {
+					sanitizers = append(sanitizers, s.Function)
+				}
+			}
 			report.TaintFlows = append(report.TaintFlows, TaintFlowSummary{
 				SourceFunc: flow.Source.Function,
 				SourceFile: flow.Source.File,
@@ -637,6 +848,8 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 				SinkFile:   flow.Sink.File,
 				Category:   flow.Category,
 				RiskLevel:  flow.RiskLevel,
+				Path:       path,
+				Sanitizers: sanitizers,
 			})
 		}
 		if report.GraphData != nil {
@@ -838,27 +1051,30 @@ func filterCodeUnderstandingMarkdownByFiles(markdown string, batchPaths []string
 
 // CodeUnderstandingReport 代码理解报告
 type CodeUnderstandingReport struct {
-	Status             string                   `json:"status"`         // success | degraded | ast_only
-	ReportVersion      string                   `json:"report_version"` // "1.0"
-	GeneratedAt        time.Time                `json:"generated_at"`
-	Mode               string                   `json:"mode"` // full | degraded | ast_only
-	ParsedFiles        int                      `json:"parsed_files"`
-	TotalFiles         int                      `json:"total_files"`
-	FileList           []string                 `json:"file_list"`
-	TotalFunctions     int                      `json:"total_functions"`
-	TotalTypes         int                      `json:"total_types"`
-	FunctionList       []string                 `json:"function_list"`
-	ASTData            *ContextExtractResult    `json:"ast_data,omitempty"`
-	GraphData          *SymbolGraphResult       `json:"graph_data,omitempty"`
-	SymbolGraphSummary SymbolGraphSummary       `json:"symbol_graph_summary"`
-	EndpointCount      int                      `json:"endpoint_count"`
-	Endpoints          []EndpointSummary        `json:"endpoints,omitempty"`
-	TaintFlowCount     int                      `json:"taint_flow_count"`
-	TaintFlows         []TaintFlowSummary       `json:"taint_flows,omitempty"`
-	CrossFileCallChain string                   `json:"cross_file_call_chain,omitempty"` // 跨文件调用链文本
-	ReportText         string                   `json:"report_text,omitempty"`           // Prompt注入文本
-	PromptInjection    string                   `json:"prompt_injection"`                // 同上，兼容命名
-	Summary            CodeUnderstandingSummary `json:"summary"`
+	Status              string                   `json:"status"`         // success | degraded | ast_only
+	ReportVersion       string                   `json:"report_version"` // "1.0"
+	GeneratedAt         time.Time                `json:"generated_at"`
+	Mode                string                   `json:"mode"` // full | degraded | ast_only
+	ParsedFiles         int                      `json:"parsed_files"`
+	TotalFiles          int                      `json:"total_files"`
+	FileList            []string                 `json:"file_list"`
+	TotalFunctions      int                      `json:"total_functions"`
+	TotalTypes          int                      `json:"total_types"`
+	FunctionList        []string                 `json:"function_list"`
+	ASTData             *ContextExtractResult    `json:"ast_data,omitempty"`
+	GraphData           *SymbolGraphResult       `json:"graph_data,omitempty"`
+	SymbolGraphSummary  SymbolGraphSummary       `json:"symbol_graph_summary"`
+	EndpointCount       int                      `json:"endpoint_count"`
+	Endpoints           []EndpointSummary        `json:"endpoints,omitempty"`
+	TaintFlowCount      int                      `json:"taint_flow_count"`
+	TaintFlows          []TaintFlowSummary       `json:"taint_flows,omitempty"`
+	CrossFileCallChain  string                   `json:"cross_file_call_chain,omitempty"` // 跨文件调用链文本
+	ReportText          string                   `json:"report_text,omitempty"`           // Prompt注入文本
+	PromptInjection     string                   `json:"prompt_injection"`                // 同上，兼容命名
+	ReverseCallIndex    map[string][]string      `json:"reverse_call_index,omitempty"`     // P2-2 反向调用索引：被调用函数 -> 调用者列表
+	ImportDependencyNet []map[string]interface{} `json:"import_dependency_net,omitempty"` // P2-4 Import 依赖网络
+	DuplicatedFunctions []map[string]interface{} `json:"duplicated_functions,omitempty"`  // P3-2 代码重复检测
+	Summary             CodeUnderstandingSummary `json:"summary"`
 }
 
 // ContextExtractResult AST提取结果（子阶段1产出）
@@ -879,17 +1095,24 @@ type FileASTResult struct {
 	ParseError      string                   `json:"parse_error,omitempty"`
 	FunctionDetails []map[string]interface{} `json:"function_details,omitempty"`
 	TypeDetails     []map[string]interface{} `json:"type_details,omitempty"`
+	ImportList      []map[string]interface{} `json:"import_list,omitempty"`    // P1-2 Import 包路径明细
+	CallSites       []map[string]interface{} `json:"call_sites,omitempty"`     // P1-7 调用站点
+	Variables       []map[string]interface{} `json:"variables,omitempty"`      // P1-8 变量列表
+	Constants       []map[string]interface{} `json:"constants,omitempty"`      // P1-8 常量列表
+	TODOComments    []map[string]interface{} `json:"todo_comments,omitempty"`  // P2-3 TODO/FIXME/HACK扫描
+	ComplexityScore int                      `json:"complexity_score,omitempty"` // P2-5 文件级复杂度
 }
 
 // SymbolGraphResult 符号图分析结果（子阶段2产出）
 type SymbolGraphResult struct {
-	Status        string   `json:"status"`
-	ScanType      string   `json:"scan_type"`
-	NodeCount     int      `json:"node_count"`
-	RelationCount int      `json:"relation_count"`
-	Frameworks    []string `json:"frameworks,omitempty"`
-	SecurityPaths []string `json:"security_paths,omitempty"`
-	Error         string   `json:"error,omitempty"`
+	Status        string                   `json:"status"`
+	ScanType      string                   `json:"scan_type"`
+	NodeCount     int                      `json:"node_count"`
+	RelationCount int                      `json:"relation_count"`
+	Frameworks    []string                 `json:"frameworks,omitempty"`
+	SecurityPaths []string                 `json:"security_paths,omitempty"`
+	Relations     []map[string]interface{} `json:"relations,omitempty"` // P2-7 Graph 关系序列化
+	Error         string                   `json:"error,omitempty"`
 }
 
 // CodeUnderstandingSummary 报告摘要
@@ -913,22 +1136,29 @@ type SymbolGraphSummary struct {
 
 // EndpointSummary 端点摘要
 type EndpointSummary struct {
-	Path      string `json:"path"`
-	Method    string `json:"method,omitempty"`
-	Handler   string `json:"handler,omitempty"`
-	File      string `json:"file"`
-	Line      int    `json:"line"`
-	Framework string `json:"framework,omitempty"`
+	Path                string   `json:"path"`
+	Method              string   `json:"method,omitempty"`
+	Handler             string   `json:"handler,omitempty"`
+	File                string   `json:"file"`
+	Line                int      `json:"line"`
+	Framework           string   `json:"framework,omitempty"`
+	AuthRequired        bool     `json:"auth_required,omitempty"`        // P2-6
+	AuthzPolicy         string   `json:"authz_policy,omitempty"`         // P2-6
+	RateLimit           string   `json:"rate_limit,omitempty"`           // P2-6
+	ProducesContentType []string `json:"produces_content_type,omitempty"` // P2-6
+	ConsumesContentType []string `json:"consumes_content_type,omitempty"` // P2-6
 }
 
 // TaintFlowSummary 污点流摘要
 type TaintFlowSummary struct {
-	SourceFunc string `json:"source_func"`
-	SourceFile string `json:"source_file"`
-	SinkFunc   string `json:"sink_func"`
-	SinkFile   string `json:"sink_file"`
-	Category   string `json:"category"`
-	RiskLevel  string `json:"risk_level"`
+	SourceFunc string   `json:"source_func"`
+	SourceFile string   `json:"source_file"`
+	SinkFunc   string   `json:"sink_func"`
+	SinkFile   string   `json:"sink_file"`
+	Category   string   `json:"category"`
+	RiskLevel  string   `json:"risk_level"`
+	Path       []string `json:"path,omitempty"`       // P1-1 结构化路径（步骤函数名列表）
+	Sanitizers []string `json:"sanitizers,omitempty"` // P1-1 净化函数列表
 }
 
 // reviewViewAdapter 适配graph.ReviewView到dataflow.ReviewViewIface
@@ -966,6 +1196,62 @@ func getStringProp(props map[string]interface{}, key string) string {
 		}
 	}
 	return ""
+}
+
+func getBoolProp(props map[string]interface{}, key string) bool {
+	if props == nil {
+		return false
+	}
+	if v, ok := props[key]; ok {
+		if b, ok := v.(bool); ok {
+			return b
+		}
+	}
+	return false
+}
+
+func getStringSliceProp(props map[string]interface{}, key string) []string {
+	if props == nil {
+		return nil
+	}
+	if v, ok := props[key]; ok {
+		if sl, ok := v.([]string); ok {
+			return sl
+		}
+		if sl, ok := v.([]interface{}); ok {
+			var result []string
+			for _, item := range sl {
+				if s, ok := item.(string); ok {
+					result = append(result, s)
+				}
+			}
+			return result
+		}
+	}
+	return nil
+}
+
+// extractPackageFromPath 从文件路径推断包名（P2-4）
+func extractPackageFromPath(filePath string) string {
+	// 简单策略：取文件所在目录的最后一级作为包名
+	dir := filepath.Dir(filePath)
+	if dir == "." || dir == "/" {
+		return ""
+	}
+	return filepath.Base(dir)
+}
+
+// extractPackageFromImport 从 import 路径推断包名（P2-4）
+func extractPackageFromImport(impPath string) string {
+	if impPath == "" {
+		return ""
+	}
+	// 取最后一个 / 后面的部分作为包名
+	idx := strings.LastIndex(impPath, "/")
+	if idx >= 0 && idx < len(impPath)-1 {
+		return impPath[idx+1:]
+	}
+	return impPath
 }
 
 func init() {

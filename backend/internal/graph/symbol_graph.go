@@ -220,46 +220,79 @@ func (sg *SymbolGraph) inferRelations(graph *MemorySymbolGraph, asts []*parser.U
 	}
 
 	// 推断接口实现关系（Go）
-	// TODO: 当前逻辑基于不准确的假设（funcNodes map 的 key 是方法名而非 "Type.Method"），
-	// 实际上 ingestAST 中 generateFuncID 会将方法名存储为 func:file:Receiver.Method 或 func:file:Method，
-	// 而 funcNodes 的 key 仅为 Name 字段（即方法名，不含接收者前缀）。
-	// 这导致 strings.Contains(fn.Name, node.Name+".") 几乎永远为 false，接口推断关系从未真正建立。
-	// 正确做法应在 ingestAST 时就为 receiver 方法统一记录 "Struct.Method" 格式的 name，
-	// 或在构建 funcNodes 时额外维护一个 receiver→methods 的映射。
+	// P3-3 修复：使用 Properties 中存储的 kind 和 receiver_methods 进行正确匹配
+	// 构建 receiver -> methods 映射
+	receiverMethods := make(map[string]map[string]bool) // receiverType -> map[methodName]bool
+	for _, node := range graph.AllNodes() {
+		if node.Type != NodeFunc {
+			continue
+		}
+		receiver := getStringProp(node.Properties, "receiver")
+		if receiver == "" {
+			continue
+		}
+		// 清理 receiver 类型：去掉 * 和 & 前缀
+		receiver = strings.TrimPrefix(receiver, "*")
+		receiver = strings.TrimPrefix(receiver, "&")
+		if receiverMethods[receiver] == nil {
+			receiverMethods[receiver] = make(map[string]bool)
+		}
+		receiverMethods[receiver][node.Name] = true
+	}
+
+	// 收集接口类型及其方法集
+	ifaceMethods := make(map[string]map[string]bool) // interfaceName -> map[methodName]bool
 	for _, node := range graph.AllNodes() {
 		if node.Type != NodeType || node.Language != "golang" {
 			continue
 		}
-		// 查找同名接口
-		ifaceNode, isIface := typeNodes[node.Name]
-		if !isIface || ifaceNode == node {
+		if getStringProp(node.Properties, "kind") != "interface" {
 			continue
 		}
-		// 检查结构体是否实现了接口的所有方法
-		if ifaceNode.Language != "golang" {
+		methods := getStringSliceProp(node.Properties, "methods")
+		if len(methods) == 0 {
 			continue
 		}
-		structMethods := make(map[string]bool)
-		for _, fnNode := range funcNodes {
-			for _, fn := range fnNode {
-				// BUG: fn.Name 此处为纯方法名，node.Name 为类型名，
-				// strings.Contains("GetUser", "UserService.") → false
-				// 正确的匹配需要 fn.Name 为 "UserService.GetUser" 或基于 ID 模式匹配
-				if fn.Package == node.Package && strings.Contains(fn.Name, node.Name+".") {
-					parts := strings.Split(fn.Name, ".")
-					if len(parts) >= 2 {
-						structMethods[parts[len(parts)-1]] = true
-					}
+		ifaceMethods[node.Name] = make(map[string]bool)
+		for _, m := range methods {
+			ifaceMethods[node.Name][m] = true
+		}
+	}
+
+	// 遍历所有 struct 类型，检查是否实现了某个接口
+	for _, node := range graph.AllNodes() {
+		if node.Type != NodeType || node.Language != "golang" {
+			continue
+		}
+		if getStringProp(node.Properties, "kind") != "struct" {
+			continue
+		}
+		structMethods := receiverMethods[node.Name]
+		if len(structMethods) == 0 {
+			continue
+		}
+		for ifaceName, requiredMethods := range ifaceMethods {
+			if len(requiredMethods) == 0 {
+				continue
+			}
+			// 检查 struct 是否实现了接口的所有方法
+			allImplemented := true
+			for reqMethod := range requiredMethods {
+				if !structMethods[reqMethod] {
+					allImplemented = false
+					break
 				}
 			}
-		}
-		// 简化的接口实现推断：如果结构体有方法，认为可能实现接口
-		if len(structMethods) > 0 {
-			graph.AddRelation(MemoryRelation{
-				From: node.ID,
-				To:   ifaceNode.ID,
-				Type: RelImplements,
-			})
+			if allImplemented {
+				ifaceNode := typeNodes[ifaceName]
+				if ifaceNode != nil {
+					graph.AddRelation(MemoryRelation{
+						From: node.ID,
+						To:   ifaceNode.ID,
+						Type: RelImplements,
+					})
+				}
+			}
 		}
 	}
 }
@@ -284,6 +317,28 @@ func getStringProp(props map[string]interface{}, key string) string {
 		}
 	}
 	return ""
+}
+
+// getStringSliceProp 安全获取字符串切片属性
+func getStringSliceProp(props map[string]interface{}, key string) []string {
+	if props == nil {
+		return nil
+	}
+	if v, ok := props[key]; ok {
+		if sl, ok := v.([]string); ok {
+			return sl
+		}
+		if sl, ok := v.([]interface{}); ok {
+			var result []string
+			for _, item := range sl {
+				if s, ok := item.(string); ok {
+					result = append(result, s)
+				}
+			}
+			return result
+		}
+	}
+	return nil
 }
 
 // inferPackage 从文件路径推断包/模块名

@@ -22,14 +22,16 @@ type ASTContext struct {
 
 // FunctionSignature 函数签名
 type FunctionSignature struct {
-	Name       string   `json:"name"`
-	Receiver   string   `json:"receiver,omitempty"` // 接收者类型，如 "*UserService"
-	Params     []string `json:"params"`             // 参数类型列表，如 ["context.Context", "int"]
-	Returns    []string `json:"returns"`            // 返回值类型列表
-	IsExported bool     `json:"is_exported"`
-	FilePath   string   `json:"file_path,omitempty"`  // 所在文件路径
-	LineStart  int      `json:"line_start,omitempty"` // 函数起始行号
-	Body       string   `json:"body,omitempty"`       // 函数体文本摘要
+	Name         string   `json:"name"`
+	Receiver     string   `json:"receiver,omitempty"`   // 接收者类型，如 "*UserService"
+	Params       []string `json:"params"`               // 参数类型列表，如 ["context.Context", "int"]
+	Returns      []string `json:"returns"`              // 返回值类型列表
+	IsExported   bool     `json:"is_exported"`
+	SecurityRole string   `json:"security_role,omitempty"` // P2-1 安全角色：auth | encryption | sanitizer | validator | handler | service | data_access | other
+	Complexity   int      `json:"complexity,omitempty"`    // P2-5 简单圈复杂度估算
+	FilePath     string   `json:"file_path,omitempty"`     // 所在文件路径
+	LineStart    int      `json:"line_start,omitempty"`    // 函数起始行号
+	Body         string   `json:"body,omitempty"`          // 函数体文本摘要
 }
 
 // Signature 生成函数签名字符串，格式如 "(receiver) Name(params) (returns)"。

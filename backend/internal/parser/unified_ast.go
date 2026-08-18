@@ -21,24 +21,35 @@ type UnifiedAST struct {
 	Endpoints   []UnifiedEndpoint   `json:"endpoints,omitempty"`    // 框架适配器产出
 	CallSites   []UnifiedCallSite   `json:"call_sites,omitempty"`   // 本文件内的调用点
 	VarBindings []UnifiedVarBinding `json:"var_bindings,omitempty"` // 变量赋值绑定
+	TODOComments []TODOComment      `json:"todo_comments,omitempty"` // P2-3 TODO/FIXME/HACK扫描
+}
+
+// TODOComment TODO/FIXME/HACK 注释
+type TODOComment struct {
+	Text     string `json:"text"`
+	Type     string `json:"type"`     // todo | fixme | hack | xxx
+	Line     int    `json:"line"`
+	Function string `json:"function,omitempty"` // 所在函数名（如果能推断）
 }
 
 // UnifiedFunction 函数定义
 type UnifiedFunction struct {
-	Name        string         `json:"name"`
-	Receiver    string         `json:"receiver,omitempty"`
-	Params      []UnifiedParam `json:"params"`
-	Returns     []string       `json:"returns"`
-	IsExported  bool           `json:"is_exported"`
-	IsAsync     bool           `json:"is_async"`
-	IsStatic    bool           `json:"is_static"`
-	IsAbstract  bool           `json:"is_abstract"`
-	IsVariadic  bool           `json:"is_variadic"`
-	Generics    []string       `json:"generics,omitempty"`
-	Annotations []string       `json:"annotations,omitempty"`
-	DocComment  string         `json:"doc_comment,omitempty"`
-	BodySnippet string         `json:"body_snippet,omitempty"`
-	Location    SourceLocation `json:"location"`
+	Name         string         `json:"name"`
+	Receiver     string         `json:"receiver,omitempty"`
+	Params       []UnifiedParam `json:"params"`
+	Returns      []string       `json:"returns"`
+	IsExported   bool           `json:"is_exported"`
+	IsAsync      bool           `json:"is_async"`
+	IsStatic     bool           `json:"is_static"`
+	IsAbstract   bool           `json:"is_abstract"`
+	IsVariadic   bool           `json:"is_variadic"`
+	Generics     []string       `json:"generics,omitempty"`
+	Annotations  []string       `json:"annotations,omitempty"`
+	DocComment   string         `json:"doc_comment,omitempty"`
+	BodySnippet  string         `json:"body_snippet,omitempty"`
+	SecurityRole string         `json:"security_role,omitempty"` // P2-1 安全角色：auth | encryption | sanitizer | validator | handler | service | data_access | other
+	Complexity   int            `json:"complexity,omitempty"`    // P2-5 简单圈复杂度估算
+	Location     SourceLocation `json:"location"`
 }
 
 // UnifiedParam 参数

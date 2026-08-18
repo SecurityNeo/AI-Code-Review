@@ -87,6 +87,7 @@ func (e *GoExtractor) ParseFile(filePath string, src []byte) (*UnifiedAST, error
 	result.Variables = variables
 	result.CallSites = extractCallSites(fset, filePath, f)
 	result.VarBindings = extractVarBindings(fset, filePath, f)
+	result.TODOComments = extractTODOComments(fset, f, functions)
 
 	return result, nil
 }
@@ -137,7 +138,9 @@ func convertFuncDecl(fset *token.FileSet, filePath string, src []byte, decl *ast
 			}
 			fn.BodySnippet = body
 		}
+		fn.Complexity = estimateComplexity(decl.Body)
 	}
+	fn.SecurityRole = inferSecurityRole(fn.Name, fn.Receiver)
 	return fn
 }
 
@@ -370,4 +373,134 @@ func nameOrAnonymous(names []*ast.Ident) string {
 		return "anonymous"
 	}
 	return names[0].Name
+}
+
+// inferSecurityRole 根据函数名和接收者推断安全角色 (P2-1)
+func inferSecurityRole(name, receiver string) string {
+	lower := strings.ToLower(name)
+	recvLower := strings.ToLower(receiver)
+	// 认证/授权
+	if strings.Contains(lower, "auth") || strings.Contains(lower, "login") || strings.Contains(lower, "logout") ||
+		strings.Contains(lower, "token") || strings.Contains(lower, "session") || strings.Contains(lower, "permission") ||
+		strings.Contains(lower, "role") || strings.Contains(lower, "credential") {
+		return "auth"
+	}
+	// 加密/解密
+	if strings.Contains(lower, "encrypt") || strings.Contains(lower, "decrypt") || strings.Contains(lower, "cipher") ||
+		strings.Contains(lower, "hash") || strings.Contains(lower, "sign") || strings.Contains(lower, "verify") {
+		return "encryption"
+	}
+	// 净化/过滤
+	if strings.Contains(lower, "sanitize") || strings.Contains(lower, "escape") || strings.Contains(lower, "clean") ||
+		strings.Contains(lower, "filter") || strings.Contains(lower, "validate") || strings.Contains(lower, "check") {
+		return "sanitizer"
+	}
+	// 输入验证
+	if strings.Contains(lower, "parse") || strings.Contains(lower, "bind") || strings.Contains(lower, "unmarshal") ||
+		strings.Contains(lower, "decode") || strings.Contains(lower, "deserialize") {
+		return "validator"
+	}
+	// HTTP Handler / Controller
+	if strings.HasPrefix(lower, "handle") || strings.HasPrefix(lower, "get") || strings.HasPrefix(lower, "post") ||
+		strings.HasPrefix(lower, "put") || strings.HasPrefix(lower, "delete") || strings.HasPrefix(lower, "patch") ||
+		strings.Contains(recvLower, "handler") || strings.Contains(recvLower, "controller") || strings.Contains(recvLower, "router") {
+		return "handler"
+	}
+	// Repository / DAO / Data Access
+	if strings.Contains(recvLower, "repo") || strings.Contains(recvLower, "dao") || strings.Contains(recvLower, "store") ||
+		strings.Contains(recvLower, "db") || strings.Contains(recvLower, "database") || strings.Contains(lower, "query") ||
+		strings.Contains(lower, "fetch") || strings.Contains(lower, "find") || strings.Contains(lower, "getby") {
+		return "data_access"
+	}
+	// Service / Business Logic
+	if strings.Contains(recvLower, "service") || strings.Contains(recvLower, "usecase") || strings.Contains(recvLower, "manager") ||
+		strings.Contains(recvLower, "biz") {
+		return "service"
+	}
+	return "other"
+}
+
+// estimateComplexity 基于 AST 简单估算圈复杂度 (P2-5)
+// 规则：每个 if/switch/for/range/select/case/&&/|| 增加 1
+func estimateComplexity(body *ast.BlockStmt) int {
+	if body == nil {
+		return 1
+	}
+	complexity := 1
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n.(type) {
+		case *ast.IfStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.ForStmt, *ast.RangeStmt, *ast.SelectStmt:
+			complexity++
+		case *ast.CaseClause:
+			// case 语句只增加非 default 的分支
+			if len(n.(*ast.CaseClause).List) > 0 {
+				complexity++
+			}
+		case *ast.BinaryExpr:
+			be := n.(*ast.BinaryExpr)
+			if be.Op == token.LAND || be.Op == token.LOR {
+				complexity++
+			}
+		}
+		return true
+	})
+	return complexity
+}
+
+// extractTODOComments 扫描文件中的所有 TODO/FIXME/HACK/XXX 注释 (P2-3)
+func extractTODOComments(fset *token.FileSet, f *ast.File, functions []UnifiedFunction) []TODOComment {
+	var results []TODOComment
+	if f.Comments == nil {
+		return results
+	}
+	// 构建函数行号范围映射，用于推断注释属于哪个函数
+	funcRanges := make([]struct {
+		name      string
+		lineStart int
+		lineEnd   int
+	}, 0, len(functions))
+	for _, fn := range functions {
+		funcRanges = append(funcRanges, struct {
+			name      string
+			lineStart int
+			lineEnd   int
+		}{name: fn.Name, lineStart: fn.Location.LineStart, lineEnd: fn.Location.LineEnd})
+	}
+	for _, cg := range f.Comments {
+		for _, c := range cg.List {
+			text := strings.TrimSpace(c.Text)
+			upper := strings.ToUpper(text)
+			var typ string
+			if strings.Contains(upper, "TODO") {
+				typ = "todo"
+			} else if strings.Contains(upper, "FIXME") {
+				typ = "fixme"
+			} else if strings.Contains(upper, "HACK") {
+				typ = "hack"
+			} else if strings.Contains(upper, "XXX") {
+				typ = "xxx"
+			} else if strings.Contains(upper, "BUG") {
+				typ = "bug"
+			}
+			if typ == "" {
+				continue
+			}
+			line := fset.Position(c.Pos()).Line
+			// 推断所属函数
+			var funcName string
+			for _, r := range funcRanges {
+				if line >= r.lineStart && line <= r.lineEnd {
+					funcName = r.name
+					break
+				}
+			}
+			results = append(results, TODOComment{
+				Text:     text,
+				Type:     typ,
+				Line:     line,
+				Function: funcName,
+			})
+		}
+	}
+	return results
 }

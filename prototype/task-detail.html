@@ -2624,7 +2624,25 @@ function createSubStageRow(stage, type) {
     if (stage.input_tokens || stage.output_tokens) {
         html += `<span class="text-[10px] text-gray-400 font-mono">${((stage.input_tokens||0)+(stage.output_tokens||0)).toLocaleString()}</span>`;
     }
-    html += '</div>';
+
+    // P3-2: 代码重复检测展示
+    if (report.duplicated_functions && report.duplicated_functions.length > 0) {
+        html += `<div class="mb-3"><div class="text-xs font-semibold text-orange-700 mb-1"><i class="fas fa-clone mr-1"></i>重复函数检测（${report.duplicated_functions.length} 组）</div>`;
+        html += '<div style="display:flex; flex-direction:column; gap:4px;">';
+        report.duplicated_functions.forEach(dup => {
+            html += `<div style="padding:6px 8px; background:#fff7ed; border-radius:6px; border:1px solid #fed7aa;">
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <span style="font-size:10px; padding:1px 5px; border-radius:4px; background:#ffedd5; color:#ea580c;">${dup.count || 0} 处重复</span>
+                    <span style="font-size:11px; font-family:monospace; color:#1f2937; flex:1;">${escapeHtml(dup.signature || '')}</span>
+                </div>
+                <div style="margin-top:2px; font-size:10px; color:#6b7280;">
+                    ${(dup.occurrences || []).map(o => '<span style="font-family:monospace;">' + escapeHtml(o.file || '') + ':' + (o.line || 0) + '</span>').join(', ')}
+                </div>
+            </div>`;
+        });
+        html += '</div></div>';
+    }
+
     return html;
 }
 
@@ -3175,22 +3193,33 @@ function renderCodeUnderstandingDetail(json) {
         partial:   { label: '部分完成', cls: 'text-amber-600 bg-amber-50 border-amber-200' },
         skipped:   { label: '已跳过', cls: 'text-gray-600 bg-gray-50 border-gray-200' },
     };
+    const modeMap = {
+        full:     { label: 'full',     cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+        degraded: { label: 'degraded', cls: 'bg-orange-100 text-orange-700 border-orange-200' },
+        ast_only: { label: 'ast_only', cls: 'bg-red-100 text-red-700 border-red-200' },
+    };
     const sc = statusMap[overallStatus] || statusMap.pending;
-    html += `<div class="mb-4 flex items-center gap-2">
+    const mc = snap.mode ? (modeMap[snap.mode] || { label: snap.mode, cls: 'bg-gray-100 text-gray-700 border-gray-200' }) : null;
+    const graphAvailable = (snap.mode === 'full' || snap.mode === 'degraded') && report.is_graph_available !== false;
+    html += `<div class="mb-4 flex items-center gap-2 flex-wrap">
         <span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium border ${sc.cls}">${sc.label}</span>
-        ${snap.mode ? `<span class="text-xs text-gray-500">运行模式: ${snap.mode}</span>` : ''}
+        ${mc ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${mc.cls}">${mc.label}</span>` : ''}
+        ${graphAvailable ? '<span class="inline-flex items-center gap-1 text-[10px] text-emerald-600" title="知识图谱可用"><i class="fas fa-project-diagram"></i>图谱可用</span>' : '<span class="inline-flex items-center gap-1 text-[10px] text-gray-400" title="仅 AST 分析"><i class="fas fa-code"></i>AST Only</span>'}
         ${json.duration_ms ? `<span class="text-xs text-gray-400 font-mono">${Math.round(json.duration_ms/1000)}s</span>` : ''}
     </div>`;
 
-    // 摘要统计 6 个卡片，分两行（每行 3 个）
-    html += '<div class="grid grid-cols-3 gap-2 mb-5">';
+    // 摘要统计 8 个卡片
+    html += '<div class="grid grid-cols-4 gap-2 mb-5">';
     html += `<div class="bg-gray-50 rounded-lg p-2 text-center"><div class="text-lg font-bold text-gray-800">${summary.total_files || snap.parsed_files || 0}</div><div class="text-[10px] text-gray-500">解析文件</div></div>`;
     html += `<div class="bg-gray-50 rounded-lg p-2 text-center"><div class="text-lg font-bold text-gray-800">${summary.total_functions || 0}</div><div class="text-[10px] text-gray-500">函数</div></div>`;
     html += `<div class="bg-gray-50 rounded-lg p-2 text-center"><div class="text-lg font-bold text-gray-800">${summary.total_structs || 0}</div><div class="text-[10px] text-gray-500">结构体</div></div>`;
+    const bcCount = (report.breaking_changes?.length || summary.breaking_change_count || 0);
+    html += `<div class="bg-gray-50 rounded-lg p-2 text-center"><div class="text-lg font-bold ${bcCount > 0 ? 'text-orange-600' : 'text-gray-800'}">${bcCount}</div><div class="text-[10px] text-gray-500">Breaking Changes</div></div>`;
     html += `<div class="bg-gray-50 rounded-lg p-2 text-center"><div class="text-lg font-bold text-gray-800">${summary.total_nodes || snap.node_count || 0}</div><div class="text-[10px] text-gray-500">图谱节点</div></div>`;
     html += `<div class="bg-gray-50 rounded-lg p-2 text-center"><div class="text-lg font-bold text-gray-800">${summary.security_path_count || report.taint_flow_count || 0}</div><div class="text-[10px] text-gray-500">安全路径</div></div>`;
     const fwList = (report.graph_data?.frameworks || report.summary?.frameworks_detected || []);
     html += `<div class="bg-gray-50 rounded-lg p-2 text-center"><div class="text-lg font-bold text-gray-800">${fwList.length > 0 ? escapeHtml(fwList.slice(0,2).join(', ')) + (fwList.length > 2 ? '...' : '') : '-'}</div><div class="text-[10px] text-gray-500">框架</div></div>`;
+    html += `<div class="bg-gray-50 rounded-lg p-2 text-center"><div class="text-lg font-bold ${graphAvailable ? 'text-emerald-600' : 'text-gray-400'}"><i class="fas ${graphAvailable ? 'fa-check-circle' : 'fa-times-circle'}"></i></div><div class="text-[10px] text-gray-500">图谱可用</div></div>`;
     html += '</div>';
 
     // 降级提示
@@ -3212,6 +3241,35 @@ function renderCodeUnderstandingDetail(json) {
         html += `</div>`;
     } else {
         html += `<div class="mb-3"><div class="text-xs font-semibold text-gray-500 mb-1"><i class="fas fa-file-alt mr-1"></i>代码分析报告</div><div class="bg-gray-50 rounded-lg border border-gray-200 p-3 text-[11px] text-gray-400 italic">未生成报告内容</div></div>`;
+    }
+
+    // 跨文件调用链上下文（P0-4 结构化解析）
+    let crossFileChainText = report.cross_file_call_chain || '';
+    if (!crossFileChainText && promptText) {
+        const match = promptText.match(/#{1,3}\s*跨文件调用链上下文[\s\S]*?(?=\n#{1,3}\s|$)/);
+        if (match) crossFileChainText = match[0].replace(/#{1,3}\s*跨文件调用链上下文\s*/, '').trim();
+    }
+    if (crossFileChainText) {
+        const lines = crossFileChainText.split('\n').map(s => s.trim()).filter(s => s.length > 0 && !s.match(/^(\-{3,}|\*{3,})$/));
+        if (lines.length > 0) {
+            html += `<div class="mb-3">`;
+            html += `<div class="text-xs font-semibold text-indigo-700 mb-1"><i class="fas fa-project-diagram mr-1"></i>跨文件调用链</div>`;
+            html += `<div class="bg-gray-50 rounded-lg border border-gray-200 p-2 text-[11px]">`;
+            lines.forEach((line, idx) => {
+                const isArrow = line.match(/^[\-=>\s]+$/);
+                if (isArrow) {
+                    html += `<div class="flex justify-center py-0.5"><i class="fas fa-arrow-down text-gray-300 text-[10px]"></i></div>`;
+                } else {
+                    const indentClass = line.startsWith('→') || line.startsWith('->') ? 'pl-3' : '';
+                    const cleanLine = line.replace(/^[→\->\s]+/, '');
+                    html += `<div class="flex items-center gap-2 py-0.5 rounded px-1 ${indentClass}">`;
+                    html += `<span class="text-[10px] text-gray-400 font-mono w-4">${idx + 1}</span>`;
+                    html += `<span class="font-mono text-gray-700">${escapeHtml(cleanLine)}</span>`;
+                    html += `</div>`;
+                }
+            });
+            html += `</div></div>`;
+        }
     }
 
     return html;
@@ -3304,35 +3362,155 @@ function renderCuContextExtractBody(sub, report) {
     if (allFuncs.length > 0) {
         html += `<div class="mt-3"><div class="text-[11px] font-medium text-gray-700 mb-1">函数签名（${allFuncs.length} 个）</div>`;
         html += '<div class="overflow-x-auto"><table class="w-full text-[11px] border rounded-lg">';
-        html += '<thead class="bg-gray-50"><tr class="text-gray-500"><th class="text-left px-2 py-1">函数签名</th><th class="text-left px-2 py-1">接收者</th><th class="text-right px-2 py-1">行号</th></tr></thead><tbody>';
+        html += '<thead class="bg-gray-50"><tr class="text-gray-500"><th class="text-left px-2 py-1">函数</th><th class="text-left px-2 py-1">签名</th><th class="text-center px-2 py-1">角色</th><th class="text-right px-2 py-1">复杂度</th><th class="text-center px-2 py-1">导出</th><th class="text-right px-2 py-1">行号</th></tr></thead><tbody>';
         allFuncs.forEach(fn => {
-            html += `<tr class="border-t"><td class="px-2 py-1 font-mono text-gray-700">${escapeHtml(fn.signature || fn.name + '()')}</td>`;
-            html += `<td class="px-2 py-1 text-gray-500">${fn.receiver ? escapeHtml(fn.receiver) : '-'}</td>`;
+            const exportedBadge = fn.is_exported ? '<span class="text-[10px] px-1 rounded bg-emerald-50 text-emerald-600">exported</span>' : '<span class="text-[10px] px-1 rounded bg-gray-100 text-gray-400">internal</span>';
+            const roleColor = {auth:'bg-blue-50 text-blue-600', encryption:'bg-purple-50 text-purple-600', sanitizer:'bg-emerald-50 text-emerald-600', validator:'bg-amber-50 text-amber-600', handler:'bg-indigo-50 text-indigo-600', service:'bg-gray-50 text-gray-600', data_access:'bg-cyan-50 text-cyan-600', other:'bg-gray-50 text-gray-400'}[fn.security_role] || 'bg-gray-50 text-gray-400';
+            const roleBadge = fn.security_role ? `<span class="text-[10px] px-1 rounded ${roleColor}">${fn.security_role}</span>` : '-';
+            html += `<tr class="border-t"><td class="px-2 py-1 font-mono text-gray-700">${escapeHtml(fn.name || '')}</td>`;
+            html += `<td class="px-2 py-1 font-mono text-gray-600">${escapeHtml(fn.signature || fn.name + '()')}</td>`;
+            html += `<td class="px-2 py-1 text-center">${roleBadge}</td>`;
+            html += `<td class="px-2 py-1 text-right ${fn.complexity > 10 ? 'text-orange-600 font-bold' : 'text-gray-400'}">${fn.complexity || '-'}</td>`;
+            html += `<td class="px-2 py-1 text-center">${exportedBadge}</td>`;
             html += `<td class="px-2 py-1 text-right text-gray-400">${fn.line || 0}</td></tr>`;
+            if (fn.doc_comment) {
+                html += `<tr><td colspan="6" class="px-2 py-1 text-[10px] text-gray-500 bg-gray-50 italic border-t">${escapeHtml(fn.doc_comment)}</td></tr>`;
+            }
         });
         html += '</tbody></table></div></div>';
     }
 
-    // 结构体字段
+    // 结构体字段（P1 增强）
     if (allTypes.length > 0) {
         html += `<div class="mt-3"><div class="text-[11px] font-medium text-gray-700 mb-1">结构体/类型（${allTypes.length} 个）</div>`;
         html += '<div style="display:flex; flex-direction:column; gap:4px;">';
         allTypes.forEach(tp => {
+            const exportedBadge = tp.is_exported ? '<span class="text-[10px] px-1 rounded bg-emerald-50 text-emerald-600">exported</span>' : '<span class="text-[10px] px-1 rounded bg-gray-100 text-gray-400">internal</span>';
+            var implExtHtml = '';
+            if (tp.implements && tp.implements.length > 0) {
+                implExtHtml += `<span style="font-size:10px; color:#4f46e5; background:#eef2ff; padding:1px 5px; border-radius:4px;">implements ${escapeHtml(tp.implements.slice(0,2).join(', '))}${tp.implements.length > 2 ? '...' : ''}</span>`;
+            }
+            if (tp.extends && tp.extends.length > 0) {
+                implExtHtml += `<span style="font-size:10px; color:#059669; background:#ecfdf5; padding:1px 5px; border-radius:4px;">extends ${escapeHtml(tp.extends.slice(0,2).join(', '))}${tp.extends.length > 2 ? '...' : ''}</span>`;
+            }
             var fieldsHtml = '';
             if (tp.fields && tp.fields.length > 0) {
-                fieldsHtml = '<div style="margin-top:4px; padding:4px 6px; background:#f3f4f6; border-radius:4px; font-size:11px; font-family:monospace; color:#374151;">' + tp.fields.slice(0, 8).map(f => escapeHtml(f)).join(', ') + (tp.fields.length > 8 ? ' <span style="color:#9ca3af;">... +' + (tp.fields.length - 8) + '</span>' : '') + '</div>';
+                const fieldItems = tp.fields.slice(0, 8).map(f => {
+                    if (typeof f === 'object' && f !== null) {
+                        let s = escapeHtml(f.name || '') + ' ' + escapeHtml(f.type || '');
+                        if (f.tag) s += ' <span style="color:#f97316;">' + escapeHtml(f.tag) + '</span>';
+                        return s;
+                    }
+                    return escapeHtml(String(f));
+                });
+                fieldsHtml = '<div style="margin-top:4px; padding:4px 6px; background:#f3f4f6; border-radius:4px; font-size:11px; font-family:monospace; color:#374151;">' + fieldItems.join(', ') + (tp.fields.length > 8 ? ' <span style="color:#9ca3af;">... +' + (tp.fields.length - 8) + '</span>' : '') + '</div>';
             }
             html += `<div style="padding:8px 10px; background:#f9fafb; border-radius:6px; border:1px solid #e5e7eb;">
-                <div style="display:flex; align-items:center; gap:8px;">
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                     <i class="fas fa-layer-group" style="color:#06b6d4; font-size:11px;"></i>
                     <span style="font-family:monospace; font-size:12px; color:#1f2937; flex:1;">${escapeHtml(tp.name || '')}</span>
+                    ${exportedBadge}
                     <span style="font-size:10px; color:#6b7280; background:#e5e7eb; padding:1px 5px; border-radius:4px;">${escapeHtml(tp.kind || 'struct')}</span>
+                    ${implExtHtml}
                     <span style="font-size:11px; color:#6b7280;">${tp.line || 0}</span>
                 </div>
+                ${tp.doc_comment ? `<div style="margin-top:2px; font-size:10px; color:#6b7280; font-style:italic;">${escapeHtml(tp.doc_comment)}</div>` : ''}
                 ${fieldsHtml}
             </div>`;
         });
         html += '</div></div>';
+    }
+
+    // TODO/FIXME/HACK 注释（P2-3）
+    var allTODOs = [];
+    fileResults.forEach(fr => {
+        if (fr.todo_comments) allTODOs = allTODOs.concat(fr.todo_comments);
+    });
+    if (allTODOs.length > 0) {
+        const typeColor = {todo:'text-amber-600 bg-amber-50', fixme:'text-red-600 bg-red-50', hack:'text-orange-600 bg-orange-50', xxx:'text-gray-600 bg-gray-50', bug:'text-purple-600 bg-purple-50'};
+        html += `<div class="mt-3"><div class="text-[11px] font-medium text-gray-700 mb-1">TODO / FIXME / HACK（${allTODOs.length} 个）</div>`;
+        html += '<div style="display:flex; flex-direction:column; gap:4px;">';
+        allTODOs.forEach(td => {
+            const color = (typeColor[td.type] || typeColor.xxx);
+            html += `<div style="padding:6px 8px; background:#f9fafb; border-radius:6px; border:1px solid #e5e7eb;">
+                <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                    <span style="font-size:10px; padding:1px 5px; border-radius:4px; ${color}">${escapeHtml(td.type || 'todo').toUpperCase()}</span>
+                    <span style="font-size:10px; color:#6b7280;">L${td.line || 0}${td.function ? ' · ' + escapeHtml(td.function) : ''}</span>
+                </div>
+                <div style="margin-top:2px; font-size:11px; color:#374151; font-family:monospace;">${escapeHtml(td.text || '')}</div>
+            </div>`;
+        });
+        html += '</div></div>';
+    }
+
+    // Import 包路径明细（P1-2）
+    var allImports = [];
+    fileResults.forEach(fr => {
+        if (fr.import_list) allImports = allImports.concat(fr.import_list);
+    });
+    if (allImports.length > 0) {
+        html += `<div class="mt-3"><div class="text-[11px] font-medium text-gray-700 mb-1">Import 依赖（${allImports.length} 个）</div>`;
+        html += '<div class="overflow-x-auto"><table class="w-full text-[11px] border rounded-lg">';
+        html += '<thead class="bg-gray-50"><tr class="text-gray-500"><th class="text-left px-2 py-1">包路径</th><th class="text-left px-2 py-1">别名</th><th class="text-center px-2 py-1">标准库</th></tr></thead><tbody>';
+        allImports.forEach(imp => {
+            const stdlibBadge = imp.is_stdlib ? '<span class="text-[10px] px-1 rounded bg-blue-50 text-blue-600">stdlib</span>' : '<span class="text-[10px] px-1 rounded bg-purple-50 text-purple-600">third-party</span>';
+            html += `<tr class="border-t"><td class="px-2 py-1 font-mono text-gray-700">${escapeHtml(imp.path || '')}</td>`;
+            html += `<td class="px-2 py-1 text-gray-500">${imp.alias ? escapeHtml(imp.alias) : '-'}</td>`;
+            html += `<td class="px-2 py-1 text-center">${stdlibBadge}</td></tr>`;
+        });
+        html += '</tbody></table></div></div>';
+    }
+
+    // 调用站点（P1-7）
+    var allCallSites = [];
+    fileResults.forEach(fr => {
+        if (fr.call_sites) allCallSites = allCallSites.concat(fr.call_sites);
+    });
+    if (allCallSites.length > 0) {
+        html += `<div class="mt-3"><div class="text-[11px] font-medium text-gray-700 mb-1">调用站点（${allCallSites.length} 个）</div>`;
+        html += '<div class="overflow-x-auto"><table class="w-full text-[11px] border rounded-lg">';
+        html += '<thead class="bg-gray-50"><tr class="text-gray-500"><th class="text-left px-2 py-1">调用者</th><th class="text-left px-2 py-1">目标函数</th><th class="text-left px-2 py-1">包</th><th class="text-right px-2 py-1">行号</th></tr></thead><tbody>';
+        allCallSites.forEach(cs => {
+            html += `<tr class="border-t"><td class="px-2 py-1 font-mono text-gray-700">${escapeHtml(cs.caller_func || '')}</td>`;
+            html += `<td class="px-2 py-1 font-mono text-gray-600">${escapeHtml(cs.target_func || '')}</td>`;
+            html += `<td class="px-2 py-1 text-gray-500">${cs.target_pkg ? escapeHtml(cs.target_pkg) : '-'}</td>`;
+            html += `<td class="px-2 py-1 text-right text-gray-400">${cs.line || 0}</td></tr>`;
+        });
+        html += '</tbody></table></div></div>';
+    }
+
+    // 变量/常量列表（P1-8）
+    var allVars = [];
+    var allConsts = [];
+    fileResults.forEach(fr => {
+        if (fr.variables) allVars = allVars.concat(fr.variables);
+        if (fr.constants) allConsts = allConsts.concat(fr.constants);
+    });
+    if (allVars.length > 0) {
+        html += `<div class="mt-3"><div class="text-[11px] font-medium text-gray-700 mb-1">变量（${allVars.length} 个）</div>`;
+        html += '<div class="overflow-x-auto"><table class="w-full text-[11px] border rounded-lg">';
+        html += '<thead class="bg-gray-50"><tr class="text-gray-500"><th class="text-left px-2 py-1">名称</th><th class="text-left px-2 py-1">类型</th><th class="text-left px-2 py-1">默认值</th><th class="text-center px-2 py-1">导出</th></tr></thead><tbody>';
+        allVars.forEach(v => {
+            const exportedBadge = v.is_exported ? '<span class="text-[10px] px-1 rounded bg-emerald-50 text-emerald-600">exported</span>' : '<span class="text-[10px] px-1 rounded bg-gray-100 text-gray-400">internal</span>';
+            html += `<tr class="border-t"><td class="px-2 py-1 font-mono text-gray-700">${escapeHtml(v.name || '')}</td>`;
+            html += `<td class="px-2 py-1 text-gray-600">${escapeHtml(v.type || '')}</td>`;
+            html += `<td class="px-2 py-1 text-gray-500">${v.default_value ? escapeHtml(String(v.default_value)) : '-'}</td>`;
+            html += `<td class="px-2 py-1 text-center">${exportedBadge}</td></tr>`;
+        });
+        html += '</tbody></table></div></div>';
+    }
+    if (allConsts.length > 0) {
+        html += `<div class="mt-3"><div class="text-[11px] font-medium text-gray-700 mb-1">常量（${allConsts.length} 个）</div>`;
+        html += '<div class="overflow-x-auto"><table class="w-full text-[11px] border rounded-lg">';
+        html += '<thead class="bg-gray-50"><tr class="text-gray-500"><th class="text-left px-2 py-1">名称</th><th class="text-left px-2 py-1">类型</th><th class="text-left px-2 py-1">值</th><th class="text-center px-2 py-1">导出</th></tr></thead><tbody>';
+        allConsts.forEach(c => {
+            const exportedBadge = c.is_exported ? '<span class="text-[10px] px-1 rounded bg-emerald-50 text-emerald-600">exported</span>' : '<span class="text-[10px] px-1 rounded bg-gray-100 text-gray-400">internal</span>';
+            html += `<tr class="border-t"><td class="px-2 py-1 font-mono text-gray-700">${escapeHtml(c.name || '')}</td>`;
+            html += `<td class="px-2 py-1 text-gray-600">${escapeHtml(c.type || '')}</td>`;
+            html += `<td class="px-2 py-1 text-gray-500">${c.value ? escapeHtml(String(c.value)) : '-'}</td>`;
+            html += `<td class="px-2 py-1 text-center">${exportedBadge}</td></tr>`;
+        });
+        html += '</tbody></table></div></div>';
     }
 
     if (sub.error) {
@@ -3370,16 +3548,19 @@ function renderCuSymbolGraphBody(sub, report) {
     </div>`;
     html += '</div>';
 
-    // 端点列表
+    // 端点列表（P2-6 增强安全元数据）
     if (endpoints.length > 0) {
         html += `<div class="mb-2"><div class="text-[11px] font-medium text-gray-700 mb-1">API 端点（${endpoints.length} 个）</div>`;
         html += '<div class="overflow-x-auto"><table class="w-full text-[11px] border rounded-lg">';
-        html += '<thead class="bg-gray-50"><tr class="text-gray-500"><th class="text-left px-2 py-1">Method</th><th class="text-left px-2 py-1">Path</th><th class="text-left px-2 py-1">Handler</th><th class="text-left px-2 py-1">文件</th><th class="text-left px-2 py-1">框架</th></tr></thead><tbody>';
+        html += '<thead class="bg-gray-50"><tr class="text-gray-500"><th class="text-left px-2 py-1">Method</th><th class="text-left px-2 py-1">Path</th><th class="text-left px-2 py-1">Handler</th><th class="text-center px-2 py-1">Auth</th><th class="text-left px-2 py-1">限流</th><th class="text-left px-2 py-1">文件</th><th class="text-left px-2 py-1">框架</th></tr></thead><tbody>';
         endpoints.forEach(ep => {
+            const authBadge = ep.auth_required ? '<span class="px-1 py-0.5 rounded bg-green-50 text-green-600 text-[10px]"><i class="fas fa-lock text-[8px]"></i>Auth</span>' : '<span class="px-1 py-0.5 rounded bg-gray-50 text-gray-400 text-[10px]">-</span>';
             html += `<tr class="border-t">
                 <td class="px-2 py-1 font-mono text-blue-600">${escapeHtml(ep.method || '-')}</td>
                 <td class="px-2 py-1">${escapeHtml(ep.path)}</td>
                 <td class="px-2 py-1 font-mono text-gray-600">${escapeHtml(ep.handler || ep.handler_func || '-')}</td>
+                <td class="px-2 py-1 text-center">${authBadge}</td>
+                <td class="px-2 py-1 text-gray-500">${ep.rate_limit ? escapeHtml(ep.rate_limit) : '-'}</td>
                 <td class="px-2 py-1 font-mono text-gray-500">${escapeHtml(ep.file || '-')}<span class="text-gray-300">:${ep.line || 0}</span></td>
                 <td class="px-2 py-1"><span class="px-1 py-0.5 rounded bg-indigo-50 text-indigo-600 text-[10px]">${escapeHtml(ep.framework || '-')}</span></td>
             </tr>`;
@@ -3387,11 +3568,13 @@ function renderCuSymbolGraphBody(sub, report) {
         html += '</tbody></table></div></div>';
     }
 
-    // 安全路径 / 污点流
+    // 安全路径 / 污点流（P0-1 + P1-1：并列展示 + 步骤可视化 + 净化器）
     if (taintFlows.length > 0) {
         html += `<div class="mb-2"><div class="text-[11px] font-medium text-gray-700 mb-1">潜在数据流风险（${taintFlows.length} 条）</div>`;
+        html += `<div class="bg-gray-50 rounded-lg border border-gray-200 p-2 text-[11px] space-y-2">`;
         taintFlows.forEach(tf => {
             const riskColor = {critical:'text-red-600 bg-red-50',high:'text-orange-600 bg-orange-50',medium:'text-amber-600 bg-amber-50',low:'text-blue-600 bg-blue-50'}[tf.risk_level] || 'text-gray-600 bg-gray-50';
+            // 源→汇概览行
             html += `<div class="flex items-center gap-2 text-[11px] py-1 border-t first:border-0">
                 <span class="px-1.5 py-0.5 rounded ${riskColor}">${escapeHtml(tf.risk_level || 'unknown')}</span>
                 <span class="font-mono text-gray-700">${escapeHtml(tf.source_func)}</span>
@@ -3399,14 +3582,120 @@ function renderCuSymbolGraphBody(sub, report) {
                 <span class="font-mono text-gray-700">${escapeHtml(tf.sink_func)}</span>
                 <span class="text-gray-400">${escapeHtml(tf.category || '')}</span>
             </div>`;
+            // P1-1: 结构化路径步骤图
+            if (tf.path && tf.path.length > 0) {
+                html += `<div class="flex flex-wrap items-center gap-1 py-0.5 pl-2">`;
+                tf.path.forEach((step, idx) => {
+                    const isFirst = idx === 0;
+                    const isLast = idx === tf.path.length - 1;
+                    const isSink = /sink|exec|danger|unsafe|write|save|delete|remove|update/i.test(step);
+                    const isSanitizer = /sanitizer|filter|validate|clean|escape|encode|sanitize|check|verify/i.test(step);
+                    let stepCls = 'bg-gray-100 text-gray-700 border-gray-200';
+                    if (isFirst) stepCls = 'bg-blue-50 text-blue-700 border-blue-200';
+                    if (isLast && isSink) stepCls = 'bg-red-50 text-red-700 border-red-200';
+                    if (isSanitizer) stepCls = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                    const label = isFirst ? '📥' : (isLast && isSink) ? '🔴' : isSanitizer ? '🛡' : '';
+                    html += `<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[10px] font-mono ${stepCls}">${label ? '<span class="text-[8px]">' + label + '</span>' : ''}${escapeHtml(step)}</span>`;
+                    if (!isLast) {
+                        html += `<i class="fas fa-chevron-right text-gray-300 text-[8px]"></i>`;
+                    }
+                });
+                html += `</div>`;
+            }
+            // P1-1: 净化函数标签
+            if (tf.sanitizers && tf.sanitizers.length > 0) {
+                html += `<div class="flex flex-wrap items-center gap-1 py-0.5 pl-2">`;
+                html += `<span class="text-[10px] text-emerald-600 font-medium"><i class="fas fa-shield-alt mr-0.5"></i>净化:</span>`;
+                tf.sanitizers.forEach(s => {
+                    html += `<span class="inline-flex items-center px-1.5 py-0.5 rounded border text-[10px] font-mono bg-emerald-50 text-emerald-700 border-emerald-200">${escapeHtml(s)}</span>`;
+                });
+                html += `</div>`;
+            }
         });
-        html += '</div>';
-    } else if (graphData.security_paths && graphData.security_paths.length > 0) {
-        html += `<div class="mb-2"><div class="text-[11px] font-medium text-gray-700 mb-1">安全路径</div>`;
+        html += `</div></div>`;
+    }
+
+    // security_paths 独立展示，解析为步骤图
+    if (graphData.security_paths && graphData.security_paths.length > 0) {
+        html += `<div class="mb-2"><div class="text-[11px] font-medium text-gray-700 mb-1">安全路径步骤（${graphData.security_paths.length} 条）</div>`;
+        html += `<div class="bg-gray-50 rounded-lg border border-gray-200 p-2 text-[11px] space-y-2">`;
         graphData.security_paths.forEach(sp => {
-            html += `<div class="text-[11px] font-mono text-gray-600 py-0.5">${escapeHtml(sp)}</div>`;
+            // 解析 Category 和步骤
+            const parts = sp.split(':');
+            const category = parts.length > 1 ? parts[0].trim() : '';
+            const pathStr = parts.length > 1 ? parts.slice(1).join(':') : sp;
+            const steps = pathStr.split(/(?:\s*->\s*|\s*→\s*)/).map(s => s.trim()).filter(Boolean);
+            if (category) {
+                html += `<div class="text-[10px] font-medium text-indigo-600">${escapeHtml(category)}</div>`;
+            }
+            html += `<div class="flex flex-wrap items-center gap-1 py-0.5">`;
+            steps.forEach((step, idx) => {
+                const isFirst = idx === 0;
+                const isLast = idx === steps.length - 1;
+                const isSink = /sink|exec|danger|unsafe|write|save|delete|remove|update/i.test(step);
+                const isSanitizer = /sanitizer|filter|validate|clean|escape|encode|sanitize|check|verify/i.test(step);
+                let stepCls = 'bg-gray-100 text-gray-700 border-gray-200';
+                if (isFirst) stepCls = 'bg-blue-50 text-blue-700 border-blue-200';
+                if (isLast && isSink) stepCls = 'bg-red-50 text-red-700 border-red-200';
+                if (isSanitizer) stepCls = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                const label = isFirst ? '📥' : (isLast && isSink) ? '🔴' : isSanitizer ? '🛡' : '';
+                html += `<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[10px] font-mono ${stepCls}">${label ? '<span class="text-[8px]">' + label + '</span>' : ''}${escapeHtml(step)}</span>`;
+                if (!isLast) {
+                    html += `<i class="fas fa-chevron-right text-gray-300 text-[8px]"></i>`;
+                }
+            });
+            html += `</div>`;
         });
-        html += '</div>';
+        html += `</div></div>`;
+    }
+
+    // P2-7: Graph 关系序列化展示（P3-1 交互式引用关系图简化版）
+    if (graphData.relations && graphData.relations.length > 0) {
+        html += `<div class="mb-2"><div class="text-[11px] font-medium text-gray-700 mb-1">符号引用关系（${graphData.relations.length} 条）</div>`;
+        html += '<div class="overflow-x-auto"><table class="w-full text-[11px] border rounded-lg">';
+        html += '<thead class="bg-gray-50"><tr class="text-gray-500"><th class="text-left px-2 py-1">From</th><th class="text-left px-2 py-1">关系</th><th class="text-left px-2 py-1">To</th></tr></thead><tbody>';
+        graphData.relations.slice(0, 30).forEach(rel => {
+            const relTypeColor = {calls:'text-blue-600', implements:'text-emerald-600', contains:'text-gray-500', uses:'text-purple-600'}[rel.type] || 'text-gray-600';
+            html += `<tr class="border-t">
+                <td class="px-2 py-1 font-mono text-gray-700">${escapeHtml(rel.from || '')}</td>
+                <td class="px-2 py-1 ${relTypeColor}">${escapeHtml(rel.type || '')}</td>
+                <td class="px-2 py-1 font-mono text-gray-700">${escapeHtml(rel.to || '')}</td>
+            </tr>`;
+        });
+        if (graphData.relations.length > 30) {
+            html += `<tr><td colspan="3" class="px-2 py-1 text-[10px] text-gray-400 text-center">... 还有 ${graphData.relations.length - 30} 条关系 ...</td></tr>`;
+        }
+        html += '</tbody></table></div></div>';
+    }
+
+    // P2-2: 反向调用索引展示
+    if (report.reverse_call_index && Object.keys(report.reverse_call_index).length > 0) {
+        const entries = Object.entries(report.reverse_call_index);
+        html += `<div class="mb-2"><div class="text-[11px] font-medium text-gray-700 mb-1">反向调用索引（${entries.length} 个被调用函数）</div>`;
+        html += '<div style="display:flex; flex-direction:column; gap:4px;">';
+        entries.slice(0, 15).forEach(([target, callers]) => {
+            html += `<div style="padding:6px 8px; background:#f9fafb; border-radius:6px; border:1px solid #e5e7eb;">
+                <div style="font-size:11px; font-family:monospace; color:#1f2937;">${escapeHtml(target)}</div>
+                <div style="margin-top:2px; font-size:10px; color:#6b7280;">被调用者: ${callers.slice(0, 5).map(c => '<span style="font-family:monospace; color:#4f46e5;">' + escapeHtml(c) + '</span>').join(', ')}${callers.length > 5 ? ' ... +' + (callers.length - 5) : ''}</div>
+            </div>`;
+        });
+        if (entries.length > 15) {
+            html += `<div style="text-align:center; font-size:10px; color:#9ca3af;">... 还有 ${entries.length - 15} 个被调用函数 ...</div>`;
+        }
+        html += '</div></div>';
+    }
+
+    // P2-4: Import 依赖网络展示
+    if (report.import_dependency_net && report.import_dependency_net.length > 0) {
+        html += `<div class="mb-2"><div class="text-[11px] font-medium text-gray-700 mb-1">Import 依赖网络</div>`;
+        html += '<div style="display:flex; flex-direction:column; gap:4px;">';
+        report.import_dependency_net.forEach(dep => {
+            html += `<div style="padding:6px 8px; background:#f9fafb; border-radius:6px; border:1px solid #e5e7eb;">
+                <div style="font-size:11px; font-family:monospace; color:#1f2937;">${escapeHtml(dep.package || '')}</div>
+                <div style="margin-top:2px; font-size:10px; color:#6b7280;">依赖: ${(dep.dependencies || []).slice(0, 6).map(d => '<span style="font-family:monospace; color:#8b5cf6;">' + escapeHtml(d) + '</span>').join(', ')}${(dep.dependencies || []).length > 6 ? ' ... +' + ((dep.dependencies || []).length - 6) : ''}</div>
+            </div>`;
+        });
+        html += '</div></div>';
     }
 
     if (sub.error) {

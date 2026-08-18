@@ -69,6 +69,15 @@ func TestGinAdapter_Enrich(t *testing.T) {
 				Location:    parser.SourceLocation{File: "handler.go", LineStart: 10},
 			},
 		},
+		CallSites: []parser.UnifiedCallSite{
+			{
+				CallerFunc:  "SetupRoutes",
+				TargetFunc:  "GET",
+				Arguments:   []string{"\"/users\"", "handler.GetUsers"},
+				ReceiverVar: "r",
+				Location:    parser.SourceLocation{File: "handler.go", LineStart: 11},
+			},
+		},
 	}
 	g := graph.NewMemorySymbolGraph(1)
 

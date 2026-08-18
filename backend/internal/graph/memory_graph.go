@@ -222,6 +222,11 @@ func (g *MemorySymbolGraph) ingestAST(ast *parser.UnifiedAST) {
 			Signature:  buildSignature(fn),
 			IsExported: fn.IsExported,
 			Location:   fn.Location,
+			Properties: map[string]interface{}{
+				"receiver": fn.Receiver,
+				"security_role": fn.SecurityRole,
+				"complexity": fn.Complexity,
+			},
 		}
 		if node.ID == "" {
 			node.ID = fmt.Sprintf("func:%s:%d", ast.FilePath, fn.Location.LineStart)
@@ -239,6 +244,11 @@ func (g *MemorySymbolGraph) ingestAST(ast *parser.UnifiedAST) {
 			Package:    pkg,
 			IsExported: tp.IsExported,
 			Location:   tp.Location,
+			Properties: map[string]interface{}{
+				"kind":     tp.Kind,
+				"methods":  getMethodNames(tp.Methods),
+				"fields":   getFieldNames(tp.Fields),
+			},
 		}
 		g.AddNode(node)
 
@@ -276,9 +286,13 @@ func (g *MemorySymbolGraph) ingestAST(ast *parser.UnifiedAST) {
 			Package:  pkg,
 			Location: parser.SourceLocation{File: ep.File, LineStart: ep.Line},
 			Properties: map[string]interface{}{
-				"method":    ep.Method,
-				"auth":      ep.AuthRequired,
-				"framework": ep.Framework,
+				"method":                ep.Method,
+				"auth":                  ep.AuthRequired,
+				"authz_policy":          ep.AuthzPolicy,
+				"rate_limit":            ep.RateLimit,
+				"produces_content_type": ep.ProducesContentType,
+				"consumes_content_type": ep.ConsumesContentType,
+				"framework":             ep.Framework,
 			},
 		}
 		g.AddNode(node)
@@ -327,4 +341,22 @@ func buildSignature(fn parser.UnifiedFunction) string {
 		}
 	}
 	return fmt.Sprintf("%s(%s)", fn.Name, strings.Join(params, ", "))
+}
+
+// getMethodNames 提取方法名列表
+func getMethodNames(methods []parser.UnifiedMethodSignature) []string {
+	var names []string
+	for _, m := range methods {
+		names = append(names, m.Name)
+	}
+	return names
+}
+
+// getFieldNames 提取字段名列表
+func getFieldNames(fields []parser.UnifiedField) []string {
+	var names []string
+	for _, f := range fields {
+		names = append(names, f.Name)
+	}
+	return names
 }
