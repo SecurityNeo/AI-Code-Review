@@ -816,30 +816,56 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 			}
 		}
 
-		// P2-7: Graph 节点与关系序列化
+		// P2-7: Graph 节点与关系序列化（带大图风险控制）
+		const maxSerializedNodes = 2000
+		const maxSerializedRelations = 2000
 		if report.GraphData != nil {
 			g := reviewView.GetGraph()
 			if g != nil {
-				for _, node := range g.AllNodes() {
-					report.GraphData.Nodes = append(report.GraphData.Nodes, map[string]interface{}{
-						"id":          node.ID,
-						"type":        node.Type,
-						"name":        node.Name,
-						"language":    node.Language,
-						"file":        node.File,
-						"package":     node.Package,
-						"signature":   node.Signature,
-						"is_exported": node.IsExported,
-						"location":    node.Location,
-						"properties":  node.Properties,
-					})
+				allNodes := g.AllNodes()
+				allRelations := g.GetAllRelations()
+
+				// 节点序列化（限制数量）
+				nodeCount := len(allNodes)
+				if nodeCount > maxSerializedNodes {
+					report.GraphData.Nodes = []map[string]interface{}{{
+						"_warning": fmt.Sprintf("节点数 %d 超过上限 %d，仅展示统计", nodeCount, maxSerializedNodes),
+					}}
+				} else {
+					for _, node := range allNodes {
+						props := node.Properties
+						if props == nil {
+							props = map[string]interface{}{}
+						}
+						report.GraphData.Nodes = append(report.GraphData.Nodes, map[string]interface{}{
+							"id":          node.ID,
+							"type":        node.Type,
+							"name":        node.Name,
+							"language":    node.Language,
+							"file":        node.File,
+							"package":     node.Package,
+							"signature":   node.Signature,
+							"is_exported": node.IsExported,
+							"location":    node.Location,
+							"properties":  props,
+						})
+					}
 				}
-				for _, rel := range g.GetAllRelations() {
-					report.GraphData.Relations = append(report.GraphData.Relations, map[string]interface{}{
-						"from": rel.From,
-						"to":   rel.To,
-						"type": rel.Type,
-					})
+
+				// 关系序列化（限制数量）
+				relCount := len(allRelations)
+				if relCount > maxSerializedRelations {
+					report.GraphData.Relations = []map[string]interface{}{{
+						"_warning": fmt.Sprintf("关系数 %d 超过上限 %d，仅展示统计", relCount, maxSerializedRelations),
+					}}
+				} else {
+					for _, rel := range allRelations {
+						report.GraphData.Relations = append(report.GraphData.Relations, map[string]interface{}{
+							"from": rel.From,
+							"to":   rel.To,
+							"type": rel.Type,
+						})
+					}
 				}
 			}
 		}
@@ -935,6 +961,57 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 				}
 			}
 		}
+	}
+
+	// P2-2 补充：为 funcDetails 增加 called_by（调用者列表）
+	if report.ASTData != nil && len(report.ReverseCallIndex) > 0 {
+		for i := range report.ASTData.FileResults {
+			fr := &report.ASTData.FileResults[i]
+			for j := range fr.FunctionDetails {
+				fd := fr.FunctionDetails[j]
+				fnName, _ := fd["name"].(string)
+				if callers, ok := report.ReverseCallIndex[fnName]; ok && len(callers) > 0 {
+					fd["called_by"] = callers
+				}
+				fr.FunctionDetails[j] = fd
+			}
+		}
+	}
+
+	// P2-4 补充：构建 importedBy 反向索引（哪些文件导入了某包）
+	type FileImportRef struct {
+		File string `json:"file"`
+		Path string `json:"path"`
+	}
+	importedBy := make(map[string][]FileImportRef)
+	if report.ASTData != nil {
+		for _, fr := range report.ASTData.FileResults {
+			for _, imp := range fr.ImportList {
+				impPath, _ := imp["path"].(string)
+				if impPath != "" {
+					importedBy[impPath] = append(importedBy[impPath], FileImportRef{
+						File: fr.Path,
+						Path: impPath,
+					})
+				}
+			}
+		}
+	}
+	// 将 importedBy 添加到报告
+	if len(importedBy) > 0 {
+		var importedByList []map[string]interface{}
+		for pkg, refs := range importedBy {
+			var files []string
+			for _, ref := range refs {
+				files = append(files, ref.File)
+			}
+			importedByList = append(importedByList, map[string]interface{}{
+				"package":         pkg,
+				"imported_by":     files,
+				"imported_count":  len(files),
+			})
+		}
+		report.ImportDependencyNet = append(report.ImportDependencyNet, importedByList...)
 	}
 
 	// Summary

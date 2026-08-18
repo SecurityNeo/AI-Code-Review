@@ -139,13 +139,58 @@ func resolveVarPrefix(groupMap map[string]string, varName string) string {
 	return ""
 }
 
-// enrichAuthMiddleware 识别认证中间件
+// enrichAuthMiddleware 识别认证中间件与限流配置
 func (a *GinAdapter) enrichAuthMiddleware(ast *parser.UnifiedAST, g *graph.MemorySymbolGraph) {
 	for _, fn := range ast.Functions {
-		if strings.Contains(fn.BodySnippet, "Use(middleware.Auth") ||
-			strings.Contains(fn.BodySnippet, "Use(middleware.JWT") {
-			if n, ok := g.GetNode(fmt.Sprintf("func:%s:%d", ast.FilePath, fn.Location.LineStart)); ok {
-				n.Properties["auth_middleware"] = true
+		funcID := fmt.Sprintf("func:%s:%d", ast.FilePath, fn.Location.LineStart)
+		authRequired := false
+		// 检测认证中间件
+		authPatterns := []string{
+			"Use(middleware.Auth", "Use(middleware.JWT", "Use(middleware.OAuth",
+			"Use(jwt", "Use(auth", "jwt.Parse", "jwt.Validate",
+		}
+		for _, pat := range authPatterns {
+			if strings.Contains(fn.BodySnippet, pat) {
+				authRequired = true
+				break
+			}
+		}
+		// 在函数节点上标记
+		if n, ok := g.GetNode(funcID); ok {
+			n.Properties["auth_middleware"] = authRequired
+		}
+
+		// 在 endpoint 节点上标记（endpoint ID 基于 handler_func，需要匹配）
+		// 简化策略：遍历此文件的所有 endpoint 节点，若 endpoint 的 handler 在当前函数体内被注册，标记认证
+		for _, node := range g.AllNodes() {
+			if node.Type == graph.NodeEndpoint && node.File == ast.FilePath {
+				handler, _ := node.Properties["handler"].(string)
+				if handler != "" && strings.Contains(fn.BodySnippet, handler) {
+					node.Properties["auth_required"] = authRequired
+					if authRequired {
+						g.AddNode(node) // 更新节点
+					}
+				}
+			}
+		}
+	}
+
+	// 检测限流配置（基于全局变量或中间件注册）
+	rateLimitPatterns := []string{
+		"Use(middleware.RateLimit", "Use(ratelimit", "RateLimit(",
+		"throttle", "limiter",
+	}
+	for _, fn := range ast.Functions {
+		for _, pat := range rateLimitPatterns {
+			if strings.Contains(fn.BodySnippet, pat) {
+				// 找到此文件的所有 endpoint 标记限流
+				for _, node := range g.AllNodes() {
+					if node.Type == graph.NodeEndpoint && node.File == ast.FilePath {
+						node.Properties["rate_limit"] = "enabled"
+						g.AddNode(node)
+					}
+				}
+				break
 			}
 		}
 	}

@@ -514,8 +514,21 @@ func extractRelevantTaintFlows(ctx StageContext, findings []model.SecurityAuditF
 	for _, tf := range codeReport.TaintFlows {
 		if auditFiles[tf.SourceFile] || auditFiles[tf.SinkFile] {
 			key := tf.SinkFile
-			entry := fmt.Sprintf("【数据流上下文】\n- Source: %s (%s)\n", tf.SourceFunc, tf.SourceFile)
-			entry += fmt.Sprintf("  → SINK: %s (%s) [风险: %s]\n", tf.SinkFunc, tf.SinkFile, tf.RiskLevel)
+			var b strings.Builder
+			b.WriteString("【数据流上下文】\n")
+			b.WriteString(fmt.Sprintf("- Source: %s (%s)\n", tf.SourceFunc, tf.SourceFile))
+			// P1-1 升级：展示完整传播路径步骤
+			for i, step := range tf.Path {
+				if step != "" {
+					b.WriteString(fmt.Sprintf("  → Step %d: %s\n", i+1, step))
+				}
+			}
+			b.WriteString(fmt.Sprintf("  → SINK: %s (%s) [风险: %s]\n", tf.SinkFunc, tf.SinkFile, tf.RiskLevel))
+			// P1-2 升级：展示净化信息
+			if len(tf.Sanitizers) > 0 {
+				b.WriteString(fmt.Sprintf("  → 净化: %s [已净化 ✓]\n", strings.Join(tf.Sanitizers, ", ")))
+			}
+			entry := b.String()
 			if existing, ok := result[key]; ok {
 				result[key] = existing + "\n" + entry
 			} else {
