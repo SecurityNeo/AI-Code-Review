@@ -139,6 +139,8 @@ func convertFuncDecl(fset *token.FileSet, filePath string, src []byte, decl *ast
 			fn.BodySnippet = body
 		}
 		fn.Complexity = estimateComplexity(decl.Body)
+		fn.LOC = estimateLOC(decl.Body)
+		fn.NestedDepth = estimateNestedDepth(decl.Body)
 	}
 	fn.SecurityRole = inferSecurityRole(fn.Name, fn.Receiver)
 	return fn
@@ -445,6 +447,36 @@ func estimateComplexity(body *ast.BlockStmt) int {
 		return true
 	})
 	return complexity
+}
+
+// estimateLOC 估算函数体代码行数 (P2-5)
+func estimateLOC(body *ast.BlockStmt) int {
+	if body == nil || body.List == nil {
+		return 0
+	}
+	return len(body.List) + 2 // 粗略估算：语句数 + 大括号行
+}
+
+// estimateNestedDepth 估算函数体最大嵌套深度 (P2-5)
+func estimateNestedDepth(body *ast.BlockStmt) int {
+	if body == nil {
+		return 0
+	}
+	maxDepth := 0
+	currentDepth := 0
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n.(type) {
+		case *ast.IfStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.ForStmt, *ast.RangeStmt, *ast.SelectStmt:
+			currentDepth++
+			if currentDepth > maxDepth {
+				maxDepth = currentDepth
+			}
+		case *ast.BlockStmt:
+			// BlockStmt本身代表嵌套层级，如果是if/for等内部的block会在对应语句中处理
+		}
+		return true
+	})
+	return maxDepth
 }
 
 // extractTODOComments 扫描文件中的所有 TODO/FIXME/HACK/XXX 注释 (P2-3)

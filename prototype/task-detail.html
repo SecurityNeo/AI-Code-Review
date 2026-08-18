@@ -3362,19 +3362,24 @@ function renderCuContextExtractBody(sub, report) {
     if (allFuncs.length > 0) {
         html += `<div class="mt-3"><div class="text-[11px] font-medium text-gray-700 mb-1">函数签名（${allFuncs.length} 个）</div>`;
         html += '<div class="overflow-x-auto"><table class="w-full text-[11px] border rounded-lg">';
-        html += '<thead class="bg-gray-50"><tr class="text-gray-500"><th class="text-left px-2 py-1">函数</th><th class="text-left px-2 py-1">签名</th><th class="text-center px-2 py-1">角色</th><th class="text-right px-2 py-1">复杂度</th><th class="text-center px-2 py-1">导出</th><th class="text-right px-2 py-1">行号</th></tr></thead><tbody>';
+        html += '<thead class="bg-gray-50"><tr class="text-gray-500"><th class="text-left px-2 py-1">函数</th><th class="text-left px-2 py-1">签名</th><th class="text-center px-2 py-1">角色</th><th class="text-center px-2 py-1">污点角色</th><th class="text-right px-2 py-1">复杂度</th><th class="text-right px-2 py-1">LOC</th><th class="text-right px-2 py-1">嵌套</th><th class="text-center px-2 py-1">导出</th><th class="text-right px-2 py-1">行号</th></tr></thead><tbody>';
         allFuncs.forEach(fn => {
             const exportedBadge = fn.is_exported ? '<span class="text-[10px] px-1 rounded bg-emerald-50 text-emerald-600">exported</span>' : '<span class="text-[10px] px-1 rounded bg-gray-100 text-gray-400">internal</span>';
             const roleColor = {auth:'bg-blue-50 text-blue-600', encryption:'bg-purple-50 text-purple-600', sanitizer:'bg-emerald-50 text-emerald-600', validator:'bg-amber-50 text-amber-600', handler:'bg-indigo-50 text-indigo-600', service:'bg-gray-50 text-gray-600', data_access:'bg-cyan-50 text-cyan-600', other:'bg-gray-50 text-gray-400'}[fn.security_role] || 'bg-gray-50 text-gray-400';
             const roleBadge = fn.security_role ? `<span class="text-[10px] px-1 rounded ${roleColor}">${fn.security_role}</span>` : '-';
+            const taintColor = {source:'bg-red-50 text-red-600', sink:'bg-orange-50 text-orange-600', sanitizer:'bg-emerald-50 text-emerald-600', normal:'bg-gray-50 text-gray-400'}[fn.taint_role] || 'bg-gray-50 text-gray-400';
+            const taintBadge = fn.taint_role && fn.taint_role !== 'normal' ? `<span class="text-[10px] px-1 rounded ${taintColor}">${fn.taint_role}</span>` : '-';
             html += `<tr class="border-t"><td class="px-2 py-1 font-mono text-gray-700">${escapeHtml(fn.name || '')}</td>`;
             html += `<td class="px-2 py-1 font-mono text-gray-600">${escapeHtml(fn.signature || fn.name + '()')}</td>`;
             html += `<td class="px-2 py-1 text-center">${roleBadge}</td>`;
+            html += `<td class="px-2 py-1 text-center">${taintBadge}</td>`;
             html += `<td class="px-2 py-1 text-right ${fn.complexity > 10 ? 'text-orange-600 font-bold' : 'text-gray-400'}">${fn.complexity || '-'}</td>`;
+            html += `<td class="px-2 py-1 text-right text-gray-400">${fn.loc || '-'}</td>`;
+            html += `<td class="px-2 py-1 text-right text-gray-400">${fn.nested_depth || '-'}</td>`;
             html += `<td class="px-2 py-1 text-center">${exportedBadge}</td>`;
             html += `<td class="px-2 py-1 text-right text-gray-400">${fn.line || 0}</td></tr>`;
             if (fn.doc_comment) {
-                html += `<tr><td colspan="6" class="px-2 py-1 text-[10px] text-gray-500 bg-gray-50 italic border-t">${escapeHtml(fn.doc_comment)}</td></tr>`;
+                html += `<tr><td colspan="9" class="px-2 py-1 text-[10px] text-gray-500 bg-gray-50 italic border-t">${escapeHtml(fn.doc_comment)}</td></tr>`;
             }
         });
         html += '</tbody></table></div></div>';

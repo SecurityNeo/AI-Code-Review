@@ -466,6 +466,9 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 		},
 	}
 
+	// 【P2-1】声明 dfResult 到 if 外部作用域，以便后续标注使用
+	var dfResult *dataflow.DataFlowResult
+
 	// 文件列表和AST数据
 	for _, ast := range asts {
 		report.FileList = append(report.FileList, ast.FilePath)
@@ -505,13 +508,16 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 				"is_exported":   fn.IsExported,
 				"params":        paramList,
 				"returns":       fn.Returns,
-				"security_role": fn.SecurityRole,
-				"complexity":    fn.Complexity,
-			})
+			"security_role": fn.SecurityRole,
+			"complexity":    fn.Complexity,
+			"loc":           fn.LOC,
+			"nested_depth":  fn.NestedDepth,
+		})
 		}
 		var typeDetails []map[string]interface{}
 		for _, tp := range ast.Types {
 			var fieldDetails []map[string]interface{}
+			var fieldStrings []string
 			for _, f := range tp.Fields {
 				fieldDetails = append(fieldDetails, map[string]interface{}{
 					"name":        f.Name,
@@ -519,16 +525,18 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 					"tag":         f.Tag,
 					"is_exported": f.IsExported,
 				})
+				fieldStrings = append(fieldStrings, f.Name+" "+f.Type)
 			}
 			typeDetails = append(typeDetails, map[string]interface{}{
-				"name":        tp.Name,
-				"kind":        tp.Kind,
-				"fields":      fieldDetails,
-				"line":        tp.Location.LineStart,
-				"doc_comment": tp.DocComment,
-				"implements":  tp.Implements,
-				"extends":     tp.Extends,
-				"is_exported": tp.IsExported,
+				"name":          tp.Name,
+				"kind":          tp.Kind,
+				"fields":        fieldStrings, // 兼容旧格式：[]string
+				"field_details": fieldDetails, // 新增结构化格式
+				"line":          tp.Location.LineStart,
+				"doc_comment":   tp.DocComment,
+				"implements":    tp.Implements,
+				"extends":       tp.Extends,
+				"is_exported":   tp.IsExported,
 			})
 		}
 
@@ -808,10 +816,24 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 			}
 		}
 
-		// P2-7: Graph 关系序列化
+		// P2-7: Graph 节点与关系序列化
 		if report.GraphData != nil {
 			g := reviewView.GetGraph()
 			if g != nil {
+				for _, node := range g.AllNodes() {
+					report.GraphData.Nodes = append(report.GraphData.Nodes, map[string]interface{}{
+						"id":          node.ID,
+						"type":        node.Type,
+						"name":        node.Name,
+						"language":    node.Language,
+						"file":        node.File,
+						"package":     node.Package,
+						"signature":   node.Signature,
+						"is_exported": node.IsExported,
+						"location":    node.Location,
+						"properties":  node.Properties,
+					})
+				}
 				for _, rel := range g.GetAllRelations() {
 					report.GraphData.Relations = append(report.GraphData.Relations, map[string]interface{}{
 						"from": rel.From,
@@ -824,7 +846,7 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 
 		// 使用 v2 污点分析引擎（基于 AST，更精确）
 		engine := dataflow.NewEngineV2(lang, asts, reviewView.GetGraph())
-		dfResult := engine.Analyze()
+		dfResult = engine.Analyze()
 		report.TaintFlowCount = len(dfResult.Flows)
 		for _, flow := range dfResult.Flows {
 			var path []string
@@ -869,8 +891,47 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 						fmt.Sprintf("%s: %s", f.Category, strings.Join(chain, " \u2192 ")))
 				} else {
 					// 无传播路径时回退到两点式
-					report.GraphData.SecurityPaths = append(report.GraphData.SecurityPaths,
-						fmt.Sprintf("%s: %s \u2192 %s", f.Category, f.Source.Function, f.Sink.Function))
+			report.GraphData.SecurityPaths = append(report.GraphData.SecurityPaths,
+				fmt.Sprintf("%s: %s \u2192 %s", f.Category, f.Source.Function, f.Sink.Function))
+			}
+		}
+	}
+}
+
+	// P2-1 补充：基于 dfResult.Flows 为函数标注 Source / Sink / Sanitizer 角色
+	if dfResult != nil && len(dfResult.Flows) > 0 {
+		sourceSet := make(map[string]bool)
+		sinkSet := make(map[string]bool)
+		sanitizerSet := make(map[string]bool)
+		for _, flow := range dfResult.Flows {
+			if flow.Source.Function != "" {
+				sourceSet[flow.Source.Function] = true
+			}
+			if flow.Sink.Function != "" {
+				sinkSet[flow.Sink.Function] = true
+			}
+			for _, s := range flow.Sanitizers {
+				if s.Function != "" {
+					sanitizerSet[s.Function] = true
+				}
+			}
+		}
+		if report.ASTData != nil {
+			for i := range report.ASTData.FileResults {
+				fr := &report.ASTData.FileResults[i]
+				for j := range fr.FunctionDetails {
+					fd := fr.FunctionDetails[j]
+					fnName, _ := fd["name"].(string)
+					taintRole := "normal"
+					if sourceSet[fnName] {
+						taintRole = "source"
+					} else if sinkSet[fnName] {
+						taintRole = "sink"
+					} else if sanitizerSet[fnName] {
+						taintRole = "sanitizer"
+					}
+					fd["taint_role"] = taintRole
+					fr.FunctionDetails[j] = fd
 				}
 			}
 		}
@@ -1111,6 +1172,7 @@ type SymbolGraphResult struct {
 	RelationCount int                      `json:"relation_count"`
 	Frameworks    []string                 `json:"frameworks,omitempty"`
 	SecurityPaths []string                 `json:"security_paths,omitempty"`
+	Nodes         []map[string]interface{} `json:"nodes,omitempty"`     // P2-7 Graph 节点序列化
 	Relations     []map[string]interface{} `json:"relations,omitempty"` // P2-7 Graph 关系序列化
 	Error         string                   `json:"error,omitempty"`
 }

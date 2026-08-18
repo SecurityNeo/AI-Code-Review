@@ -49,6 +49,8 @@ type UnifiedFunction struct {
 	BodySnippet  string         `json:"body_snippet,omitempty"`
 	SecurityRole string         `json:"security_role,omitempty"` // P2-1 安全角色：auth | encryption | sanitizer | validator | handler | service | data_access | other
 	Complexity   int            `json:"complexity,omitempty"`    // P2-5 简单圈复杂度估算
+	LOC          int            `json:"loc,omitempty"`           // P2-5 函数体行数
+	NestedDepth  int            `json:"nested_depth,omitempty"`  // P2-5 最大嵌套深度
 	Location     SourceLocation `json:"location"`
 }
 
