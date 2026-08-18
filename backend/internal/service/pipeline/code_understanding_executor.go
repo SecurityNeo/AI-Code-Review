@@ -1158,14 +1158,15 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 
 	// Summary
 	report.Summary = CodeUnderstandingSummary{
-		TotalFiles:         report.TotalFiles,
-		TotalFunctions:     report.TotalFunctions,
-		TotalStructs:       report.TotalTypes,
-		TotalNodes:         report.SymbolGraphSummary.NodeCount,
-		TotalRelations:     report.SymbolGraphSummary.RelCount,
-		FrameworksDetected: getFrameworks(report.Endpoints),
-		SecurityPathCount:  report.TaintFlowCount,
-		IsGraphAvailable:   report.SymbolGraphSummary.NodeCount > 0,
+		TotalFiles:          report.TotalFiles,
+		TotalFunctions:      report.TotalFunctions,
+		TotalStructs:        report.TotalTypes,
+		TotalNodes:          report.SymbolGraphSummary.NodeCount,
+		TotalRelations:      report.SymbolGraphSummary.RelCount,
+		FrameworksDetected:  getFrameworks(report.Endpoints),
+		SecurityPathCount:   report.TaintFlowCount,
+		BreakingChangeCount: len(report.BreakingChanges),
+		IsGraphAvailable:    report.SymbolGraphSummary.NodeCount > 0,
 	}
 
 	// 自动降级：无图谱节点时降级为 AST Only
