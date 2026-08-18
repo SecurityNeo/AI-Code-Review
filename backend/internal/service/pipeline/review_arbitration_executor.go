@@ -89,17 +89,15 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 			symbolGraphData = &engine.SymbolGraphData{}
 			// 只提取变更相关节点（文件路径匹配当前变更集）避免 Token 过多
 			changedSet := make(map[string]bool)
+			for _, f := range codeReport.FileList {
+				changedSet[f] = true
+			}
+			// 补充 SecurityAudit 和 ImpactFindings 涉及的文件（可能包含不在 FileList 中的下游文件）
 			for _, ep := range agentData.SecurityAudit {
 				changedSet[ep.FilePath] = true
 			}
 			for _, ep := range agentData.ImpactFindings {
 				changedSet[ep.FilePath] = true
-			}
-			// 若 changedSet 为空，fallback 为所有 endpoint 文件
-			if len(changedSet) == 0 {
-				for _, ep := range codeReport.Endpoints {
-					changedSet[ep.File] = true
-				}
 			}
 			nodeCount := 0
 			const maxArbNodes = 100
