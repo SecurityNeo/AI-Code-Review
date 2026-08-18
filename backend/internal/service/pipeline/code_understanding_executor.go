@@ -509,9 +509,15 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 				"params":        paramList,
 				"returns":       fn.Returns,
 			"security_role": fn.SecurityRole,
+			// P2-5 复杂度：同时输出扁平字段（向后兼容）和嵌套 metrics（新格式）
 			"complexity":    fn.Complexity,
 			"loc":           fn.LOC,
 			"nested_depth":  fn.NestedDepth,
+			"metrics": map[string]interface{}{
+				"loc":          fn.LOC,
+				"cyclomatic":   fn.Complexity,
+				"nested_depth": fn.NestedDepth,
+			},
 		})
 		}
 		var typeDetails []map[string]interface{}
@@ -889,16 +895,17 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 					sanitizers = append(sanitizers, s.Function)
 				}
 			}
-			report.TaintFlows = append(report.TaintFlows, TaintFlowSummary{
-				SourceFunc: flow.Source.Function,
-				SourceFile: flow.Source.File,
-				SinkFunc:   flow.Sink.Function,
-				SinkFile:   flow.Sink.File,
-				Category:   flow.Category,
-				RiskLevel:  flow.RiskLevel,
-				Path:       path,
-				Sanitizers: sanitizers,
-			})
+		report.TaintFlows = append(report.TaintFlows, TaintFlowSummary{
+			SourceFunc:  flow.Source.Function,
+			SourceFile:  flow.Source.File,
+			SinkFunc:    flow.Sink.Function,
+			SinkFile:    flow.Sink.File,
+			Category:    flow.Category,
+			RiskLevel:   flow.RiskLevel,
+			Path:        path,
+			Sanitizers:  sanitizers,
+			IsSanitized: flow.IsSanitized,
+		})
 		}
 		if report.GraphData != nil {
 			report.GraphData.SecurityPaths = make([]string, 0, len(dfResult.Flows))
@@ -958,6 +965,51 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 					}
 					fd["taint_role"] = taintRole
 					fr.FunctionDetails[j] = fd
+				}
+			}
+		}
+	}
+
+	// P0-3: Breaking Changes 检测（对比基线图中的导出符号与当前 AST）
+	if reviewView != nil {
+		baselineNodes := reviewView.GetGraph().AllNodes()
+		// 收集基线中所有导出函数和类型的签名
+		baselineExported := make(map[string]bool)
+		for _, node := range baselineNodes {
+			if node.IsExported {
+				key := fmt.Sprintf("%s:%s:%s", node.Type, node.Name, node.File)
+				baselineExported[key] = true
+			}
+		}
+		// 收集当前 AST 中所有导出函数和类型
+		currentExported := make(map[string]bool)
+		if report.ASTData != nil {
+			for _, fr := range report.ASTData.FileResults {
+				for _, fd := range fr.FunctionDetails {
+					if isExp, _ := fd["is_exported"].(bool); isExp {
+						name, _ := fd["name"].(string)
+						key := fmt.Sprintf("function:%s:%s", name, fr.Path)
+						currentExported[key] = true
+					}
+				}
+				for _, td := range fr.TypeDetails {
+					if isExp, _ := td["is_exported"].(bool); isExp {
+						name, _ := td["name"].(string)
+						key := fmt.Sprintf("type:%s:%s", name, fr.Path)
+						currentExported[key] = true
+					}
+				}
+			}
+		}
+		// 检测被删除的导出符号
+		for key := range baselineExported {
+			if !currentExported[key] {
+				parts := strings.SplitN(key, ":", 3)
+				if len(parts) == 3 {
+					report.BreakingChanges = append(report.BreakingChanges, BreakingChange{
+						Description: fmt.Sprintf("导出%s `%s` 在变更中被删除或更名", parts[0], parts[1]),
+						File:        parts[2],
+					})
 				}
 			}
 		}
@@ -1050,6 +1102,16 @@ func formatReportText(report *CodeUnderstandingReport, changedFiles []string) st
 	var b strings.Builder
 	b.WriteString("## 基于AST与知识图谱的代码变更分析报告\n\n")
 
+	// P0-2: 运行模式状态
+	b.WriteString(fmt.Sprintf("- **运行模式**: %s (%s)\n", report.Mode, report.Status))
+
+	// P0-3: 图谱可用性
+	if report.Summary.IsGraphAvailable {
+		b.WriteString("- **知识图谱**: 可用\n")
+	} else {
+		b.WriteString("- **知识图谱**: 不可用（降级为 AST Only）\n")
+	}
+
 	// 按 changedFiles 重算统计数据（防御性检查 ASTData）
 	batchFileCount := 0
 	batchFuncCount := 0
@@ -1083,6 +1145,17 @@ func formatReportText(report *CodeUnderstandingReport, changedFiles []string) st
 		b.WriteString("\n### API端点 (变更相关)\n")
 		for _, ep := range changedEndpoints {
 			b.WriteString(fmt.Sprintf("- `%s %s` (%s:%d)\n", ep.Method, ep.Path, ep.File, ep.Line))
+			// P2-6: 端点安全元数据
+			var meta []string
+			if ep.AuthRequired {
+				meta = append(meta, "🔒 需认证")
+			}
+			if ep.RateLimit != "" {
+				meta = append(meta, "🚦 "+ep.RateLimit)
+			}
+			if len(meta) > 0 {
+				b.WriteString(fmt.Sprintf("  → %s\n", strings.Join(meta, ", ")))
+			}
 		}
 	}
 
@@ -1091,6 +1164,18 @@ func formatReportText(report *CodeUnderstandingReport, changedFiles []string) st
 		for _, tf := range changedFlows {
 			b.WriteString(fmt.Sprintf("- **%s**: %s (%s) → %s (%s) (风险: %s)\n",
 				tf.Category, tf.SourceFunc, tf.SourceFile, tf.SinkFunc, tf.SinkFile, tf.RiskLevel))
+			// P1-1: 展示完整传播路径步骤
+			if len(tf.Path) > 0 {
+				for i, step := range tf.Path {
+					if step != "" {
+						b.WriteString(fmt.Sprintf("  → Step %d: %s\n", i+1, step))
+					}
+				}
+			}
+			// P1-1: 展示净化信息
+			if tf.IsSanitized && len(tf.Sanitizers) > 0 {
+				b.WriteString(fmt.Sprintf("  → 净化: %s [已净化 ✓]\n", strings.Join(tf.Sanitizers, ", ")))
+			}
 		}
 	}
 
@@ -1112,6 +1197,63 @@ func formatReportText(report *CodeUnderstandingReport, changedFiles []string) st
 		b.WriteString("\n### 变更函数列表\n")
 		for _, fn := range batchFunctions {
 			b.WriteString(fmt.Sprintf("- %s\n", fn))
+		}
+	}
+
+	// P0-3: Breaking Changes
+	if len(report.BreakingChanges) > 0 {
+		b.WriteString("\n### Breaking Changes\n")
+		for _, bc := range report.BreakingChanges {
+			b.WriteString(fmt.Sprintf("- %s (%s:%d)\n", bc.Description, bc.File, bc.Line))
+		}
+	}
+
+	// 收集变更文件的 TODO 注释
+	var batchTODOs []map[string]interface{}
+	if report.ASTData != nil {
+		for _, fr := range report.ASTData.FileResults {
+			if changedSet[fr.Path] {
+				batchTODOs = append(batchTODOs, fr.TODOComments...)
+			}
+		}
+		if len(batchTODOs) > 0 {
+			b.WriteString(fmt.Sprintf("\n### TODO / FIXME / HACK 注释（%d 个）\n", len(batchTODOs)))
+			for _, td := range batchTODOs {
+				typ, _ := td["type"].(string)
+				file, _ := td["file"].(string)
+				line, _ := td["line"].(int)
+				fn, _ := td["function"].(string)
+				text, _ := td["text"].(string)
+				b.WriteString(fmt.Sprintf("- [%s] %s:%d (%s): %s\n", strings.ToUpper(typ), file, line, fn, text))
+			}
+		}
+	}
+
+	// P2-4: Import 依赖网络（变更文件相关的 import 统计）
+	if len(report.ImportDependencyNet) > 0 {
+		var changedImports []map[string]interface{}
+		for _, dep := range report.ImportDependencyNet {
+			if pkg, ok := dep["package"].(string); ok && pkg != "" {
+				changedImports = append(changedImports, dep)
+			}
+		}
+		if len(changedImports) > 0 {
+			b.WriteString(fmt.Sprintf("\n### Import 依赖网络（%d 个包）\n", len(changedImports)))
+			for _, dep := range changedImports {
+				pkg := dep["package"].(string)
+				cnt, _ := dep["imported_count"].(int)
+				b.WriteString(fmt.Sprintf("- `%s`（被 %d 个文件导入）\n", pkg, cnt))
+			}
+		}
+	}
+
+	// P3-2: 重复函数检测
+	if len(report.DuplicatedFunctions) > 0 {
+		b.WriteString(fmt.Sprintf("\n### 重复函数检测（%d 组）\n", len(report.DuplicatedFunctions)))
+		for _, dup := range report.DuplicatedFunctions {
+			sig, _ := dup["signature"].(string)
+			cnt, _ := dup["count"].(int)
+			b.WriteString(fmt.Sprintf("- %s（%d 处重复）\n", sig, cnt))
 		}
 	}
 
@@ -1212,7 +1354,15 @@ type CodeUnderstandingReport struct {
 	ReverseCallIndex    map[string][]string      `json:"reverse_call_index,omitempty"`     // P2-2 反向调用索引：被调用函数 -> 调用者列表
 	ImportDependencyNet []map[string]interface{} `json:"import_dependency_net,omitempty"` // P2-4 Import 依赖网络
 	DuplicatedFunctions []map[string]interface{} `json:"duplicated_functions,omitempty"`  // P3-2 代码重复检测
+	BreakingChanges     []BreakingChange         `json:"breaking_changes,omitempty"`        // P0-3 破坏性变更
 	Summary             CodeUnderstandingSummary `json:"summary"`
+}
+
+// BreakingChange 破坏性变更项
+type BreakingChange struct {
+	Description string `json:"description"`
+	File        string `json:"file"`
+	Line        int    `json:"line"`
 }
 
 // ContextExtractResult AST提取结果（子阶段1产出）
@@ -1290,14 +1440,15 @@ type EndpointSummary struct {
 
 // TaintFlowSummary 污点流摘要
 type TaintFlowSummary struct {
-	SourceFunc string   `json:"source_func"`
-	SourceFile string   `json:"source_file"`
-	SinkFunc   string   `json:"sink_func"`
-	SinkFile   string   `json:"sink_file"`
-	Category   string   `json:"category"`
-	RiskLevel  string   `json:"risk_level"`
-	Path       []string `json:"path,omitempty"`       // P1-1 结构化路径（步骤函数名列表）
-	Sanitizers []string `json:"sanitizers,omitempty"` // P1-1 净化函数列表
+	SourceFunc  string   `json:"source_func"`
+	SourceFile  string   `json:"source_file"`
+	SinkFunc    string   `json:"sink_func"`
+	SinkFile    string   `json:"sink_file"`
+	Category    string   `json:"category"`
+	RiskLevel   string   `json:"risk_level"`
+	Path        []string `json:"path,omitempty"`       // P1-1 结构化路径（步骤函数名列表）
+	Sanitizers  []string `json:"sanitizers,omitempty"` // P1-1 净化函数列表
+	IsSanitized bool     `json:"is_sanitized"`         // P1-1 是否已净化
 }
 
 // reviewViewAdapter 适配graph.ReviewView到dataflow.ReviewViewIface

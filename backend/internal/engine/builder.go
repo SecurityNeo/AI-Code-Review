@@ -980,16 +980,18 @@ func BuildArbitrationPrompt(ctx *PromptContext) (string, *llm.ResponseFormat, er
 	}
 
 	type arbitrationInputData struct {
-		AgentFindings     json.RawMessage `json:"agent_findings,omitempty"`
-		BatchResults      json.RawMessage `json:"batch_results"`
-		DimensionConfig   json.RawMessage `json:"dimension_config"`
-		DeductScoreConfig json.RawMessage `json:"deduct_score_config"`
+		AgentFindings     json.RawMessage         `json:"agent_findings,omitempty"`
+		BatchResults      json.RawMessage         `json:"batch_results"`
+		DimensionConfig   json.RawMessage         `json:"dimension_config"`
+		DeductScoreConfig json.RawMessage         `json:"deduct_score_config"`
+		SymbolGraph       *SymbolGraphData `json:"symbol_graph,omitempty"`
 	}
 	userData := arbitrationInputData{
 		AgentFindings:     agentJSON,
 		BatchResults:      batchJSON,
 		DimensionConfig:   dimJSON,
 		DeductScoreConfig: dscJSON,
+		SymbolGraph:       ctx.SymbolGraphData,
 	}
 	userJSON, err := json.MarshalIndent(userData, "", "  ")
 	if err != nil {

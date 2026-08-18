@@ -3586,6 +3586,7 @@ function renderCuSymbolGraphBody(sub, report) {
                 <i class="fas fa-arrow-right text-gray-300 text-[10px]"></i>
                 <span class="font-mono text-gray-700">${escapeHtml(tf.sink_func)}</span>
                 <span class="text-gray-400">${escapeHtml(tf.category || '')}</span>
+                ${tf.is_sanitized ? '<span class="inline-flex items-center px-1.5 py-0.5 rounded border text-[10px] font-medium bg-emerald-50 text-emerald-700 border-emerald-200" title="已净化"><i class="fas fa-shield-alt mr-0.5 text-[8px]"></i>已净化</span>' : ''}
             </div>`;
             // P1-1: 结构化路径步骤图
             if (tf.path && tf.path.length > 0) {
@@ -3749,6 +3750,24 @@ function renderCuReportMergeBody(sub, report) {
         <div class="text-lg font-bold text-indigo-700">${report.taint_flow_count || 0}</div>
         <div class="text-[10px] text-indigo-500">污点流</div>
     </div>`;
+    html += '</div>';
+
+    // P0-2: 运行模式状态指示器 + P0-3: 图谱可用性 / Breaking Changes
+    html += '<div class="flex items-center gap-2 mb-3">';
+    const modeBadge = {
+        full: { cls: 'bg-green-50 text-green-700 border-green-200', icon: 'fa-check-circle', text: 'Full' },
+        degraded: { cls: 'bg-amber-50 text-amber-700 border-amber-200', icon: 'fa-exclamation-triangle', text: 'Degraded' },
+        ast_only: { cls: 'bg-gray-50 text-gray-600 border-gray-200', icon: 'fa-code', text: 'AST Only' }
+    }[report.mode] || { cls: 'bg-gray-50 text-gray-600 border-gray-200', icon: 'fa-question-circle', text: report.mode || 'Unknown' };
+    html += `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-medium ${modeBadge.cls}"><i class="fas ${modeBadge.icon} text-[8px]"></i>${modeBadge.text}</span>`;
+    if (report.summary && report.summary.is_graph_available !== undefined) {
+        const graphOk = report.summary.is_graph_available;
+        html += `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-medium ${graphOk ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-gray-50 text-gray-400 border-gray-200'}"><i class="fas ${graphOk ? 'fa-project-diagram' : 'fa-times'} text-[8px]"></i>图谱 ${graphOk ? '可用' : '不可用'}</span>`;
+    }
+    const bcCount = (report.breaking_changes || []).length;
+    if (bcCount > 0) {
+        html += `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-medium bg-red-50 text-red-700 border-red-200"><i class="fas fa-bolt text-[8px]"></i>Breaking Changes: ${bcCount}</span>`;
+    }
     html += '</div>';
 
     // 代码分析报告（Markdown 渲染）
