@@ -123,6 +123,7 @@
                         <thead class="bg-gray-50 border-b">
                         <tr>
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">项目名称</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">开发语言</th>
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">项目地址</th>
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">AI审核模版</th>
                             <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">规则数</th>
@@ -479,6 +480,22 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                 .replace(/'/g, "&#039;");
         }
 
+        // 格式化开发语言为徽章样式
+        function formatLanguageBadge(lang) {
+            if (!lang) return '<span class="text-xs text-gray-400">-</span>';
+            const map = {
+                'golang':      { text: 'Go',         color: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
+                'go':          { text: 'Go',         color: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
+                'java':        { text: 'Java',       color: 'bg-orange-50 text-orange-700 border-orange-200' },
+                'python':      { text: 'Python',     color: 'bg-blue-50 text-blue-700 border-blue-200' },
+                'javascript':  { text: 'JavaScript', color: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+                'typescript':  { text: 'TypeScript', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+                'frontend':    { text: '前端',       color: 'bg-pink-50 text-pink-700 border-pink-200' },
+            };
+            const info = map[lang.toLowerCase()] || { text: lang, color: 'bg-gray-50 text-gray-600 border-gray-200' };
+            return `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${info.color}">${info.text}</span>`;
+        }
+
         function toggleTokenVisibility() {
             var input = document.getElementById('projectToken');
             var icon = document.getElementById('tokenEyeIcon');
@@ -537,7 +554,7 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             if (!tbody) return;
             
             if (projects.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" class="px-6 py-8 text-center text-gray-500">暂无数据</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" class="px-6 py-8 text-center text-gray-500">暂无数据</td></tr>';
                 return;
             }
 
@@ -556,6 +573,9 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                             </div>
                             <a href="project-detail.html?id=${p.id}" class="font-medium text-sm text-blue-600 hover:text-blue-700">${escapeHtml(p.name || '-')}</a>
                         </div>
+                    </td>
+                    <td class="px-6 py-4 text-center">
+                        ${formatLanguageBadge(p.language)}
                     </td>
                     <td class="px-6 py-4 text-sm text-gray-600 max-w-xs truncate" title="${escapeHtml(p.project_path || '')}">${escapeHtml(p.project_path || '-')}</td>
                     <td class="px-6 py-4 text-sm">${escapeHtml(p.template?.name || '-')}</td>
