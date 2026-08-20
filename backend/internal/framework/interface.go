@@ -43,11 +43,24 @@ func (r *AdapterRegistry) Register(adapter FrameworkAdapter) {
 func (r *AdapterRegistry) GetAdaptersForAST(ast *parser.UnifiedAST) []FrameworkAdapter {
 	var result []FrameworkAdapter
 	for _, a := range r.adapters {
-		if a.Language() == ast.Language && a.Detect(ast) {
+		if isLanguageCompatible(a.Language(), ast.Language) && a.Detect(ast) {
 			result = append(result, a)
 		}
 	}
 	return result
+}
+
+// isLanguageCompatible 判断适配器语言是否与 AST 语言兼容
+// TypeScript 是 JavaScript 的超集，允许使用 JavaScript 框架适配器
+func isLanguageCompatible(adapterLang, astLang string) bool {
+	if adapterLang == astLang {
+		return true
+	}
+	// TypeScript 文件允许匹配 JavaScript 适配器（.vue/.ts 文件中的 Express 路由等）
+	if astLang == "typescript" && adapterLang == "javascript" {
+		return true
+	}
+	return false
 }
 
 // GlobalAdapterRegistry 全局注册中心
