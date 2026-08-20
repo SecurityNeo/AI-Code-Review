@@ -2245,19 +2245,19 @@ const stageNameMap = {
 };
 
 const stageDescMap = {
-    'trigger_check': '检查触发条件与事件过滤',
-    'git_clone': '拉取完整仓库镜像',
-    'code_understanding': 'AST 提取 + 知识图谱 + 数据流分析',
-    'dependency_scan': '依赖漏洞扫描',
-    'secret_scan': '扫描 diff 中的密钥 / Token / 密码泄露',
-    'security_audit': 'SQL 注入 / unsafe eval / 反序列化检测',
-    'test_suggestion': '基于分支结构生成测试场景建议',
-    'impact_analysis': '识别 Breaking Change 和跨模块影响',
-    'batch_review_frame': 'LLM 结构化评审',
+    'trigger_check': '校验 Merge Request 事件类型与目标分支规则，决定是否触发完整评审流水线',
+    'git_clone': '全量克隆目标仓库并提取变更文件内容与 diff 上下文，为 AST 提取与符号图构建提供原始数据源',
+    'code_understanding': '基于 Tree-sitter（CGO）解析 AST，构建增量符号图与跨文件调用链；集成 Framework Adapter 识别 HTTP Endpoint、Sink 与 Auth 中间件；运行 Taint Engine 分析数据流路径与 Breaking Changes',
+    'dependency_scan': '扫描 go.mod / package.json / requirements.txt 等依赖文件，匹配已知 CVE 漏洞数据库',
+    'secret_scan': '基于多模式正则引擎扫描 diff 文本中的 API Key、私钥、Token、密码等高熵字符串',
+    'security_audit': '基于 Taint Engine 的数据流分析，检测 SQL 注入、命令注入、反序列化、不安全反射、路径遍历等 OWASP Top 10 漏洞模式；支持跨函数污点追踪',
+    'test_suggestion': '基于 AST 分析变更函数的分支结构与边界条件（null / 空值 / 越界 / 异常路径），生成结构化测试场景、输入数据与断言模板',
+    'impact_analysis': '对比变更前后符号签名（归一化处理），识别 Breaking Change；基于增量符号图分析上下游调用链影响范围；生成迁移步骤与受影响文件列表',
+    'batch_review_frame': '将变更文件按 Token 预算自动拆分为多个批次，并行调度 LLM 执行结构化评审；输出多维度评分与具体改进建议',
     'batch_plan': '智能分批 + Token 预估',
     'batch_summary': '批次结果汇总 + 最终报告生成',
-    'review_arbitration': 'Agent-LLM 协同去重、分类与汇总裁决',
-    'post_process': '发布 GitLab 评论 + 状态持久化',
+    'review_arbitration': '合并 Agent 自动发现与 LLM 评审结果；执行多源去重、维度评分归一化与加权总分计算；生成最终裁决报告与影响摘要',
+    'post_process': '将评审结果持久化至数据库，生成 GitLab MR 评论 Markdown，推送评审状态与统计看板数据',
 };
 
 function renderPipeline(data) {

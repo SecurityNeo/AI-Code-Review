@@ -16,17 +16,12 @@
         .sidebar-item.active { background-color: rgba(255,255,255,0.15); border-left: 3px solid #3b82f6; }
         .toast { position: fixed; top: 20px; right: 20px; z-index: 9999; animation: slideIn 0.3s ease; }
         @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-        .stage-item { transition: all 0.2s; }
-        .stage-item.disabled { opacity: 0.5; pointer-events: none; }
-        .trigger-events { transition: all 0.2s; }
-        .trigger-events.disabled { opacity: 0.4; pointer-events: none; }
-        .stage-timeout { transition: all 0.2s; }
-        .stage-timeout.disabled { opacity: 0.4; pointer-events: none; }
-        .stage-parallel-max { transition: all 0.2s; }
-        .stage-parallel-max.disabled { opacity: 0.4; pointer-events: none; }
-        .stage-item--error { border: 1px solid #f56c6c !important; }
-        .stage-item--error .stage-error-msg { color: #f56c6c; font-size: 12px; margin-top: 8px; display: flex; align-items: center; gap: 6px; }
-        .stage-item--dep-warning { border: 1px solid #e6a23c !important; }
+        .stage-card { position: relative; transition: all 0.2s; }
+        .stage-card.disabled { opacity: 0.5; pointer-events: none; }
+        .stage-config-section { padding: 8px 12px; background: #f9fafb; border-radius: 8px; }
+        .stage-card--error { border: 1px solid #f56c6c !important; }
+        .stage-card--error .stage-error-msg { color: #f56c6c; font-size: 12px; margin-top: 8px; display: flex; align-items: center; gap: 6px; }
+        .stage-card--dep-warning { border: 1px solid #e6a23c !important; }
         .stage-dep-badge {
             position: absolute; top: 8px; right: 8px; width: 22px; height: 22px;
             background: #f56c6c; border-radius: 50%; display: flex; align-items: center;
@@ -42,7 +37,6 @@
             content: ''; position: absolute; top: -5px; right: 8px;
             border-width: 5px; border-style: solid; border-color: transparent transparent #333 transparent;
         }
-        .stage-item { position: relative; transition: all 0.2s; }
     </style>
 </head>
 <body class="bg-gray-50 font-sans">
@@ -285,6 +279,53 @@ const STAGE_DEFS = [
     }
 ];
 
+const STAGE_ICON_MAP = {
+    'trigger_check': 'fa-filter',
+    'git_clone': 'fa-code-branch',
+    'code_understanding': 'fa-brain',
+    'dependency_scan': 'fa-shield-virus',
+    'secret_scan': 'fa-key',
+    'security_audit': 'fa-user-shield',
+    'test_suggestion': 'fa-vial',
+    'impact_analysis': 'fa-project-diagram',
+    'batch_review_frame': 'fa-robot',
+    'review_arbitration': 'fa-gavel',
+    'post_process': 'fa-paper-plane'
+};
+
+const PIPELINE_GROUPS = [
+    {
+        title: '触发与准备',
+        desc: '流水线入口控制与代码环境准备',
+        stages: ['trigger_check', 'git_clone']
+    },
+    {
+        title: '深度理解',
+        desc: 'AST 语义提取、符号图构建与框架识别',
+        stages: ['code_understanding']
+    },
+    {
+        title: '安全检测',
+        desc: '依赖漏洞扫描、密钥泄露检测与安全审计',
+        stages: ['dependency_scan', 'secret_scan', 'security_audit']
+    },
+    {
+        title: '质量与影响',
+        desc: '测试场景生成与变更影响范围分析',
+        stages: ['test_suggestion', 'impact_analysis']
+    },
+    {
+        title: 'AI 评审',
+        desc: 'LLM 并行结构化评审',
+        stages: ['batch_review_frame']
+    },
+    {
+        title: '裁决与发布',
+        desc: '多源结果去重裁决与评审报告发布',
+        stages: ['review_arbitration', 'post_process']
+    }
+];
+
 const TRIGGER_EVENT_DEFS = [
     { code: 'merge_request_open',   name: 'MR 创建时',   desc: 'Merge Request open' },
     { code: 'merge_request_update', name: 'MR 更新时',   desc: 'Merge Request update（代码推送）' },
@@ -333,199 +374,190 @@ function renderStages(enabledStages, stageConfigs, triggerEvents) {
     const enabledSet = new Set(enabledStages || []);
     const triggerEventSet = new Set();
     const rawEvents = triggerEvents || TRIGGER_EVENT_DEFS.map(e => e.code);
-    // 兼容旧数据：merge_request 总开关包含所有子事件
     if (rawEvents.includes('merge_request')) {
         TRIGGER_EVENT_DEFS.forEach(e => triggerEventSet.add(e.code));
     } else {
         rawEvents.forEach(e => triggerEventSet.add(e));
     }
 
-    container.innerHTML = STAGE_DEFS.map(stage => {
-        const isEnabled = enabledSet.has(stage.code);
-        const isDisabled = !stage.removable;
+    const stageDefMap = {};
+    STAGE_DEFS.forEach(s => { stageDefMap[s.code] = s; });
 
-        let triggerEventsHtml = '';
-        if (stage.triggerEvents) {
-            triggerEventsHtml = `
-                <div class="mt-2 pl-6 trigger-events ${isEnabled ? '' : 'disabled'}" id="triggerEventOptions">
-                    <div class="text-xs text-gray-500 mb-1.5">允许触发以下事件（多选）：</div>
-                    <div class="flex flex-wrap gap-2">
-                        ${TRIGGER_EVENT_DEFS.map(ev => `
-                            <label class="cursor-pointer inline-flex items-center gap-1.5 px-2.5 py-1.5 border rounded-lg text-xs ${triggerEventSet.has(ev.code) ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 bg-white hover:bg-gray-50'}">
-                                <input type="checkbox" 
-                                    name="trigger_event" 
-                                    value="${ev.code}" 
-                                    ${triggerEventSet.has(ev.code) ? 'checked' : ''} 
-                                    class="w-3.5 h-3.5 text-blue-600 rounded"
-                                    onchange="this.checked ? this.parentElement.classList.add('border-blue-500','bg-blue-50','text-blue-700') : this.parentElement.classList.remove('border-blue-500','bg-blue-50','text-blue-700'); this.parentElement.classList.add('border-gray-200','text-gray-600','bg-white');">
-                                <span class="font-medium">${ev.name}</span>
-                            </label>
-                            <span class="text-[10px] text-gray-400 -ml-1.5 mt-0.5 w-full pl-0 pb-1 hidden">${ev.desc}</span>
-                        `).join('')}
-                    </div>
-                </div>
-            `;
-        }
-
-        // 超时时间输入
-        const stageCfg = (stageConfigs && stageConfigs[stage.code]) || {};
-        const timeoutVal = stageCfg.timeout || stage.timeout || 300;
-        let timeoutHtml = `
-            <div class="mt-2 pl-6 stage-timeout ${isEnabled ? '' : 'disabled'}" data-stage="${stage.code}">
-                <div class="text-xs text-gray-500 mb-1.5">超时时间：</div>
-                <div class="flex items-center gap-2">
-                    <input type="number" 
-                        id="timeout_${stage.code}" 
-                        value="${timeoutVal}" 
-                        min="5" max="3600" 
-                        class="w-20 px-2 py-1.5 border rounded text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                        onchange="clampTimeout(this)">
-                    <span class="text-xs text-gray-400">秒</span>
-                </div>
+    container.innerHTML = PIPELINE_GROUPS.map((group) => {
+        const groupStages = group.stages.map(code => stageDefMap[code]).filter(Boolean);
+        if (groupStages.length === 0) return '';
+        const stageCards = groupStages.map(stage => renderStageCard(stage, enabledSet, triggerEventSet, stageConfigs)).join('');
+        return `<div class="mb-8">
+            <div class="flex items-center gap-2 mb-1">
+                <div class="w-1 h-5 bg-gradient-to-b from-blue-500 to-indigo-500 rounded-full"></div>
+                <h3 class="text-sm font-semibold text-gray-800">${group.title}</h3>
+                <span class="text-[11px] text-gray-400 ml-1">${group.desc}</span>
             </div>
-        `;
-
-        // batch_review_frame 专用：最大 diff 文件数 + 每批 token 上限
-        let batchReviewConfigHtml = '';
-        if (stage.batchConfig) {
-            const maxDiffVal = stageCfg.max_diff_files || 50;
-            const maxTokensVal = stageCfg.max_tokens_per_batch || 100000;
-            batchReviewConfigHtml = `
-                <div class="mt-2 pl-6 stage-batch-config ${isEnabled ? '' : 'disabled'}" data-stage="${stage.code}">
-                    <div class="text-xs text-gray-500 mb-1.5">分批评审阈值：</div>
-                    <div class="flex items-center gap-3">
-                        <div class="flex items-center gap-1.5">
-                            <input type="number" 
-                                id="max_diff_files_${stage.code}" 
-                                value="${maxDiffVal}" 
-                                min="1" max="500" 
-                                class="w-20 px-2 py-1.5 border rounded text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none">
-                            <span class="text-xs text-gray-400">文件</span>
-                        </div>
-                        <div class="flex items-center gap-1.5">
-                            <input type="number" 
-                                id="max_tokens_per_batch_${stage.code}" 
-                                value="${maxTokensVal}" 
-                                min="1000" max="2000000" 
-                                class="w-24 px-2 py-1.5 border rounded text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none">
-                            <span class="text-xs text-gray-400">token/批</span>
-                        </div>
-                    </div>
-                    <div class="mt-2 p-2 bg-blue-50 rounded border border-blue-100 text-[11px] text-blue-700 leading-relaxed">
-                        <div class="font-medium mb-1">💡 分批评审说明：</div>
-                        <div>• 每批可用 token = 总 token - 固定开销（系统指令、评审规则、AST 上下文、输出格式 Schema 等）。</div>
-                        <div>• commits/MR 标题等信息仅在最末一批注入，不会占用前面批次的配额。</div>
-                        <div>• 当单文件变更量过大时，系统会自动截断并附加提示「diff较大，当前批次仅展示部分内容」。</div>
-                    </div>
-                </div>
-            `;
-        }
-
-        // 扩展智能体专用：LLM 增强超时
-        let llmEnhanceHtml = '';
-        if (stage.llmEnhanceTimeout) {
-            const letVal = stageCfg.llm_enhance_timeout || stage.llmEnhanceTimeout;
-            llmEnhanceHtml = `
-                <div class="mt-2 pl-6 stage-llm-enhance ${isEnabled ? '' : 'disabled'}" data-stage="${stage.code}">
-                    <div class="text-xs text-gray-500 mb-1.5">LLM 增强超时：</div>
-                    <div class="flex items-center gap-2">
-                        <input type="number" 
-                            id="llm_enhance_timeout_${stage.code}" 
-                            value="${letVal}" 
-                            min="5" max="1200" 
-                            class="w-20 px-2 py-1.5 border rounded text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                            onchange="clampTimeout(this)">
-                        <span class="text-xs text-gray-400">秒（LLM 验证/生成超时，0 表示关闭 LLM 增强）</span>
-                    </div>
-                </div>
-            `;
-        }
-        let parallelMaxHtml = '';
-        if (stage.parallelMax) {
-            const pmVal = stageCfg.parallel_max || 3;
-            parallelMaxHtml = `
-                <div class="mt-2 pl-6 stage-parallel-max ${isEnabled ? '' : 'disabled'}" data-stage="${stage.code}">
-                    <div class="text-xs text-gray-500 mb-1.5">每波最多并行批次：</div>
-                    <div class="flex items-center gap-2">
-                        <input type="number" 
-                            id="parallel_max_${stage.code}" 
-                            value="${pmVal}" 
-                            min="1" max="10" 
-                            class="w-20 px-2 py-1.5 border rounded text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                            onchange="clampParallelMax(this)">
-                        <span class="text-xs text-gray-400">批次（1-10）</span>
-                    </div>
-                </div>
-            `;
-        }
-
-        let subTimeoutsHtml = '';
-        if (stage.subTimeouts && Array.isArray(stage.subTimeouts)) {
-            const stHtml = stage.subTimeouts.map(st => {
-                const val = (stageCfg[st.key] !== undefined) ? stageCfg[st.key] : st.default;
-                return `<div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 10px; background:#f9fafb; border-radius:6px;">
-                    <div>
-                        <div style="font-size:12px; font-weight:500; color:#374151;">${st.label}</div>
-                        <div style="font-size:11px; color:#9ca3af;">${st.desc}</div>
-                    </div>
-                    <div style="display:flex; align-items:center; gap:4px;">
-                        <input type="number" id="${st.key}" value="${val}" min="1" max="300"
-                            class="w-16 px-2 py-1 border rounded text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                            onchange="clampTimeout(this)">
-                        <span style="font-size:11px; color:#9ca3af;">秒</span>
-                    </div>
-                </div>`;
-            }).join('');
-            subTimeoutsHtml = `
-                <div class="mt-2 pl-6 sub-timeouts ${isEnabled ? '' : 'disabled'}" data-stage="${stage.code}">
-                    <div class="text-xs text-gray-500 mb-1.5">子阶段超时配置：</div>
-                    <div style="display:flex; flex-direction:column; gap:6px;">
-                        ${stHtml}
-                    </div>
-                </div>
-            `;
-        }
-
-        return `
-            <div class="stage-item border rounded-lg p-4 ${isEnabled ? 'bg-white' : 'bg-gray-50'}" data-code="${stage.code}">
-                <div class="flex items-start gap-3">
-                    <div class="pt-0.5">
-                        <input type="checkbox" 
-                            id="stage_${stage.code}" 
-                            ${isEnabled ? 'checked' : ''} 
-                            ${isDisabled ? 'disabled' : ''}
-                            onchange="toggleStage('${stage.code}')"
-                            class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer'}">
-                    </div>
-                    <div class="flex-1">
-                        <label for="stage_${stage.code}" class="flex items-center gap-2 cursor-pointer ${isDisabled ? 'cursor-not-allowed' : ''}">
-                            <span class="font-medium text-sm text-gray-800">${stage.name}</span>
-                            <span class="text-xs text-gray-400">${stage.desc}</span>
-                            ${stage.warning ? '<i class="fas fa-exclamation-triangle text-amber-500 text-xs" title="不推荐关闭"></i>' : ''}
-                            ${isDisabled ? '<span class="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">不可禁用</span>' : ''}
-                        </label>
-                        ${stage.impact ? `<p class="text-xs text-gray-400 mt-1">${stage.impact}</p>` : ''}
-                        ${STAGE_DEPENDENCIES[stage.code] ? `
-                        <div class="flex flex-wrap gap-1.5 mt-2">
-                            <span class="text-[10px] text-gray-400">依赖：</span>
-                            ${STAGE_DEPENDENCIES[stage.code].map(dep => `
-                                <span class="text-[10px] px-1.5 py-0.5 rounded border ${enabledSet.has(dep) ? 'border-green-200 bg-green-50 text-green-700' : 'border-red-200 bg-red-50 text-red-700'}">${STAGE_NAMES[dep] || dep}</span>
-                            `).join('')}
-                        </div>` : ''}
-                        ${triggerEventsHtml}
-                        ${timeoutHtml}
-                        ${parallelMaxHtml}
-                        ${batchReviewConfigHtml}
-                        ${llmEnhanceHtml}
-                        ${subTimeoutsHtml}
-                    </div>
-                </div>
-            </div>
-        `;
+            <div class="ml-3 pl-3 border-l-2 border-gray-100 space-y-3">${stageCards}</div>
+        </div>`;
     }).join('');
 }
 
-// ========== 依赖校验 ==========
+function renderStageCard(stage, enabledSet, triggerEventSet, stageConfigs) {
+    const isEnabled = enabledSet.has(stage.code);
+    const isDisabled = !stage.removable;
+    const stageCfg = (stageConfigs && stageConfigs[stage.code]) || {};
+    const icon = STAGE_ICON_MAP[stage.code] || 'fa-circle';
+    const iconColor = isEnabled ? 'text-blue-600 bg-blue-50' : 'text-gray-400 bg-gray-100';
+
+    let triggerEventsSection = '';
+    if (stage.triggerEvents) {
+        triggerEventsSection = `<div class="stage-config-section">
+            <div class="text-[11px] font-medium text-gray-500 mb-1.5">允许触发以下事件（多选）</div>
+            <div class="flex flex-wrap gap-2">${TRIGGER_EVENT_DEFS.map(ev => `
+                <label class="cursor-pointer inline-flex items-center gap-1 px-2 py-1 border rounded-md text-[11px] ${triggerEventSet.has(ev.code) ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}">
+                    <input type="checkbox" name="trigger_event" value="${ev.code}" ${triggerEventSet.has(ev.code) ? 'checked' : ''} class="w-3 h-3 text-blue-600 rounded" onchange="toggleTriggerStyle(this)">
+                    <span>${ev.name}</span>
+                </label>`).join('')}</div>
+        </div>`;
+    }
+
+    const timeoutVal = stageCfg.timeout || stage.timeout || 300;
+    const timeoutSection = `<div class="stage-config-section">
+        <div class="flex items-center justify-between">
+            <span class="text-[11px] text-gray-500">超时时间</span>
+            <div class="flex items-center gap-1">
+                <input type="number" id="timeout_${stage.code}" value="${timeoutVal}" min="5" max="3600" class="w-16 px-1.5 py-1 border rounded text-[11px] text-right focus:ring-1 focus:ring-blue-500 focus:outline-none" onchange="clampTimeout(this)">
+                <span class="text-[11px] text-gray-400">秒</span>
+            </div>
+        </div>
+    </div>`;
+
+    let batchReviewSection = '';
+    if (stage.batchConfig) {
+        const maxDiffVal = stageCfg.max_diff_files || 50;
+        const maxTokensVal = stageCfg.max_tokens_per_batch || 100000;
+        batchReviewSection = `<div class="stage-config-section">
+            <div class="text-[11px] font-medium text-gray-500 mb-1.5">分批评审阈值</div>
+            <div class="flex items-center gap-4">
+                <div class="flex items-center gap-1">
+                    <input type="number" id="max_diff_files_${stage.code}" value="${maxDiffVal}" min="1" max="500" class="w-14 px-1.5 py-1 border rounded text-[11px] text-right focus:ring-1 focus:ring-blue-500 focus:outline-none">
+                    <span class="text-[11px] text-gray-400">文件/批</span>
+                </div>
+                <div class="flex items-center gap-1">
+                    <input type="number" id="max_tokens_per_batch_${stage.code}" value="${maxTokensVal}" min="1000" max="2000000" class="w-20 px-1.5 py-1 border rounded text-[11px] text-right focus:ring-1 focus:ring-blue-500 focus:outline-none">
+                    <span class="text-[11px] text-gray-400">token/批</span>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    let llmEnhanceSection = '';
+    if (stage.llmEnhanceTimeout) {
+        const letVal = stageCfg.llm_enhance_timeout || stage.llmEnhanceTimeout;
+        llmEnhanceSection = `<div class="stage-config-section">
+            <div class="flex items-center justify-between">
+                <span class="text-[11px] text-gray-500">LLM 增强超时</span>
+                <div class="flex items-center gap-1">
+                    <input type="number" id="llm_enhance_timeout_${stage.code}" value="${letVal}" min="0" max="1200" class="w-16 px-1.5 py-1 border rounded text-[11px] text-right focus:ring-1 focus:ring-blue-500 focus:outline-none" onchange="clampTimeout(this)">
+                    <span class="text-[11px] text-gray-400">秒</span>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    let parallelMaxSection = '';
+    if (stage.parallelMax) {
+        const pmVal = stageCfg.parallel_max || 3;
+        parallelMaxSection = `<div class="stage-config-section">
+            <div class="flex items-center justify-between">
+                <span class="text-[11px] text-gray-500">每波最多并行批次</span>
+                <div class="flex items-center gap-1">
+                    <input type="number" id="parallel_max_${stage.code}" value="${pmVal}" min="1" max="10" class="w-14 px-1.5 py-1 border rounded text-[11px] text-right focus:ring-1 focus:ring-blue-500 focus:outline-none" onchange="clampParallelMax(this)">
+                    <span class="text-[11px] text-gray-400">批次</span>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    let subTimeoutsSection = '';
+    if (stage.subTimeouts && Array.isArray(stage.subTimeouts)) {
+        const stHtml = stage.subTimeouts.map(st => {
+            const val = (stageCfg[st.key] !== undefined) ? stageCfg[st.key] : st.default;
+            return `<div class="flex items-center justify-between py-1">
+                <div><div class="text-[11px] font-medium text-gray-600">${st.label}</div><div class="text-[10px] text-gray-400">${st.desc}</div></div>
+                <div class="flex items-center gap-1">
+                    <input type="number" id="${st.key}" value="${val}" min="1" max="300" class="w-14 px-1.5 py-1 border rounded text-[11px] text-right focus:ring-1 focus:ring-blue-500 focus:outline-none" onchange="clampTimeout(this)">
+                    <span class="text-[10px] text-gray-400">秒</span>
+                </div>
+            </div>`;
+        }).join('');
+        subTimeoutsSection = `<div class="stage-config-section"><div class="text-[11px] font-medium text-gray-500 mb-1.5">子阶段超时配置</div><div class="space-y-1">${stHtml}</div></div>`;
+    }
+
+    let depsSection = '';
+    if (STAGE_DEPENDENCIES[stage.code]) {
+        const deps = STAGE_DEPENDENCIES[stage.code].map(dep => {
+            const isDepEnabled = enabledSet.has(dep);
+            return `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] border ${isDepEnabled ? 'border-green-200 bg-green-50 text-green-700' : 'border-red-200 bg-red-50 text-red-700'}"><i class="fas fa-${isDepEnabled ? 'check' : 'times'} text-[8px]"></i>${STAGE_NAMES[dep] || dep}</span>`;
+        }).join('');
+        depsSection = `<div class="flex flex-wrap items-center gap-1.5 mt-2"><span class="text-[10px] text-gray-400">依赖</span>${deps}</div>`;
+    }
+
+    let impactSection = '';
+    if (stage.impact) {
+        impactSection = `<div class="mt-2 text-[11px] text-gray-500 bg-amber-50 border border-amber-100 rounded-md px-2.5 py-1.5"><i class="fas fa-info-circle text-amber-500 mr-1"></i>${stage.impact}</div>`;
+    }
+
+    const configContent = [triggerEventsSection, timeoutSection, batchReviewSection, llmEnhanceSection, parallelMaxSection, subTimeoutsSection, depsSection, impactSection].filter(Boolean).join('');
+    const hasConfig = Boolean(configContent);
+
+    return `<div class="stage-card rounded-xl border ${isEnabled ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50/60'} transition-all hover:shadow-sm" data-code="${stage.code}">
+        <div class="p-4">
+            <div class="flex items-start gap-3">
+                <div class="w-9 h-9 rounded-lg ${iconColor} flex items-center justify-center flex-shrink-0 mt-0.5"><i class="fas ${icon} text-sm"></i></div>
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="text-sm font-semibold text-gray-800">${stage.name}</span>
+                                ${isDisabled ? '<span class="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded flex-shrink-0">不可禁用</span>' : ''}
+                                ${stage.warning && !isDisabled ? '<i class="fas fa-exclamation-triangle text-amber-500 text-xs flex-shrink-0" title="不推荐关闭"></i>' : ''}
+                            </div>
+                            <p class="text-xs text-gray-500 leading-relaxed">${stage.desc}</p>
+                        </div>
+                        <div class="flex items-center gap-2 flex-shrink-0">
+                            ${hasConfig ? `<button type="button" onclick="event.stopPropagation(); toggleStageConfig('${stage.code}')" class="text-[11px] text-gray-400 hover:text-blue-600 transition-colors px-2 py-1 rounded hover:bg-gray-50" id="configToggle_${stage.code}"><i class="fas fa-cog mr-0.5"></i>配置</button>` : ''}
+                            <div class="relative inline-flex items-center">
+                                <input type="checkbox" id="stage_${stage.code}" ${isEnabled ? 'checked' : ''} ${isDisabled ? 'disabled' : ''} onchange="toggleStage('${stage.code}')" class="sr-only peer" role="switch">
+                                <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[\'\'] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600 ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        ${hasConfig ? `<div class="stage-config-panel hidden px-4 pb-4" id="configPanel_${stage.code}"><div class="pt-3 border-t border-gray-100 space-y-3">${configContent}</div></div>` : ''}
+    </div>`;
+}
+
+function toggleStageConfig(code) {
+    const panel = document.getElementById('configPanel_' + code);
+    const btn = document.getElementById('configToggle_' + code);
+    if (!panel || !btn) return;
+    panel.classList.toggle('hidden');
+    const isOpen = !panel.classList.contains('hidden');
+    btn.innerHTML = isOpen ? '<i class="fas fa-chevron-up mr-0.5"></i>收起' : '<i class="fas fa-cog mr-0.5"></i>配置';
+    btn.classList.toggle('text-blue-600', isOpen);
+}
+
+function toggleTriggerStyle(el) {
+    const label = el.parentElement;
+    if (el.checked) {
+        label.classList.remove('border-gray-200', 'text-gray-500', 'hover:bg-gray-50');
+        label.classList.add('border-blue-500', 'bg-blue-50', 'text-blue-700');
+    } else {
+        label.classList.remove('border-blue-500', 'bg-blue-50', 'text-blue-700');
+        label.classList.add('border-gray-200', 'text-gray-500', 'hover:bg-gray-50');
+    }
+}
+
+
 let currentViolations = [];
 
 function recalcViolations() {
@@ -550,8 +582,8 @@ function recalcViolations() {
 
 function renderViolationBadges() {
     // 清除所有旧状态
-    document.querySelectorAll('.stage-item').forEach(el => {
-        el.classList.remove('stage-item--error', 'stage-item--dep-warning');
+    document.querySelectorAll('.stage-card').forEach(el => {
+        el.classList.remove('stage-card--error', 'stage-card--dep-warning');
         const badge = el.querySelector('.stage-dep-badge');
         if (badge) badge.remove();
         const msg = el.querySelector('.stage-error-msg');
@@ -567,9 +599,9 @@ function renderViolationBadges() {
 
     for (const v of currentViolations) {
         // 下游智能体自身标红
-        const stageEl = document.querySelector('.stage-item[data-code="' + v.stage + '"]');
+        const stageEl = document.querySelector('.stage-card[data-code="' + v.stage + '"]');
         if (stageEl) {
-            stageEl.classList.add('stage-item--error');
+            stageEl.classList.add('stage-card--error');
             // 在卡片内追加错误文案（如果不存在）
             if (!stageEl.querySelector('.stage-error-msg')) {
                 const msgDiv = document.createElement('div');
@@ -580,9 +612,9 @@ function renderViolationBadges() {
         }
         // 被依赖但未开启的上游智能体：边框标黄 + 右上角感叹号
         for (const dep of v.missing_deps) {
-            const depEl = document.querySelector('.stage-item[data-code="' + dep + '"]');
+            const depEl = document.querySelector('.stage-card[data-code="' + dep + '"]');
             if (depEl && !enabledSet.has(dep)) {
-                depEl.classList.add('stage-item--dep-warning');
+                depEl.classList.add('stage-card--dep-warning');
                 if (!depEl.querySelector('.stage-dep-badge')) {
                     const stageName = STAGE_NAMES[v.stage] || v.stage;
                     const badge = document.createElement('div');
@@ -599,7 +631,7 @@ function renderViolationBadges() {
 function toggleStage(code) {
     const checkbox = document.getElementById('stage_' + code);
     if (!checkbox) return;
-    const item = checkbox.closest('.stage-item');
+    const item = checkbox.closest('.stage-card');
     if (!item) return;
 
     if (checkbox.checked) {
@@ -636,15 +668,6 @@ function toggleStage(code) {
             }
         }
     }
-
-    const subPanels = item.querySelectorAll('.trigger-events, .stage-timeout, .stage-parallel-max, .sub-timeouts');
-    subPanels.forEach(panel => {
-        if (checkbox.checked) {
-            panel.classList.remove('disabled');
-        } else {
-            panel.classList.add('disabled');
-        }
-    });
 
     recalcViolations();
 }
@@ -862,7 +885,7 @@ function saveConfig() {
                 const msgs = data.violations.map(v => v.message).join('；');
                 showToast('配置保存失败：' + msgs, 'error');
                 // 滚动到第一个违规卡片
-                const first = document.querySelector('.stage-item--error, .stage-item--dep-warning');
+                const first = document.querySelector('.stage-card--error, .stage-card--dep-warning');
                 if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
             } else {
                 showToast(data.error || ('保存失败 HTTP ' + r.status), 'error');
