@@ -122,7 +122,7 @@ func (m *RepoManager) clone(gitURL, repoDir, branch string) error {
 
 	args := []string{"clone", "--depth", "1", "--single-branch", "--branch", branch, gitURL, repoDir}
 	cmd := exec.Command("git", args...)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_SSL_NO_VERIFY=1")
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -135,7 +135,7 @@ func (m *RepoManager) clone(gitURL, repoDir, branch string) error {
 func (m *RepoManager) fetchAndCheckout(repoDir, branch string) error {
 	// fetch 最新
 	cmd := exec.Command("git", "-C", repoDir, "fetch", "--depth", "1", "origin", branch)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_SSL_NO_VERIFY=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git fetch 失败: %w\n输出: %s", err, string(out))
@@ -143,6 +143,7 @@ func (m *RepoManager) fetchAndCheckout(repoDir, branch string) error {
 
 	// 强制 checkout（丢弃本地修改）
 	cmd = exec.Command("git", "-C", repoDir, "checkout", "-f", "-B", branch, "origin/"+branch)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_SSL_NO_VERIFY=1")
 	out, err = cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git checkout 失败: %w\n输出: %s", err, string(out))
