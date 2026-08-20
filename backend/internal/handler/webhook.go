@@ -550,7 +550,18 @@ func (h *WebhookHandler) handleMRMergeEvent(c *gin.Context, payload map[string]i
 		workspace = "/tmp/codeguard"
 	}
 	scanService := graphscan.NewScanService(model.DB, workspace)
-	_, err := scanService.TriggerScan(uint64(project.ID), targetBranch)
+
+	// 提取 MR 信息
+	mrIID := 0
+	if iid, ok := attrs["iid"].(float64); ok {
+		mrIID = int(iid)
+	}
+	mrTitle, _ := attrs["title"].(string)
+
+	_, err := scanService.TriggerScan(uint64(project.ID), targetBranch,
+		graphscan.WithTriggerType("mr_merge"),
+		graphscan.WithMRInfo(mrIID, mrTitle),
+	)
 	if err != nil {
 		zap.L().Warn("trigger graph scan on merge failed", zap.Error(err))
 		c.JSON(200, gin.H{"message": "merge handled, graph scan queued already running"})

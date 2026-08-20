@@ -215,7 +215,7 @@ func GetReviewJSONSchema(dimensions []string) interface{} {
 			},
 			"dimensions": map[string]interface{}{
 				"type":                 "object",
-				"additionalProperties": true,
+				"additionalProperties": false,
 				"required":             dimensions,
 				"properties":           dimProps,
 			},

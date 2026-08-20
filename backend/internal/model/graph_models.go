@@ -9,6 +9,9 @@ type GraphScanTask struct {
 	Branch        string     `gorm:"column:branch;not null;default:'main'"`
 	ScanType      string     `gorm:"column:scan_type;size:32;not null;default:'full'"` // full | incremental
 	Status        string     `gorm:"column:status;size:32;not null;default:'pending'"` // pending | running | completed | failed
+	TriggerType   string     `gorm:"column:trigger_type;size:20;not null;default:'manual'"` // manual | mr_merge
+	MRIID         int        `gorm:"column:mr_iid;not null;default:0"`                    // MR合入时填充
+	MRTitle       string     `gorm:"column:mr_title;size:512"`
 	NodeCount     int        `gorm:"column:node_count;not null;default:0"`
 	RelationCount int        `gorm:"column:relation_count;not null;default:0"`
 	FileCount     int        `gorm:"column:file_count;not null;default:0"`

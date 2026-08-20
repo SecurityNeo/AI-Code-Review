@@ -51,7 +51,7 @@ const MENU_CONFIG = [
         icon: 'fa-robot',
         role: ['admin', 'user'],
         children: [
-            { id: 'projects',     name: '项目管理',   href: 'projects.html',     icon: 'fa-folder-open',    role: ['admin'] },
+            { id: 'projects',     name: '项目管理',   href: 'projects.html',     icon: 'fa-folder-open',    role: ['admin', 'user'] },
             { id: 'review-rules', name: '评审规则库', href: 'review-rules.html', icon: 'fa-shield-halved',  role: ['admin'] },
             { id: 'incubator',    name: '规则孵化台', href: 'incubator.html',    icon: 'fa-flask',            role: ['admin'] },
             { id: 'tasks',        name: '评审任务列表', href: 'tasks.html',        icon: 'fa-tasks',             role: ['admin', 'user'] },

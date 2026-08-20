@@ -100,7 +100,7 @@ func (s *SQLiteGraphStorage) getDB(projectID uint64) (*sql.DB, error) {
 		return nil, fmt.Errorf("create dir for project %d failed: %w", projectID, err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=DELETE&_busy_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite for project %d failed: %w", projectID, err)
 	}
@@ -109,6 +109,16 @@ func (s *SQLiteGraphStorage) getDB(projectID uint64) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("init schema for project %d failed: %w", projectID, err)
 	}
+
+	// 切换 WAL 模式到 DELETE（如果之前是 WAL）
+	if _, err := db.Exec("PRAGMA journal_mode=DELETE;"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("switch journal mode failed: %w", err)
+	}
+
+	// 删除可能残留的 WAL 文件（确保干净状态）
+	os.Remove(dbPath + "-wal")
+	os.Remove(dbPath + "-shm")
 
 	s.dbCache[projectID] = db
 	return db, nil
@@ -134,6 +144,9 @@ func (s *SQLiteGraphStorage) Save(projectID uint64, graph *MemorySymbolGraph) er
 		return err
 	}
 	if _, err := tx.Exec("DELETE FROM graph_file_index"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM graph_metadata WHERE key != 'schema_version'"); err != nil {
 		return err
 	}
 
@@ -177,11 +190,30 @@ func (s *SQLiteGraphStorage) Save(projectID uint64, graph *MemorySymbolGraph) er
 	fileRelIDs := make(map[string][]int64)
 	for _, rel := range graph.GetAllRelations() {
 		fromID := nodeIDMap[rel.From]
-		toID := nodeIDMap[rel.To]
 		if fromID == 0 {
 			continue
 		}
+		toID := nodeIDMap[rel.To]
+		if toID == 0 {
+			// 外部依赖：目标节点不在图中，存储为 -1（ sentinel 值）
+			toID = -1
+		}
 		props, _ := json.Marshal(rel.Extra)
+		if toID == -1 {
+			// 外部依赖：在 props 中存储目标 ID
+			var extra map[string]interface{}
+			if rel.Extra != nil {
+				extra = make(map[string]interface{}, len(rel.Extra))
+				for k, v := range rel.Extra {
+					extra[k] = v
+				}
+			}
+			if extra == nil {
+				extra = make(map[string]interface{})
+			}
+			extra["target_id"] = rel.To
+			props, _ = json.Marshal(extra)
+		}
 		res, err := relStmt.Exec(rel.Type, fromID, toID, string(props), "")
 		if err != nil {
 			return fmt.Errorf("insert relation failed: %w", err)
@@ -204,6 +236,22 @@ func (s *SQLiteGraphStorage) Save(projectID uint64, graph *MemorySymbolGraph) er
 		_, err := fileStmt.Exec(file, string(nidsJSON), string(ridsJSON))
 		if err != nil {
 			return err
+		}
+	}
+
+	metaStmt, err := tx.Prepare(`
+		INSERT OR REPLACE INTO graph_metadata (key, value, updated_at)
+		VALUES (?, ?, datetime('now'))
+	`)
+	if err != nil {
+		return err
+	}
+	defer metaStmt.Close()
+	for k, v := range graph.AllMetadata() {
+		metaJSON, _ := json.Marshal(v)
+		_, err := metaStmt.Exec(k, string(metaJSON))
+		if err != nil {
+			return fmt.Errorf("insert metadata %s failed: %w", k, err)
 		}
 	}
 
@@ -279,15 +327,46 @@ func (s *SQLiteGraphStorage) Load(projectID uint64) (*MemorySymbolGraph, error) 
 			return nil, err
 		}
 		fromNodeID := nodeIDMap[fromID]
-		toNodeID := nodeIDMap[toID]
 		if fromNodeID == "" {
 			continue
+		}
+		// 支持外部依赖：to_node_id=-1 表示目标不在图中
+		var toNodeID string
+		if toID == -1 {
+			// 尝试从 relation props 或 Extra 中恢复目标 ID
+			var extra map[string]string
+			if propsJSON != "" {
+				_ = json.Unmarshal([]byte(propsJSON), &extra)
+			}
+			if targetID, ok := extra["target_id"]; ok && targetID != "" {
+				toNodeID = targetID
+			}
+			if toNodeID == "" {
+				continue
+			}
+		} else {
+			toNodeID = nodeIDMap[toID]
 		}
 		rel := MemoryRelation{From: fromNodeID, To: toNodeID, Type: relType}
 		if propsJSON != "" {
 			_ = json.Unmarshal([]byte(propsJSON), &rel.Extra)
 		}
 		graph.AddRelation(rel)
+	}
+
+	// 加载 metadata
+	metaRows, err := db.Query(`SELECT key, value FROM graph_metadata WHERE key != 'schema_version'`)
+	if err == nil {
+		defer metaRows.Close()
+		for metaRows.Next() {
+			var k, v string
+			if err := metaRows.Scan(&k, &v); err == nil && v != "" {
+				var val interface{}
+				if err := json.Unmarshal([]byte(v), &val); err == nil {
+					graph.SetMetadata(k, val)
+				}
+			}
+		}
 	}
 
 	return graph, nil

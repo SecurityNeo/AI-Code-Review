@@ -3,6 +3,7 @@ package handler
 import (
 	"strconv"
 
+	"github.com/ai-optimizer/backend/internal/middleware"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
 	"github.com/gin-gonic/gin"
@@ -22,7 +23,24 @@ func (h *ProjectHandler) List(c *gin.Context) {
 	status := c.Query("status")
 	source := c.Query("source")
 
-	projects, total, err := service.NewProjectService().List(page, pageSize, keyword, status, source)
+	// 获取当前用户角色
+	user, ok := middleware.GetUser(c)
+	if !ok {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
+	var projectIDs []uint
+	if user.Role != model.RoleAdmin {
+		// 非管理员：只查询自己负责的项目
+		projectIDs = GetResponsibleProjectIDs(user.GitlabUsername)
+		if len(projectIDs) == 0 {
+			c.JSON(200, gin.H{"data": []model.Project{}, "total": 0, "page": page, "page_size": pageSize})
+			return
+		}
+	}
+
+	projects, total, err := service.NewProjectService().List(page, pageSize, keyword, status, source, projectIDs)
 	if err != nil {
 		zap.L().Error("list projects failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -31,9 +49,46 @@ func (h *ProjectHandler) List(c *gin.Context) {
 	c.JSON(200, gin.H{"data": projects, "total": total, "page": page, "page_size": pageSize})
 }
 
+// GetResponsibleProjectIDs 根据 GitLab 用户名获取负责的项目 ID 列表
+func GetResponsibleProjectIDs(gitlabUsername string) []uint {
+	if gitlabUsername == "" {
+		return nil
+	}
+	// 通过 GitLab 用户名找 TeamMember
+	var member model.TeamMember
+	if err := model.DB.Where("gitlab_username = ?", gitlabUsername).First(&member).Error; err != nil {
+		return nil
+	}
+	// 通过 MemberID 找 ProjectResponsibility
+	var responsibilities []model.ProjectResponsibility
+	if err := model.DB.Where("member_id = ?", member.ID).Find(&responsibilities).Error; err != nil {
+		return nil
+	}
+	ids := make([]uint, 0, len(responsibilities))
+	for _, r := range responsibilities {
+		ids = append(ids, r.ProjectID)
+	}
+	return ids
+}
+
 // Options 返回项目名称列表（用于下拉框选择，不含敏感字段）
 func (h *ProjectHandler) Options(c *gin.Context) {
-	projects, err := service.NewProjectService().Options()
+	user, ok := middleware.GetUser(c)
+	if !ok {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
+	var projectIDs []uint
+	if user.Role != model.RoleAdmin {
+		projectIDs = GetResponsibleProjectIDs(user.GitlabUsername)
+		if len(projectIDs) == 0 {
+			c.JSON(200, gin.H{"data": []service.ProjectOption{}})
+			return
+		}
+	}
+
+	projects, err := service.NewProjectService().Options(projectIDs)
 	if err != nil {
 		zap.L().Error("list project options failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -44,11 +99,34 @@ func (h *ProjectHandler) Options(c *gin.Context) {
 
 func (h *ProjectHandler) Get(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
+	user, ok := middleware.GetUser(c)
+	if !ok {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	p, err := service.NewProjectService().Get(uint(id))
 	if err != nil {
 		c.JSON(404, gin.H{"error": "not found"})
 		return
 	}
+
+	// 非管理员只能查看自己负责的项目
+	if user.Role != model.RoleAdmin {
+		projectIDs := GetResponsibleProjectIDs(user.GitlabUsername)
+		found := false
+		for _, pid := range projectIDs {
+			if pid == uint(id) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			c.JSON(403, gin.H{"error": "无权限访问该项目"})
+			return
+		}
+	}
+
 	c.JSON(200, gin.H{"data": p})
 }
 

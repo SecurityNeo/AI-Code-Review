@@ -142,7 +142,7 @@ func convertFuncDecl(fset *token.FileSet, filePath string, src []byte, decl *ast
 		fn.LOC = estimateLOC(decl.Body)
 		fn.NestedDepth = estimateNestedDepth(decl.Body)
 	}
-	fn.SecurityRole = inferSecurityRole(fn.Name, fn.Receiver)
+	fn.SecurityRole = InferSecurityRole(fn.Name, fn.Receiver)
 	return fn
 }
 
@@ -377,8 +377,8 @@ func nameOrAnonymous(names []*ast.Ident) string {
 	return names[0].Name
 }
 
-// inferSecurityRole 根据函数名和接收者推断安全角色 (P2-1)
-func inferSecurityRole(name, receiver string) string {
+// InferSecurityRole 根据函数名和接收者推断安全角色 (P2-1)
+func InferSecurityRole(name, receiver string) string {
 	lower := strings.ToLower(name)
 	recvLower := strings.ToLower(receiver)
 	// 认证/授权
@@ -397,29 +397,70 @@ func inferSecurityRole(name, receiver string) string {
 		strings.Contains(lower, "filter") || strings.Contains(lower, "validate") || strings.Contains(lower, "check") {
 		return "sanitizer"
 	}
-	// 输入验证
+	// 输入验证 / 解析
 	if strings.Contains(lower, "parse") || strings.Contains(lower, "bind") || strings.Contains(lower, "unmarshal") ||
-		strings.Contains(lower, "decode") || strings.Contains(lower, "deserialize") {
+		strings.Contains(lower, "decode") || strings.Contains(lower, "deserialize") || strings.Contains(lower, "validate") {
 		return "validator"
 	}
-	// HTTP Handler / Controller
-	if strings.HasPrefix(lower, "handle") || strings.HasPrefix(lower, "get") || strings.HasPrefix(lower, "post") ||
-		strings.HasPrefix(lower, "put") || strings.HasPrefix(lower, "delete") || strings.HasPrefix(lower, "patch") ||
-		strings.Contains(recvLower, "handler") || strings.Contains(recvLower, "controller") || strings.Contains(recvLower, "router") {
+	// 数据访问层 CRUD（优先匹配，比 handler 更宽泛）
+	if strings.Contains(lower, "get") || strings.Contains(lower, "list") || strings.Contains(lower, "find") ||
+		strings.Contains(lower, "fetch") || strings.Contains(lower, "query") || strings.Contains(lower, "search") ||
+		strings.Contains(lower, "byid") || strings.Contains(lower, "byuuid") ||
+		strings.Contains(lower, "save") || strings.Contains(lower, "create") || strings.Contains(lower, "insert") ||
+		strings.Contains(lower, "update") || strings.Contains(lower, "modify") || strings.Contains(lower, "edit") ||
+		strings.Contains(lower, "delete") || strings.Contains(lower, "remove") || strings.Contains(lower, "destroy") ||
+		strings.Contains(lower, "count") || strings.Contains(lower, "exist") || strings.Contains(lower, "has") {
+		return "data_access"
+	}
+	// HTTP Handler / Controller（需要更严格的上下文证据）
+	if strings.HasPrefix(lower, "handle") || strings.HasPrefix(lower, "serve") ||
+		strings.Contains(recvLower, "handler") || strings.Contains(recvLower, "controller") ||
+		strings.Contains(recvLower, "router") || strings.Contains(recvLower, "mux") ||
+		strings.Contains(recvLower, "gin") || strings.Contains(recvLower, "echo") || strings.Contains(recvLower, "fiber") {
 		return "handler"
 	}
-	// Repository / DAO / Data Access
+	// Repository / DAO（通过接收者类型识别）
 	if strings.Contains(recvLower, "repo") || strings.Contains(recvLower, "dao") || strings.Contains(recvLower, "store") ||
-		strings.Contains(recvLower, "db") || strings.Contains(recvLower, "database") || strings.Contains(lower, "query") ||
-		strings.Contains(lower, "fetch") || strings.Contains(lower, "find") || strings.Contains(lower, "getby") {
+		strings.Contains(recvLower, "db") || strings.Contains(recvLower, "database") || strings.Contains(recvLower, "model") {
 		return "data_access"
 	}
 	// Service / Business Logic
 	if strings.Contains(recvLower, "service") || strings.Contains(recvLower, "usecase") || strings.Contains(recvLower, "manager") ||
-		strings.Contains(recvLower, "biz") {
+		strings.Contains(recvLower, "biz") || strings.Contains(recvLower, "facade") {
 		return "service"
 	}
 	return "other"
+}
+
+// EstimateComplexityFromSnippet 基于函数体文本估算圈复杂度（tree-sitter 可用时使用）
+func EstimateComplexityFromSnippet(snippet string) int {
+	if snippet == "" {
+		return 1
+	}
+	complexity := 1
+	lines := strings.Split(snippet, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// 跳过注释
+		if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "*") {
+			continue
+		}
+		// 匹配 if / switch / for / range / select 关键字（避免匹配包含这些子串的变量名）
+		lower := strings.ToLower(trimmed)
+		for _, kw := range []string{"if ", "switch ", "for ", "range ", "select "} {
+			if strings.HasPrefix(lower, kw) {
+				complexity++
+				break
+			}
+		}
+		// case/default（只计数case，不计数default）
+		if strings.HasPrefix(lower, "case ") {
+			complexity++
+		}
+		// && / || 运算符
+		complexity += strings.Count(trimmed, "&&") + strings.Count(trimmed, "||")
+	}
+	return complexity
 }
 
 // estimateComplexity 基于 AST 简单估算圈复杂度 (P2-5)

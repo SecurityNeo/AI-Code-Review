@@ -1,0 +1,2219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script src="js/theme.js?v=1"></script>
+    <style>html{background-color:#f8fafc;}</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>代码地图 - CodeGuard</title>
+    <script src="js/auth.js?v=6"></script>
+    <script src="js/menu-config.js?v=6"></script>
+    <script src="js/sidebar.js?v=6"></script>
+    <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="css/theme.css?v=1">
+    <script src="/static/js/tailwindcss.min.js"></script>
+    <script src="/static/js/vis-network.min.js"></script>
+    <script src="/static/js/echarts.min.js"></script>
+    <style>
+        /* ===== 全局基础 ===== */
+        body { overflow: hidden; }
+        * { scrollbar-width: thin; scrollbar-color: #cbd5e1 #f1f5f9; }
+        *::-webkit-scrollbar { width: 6px; }
+        *::-webkit-scrollbar-track { background: #f1f5f9; }
+        *::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        *::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* ===== 头部 ===== */
+        .cm-header { height: 56px; background: white; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; flex-shrink: 0; z-index: 50; }
+
+        /* ===== 视图 Tab ===== */
+        .cm-view-tab { padding: 8px 16px; font-size: 13px; color: #64748b; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; white-space: nowrap; }
+        .cm-view-tab:hover { color: #334155; }
+        .cm-view-tab.active { color: #4f46e5; border-bottom-color: #4f46e5; font-weight: 500; }
+
+        /* ===== 左侧边栏 ===== */
+        .cm-sidebar { width: 320px; background: white; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; flex-shrink: 0; }
+        .cm-sidebar-tabs { display: flex; border-bottom: 1px solid #e2e8f0; }
+        .cm-sidebar-tab { flex: 1; padding: 8px; font-size: 12px; text-align: center; color: #64748b; cursor: pointer; }
+        .cm-sidebar-tab:hover { background: #f8fafc; }
+        .cm-sidebar-tab.active { color: #4f46e5; border-bottom: 2px solid #4f46e5; font-weight: 500; }
+        .cm-filter-panel { padding: 12px; border-bottom: 1px solid #e2e8f0; }
+        .cm-filter-title { font-size: 11px; font-weight: 600; color: #475569; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+        .cm-filter-item { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 12px; color: #475569; cursor: pointer; }
+        .cm-filter-item:hover { color: #334155; }
+        .cm-filter-count { margin-left: auto; font-size: 11px; color: #94a3b8; }
+        .cm-complexity-bar { height: 16px; border-radius: 3px; margin-bottom: 4px; cursor: pointer; position: relative; overflow: hidden; }
+        .cm-complexity-bar:hover { opacity: 0.8; }
+        .cm-tree-node { padding: 4px 8px; font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 6px; border-radius: 4px; }
+        .cm-tree-node:hover { background: #f1f5f9; }
+        .cm-tree-node.active { background: #eff6ff; border-left: 2px solid #4f46e5; }
+        .cm-tree-children { padding-left: 16px; }
+        .cm-tree-icon { width: 14px; text-align: center; color: #94a3b8; }
+        .cm-tree-badge { margin-left: auto; font-size: 10px; padding: 1px 5px; border-radius: 4px; background: #f1f5f9; color: #64748b; }
+
+        /* ===== 中央内容区 ===== */
+        .cm-center { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #f8fafc; }
+        .cm-view-container { flex: 1; overflow-y: auto; padding: 16px; position: relative; }
+
+        /* ===== Graph View ===== */
+        .cm-graph-network { width: 100%; height: 100%; border-radius: 8px; background: #f8fafc; }
+        .cm-graph-legend { position: absolute; bottom: 16px; right: 16px; background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px; font-size: 11px; max-width: 180px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); z-index: 20; }
+        .cm-graph-toolbar { position: absolute; bottom: 16px; left: 16px; display: flex; flex-direction: column; gap: 4px; z-index: 20; }
+        .cm-graph-toolbtn { width: 32px; height: 32px; border-radius: 6px; background: white; border: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: center; color: #64748b; cursor: pointer; font-size: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+        .cm-graph-toolbtn:hover { background: #f8fafc; color: #334155; }
+        .cm-legend-item { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+        .cm-legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+        /* ===== List View ===== */
+        .cm-data-table { width: 100%; border-collapse: collapse; font-size: 13px; background: white; border-radius: 8px; overflow: hidden; }
+        .cm-data-table th { background: #f8fafc; padding: 10px 12px; text-align: left; font-weight: 600; color: #475569; font-size: 12px; border-bottom: 1px solid #e2e8f0; cursor: pointer; white-space: nowrap; }
+        .cm-data-table th:hover { background: #f1f5f9; }
+        .cm-data-table td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; color: #334155; }
+        .cm-data-table tbody tr:hover { background: #f8fafc; }
+        .cm-data-table tbody tr:last-child td { border-bottom: none; }
+        .cm-role-badge { display: inline-flex; align-items: center; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 500; }
+        .cm-complexity-high { color: #dc2626; font-weight: 600; }
+        .cm-complexity-mid { color: #ea580c; }
+        .cm-complexity-low { color: #16a34a; }
+
+        /* ===== Security View ===== */
+        .cm-risk-card { background: white; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; text-align: center; }
+        .cm-risk-card .value { font-size: 28px; font-weight: 700; color: #1e293b; }
+        .cm-risk-card .label { font-size: 12px; color: #64748b; margin-top: 4px; }
+        .cm-sink-category-exec { background: #fef2f2; color: #dc2626; }
+        .cm-sink-category-sql { background: #fff7ed; color: #ea580c; }
+        .cm-sink-category-file { background: #fefce8; color: #ca8a04; }
+        .cm-sink-category-xss { background: #f0fdf4; color: #16a34a; }
+        .cm-risk-critical { color: #dc2626; font-weight: 600; }
+        .cm-risk-high { color: #ea580c; font-weight: 600; }
+        .cm-risk-medium { color: #ca8a04; }
+        .cm-risk-low { color: #16a34a; }
+
+        /* ===== Dashboard View ===== */
+        .cm-metric-card { background: white; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; }
+        .cm-metric-value { font-size: 24px; font-weight: 700; color: #1e293b; }
+        .cm-metric-label { font-size: 12px; color: #64748b; margin-top: 2px; }
+        .cm-metric-sub { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+        .cm-heat-cell { width: 20px; height: 20px; border-radius: 3px; cursor: pointer; transition: transform 0.15s; }
+        .cm-heat-cell:hover { transform: scale(1.2); z-index: 10; }
+
+        /* ===== 右侧面板 ===== */
+        .cm-right-panel { width: 340px; background: white; border-left: 1px solid #e2e8f0; display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; }
+        .cm-right-panel.hidden { display: none; }
+        #rightPanelContent { display: flex; flex-direction: column; height: 100%; }
+        .cm-panel-header { padding: 16px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+        .cm-panel-body { flex: 1; overflow-y: auto; padding: 16px; min-height: 0; }
+        .cm-detail-section { margin-bottom: 20px; }
+        .cm-detail-section-title { font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 10px; }
+        .cm-detail-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; font-size: 13px; }
+        .cm-detail-row .key { color: #64748b; }
+        .cm-detail-row .value { color: #334155; font-family: monospace; }
+        .cm-code-block { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 12px; line-height: 1.5; overflow-x: auto; white-space: pre; }
+        .cm-relation-item { padding: 6px 8px; border-radius: 6px; background: #f8fafc; margin-bottom: 6px; font-size: 12px; cursor: pointer; }
+        .cm-relation-item:hover { background: #f1f5f9; }
+
+        /* ===== 状态栏 ===== */
+        .cm-statusbar { height: 32px; background: #f1f5f9; border-top: 1px solid #e2e8f0; display: flex; align-items: center; padding: 0 16px; font-size: 11px; color: #64748b; gap: 20px; flex-shrink: 0; }
+
+        /* ===== 通用 ===== */
+        .cm-empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #94a3b8; gap: 12px; }
+        .cm-loading-overlay { position: absolute; inset: 0; background: rgba(255,255,255,0.7); display: flex; align-items: center; justify-content: center; z-index: 30; }
+        .cm-tag { display: inline-flex; align-items: center; padding: 1px 6px; border-radius: 4px; font-size: 10px; }
+        .cm-resize-handle { width: 4px; background: #e2e8f0; cursor: col-resize; transition: background 0.2s; flex-shrink: 0; }
+        .cm-resize-handle:hover { background: #4f46e5; }
+        .cm-section-title { font-size: 14px; font-weight: 600; color: #1e293b; margin-bottom: 12px; }
+
+        /* ===== 搜索下拉 ===== */
+        .cm-search-dropdown { position: absolute; top: 48px; left: 50%; transform: translateX(-50%); width: 400px; max-height: 300px; background: white; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,0.15); z-index: 100; overflow-y: auto; }
+        .cm-search-group { padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
+        .cm-search-group:last-child { border-bottom: none; }
+        .cm-search-group-title { font-size: 11px; font-weight: 600; color: #94a3b8; padding: 4px 12px; text-transform: uppercase; }
+        .cm-search-item { padding: 6px 12px; font-size: 13px; color: #334155; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+        .cm-search-item:hover { background: #f8fafc; }
+        .cm-search-icon { width: 20px; text-align: center; color: #94a3b8; }
+
+        /* ===== 响应式 ===== */
+        @media (max-width: 1024px) {
+            .cm-sidebar { position: absolute; z-index: 40; transform: translateX(-100%); transition: transform 0.3s; }
+            .cm-sidebar.open { transform: translateX(0); }
+            .cm-right-panel { position: absolute; right: 0; z-index: 40; height: 100%; }
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col">
+    <!-- ===== 头部 ===== -->
+    <header class="cm-header">
+        <div class="flex items-center gap-4">
+            <button onclick="window.location.href='projects.html'" class="text-gray-500 hover:text-gray-700 p-2 rounded-lg hover:bg-gray-100 transition" title="返回项目列表">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+            <div>
+                <div class="text-sm font-semibold text-gray-800" id="projectName">-</div>
+                <div class="text-xs text-gray-400 font-mono" id="branchName">-</div>
+            </div>
+            <span id="modeBadge" class="hidden text-xs px-2 py-0.5 rounded-full font-medium">-</span>
+        </div>
+        <div class="flex items-center gap-3">
+            <!-- 视图 Tab -->
+            <div class="flex bg-gray-100 rounded-lg p-1">
+                <div class="cm-view-tab active rounded-md" onclick="switchView('graph')" data-view="graph"><i class="fas fa-project-diagram mr-1"></i>图谱</div>
+                <div class="cm-view-tab rounded-md" onclick="switchView('list')" data-view="list"><i class="fas fa-list mr-1"></i>列表</div>
+                <div class="cm-view-tab rounded-md" onclick="switchView('security')" data-view="security"><i class="fas fa-shield-alt mr-1"></i>安全</div>
+                <div class="cm-view-tab rounded-md" onclick="switchView('dashboard')" data-view="dashboard"><i class="fas fa-chart-pie mr-1"></i>仪表盘</div>
+                <div class="cm-view-tab rounded-md" onclick="switchView('dependencies')" data-view="dependencies"><i class="fas fa-sitemap mr-1"></i>依赖</div>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <!-- 搜索 -->
+            <div class="relative">
+                <input type="text" id="globalSearch" placeholder="搜索函数、类型、路径..." 
+                    class="w-64 h-9 px-3 pl-9 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
+                    oninput="handleSearch(this.value)" onblur="setTimeout(hideSearchDropdown, 200)">
+                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+                <div id="searchDropdown" class="cm-search-dropdown hidden"></div>
+            </div>
+            <button onclick="refreshGraph()" class="h-9 px-3 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition" title="刷新">
+                <i class="fas fa-sync-alt"></i>
+            </button>
+            <button onclick="exportData()" class="h-9 px-3 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition" title="导出数据">
+                <i class="fas fa-download"></i>
+            </button>
+            <button onclick="buildGraph()" class="h-9 px-3 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition" title="构建代码地图">
+                <i class="fas fa-hammer mr-1"></i>构建
+            </button>
+        </div>
+    </header>
+
+    <!-- ===== 主体 ===== -->
+    <div class="flex-1 flex overflow-hidden">
+        <!-- 左侧边栏 -->
+        <aside id="leftSidebar" class="cm-sidebar">
+            <div class="cm-sidebar-tabs">
+                <div class="cm-sidebar-tab active" onclick="switchSidebarTab('files')">📁 文件</div>
+                <div class="cm-sidebar-tab" onclick="switchSidebarTab('symbols')">🔣 符号</div>
+            </div>
+            <div class="flex-1 overflow-y-auto">
+                <!-- 筛选面板 (sticky) -->
+                <div class="sticky top-0 bg-white z-10" style="border-bottom: 1px solid #e2e8f0;">
+                    <div class="p-3">
+                        <input type="text" id="sidebarFilter" placeholder="过滤..."
+                            class="w-full h-8 px-3 text-xs border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-300"
+                            oninput="filterSidebar(this.value)">
+                    </div>
+                    <div id="filterPanel" class="cm-filter-panel">
+                        <div class="cm-filter-title">安全角色</div>
+                        <div id="roleFilters"></div>
+                        <div class="cm-filter-title mt-3">复杂度</div>
+                        <div id="complexityFilters"></div>
+                    </div>
+                </div>
+                <!-- 内容区 -->
+                <div id="sidebarContent"></div>
+            </div>
+        </aside>
+
+        <!-- 拖拽把手 -->
+        <div class="cm-resize-handle" id="leftResizeHandle"></div>
+
+        <!-- 中央内容区 -->
+        <main class="cm-center">
+            <!-- 加载遮罩 -->
+            <div id="loadingOverlay" class="cm-loading-overlay" style="display:none;">
+                <div class="text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i>加载中...</div>
+            </div>
+
+            <!-- Graph View -->
+            <div id="view-graph" class="cm-view-container" style="padding: 0;">
+                <div id="graphNetwork" class="cm-graph-network"></div>
+                <div class="cm-graph-legend" id="graphLegend"></div>
+                <div class="cm-graph-toolbar">
+                    <button class="cm-graph-toolbtn" onclick="zoomIn()" title="放大">+</button>
+                    <button class="cm-graph-toolbtn" onclick="zoomOut()" title="缩小">-</button>
+                    <button class="cm-graph-toolbtn" onclick="fitGraph()" title="适配">⛶</button>
+                    <button class="cm-graph-toolbtn" onclick="resetGraph()" title="重置">⟲</button>
+                </div>
+            </div>
+
+            <!-- List View -->
+            <div id="view-list" class="cm-view-container hidden">
+                <div class="flex mb-4 border-b border-gray-200">
+                    <div class="px-4 py-2 text-sm font-medium text-indigo-600 border-b-2 border-indigo-600 cursor-pointer" data-list-tab="functions" onclick="switchListTab('functions')">函数</div>
+                    <div class="px-4 py-2 text-sm text-gray-500 cursor-pointer hover:text-gray-700" data-list-tab="endpoints" onclick="switchListTab('endpoints')">端点</div>
+                    <div class="px-4 py-2 text-sm text-gray-500 cursor-pointer hover:text-gray-700" data-list-tab="types" onclick="switchListTab('types')">类型</div>
+                    <div class="px-4 py-2 text-sm text-gray-500 cursor-pointer hover:text-gray-700" data-list-tab="files" onclick="switchListTab('files')">文件</div>
+                </div>
+                <div id="listContent"></div>
+            </div>
+
+            <!-- Security View -->
+            <div id="view-security" class="cm-view-container hidden">
+                <div id="securityContent"></div>
+            </div>
+
+            <!-- Dashboard View -->
+            <div id="view-dashboard" class="cm-view-container hidden">
+                <div id="dashboardContent"></div>
+            </div>
+
+            <!-- Dependencies View -->
+            <div id="view-dependencies" class="cm-view-container hidden">
+                <div id="dependenciesContent"></div>
+            </div>
+        </main>
+
+        <!-- 拖拽把手 -->
+        <div class="cm-resize-handle" id="rightResizeHandle"></div>
+
+        <!-- 右侧面板 -->
+        <aside id="rightPanel" class="cm-right-panel">
+            <div id="rightPanelContent"></div>
+        </aside>
+    </div>
+
+    <!-- ===== 状态栏 ===== -->
+    <footer class="cm-statusbar">
+        <span id="statusFileCount">文件: -</span>
+        <span id="statusNodeCount">节点: -</span>
+        <span id="statusRelCount">关系: -</span>
+        <span id="statusLastScan">最后扫描: -</span>
+        <span id="statusScanMode" class="ml-auto"></span>
+    </footer>
+
+    <script>
+    // ===== 全局状态 =====
+    const state = {
+        projectId: null,
+        projectName: '',
+        branch: '',
+        scanMode: '',
+        scanStatus: '',
+        lastScanAt: null,
+        activeView: 'graph',
+        activeListTab: 'functions',
+        activeSidebarTab: 'files',
+        graphData: null,
+        overview: null,
+        metrics: null,
+        files: null,
+        security: null,
+        dependencies: null,
+        selectedNodeId: null,
+        filters: { roles: new Set(), complexity: new Set(['all']), search: '' },
+        network: null,
+        detailLevel: 'medium',
+    };
+
+    // ===== 颜色映射 =====
+    const ROLE_NAMES = {
+        auth: '认证', encryption: '加密', sanitizer: '安全过滤',
+        validator: '参数校验', handler: '请求处理', service: '业务逻辑',
+        data_access: '数据访问', other: '普通函数', sink: '风险汇聚点'
+    };
+    const ROLE_TIPS = {
+        auth: 'Authentication/Auth - 登录、Token、Session、权限认证',
+        encryption: 'Encryption - 加密、解密、哈希、签名',
+        sanitizer: 'Sanitizer - SQL注入过滤、XSS过滤、输入净化',
+        validator: 'Validator - 参数校验、格式验证、输入解析',
+        handler: 'HTTP Handler - 请求处理、Controller、路由处理器',
+        service: 'Service - 业务逻辑、Usecase、Manager',
+        data_access: 'Data Access - Repository、DAO、CRUD数据操作',
+        other: 'Other - 普通工具函数、未分类函数',
+        sink: 'Sink - 数据汇聚/危险函数调用点，如SQL执行、文件操作、命令执行'
+    };
+    const ROLE_COLORS = {
+        auth: '#3b82f6', encryption: '#9333ea', sanitizer: '#10b981',
+        validator: '#f59e0b', handler: '#6366f1', service: '#64748b',
+        data_access: '#06b6d4', other: '#94a3b8'
+    };
+    const ROLE_BG = {
+        auth: 'bg-blue-50 text-blue-600', encryption: 'bg-purple-50 text-purple-600',
+        sanitizer: 'bg-emerald-50 text-emerald-600', validator: 'bg-amber-50 text-amber-600',
+        handler: 'bg-indigo-50 text-indigo-600', service: 'bg-gray-50 text-gray-600',
+        data_access: 'bg-cyan-50 text-cyan-600', other: 'bg-gray-50 text-gray-400'
+    };
+    const METHOD_COLORS = {
+        GET: { bg: '#dcfce7', text: '#166534' }, POST: { bg: '#dbeafe', text: '#1e40af' },
+        PUT: { bg: '#fef9c3', text: '#854d0e' }, DELETE: { bg: '#fee2e2', text: '#991b1b' },
+        PATCH: { bg: '#f3e8ff', text: '#6b21a8' }
+    };
+
+    // ===== 初始化 =====
+    document.addEventListener('DOMContentLoaded', function() {
+        state.projectId = getProjectId();
+        if (!state.projectId) {
+            document.querySelector('.cm-center').innerHTML = '<div class="cm-empty-state"><i class="fas fa-exclamation-triangle text-2xl"></i><div>缺少 project_id 参数</div></div>';
+            return;
+        }
+        loadProjectInfo();
+        loadData();
+        setupResizablePanels();
+    });
+
+    function getProjectId() {
+        const params = new URLSearchParams(location.search);
+        return params.get('project_id') || params.get('id');
+    }
+
+    function getApiBase() {
+        return '/api/v1';
+    }
+
+    async function apiFetch(url, options) {
+        const token = localStorage.getItem('token');
+        options = options || {};
+        options.headers = options.headers || {};
+        if (token) {
+            options.headers['Authorization'] = 'Bearer ' + token;
+        }
+        return fetch(url, options);
+    }
+
+    // ===== 数据加载 =====
+    async function loadData() {
+        showLoading(true);
+        try {
+            // 并行加载基础数据
+            await Promise.all([
+                loadOverview(),
+                loadFiles(),
+                loadMetrics()
+            ]);
+            // 延迟加载其他视图数据
+            if (state.activeView === 'graph') {
+                loadGraphVisualization();
+            }
+        } catch (e) {
+            console.error('loadData error', e);
+        }
+        showLoading(false);
+    }
+
+    async function loadProjectInfo() {
+        try {
+            const res = await apiFetch(getApiBase() + '/projects/' + state.projectId);
+            if (!res.ok) return;
+            const resp = await res.json();
+            // API 返回格式可能是 {data: {...}} 或直接 {...}
+            const data = resp.data || resp;
+            state.projectName = data.name || data.project_name || '未知项目';
+            state.branch = data.graph_base_branch || data.branch || 'main';
+            state.scanMode = data.graph_scan_mode || data.scan_mode || '';
+            state.lastScanAt = data.graph_last_build_at || data.last_scan_at || data.built_at;
+            
+            document.getElementById('projectName').textContent = state.projectName;
+            document.getElementById('branchName').textContent = state.branch;
+            
+            const modeBadge = document.getElementById('modeBadge');
+            if (state.scanMode) {
+                modeBadge.classList.remove('hidden');
+                modeBadge.textContent = state.scanMode;
+                const modeMap = {
+                    full: 'bg-emerald-100 text-emerald-700',
+                    degraded: 'bg-orange-100 text-orange-700',
+                    ast_only: 'bg-red-100 text-red-700'
+                };
+                modeBadge.className = 'text-xs px-2 py-0.5 rounded-full font-medium ' + (modeMap[state.scanMode] || 'bg-gray-100 text-gray-600');
+            }
+        } catch (e) {
+            console.error('loadProjectInfo', e);
+        }
+    }
+
+    async function loadOverview() {
+        try {
+            const res = await apiFetch(getApiBase() + '/projects/' + state.projectId + '/graph/overview');
+            if (!res.ok) return;
+            const data = await res.json();
+            state.overview = data;
+            updateStatusBar(data);
+            renderSymbolList(data);
+            renderFilterPanel(data);
+        } catch (e) {
+            console.error('loadOverview', e);
+        }
+    }
+
+    async function loadFiles() {
+        try {
+            const res = await apiFetch(getApiBase() + '/projects/' + state.projectId + '/graph/files');
+            if (!res.ok) return;
+            const data = await res.json();
+            state.files = data.files || [];
+            // 文件数据加载完成后，如果当前是文件视图则渲染文件树
+            if (state.activeSidebarTab === 'files') {
+                renderFileTree();
+            }
+        } catch (e) {
+            console.error('loadFiles', e);
+        }
+    }
+
+    async function loadMetrics() {
+        try {
+            const res = await apiFetch(getApiBase() + '/projects/' + state.projectId + '/graph/metrics');
+            if (!res.ok) return;
+            const data = await res.json();
+            state.metrics = data;
+        } catch (e) {
+            console.error('loadMetrics', e);
+        }
+    }
+
+    async function loadGraphVisualization() {
+        if (state.network) return; // 已初始化
+        try {
+            const res = await apiFetch(getApiBase() + '/projects/' + state.projectId + '/graph/visualization?detail_level=' + state.detailLevel);
+            if (!res.ok) return;
+            const data = await res.json();
+            state.graphData = data;
+            renderGraphView(data);
+        } catch (e) {
+            console.error('loadGraphVisualization', e);
+        }
+    }
+
+    async function loadNodeDetail(nodeId) {
+        try {
+            const res = await apiFetch(getApiBase() + '/projects/' + state.projectId + '/graph/node-detail?node_id=' + encodeURIComponent(nodeId));
+            if (!res.ok) return;
+            const data = await res.json();
+            renderRightPanel(data);
+
+            // 同步图谱高亮
+            syncGraphSelection(nodeId);
+        } catch (e) {
+            console.error('loadNodeDetail', e);
+        }
+    }
+
+    // 在图谱中查找并选中对应节点
+    function syncGraphSelection(originalNodeId) {
+        if (!state.graphData || !state.graphData.nodes) return;
+
+        // 查找匹配的 Graph 节点（通过 original_id 或 id 直接匹配）
+        const graphNode = state.graphData.nodes.find(n => {
+            if (n.original_id === originalNodeId) return true;
+            if (n.id === originalNodeId) return true;
+            return false;
+        });
+
+        if (!graphNode) return;
+
+        const graphNodeId = graphNode.id;
+
+        // 如果当前不在 Graph View，切换到 Graph
+        if (state.activeView !== 'graph') {
+            switchView('graph');
+        }
+
+        // 确保 network 已初始化
+        if (!state.network) {
+            // network 还未初始化，延迟重试
+            setTimeout(() => syncGraphSelection(originalNodeId), 500);
+            return;
+        }
+
+        // 选中并聚焦节点
+        try {
+            state.network.selectNodes([graphNodeId]);
+            state.network.focus(graphNodeId, {
+                scale: 1.2,
+                animation: { duration: 300, easingFunction: 'easeInOutQuad' }
+            });
+            highlightNodeNeighbors(graphNodeId);
+            // 记录当前选中的原始节点 ID
+            state.selectedNodeId = graphNodeId;
+        } catch (e) {
+            console.error('syncGraphSelection error', e);
+        }
+    }
+
+    // ===== 状态栏更新 =====
+    function updateStatusBar(data) {
+        const fileCount = state.files ? state.files.length : 0;
+        document.getElementById('statusFileCount').textContent = '文件: ' + (fileCount || '-');
+        document.getElementById('statusNodeCount').textContent = '节点: ' + (data.node_count || 0);
+        document.getElementById('statusRelCount').textContent = '关系: ' + (data.relation_count || data.rel_count || 0);
+        const lastScan = state.lastScanAt ? formatDate(state.lastScanAt) : (data.built_at || '-');
+        document.getElementById('statusLastScan').textContent = '最后扫描: ' + lastScan;
+        
+        const modeMap = { full: '✅ 完整分析', degraded: '⚠️ 降级模式', ast_only: '📝 仅 AST' };
+        document.getElementById('statusScanMode').textContent = modeMap[state.scanMode] || '';
+    }
+
+    // ===== 视图切换 =====
+    function switchView(view) {
+        state.activeView = view;
+        document.querySelectorAll('.cm-view-tab').forEach(t => {
+            t.classList.toggle('active', t.dataset.view === view);
+        });
+        ['graph', 'list', 'security', 'dashboard', 'dependencies'].forEach(v => {
+            document.getElementById('view-' + v).classList.toggle('hidden', v !== view);
+        });
+        
+        if (view === 'graph') {
+            if (!state.network) {
+                loadGraphVisualization();
+            } else {
+                filterGraphNodes(); // 确保当前过滤设置被应用
+            }
+        } else if (view === 'security' && !state.security) {
+            loadSecurityView();
+        } else if (view === 'dashboard') {
+            renderDashboardView();
+        } else if (view === 'dependencies' && !state.dependencies) {
+            loadDependenciesView();
+        } else if (view === 'list') {
+            renderListView();
+        }
+    }
+
+    function switchListTab(tab) {
+        state.activeListTab = tab;
+        document.querySelectorAll('[data-list-tab]').forEach(t => {
+            t.className = t.dataset.listTab === tab
+                ? 'px-4 py-2 text-sm font-medium text-indigo-600 border-b-2 border-indigo-600 cursor-pointer'
+                : 'px-4 py-2 text-sm text-gray-500 cursor-pointer hover:text-gray-700';
+        });
+        renderListView();
+    }
+
+    function switchSidebarTab(tab) {
+        state.activeSidebarTab = tab;
+        document.querySelectorAll('.cm-sidebar-tab').forEach(t => {
+            t.classList.toggle('active', t.textContent.includes(tab === 'files' ? '文件' : '符号'));
+        });
+        if (tab === 'files') {
+            renderFileTree();
+        } else {
+            renderSymbolList(state.overview);
+        }
+    }
+
+    // ===== 左侧边栏渲染 =====
+    function renderFileTree() {
+        const container = document.getElementById('sidebarContent');
+        const files = state.files || [];
+        if (files.length === 0) {
+            container.innerHTML = '<div class="p-4 text-xs text-gray-400 text-center">暂无文件数据</div>';
+            return;
+        }
+        
+        // 按目录层级构建树
+        const tree = buildFileTree(files);
+        container.innerHTML = renderTreeNodes(tree);
+    }
+
+    function getTreeStateKey() {
+        return 'cm_tree_state_' + (state.projectId || '0');
+    }
+
+    function saveTreeState() {
+        const expanded = [];
+        document.querySelectorAll('.cm-tree-children').forEach(el => {
+            if (!el.classList.contains('hidden')) {
+                const nodeEl = el.previousElementSibling;
+                if (nodeEl) {
+                    const path = nodeEl.getAttribute('data-path');
+                    if (path) expanded.push(path);
+                }
+            }
+        });
+        try {
+            localStorage.setItem(getTreeStateKey(), JSON.stringify(expanded));
+        } catch(e) {}
+    }
+
+    function loadTreeState() {
+        try {
+            const key = getTreeStateKey();
+            const saved = localStorage.getItem(key);
+            return saved ? JSON.parse(saved) : [];
+        } catch(e) {
+            return [];
+        }
+    }
+
+    function buildFileTree(files) {
+        const root = { name: '', children: {}, isDir: true };
+        files.forEach(f => {
+            const parts = (f.path || f.file || '').split('/');
+            let curr = root;
+            parts.forEach((part, idx) => {
+                if (!curr.children[part]) {
+                    curr.children[part] = {
+                        name: part,
+                        children: {},
+                        isDir: idx < parts.length - 1,
+                        file: null
+                    };
+                }
+                if (idx === parts.length - 1) {
+                    curr.children[part].file = f;
+                }
+                curr = curr.children[part];
+            });
+        });
+        return root;
+    }
+
+    function renderTreeNodes(node, path) {
+        path = path || '';
+        if (!node.children) return '';
+        const children = Object.values(node.children);
+        
+        // 排序：目录在前，文件在后
+        children.sort((a, b) => {
+            if (a.isDir && !b.isDir) return -1;
+            if (!a.isDir && b.isDir) return 1;
+            return a.name.localeCompare(b.name);
+        });
+        
+        const savedState = loadTreeState();
+        
+        return children.map(child => {
+            const fullPath = path ? path + '/' + child.name : child.name;
+            if (child.isDir) {
+                const isExpanded = savedState.includes(fullPath);
+                return `<div>
+                    <div class="cm-tree-node" onclick="toggleTreeNode(this)" data-path="${escapeHtml(fullPath)}">
+                        <span class="cm-tree-icon"><i class="fas fa-chevron-right text-[10px] transition-transform" style="${isExpanded ? 'transform:rotate(90deg)' : ''}"></i></span>
+                        <span class="cm-tree-icon"><i class="fas fa-folder text-yellow-400"></i></span>
+                        <span>${escapeHtml(child.name)}</span>
+                    </div>
+                    <div class="cm-tree-children ${isExpanded ? '' : 'hidden'}">${renderTreeNodes(child, fullPath)}</div>
+                </div>`;
+            } else {
+                const f = child.file || {};
+                const funcCount = f.functions || 0;
+                const epCount = f.endpoints || 0;
+                return `<div class="cm-tree-node" onclick="selectFile('${escapeHtml(fullPath)}')" data-file="${escapeHtml(fullPath)}">
+                    <span class="cm-tree-icon"><i class="far fa-file-code text-gray-400"></i></span>
+                    <span class="truncate">${escapeHtml(child.name)}</span>
+                    ${funcCount > 0 ? `<span class="cm-tree-badge">${funcCount}个函数</span>` : ''}
+                    ${epCount > 0 ? `<span class="cm-tree-badge bg-blue-50 text-blue-500">${epCount}个端点</span>` : ''}
+                </div>`;
+            }
+        }).join('');
+    }
+
+    function toggleTreeNode(el) {
+        const icon = el.querySelector('.fa-chevron-right');
+        const children = el.parentElement.querySelector('.cm-tree-children');
+        if (children) {
+            children.classList.toggle('hidden');
+            const isExpanded = !children.classList.contains('hidden');
+            icon.style.transform = isExpanded ? 'rotate(90deg)' : '';
+            saveTreeState();
+        }
+    }
+
+    function renderSymbolList(data) {
+        const container = document.getElementById('sidebarContent');
+        if (!data) {
+            container.innerHTML = '<div class="p-4 text-xs text-gray-400 text-center">暂无数据</div>';
+            return;
+        }
+        
+        let html = '<div class="p-2">';
+        
+        // 函数列表（按包分组）
+        const funcs = data.functions || [];
+        if (funcs.length > 0) {
+            html += '<div class="mb-3">';
+            html += '<div class="cm-filter-title">函数 (' + funcs.length + ')</div>';
+            funcs.slice(0, 50).forEach(fn => {
+                const roleColor = ROLE_COLORS[fn.security_role] || ROLE_COLORS.other;
+                html += `<div class="cm-tree-node" onclick="loadNodeDetail('${escapeHtml(fn.id || '')}')" title="${escapeHtml(fn.package || '')}.${escapeHtml(fn.name || '')}">`;
+                html += `<span class="cm-tree-icon" style="color:${roleColor}"><i class="fas fa-circle" style="font-size:6px"></i></span>`;
+                html += `<span class="truncate text-xs">${escapeHtml(fn.name || '')}</span>`;
+                html += `</div>`;
+            });
+            if (funcs.length > 50) {
+                html += '<div class="text-xs text-gray-400 text-center py-1">还有 ' + (funcs.length - 50) + ' 个函数...</div>';
+            }
+            html += '</div>';
+        }
+        
+        // 类型列表
+        const types = data.types || [];
+        if (types.length > 0) {
+            html += '<div class="mb-3">';
+            html += '<div class="cm-filter-title">类型 (' + types.length + ')</div>';
+            types.slice(0, 30).forEach(tp => {
+                const icon = tp.kind === 'interface' ? 'fas fa-i-cursor' : 'fas fa-cube';
+                html += `<div class="cm-tree-node" onclick="loadNodeDetail('${escapeHtml(tp.id || '')}')">`;
+                html += `<span class="cm-tree-icon text-gray-400"><i class="${icon}" style="font-size:8px"></i></span>`;
+                html += `<span class="truncate text-xs">${escapeHtml(tp.name || '')}</span>`;
+                html += `<span class="cm-tree-badge text-gray-400">${tp.kind || 'struct'}</span>`;
+                html += `</div>`;
+            });
+            html += '</div>';
+        }
+        
+        // 端点列表
+        const endpoints = data.endpoints || [];
+        if (endpoints.length > 0) {
+            html += '<div class="mb-3">';
+            html += '<div class="cm-filter-title">端点 (' + endpoints.length + ')</div>';
+            endpoints.forEach(ep => {
+                const method = (ep.method || 'GET').toUpperCase();
+                const mc = METHOD_COLORS[method] || METHOD_COLORS.GET;
+                // 使用后端返回的原始 ID
+                const epId = ep.id || `endpoint:${ep.file}:${ep.method}:${ep.path}`;
+                html += `<div class="cm-tree-node" onclick="loadNodeDetail('${escapeHtml(epId)}')">`;
+                html += `<span class="cm-method-badge" style="background:${mc.bg};color:${mc.text};">${method}</span>`;
+                html += `<span class="truncate text-xs flex-1 ml-2">${escapeHtml(ep.path || '')}</span>`;
+                html += `</div>`;
+            });
+            html += '</div>';
+        }
+        
+        html += '</div>';
+        container.innerHTML = html;
+    }
+    
+    async function showNodeDetailByName(name, type) {
+        // 通过名称查找节点 ID
+        try {
+            const overview = state.overview;
+            if (!overview) return;
+            
+            let targetNode = null;
+            
+            // 在对应类型的列表中查找
+            if (type === 'function' && overview.functions) {
+                targetNode = overview.functions.find(f => f.name === name);
+            } else if (type === 'endpoint' && overview.endpoints) {
+                targetNode = overview.endpoints.find(e => e.path === name);
+            } else if (type === 'type' && overview.types) {
+                targetNode = overview.types.find(t => t.name === name);
+            }
+            
+            if (targetNode && targetNode.id) {
+                await loadNodeDetail(targetNode.id);
+            } else {
+                // 无法找到节点 ID，显示基础信息
+                const panel = document.getElementById('rightPanel');
+                const content = document.getElementById('rightPanelContent');
+                panel.classList.remove('hidden');
+                content.innerHTML = '<div class="p-4"><div class="text-sm font-semibold">' + escapeHtml(name) + '</div><div class="text-xs text-gray-400 mt-1">未找到详细节点信息</div></div>';
+            }
+        } catch (e) {
+            console.error('showNodeDetailByName error', e);
+        }
+    }
+
+    function renderFilterPanel(data) {
+        const roleContainer = document.getElementById('roleFilters');
+        // 优先使用后端返回的完整角色分布（不受 50 条截断影响）
+        let roleStats = data.role_distribution || {};
+        
+        // 兼容旧 API，fallback 到 functions 列表统计
+        if (Object.keys(roleStats).length === 0) {
+            roleStats = {};
+            (data.functions || []).forEach(f => {
+                if (f.security_role) {
+                    roleStats[f.security_role] = (roleStats[f.security_role] || 0) + 1;
+                }
+            });
+        }
+        
+        // 按数量降序排列
+        const sortedRoles = Object.entries(roleStats).sort((a, b) => b[1] - a[1]);
+        
+        roleContainer.innerHTML = sortedRoles.map(([role, count]) => {
+            const color = ROLE_COLORS[role] || '#94a3b8';
+            const label = ROLE_NAMES[role] || role;
+            const tip = ROLE_TIPS[role] || role;
+            return `<label class="cm-filter-item" title="${escapeHtml(tip)}">
+                <input type="checkbox" checked onchange="toggleRoleFilter('${role}', this.checked)" class="rounded text-indigo-600">
+                <span style="width:8px;height:8px;border-radius:50%;background:${color};"></span>
+                <span>${label}</span>
+                <span class="cm-filter-count">${count}</span>
+            </label>`;
+        }).join('');
+        
+        // 初始化时全选（仅添加尚未存在的，不覆盖用户选择）
+        sortedRoles.forEach(([role]) => {
+            if (!state.filters.roles.has(role)) {
+                state.filters.roles.add(role);
+            }
+        });
+
+        // 复杂度筛选（简化）
+        const compContainer = document.getElementById('complexityFilters');
+        compContainer.innerHTML = `
+            <div class="flex items-center gap-2 text-xs text-gray-500">
+                <span class="inline-block w-2 h-2 rounded bg-green-500"></span> 低 (≤5)
+                <span class="inline-block w-2 h-2 rounded bg-yellow-500 ml-2"></span> 中 (6-10)
+                <span class="inline-block w-2 h-2 rounded bg-orange-500 ml-2"></span> 高 (11-15)
+                <span class="inline-block w-2 h-2 rounded bg-red-500 ml-2"></span> 极高 (>15)
+            </div>
+        `;
+        
+        // 初始化完成后立即应用 Graph 过滤
+        if (state.activeView === 'graph' && state.network) {
+            filterGraphNodes();
+        }
+    }
+
+    function toggleRoleFilter(role, checked) {
+        if (checked) state.filters.roles.add(role);
+        else state.filters.roles.delete(role);
+        
+        // Graph View：过滤节点显示
+        if (state.activeView === 'graph' && state.network) {
+            filterGraphNodes();
+        }
+        
+        // List View：重新渲染当前列表
+        if (state.activeView === 'list') {
+            renderListView();
+        }
+        
+        // Security View：重新渲染（如果有函数列表）
+        if (state.activeView === 'security' && state.security) {
+            renderSecurityView(state.security);
+        }
+    }
+
+    // ===== Graph View 渲染 =====
+    function renderGraphView(data) {
+        if (!data || !data.nodes || data.nodes.length === 0) {
+            document.getElementById('graphNetwork').innerHTML = '<div class="cm-empty-state"><i class="fas fa-project-diagram text-3xl"></i><div>暂无图谱数据，请先构建代码地图</div></div>';
+            return;
+        }
+        
+        const nodes = new vis.DataSet((data.nodes || []).map(n => {
+            const bgColor = getNodeColor(n);
+            const borderColor = '#ffffff';
+            return {
+                id: n.id,
+                label: n.label || n.name,
+                title: formatNodeTooltip(n),
+                shape: getNodeShape(n.type),
+                color: { background: bgColor, border: borderColor },
+                size: n.type === 'endpoint' ? 14 : (n.count ? Math.max(10, Math.min(40, n.count)) : 12),
+                font: { size: n.type === 'package' ? 13 : 11, face: 'system-ui', color: '#1f2937' },
+                shadow: n.type === 'sink' ? { enabled: true, color: 'rgba(220,38,38,0.4)', size: 10 } : undefined,
+                // 预计算颜色字符串（供highlight/reset使用，避免引用color对象）
+                backgroundColor: bgColor,
+                borderColor: borderColor,
+                // 存储原始数据用于点击详情和过滤
+                _original_id: n.original_id || n.id,
+                _type: n.type,
+                _role: n.role || '',
+                _method: n.method || '',
+            };
+        }));
+        
+        const edges = new vis.DataSet((data.edges || []).map(e => ({
+            from: e.from,
+            to: e.to,
+            arrows: 'to',
+            color: { color: e.type === 'calls' ? '#94a3b8' : '#cbd5e1' },
+            dashes: e.type !== 'calls',
+            width: Math.min(3, Math.max(1, (e.weight || 1) / 2)),
+        })));
+        
+        const container = document.getElementById('graphNetwork');
+        state.network = new vis.Network(container, { nodes, edges }, {
+            layout: { hierarchical: false },
+            physics: {
+                stabilization: false,
+                barnesHut: {
+                    gravitationalConstant: -2000,
+                    centralGravity: 0.3,
+                    springLength: 95,
+                    springConstant: 0.04,
+                    damping: 0.09,
+                }
+            },
+            interaction: {
+                hover: true,
+                tooltipDelay: 200,
+                hideEdgesOnDrag: true,
+                navigationButtons: false,
+            },
+        });
+        
+        state.network.on('click', function(params) {
+            if (params.nodes.length > 0) {
+                const nodeId = params.nodes[0];
+                state.selectedNodeId = nodeId;
+                highlightNodeNeighbors(nodeId);
+                // 获取节点的原始 ID（用于查询详情）
+                const node = nodes.get(nodeId);
+                const originalId = node && node._original_id ? node._original_id : nodeId;
+                loadNodeDetail(originalId);
+                // 自动切换到左侧符号面板
+                switchSidebarTab('symbols');
+            } else {
+                resetNodeHighlight();
+                closeRightPanel();
+            }
+        });
+        
+        // 双击恢复所有节点
+        state.network.on('doubleClick', function() {
+            resetNodeHighlight();
+        });
+        
+        renderGraphLegend();
+    }
+
+    function renderGraphLegend() {
+        const legend = document.getElementById('graphLegend');
+        const items = [
+            { role: 'auth', color: '#3b82f6' },
+            { role: 'encryption', color: '#9333ea' },
+            { role: 'handler', color: '#6366f1' },
+            { role: 'sanitizer', color: '#10b981' },
+            { role: 'validator', color: '#f59e0b' },
+            { role: 'data_access', color: '#06b6d4' },
+            { role: 'service', color: '#64748b' },
+            { role: 'other', color: '#94a3b8' },
+            { role: 'sink', color: '#dc2626' },
+        ];
+        legend.innerHTML = '<div class="font-semibold text-xs mb-2">图例</div>' +
+            items.map(item => `<div class="cm-legend-item" title="${escapeHtml(ROLE_TIPS[item.role] || item.role)}"><div class="cm-legend-dot" style="background:${item.color};"></div><span>${ROLE_NAMES[item.role] || item.role}</span></div>`).join('');
+    }
+
+    function getNodeShape(type) {
+        switch(type) {
+            case 'function': return 'dot';
+            case 'type': return 'box';
+            case 'endpoint': return 'diamond';
+            case 'sink': return 'hexagon';
+            case 'package': return 'ellipse';
+            default: return 'dot';
+        }
+    }
+
+    function getNodeColor(node) {
+        if (node.type === 'package') return '#f8fafc';
+        if (node.type === 'endpoint') {
+            return METHOD_COLORS[node.method]?.bg || '#e2e8f0';
+        }
+        if (node.type === 'sink') return '#fee2e2';
+        return ROLE_COLORS[node.role] || ROLE_COLORS[getStringProp(node.properties, 'security_role')] || '#94a3b8';
+    }
+
+    function formatNodeTooltip(node) {
+        let text = node.name || node.label || '';
+        if (node.file) text += '\n' + node.file + (node.line ? ':' + node.line : '');
+        if (node.package) text += '\nPackage: ' + node.package;
+        if (node.complexity) text += '\nCC: ' + node.complexity;
+        return text;
+    }
+
+    function zoomIn() { if (state.network) state.network.moveTo({ scale: state.network.getScale() * 1.3 }); }
+    function zoomOut() { if (state.network) state.network.moveTo({ scale: state.network.getScale() * 0.7 }); }
+    function fitGraph() { if (state.network) state.network.fit({ animation: true }); }
+    function resetGraph() { if (state.network) state.network.fit(); }
+    
+    function getNodeColorFromData(n) {
+        if (!n) return '#94a3b8';
+        if (n.type === 'package') return '#f8fafc';
+        if (n.type === 'endpoint') {
+            const method = n.method || (n.properties && n.properties.method) || '';
+            return (METHOD_COLORS[method.toUpperCase()] || METHOD_COLORS.GET).bg;
+        }
+        if (n.type === 'sink') return '#fee2e2';
+        const role = n.role || (n.properties && n.properties.security_role) || '';
+        return ROLE_COLORS[role] || ROLE_COLORS.other || '#94a3b8';
+    }
+    
+    function getNodeSizeFromData(n) {
+        if (!n) return 12;
+        if (n.type === 'endpoint') return 14;
+        if (n.type === 'package') return n.count ? Math.max(10, Math.min(40, n.count)) : 12;
+        return 12;
+    }
+    
+    function highlightNodeNeighbors(selectedNodeId) {
+        if (!state.network || !state.graphData) return;
+        
+        const nodes = state.graphData.nodes || [];
+        const edges = state.graphData.edges || [];
+        
+        // 找到关联节点（直接相连的节点）
+        const connectedNodes = new Set([selectedNodeId]);
+        const connectedEdges = new Set();
+        
+        edges.forEach(e => {
+            if (e.from === selectedNodeId) {
+                connectedNodes.add(e.to);
+                connectedEdges.add(e.id);
+            } else if (e.to === selectedNodeId) {
+                connectedNodes.add(e.from);
+                connectedEdges.add(e.id);
+            }
+        });
+        
+        // 更新节点透明度（非关联节点变灰）
+        const nodeUpdates = nodes.map(n => {
+            const isConnected = connectedNodes.has(n.id);
+            const origColor = getNodeColorFromData(n);
+            return {
+                id: n.id,
+                color: {
+                    background: isConnected ? origColor : '#e2e8f0',
+                    border: isConnected ? '#ffffff' : '#cbd5e1'
+                },
+                opacity: isConnected ? 1 : 0.2,
+                font: { color: isConnected ? '#1f2937' : '#94a3b8' }
+            };
+        });
+        
+        // 更新边透明度
+        const edgeUpdates = edges.map(e => {
+            const isConn = connectedEdges.has(e.id);
+            return {
+                id: e.id,
+                color: isConn ? (e.type === 'calls' ? '#f59e0b' : '#3b82f6') : '#e2e8f0',
+                width: isConn ? 2 : 1,
+                hidden: !isConn && !connectedNodes.has(e.from) && !connectedNodes.has(e.to)
+            };
+        });
+        
+        try {
+            state.network.body.data.nodes.update(nodeUpdates);
+            state.network.body.data.edges.update(edgeUpdates);
+        } catch(e) {
+            console.error('highlightNodeNeighbors error', e);
+        }
+    }
+    
+    function resetNodeHighlight() {
+        if (!state.network || !state.graphData) return;
+        
+        const nodes = state.graphData.nodes || [];
+        const edges = state.graphData.edges || [];
+        
+        const nodeUpdates = nodes.map(n => ({
+            id: n.id,
+            color: {
+                background: getNodeColorFromData(n),
+                border: '#ffffff'
+            },
+            opacity: 1,
+            font: { color: '#1f2937' }
+        }));
+        
+        const edgeUpdates = edges.map(e => ({
+            id: e.id,
+            color: e.type === 'calls' ? '#94a3b8' : '#cbd5e1',
+            width: Math.min(3, Math.max(1, (e.weight || 1) / 2)),
+            hidden: false
+        }));
+        
+        try {
+            state.network.body.data.nodes.update(nodeUpdates);
+            state.network.body.data.edges.update(edgeUpdates);
+        } catch(e) {
+            console.error('resetNodeHighlight error', e);
+        }
+    }
+    
+    function filterGraphNodes() {
+        // Vis.js 10.x 支持 hidden 属性，用 hidden 控制可见性最可靠
+        if (!state.network || !state.graphData || !state.graphData.nodes) return;
+        
+        const activeRoles = state.filters.roles;
+        const allNodes = state.graphData.nodes;
+        const updates = [];
+        
+        allNodes.forEach(n => {
+            const role = n.role || '';
+            const nodeType = n.type || '';
+            const isFunction = nodeType === 'function';
+            const hasRole = role && role !== '';
+            const roleActive = activeRoles.has(role);
+            
+            if (isFunction && hasRole && !roleActive) {
+                // 隐藏不匹配的 function
+                updates.push({ id: n.id, hidden: true });
+            } else {
+                // 显示其他节点或匹配的 function
+                updates.push({ id: n.id, hidden: false });
+            }
+        });
+        
+        try {
+            if (state.network.body && state.network.body.data && state.network.body.data.nodes) {
+                state.network.body.data.nodes.update(updates);
+            }
+        } catch(e) {
+            console.error('filterGraphNodes error', e);
+        }
+    }
+
+    // ===== List View 渲染 =====
+    function renderListView() {
+        const container = document.getElementById('listContent');
+        const data = state.overview;
+        if (!data) {
+            container.innerHTML = '<div class="cm-empty-state">加载中...</div>';
+            return;
+        }
+        
+        switch(state.activeListTab) {
+            case 'functions': renderFunctionTable(data.functions || []); break;
+            case 'endpoints': renderEndpointTable(data.endpoints || []); break;
+            case 'types': renderTypeTable(data.types || []); break;
+            case 'files': renderFileTable(state.files || []); break;
+        }
+    }
+
+    function renderFunctionTable(functions) {
+        const container = document.getElementById('listContent');
+        // 应用角色过滤
+        const activeRoles = state.filters.roles;
+        const filtered = activeRoles.size === 0 ? functions : functions.filter(fn => {
+            return fn.security_role && activeRoles.has(fn.security_role);
+        });
+        if (filtered.length === 0) {
+            container.innerHTML = '<div class="cm-empty-state">暂无函数数据（当前过滤条件下）</div>';
+            return;
+        }
+        
+        let html = '<div class="overflow-x-auto"><table class="cm-data-table">';
+        html += '<thead><tr><th>名称</th><th>签名</th><th>包</th><th style="min-width:90px;width:90px">角色</th><th>复杂度</th><th>被调用</th><th>导出</th><th>文件</th></tr></thead><tbody>';
+        
+        filtered.forEach(fn => {
+            const cc = fn.complexity;
+            const ccValue = cc === undefined || cc === null ? '-' : cc;
+            const ccClass = cc > 15 ? 'cm-complexity-high' : cc > 10 ? 'cm-complexity-mid' : 'cm-complexity-low';
+            const hasRole = fn.security_role && fn.security_role !== '';
+            const roleLabel = hasRole ? (ROLE_NAMES[fn.security_role] || fn.security_role) : '';
+            const roleTip = hasRole ? (ROLE_TIPS[fn.security_role] || fn.security_role) : '';
+            const roleBadge = hasRole ? `<span class="cm-role-badge ${ROLE_BG[fn.security_role] || ROLE_BG.other}" title="${escapeHtml(roleTip)}">${roleLabel}</span>` : '<span class="text-xs text-gray-400">-</span>';
+            const incomingCalls = fn.incoming_calls;
+            const callValue = incomingCalls === undefined || incomingCalls === null ? '-' : incomingCalls;
+            const callBadge = incomingCalls > 0 ? `<span class="cm-tag bg-indigo-50 text-indigo-600 text-xs">${incomingCalls}</span>` : '<span class="text-xs text-gray-400">-</span>';
+            
+            html += `<tr onclick="loadNodeDetail('${escapeHtml(fn.id || '')}')">`;
+            html += `<td class="font-mono font-medium">${escapeHtml(fn.name || '')}</td>`;
+            html += `<td class="font-mono text-xs text-gray-500">${escapeHtml(fn.signature || fn.name + '()')}</td>`;
+            html += `<td class="text-xs text-gray-500">${escapeHtml(fn.package || '')}</td>`;
+            html += `<td>${roleBadge}</td>`;
+            html += `<td class="${ccClass} text-right">${ccValue}</td>`;
+            html += `<td class="text-center">${callValue}</td>`;
+            html += `<td class="text-center">${fn.is_exported ? '<i class="fas fa-check text-green-500 text-xs"></i>' : '-'}</td>`;
+            html += `<td class="text-xs text-gray-400">${escapeHtml(fn.file || '')}${fn.line ? ':' + fn.line : ''}</td>`;
+            html += '</tr>';
+        });
+        
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+    }
+
+    function renderEndpointTable(endpoints) {
+        const container = document.getElementById('listContent');
+        if (endpoints.length === 0) {
+            container.innerHTML = '<div class="cm-empty-state">暂无端点数据</div>';
+            return;
+        }
+        
+        let html = '<div class="overflow-x-auto"><table class="cm-data-table">';
+        html += '<thead><tr><th>Method</th><th>Path</th><th>Handler</th><th>框架</th><th>认证</th><th>限流</th><th>文件</th></tr></thead><tbody>';
+        
+        endpoints.forEach(ep => {
+            const method = (ep.method || 'GET').toUpperCase();
+            const mc = METHOD_COLORS[method] || METHOD_COLORS.GET;
+            const methodBadge = `<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${mc.bg};color:${mc.text};">${method}</span>`;
+            const authBadge = ep.auth_required 
+                ? '<span class="cm-tag bg-blue-50 text-blue-600 border border-blue-100">🔒 Required</span>'
+                : '<span class="cm-tag bg-gray-50 text-gray-400 border border-gray-100">Open</span>';
+            const hasHandler = ep.handler && ep.handler !== '';
+            const handlerCell = hasHandler 
+                ? `<span class="font-mono text-xs text-indigo-600">${escapeHtml(ep.handler)}</span>`
+                : '<span class="text-xs text-gray-400">-</span>';
+            const hasRateLimit = ep.rate_limit && ep.rate_limit !== '';
+            
+            html += `<tr onclick="loadNodeDetail('${escapeHtml(ep.id || '')}')">`;
+            html += `<td>${methodBadge}</td>`;
+            html += `<td class="font-mono text-sm">${escapeHtml(ep.path || '')}</td>`;
+            html += `<td>${handlerCell}</td>`;
+            html += `<td class="text-xs text-gray-500">${escapeHtml(ep.framework || '')}</td>`;
+            html += `<td>${authBadge}</td>`;
+            html += `<td class="text-xs">${hasRateLimit ? escapeHtml(ep.rate_limit) : '-'}</td>`;
+            html += `<td class="text-xs text-gray-400">${escapeHtml(ep.file || '')}${ep.line ? ':' + ep.line : ''}</td>`;
+            html += '</tr>';
+        });
+        
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+    }
+
+    function renderTypeTable(types) {
+        const container = document.getElementById('listContent');
+        if (types.length === 0) {
+            container.innerHTML = '<div class="cm-empty-state">暂无类型数据</div>';
+            return;
+        }
+        
+        let html = '<div class="overflow-x-auto"><table class="cm-data-table">';
+        html += '<thead><tr><th>名称</th><th>类别</th><th>字段数</th><th>方法数</th><th>实现接口</th><th>被实现</th><th>导出</th><th>文件</th></tr></thead><tbody>';
+        
+        types.forEach(tp => {
+            const fields = tp.fields || [];
+            const methods = tp.methods || [];
+            const fieldCount = fields.length;
+            const methodCount = methods.length;
+            const kindBadge = `<span class="cm-tag bg-gray-100 text-gray-600">${tp.kind || 'struct'}</span>`;
+            const implements = tp.implements || [];
+            const implCell = implements.length > 0 
+                ? `<div class="flex flex-wrap gap-1">${implements.map(i => `<span class="cm-tag bg-orange-50 text-orange-600 text-xs border border-orange-100">${escapeHtml(i)}</span>`).join('')}</div>`
+                : '<span class="text-xs text-gray-400">-</span>';
+            
+            // 被实现次数（仅 interface 显示）
+            const implByCount = tp.implemented_by_count;
+            const implByValue = implByCount === undefined || implByCount === null ? '-' : implByCount;
+            const implByCell = tp.kind === 'interface' 
+                ? `<span class="cm-tag bg-purple-50 text-purple-600 text-xs">${implByCount}</span>`
+                : '<span class="text-xs text-gray-400">-</span>';
+            
+            html += `<tr onclick="loadNodeDetail('${escapeHtml(tp.id || '')}')">`;
+            html += `<td class="font-mono font-medium">${escapeHtml(tp.name || '')}</td>`;
+            html += `<td>${kindBadge}</td>`;
+            html += `<td class="text-center">${fieldCount > 0 ? fieldCount : '-'}</td>`;
+            html += `<td class="text-center">${methodCount > 0 ? methodCount : '-'}</td>`;
+            html += `<td>${implCell}</td>`;
+            html += `<td class="text-center">${implByValue}</td>`;
+            html += `<td class="text-center">${tp.is_exported ? '<i class="fas fa-check text-green-500 text-xs"></i>' : '-'}</td>`;
+            html += `<td class="text-xs text-gray-400">${escapeHtml(tp.file || '')}${tp.line ? ':' + tp.line : ''}</td>`;
+            html += '</tr>';
+        });
+        
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+    }
+
+    function renderFileTable(files) {
+        const container = document.getElementById('listContent');
+        if (!files || files.length === 0) {
+            container.innerHTML = '<div class="cm-empty-state">暂无文件数据</div>';
+            return;
+        }
+        
+        let html = '<div class="overflow-x-auto"><table class="cm-data-table">';
+        html += '<thead><tr><th>文件路径</th><th>包</th><th>函数</th><th>类型</th><th>端点</th><th>总复杂度</th></tr></thead><tbody>';
+        
+        files.forEach(f => {
+            html += `<tr>`;
+            html += `<td class="font-mono text-sm">${escapeHtml(f.path || '')}</td>`;
+            html += `<td class="text-xs text-gray-500">${escapeHtml(f.package || '')}</td>`;
+            html += `<td class="text-center">${f.functions || 0}</td>`;
+            html += `<td class="text-center">${f.types || 0}</td>`;
+            html += `<td class="text-center">${f.endpoints || 0}</td>`;
+            html += `<td class="text-center">${f.complexity || 0}</td>`;
+            html += '</tr>';
+        });
+        
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+    }
+
+    // ===== Security View 渲染 =====
+    async function loadSecurityView() {
+        showLoading(true);
+        try {
+            const res = await apiFetch(getApiBase() + '/projects/' + state.projectId + '/graph/overview');
+            if (!res.ok) return;
+            const data = await res.json();
+            state.security = data;
+            renderSecurityView(data);
+        } catch (e) {
+            console.error('loadSecurityView', e);
+        }
+        showLoading(false);
+    }
+
+    function renderSecurityView(data) {
+        const container = document.getElementById('securityContent');
+        const sinkInfos = data.sink_infos || [];
+        const taintPaths = data.taint_paths || [];
+        
+        let html = '';
+        
+        // 风险卡片
+        html += '<div class="grid grid-cols-4 gap-4 mb-6">';
+        html += `<div class="cm-risk-card">
+            <div class="value text-red-600">${sinkInfos.length}</div>
+            <div class="label">危险 Sink</div>
+        </div>`;
+        html += `<div class="cm-risk-card">
+            <div class="value text-orange-600">${(taintPaths || []).filter(p => !p.has_sanitizer).length}</div>
+            <div class="label">未净化路径</div>
+        </div>`;
+        html += `<div class="cm-risk-card">
+            <div class="value text-green-600">${(taintPaths || []).filter(p => p.has_sanitizer).length}</div>
+            <div class="label">已净化路径</div>
+        </div>`;
+        html += `<div class="cm-risk-card">
+            <div class="value text-red-600">${(data.endpoints || []).filter(e => !e.auth_required).length}</div>
+            <div class="label">无认证端点</div>
+        </div>`;
+        html += '</div>';
+        
+        // 认证覆盖率统计
+        const authCoverage = data.auth_coverage || {};
+        const authTotal = authCoverage.total || 0;
+        const authProtected = authCoverage.protected || 0;
+        const authRequiredCount = authCoverage.required || 0;
+        const coverageRate = authRequiredCount > 0 ? Math.round((authProtected / authRequiredCount) * 100) : 0;
+        const unprotectedHighRisk = authCoverage.unprotected_high_risk || [];
+        
+        if (authTotal > 0) {
+            html += '<div class="bg-white rounded-xl border border-gray-200 p-4 mb-6">';
+            html += '<div class="cm-section-title">认证覆盖率</div>';
+            html += '<div class="grid grid-cols-4 gap-4 mb-4">';
+            html += `<div class="text-center"><div class="text-2xl font-bold text-gray-800">${authTotal}</div><div class="text-xs text-gray-500">总端点</div></div>`;
+            html += `<div class="text-center"><div class="text-2xl font-bold text-blue-600">${authRequiredCount}</div><div class="text-xs text-gray-500">需认证</div></div>`;
+            html += `<div class="text-center"><div class="text-2xl font-bold text-green-600">${authProtected}</div><div class="text-xs text-gray-500">已认证</div></div>`;
+            html += `<div class="text-center"><div class="text-2xl font-bold ${coverageRate >= 80 ? 'text-green-600' : coverageRate >= 50 ? 'text-orange-600' : 'text-red-600'}">${coverageRate}%</div><div class="text-xs text-gray-500">覆盖率</div></div>`;
+            html += '</div>';
+            html += `<div class="w-full bg-gray-200 rounded-full h-2"><div class="bg-blue-600 h-2 rounded-full transition-all" style="width:${coverageRate}%"></div></div>`;
+            html += '</div>';
+        }
+        
+        // 未认证高风险端点列表
+        if (unprotectedHighRisk.length > 0) {
+            html += '<div class="bg-white rounded-xl border border-red-200 p-4 mb-6">';
+            html += '<div class="cm-section-title text-red-600"><i class="fas fa-exclamation-triangle mr-2"></i>未认证的高风险端点 (' + unprotectedHighRisk.length + ')</div>';
+            html += '<table class="cm-data-table">';
+            html += '<thead><tr><th>Method</th><th>Path</th><th>Framework</th><th>File</th></tr></thead><tbody>';
+            unprotectedHighRisk.forEach(ep => {
+                html += `<tr>`;
+                html += `<td><span class="cm-method-tag cm-method-${(ep.method || 'GET').toLowerCase()}">${ep.method || 'GET'}</span></td>`;
+                html += `<td class="font-medium">${escapeHtml(ep.path || '')}</td>`;
+                html += `<td class="text-xs text-gray-500">${escapeHtml(ep.framework || '')}</td>`;
+                html += `<td class="text-xs text-gray-500">${escapeHtml(ep.file || '')}:${ep.line || '-'}</td>`;
+                html += `</tr>`;
+            });
+            html += '</tbody></table></div>';
+        }
+        
+        // Sink 列表
+        if (sinkInfos.length > 0) {
+            html += '<div class="bg-white rounded-xl border border-gray-200 p-4 mb-4">';
+            html += '<div class="cm-section-title">危险函数列表</div>';
+            html += '<table class="cm-data-table">';
+            html += '<thead><tr><th>类别</th><th>函数</th><th>文件</th><th>行</th></tr></thead><tbody>';
+            sinkInfos.forEach(sink => {
+                const catClass = 'cm-sink-category-' + (sink.category || 'other');
+                html += `<tr>`;
+                html += `<td><span class="cm-tag ${catClass}">${sink.category || 'other'}</span></td>`;
+                html += `<td class="font-mono font-medium">${escapeHtml(sink.name || '')}</td>`;
+                html += `<td class="text-xs text-gray-500">${escapeHtml(sink.file || '')}</td>`;
+                html += `<td class="text-xs text-gray-400">${sink.line || '-'}</td>`;
+                html += `</tr>`;
+            });
+            html += '</tbody></table></div>';
+        }
+        
+        // 污点路径列表
+        if (taintPaths.length > 0) {
+            html += '<div class="bg-white rounded-xl border border-gray-200 p-4">';
+            html += '<div class="cm-section-title">污点传播路径</div>';
+            html += '<table class="cm-data-table">';
+            html += '<thead><tr><th>Source → Sink</th><th>深度</th><th>Sanitizer</th><th>风险</th></tr></thead><tbody>';
+            taintPaths.forEach(path => {
+                const riskClass = 'cm-risk-' + (path.risk_level || 'low');
+                html += `<tr>`;
+                html += `<td><div class="text-sm font-medium">${escapeHtml(path.source_name || '')} → ${escapeHtml(path.sink_name || '')}</div>`;
+                html += `<div class="text-xs text-gray-400">${escapeHtml(path.source_file || '')} → ${escapeHtml(path.sink_file || '')}</div></td>`;
+                html += `<td class="text-center">${path.path_depth || '-'}</td>`;
+                html += `<td class="text-center">${path.has_sanitizer ? '<i class="fas fa-shield-alt text-green-500"></i>' : '<i class="fas fa-times text-red-400"></i>'}</td>`;
+                html += `<td class="${riskClass}">${path.risk_level || 'low'}</td>`;
+                html += '</tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+        
+        container.innerHTML = html;
+    }
+
+    // ===== Dashboard View 渲染 =====
+    function renderDashboardView() {
+        const container = document.getElementById('dashboardContent');
+        const data = state.metrics;
+        if (!data || data.status !== 'completed') {
+            container.innerHTML = '<div class="cm-empty-state">暂无度量数据</div>';
+            return;
+        }
+        
+        let html = '';
+        
+        // 第一行度量卡片
+        html += '<div class="grid grid-cols-4 gap-4 mb-6">';
+        html += createMetricCard('📄 文件', state.files ? state.files.length : '-', '解析完成');
+        html += createMetricCard('🔧 函数', state.overview ? (state.overview.function_count || 0) : '-', '平均复杂度: ' + (data.avg_complexity || 0));
+        html += createMetricCard('📦 类型', state.overview ? (state.overview.type_count || 0) : '-', '结构体 / 接口');
+        html += createMetricCard('🔗 端点', state.overview ? (state.overview.endpoint_count || 0) : '-', '认证率: ' + calculateAuthRate());
+        html += '</div>';
+        
+        // 第二行度量卡片
+        html += '<div class="grid grid-cols-4 gap-4 mb-6">';
+        html += createMetricCard('🧠 平均复杂度', data.avg_complexity || 0, '最高: ' + ((data.max_complexity_function || {}).complexity || 0));
+        html += createMetricCard('🔒 API 健康度', (data.api_health_avg_score || 0) + '/100', '导出 API: ' + (data.exported_api_count || 0));
+        html += createMetricCard('📋 技术债务', 
+            (data.todo_stats ? Object.values(data.todo_stats).reduce((a,b) => a+b, 0) : 0) + ' TODO',
+            '重复函数: ' + (data.duplicated_function_groups || 0) + ' 组');
+        html += createMetricCard('⚡ 安全风险', data.taint_path_count || 0, '污点路径总数');
+        html += '</div>';
+        
+        // 图表区域
+        html += '<div class="grid grid-cols-2 gap-4 mb-6">';
+        html += '<div class="bg-white rounded-xl border border-gray-200 p-4"><div class="cm-section-title">复杂度分布</div><div id="complexityChart" style="height:200px;"></div></div>';
+        html += '<div class="bg-white rounded-xl border border-gray-200 p-4"><div class="cm-section-title">安全角色分布</div><div id="roleChart" style="height:200px;"></div></div>';
+        html += '</div>';
+        
+        html += '<div class="grid grid-cols-2 gap-4 mb-6">';
+        html += '<div class="bg-white rounded-xl border border-gray-200 p-4"><div class="cm-section-title">文件规模 TOP 10</div><div id="fileSizeChart" style="height:200px;"></div></div>';
+        html += '<div class="bg-white rounded-xl border border-gray-200 p-4"><div class="cm-section-title">调用热图 TOP 10</div><div id="hotCallChart" style="height:200px;"></div></div>';
+        html += '</div>';
+        
+        // 风险热力图（新增）
+        html += '<div class="bg-white rounded-xl border border-gray-200 p-4 mb-6">';
+        html += '<div class="cm-section-title">文件风险热力图</div>';
+        html += '<div id="riskHeatmapChart" style="height:300px;"></div>';
+        html += '</div>';
+        
+        container.innerHTML = html;
+        
+        // 初始化图表
+        setTimeout(() => initDashboardCharts(data), 100);
+    }
+
+    function createMetricCard(label, value, sub) {
+        return `<div class="cm-metric-card">
+            <div class="cm-metric-value">${value}</div>
+            <div class="cm-metric-label">${label}</div>
+            <div class="cm-metric-sub">${sub}</div>
+        </div>`;
+    }
+
+    function calculateAuthRate() {
+        if (!state.overview || !state.overview.endpoints) return 'N/A';
+        const eps = state.overview.endpoints;
+        if (eps.length === 0) return 'N/A';
+        const authCount = eps.filter(e => e.auth_required).length;
+        return Math.round(authCount / eps.length * 100) + '%';
+    }
+
+    function initDashboardCharts(data) {
+        // 复杂度分布柱状图
+        const compChart = echarts.init(document.getElementById('complexityChart'));
+        const compDist = data.complexity_distribution || {};
+        compChart.setOption({
+            xAxis: { type: 'category', data: ['1-5', '6-10', '11-15', '>15'], axisLabel: { fontSize: 10 } },
+            yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
+            series: [{ data: [compDist['1-5']||0, compDist['6-10']||0, compDist['11-15']||0, compDist['>15']||0], type: 'bar', itemStyle: { color: (p) => ['#22c55e','#eab308','#f97316','#ef4444'][p.dataIndex] } }]
+        });
+        
+        // 安全角色饼图
+        const roleChart = echarts.init(document.getElementById('roleChart'));
+        const roleDist = data.security_role_distribution || {};
+        roleChart.setOption({
+            series: [{ type: 'pie', radius: '60%', data: Object.entries(roleDist).map(([k,v]) => ({name: ROLE_NAMES[k] || k, value:v})), label: { fontSize: 10 } }]
+        });
+        
+        // 文件规模 Top 10
+        const fileChart = echarts.init(document.getElementById('fileSizeChart'));
+        const topFiles = (state.files || []).sort((a,b) => (b.functions||0) - (a.functions||0)).slice(0, 10);
+        fileChart.setOption({
+            yAxis: { type: 'category', data: topFiles.map(f => f.path.split('/').pop() || ''), inverse: true, axisLabel: { fontSize: 9 } },
+            xAxis: { type: 'value', axisLabel: { fontSize: 10 } },
+            series: [{ type: 'bar', data: topFiles.map(f => f.functions || 0), itemStyle: { color: '#6366f1' } }]
+        });
+        
+        // 调用热图（简化：基于 node incoming relations 计数）
+        const hotChart = echarts.init(document.getElementById('hotCallChart'));
+        const topFuncs = (data.top_complex_functions || []).slice(0, 10);
+        hotChart.setOption({
+            yAxis: { type: 'category', data: topFuncs.map(f => f.name), inverse: true, axisLabel: { fontSize: 9 } },
+            xAxis: { type: 'value', axisLabel: { fontSize: 10 } },
+            series: [{ type: 'bar', data: topFuncs.map(f => f.complexity || 0), itemStyle: { color: '#f97316' } }]
+        });
+        
+        // 风险热力图（新增）
+        const heatmapData = data.risk_heatmap || [];
+        if (heatmapData.length > 0 && document.getElementById('riskHeatmapChart')) {
+            const riskChart = echarts.init(document.getElementById('riskHeatmapChart'));
+            const files = heatmapData.map(item => item.file ? item.file.split('/').pop() : '');
+            const dimensions = ['复杂度', 'TODO', '未认证', '污点', '综合'];
+            const seriesData = [];
+            heatmapData.forEach((item, fileIndex) => {
+                seriesData.push([fileIndex, 0, item.complexity_score || 0]);
+                seriesData.push([fileIndex, 1, item.todo_score || 0]);
+                seriesData.push([fileIndex, 2, item.unauth_score || 0]);
+                seriesData.push([fileIndex, 3, item.taint_score || 0]);
+                seriesData.push([fileIndex, 4, item.total_risk || 0]);
+            });
+            riskChart.setOption({
+                tooltip: { position: 'top' },
+                grid: { height: '70%', top: '10%' },
+                xAxis: { type: 'category', data: files, splitArea: { show: true }, axisLabel: { fontSize: 9, rotate: 45 } },
+                yAxis: { type: 'category', data: dimensions, splitArea: { show: true }, axisLabel: { fontSize: 10 } },
+                visualMap: { min: 0, max: 10, calculable: true, orient: 'horizontal', left: 'center', bottom: '0%', inRange: { color: ['#22c55e', '#eab308', '#ef4444'] } },
+                series: [{ name: '风险评分', type: 'heatmap', data: seriesData, label: { show: true, fontSize: 9 }, emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0, 0, 0, 0.5)' } } }]
+            });
+        }
+    }
+
+    // ===== Dependencies View 渲染 =====
+    async function loadDependenciesView() {
+        showLoading(true);
+        try {
+            const res = await apiFetch(getApiBase() + '/projects/' + state.projectId + '/graph/dependencies');
+            if (!res.ok) return;
+            const data = await res.json();
+            state.dependencies = data;
+            renderDependenciesView(data);
+        } catch (e) {
+            console.error('loadDependenciesView', e);
+        }
+        showLoading(false);
+    }
+
+    function renderDependenciesView(data) {
+        const container = document.getElementById('dependenciesContent');
+        const internalDeps = data.internal_deps || [];
+        const externalDeps = data.external_deps || [];
+        
+        let html = '<div class="grid grid-cols-2 gap-4">';
+        
+        // 内部依赖
+        html += '<div class="bg-white rounded-xl border border-gray-200 p-4">';
+        html += '<div class="cm-section-title">内部依赖 (' + internalDeps.length + ')</div>';
+        html += '<div class="space-y-2 max-h-96 overflow-y-auto">';
+        internalDeps.forEach(dep => {
+            html += `<div class="flex items-center justify-between p-2 rounded-lg bg-gray-50 text-sm">
+                <span class="font-mono text-xs">${escapeHtml(dep.from_package || '')} <i class="fas fa-arrow-right text-gray-300 mx-1"></i> ${escapeHtml(dep.to_package || '')}</span>
+                <span class="text-xs text-gray-400">${dep.count || 0} 次引用</span>
+            </div>`;
+        });
+        if (internalDeps.length === 0) html += '<div class="text-xs text-gray-400 text-center py-4">暂无内部依赖数据</div>';
+        html += '</div></div>';
+        
+        // 外部依赖
+        html += '<div class="bg-white rounded-xl border border-gray-200 p-4">';
+        html += '<div class="cm-section-title">外部依赖 (' + externalDeps.length + ')</div>';
+        html += '<div class="space-y-2 max-h-96 overflow-y-auto">';
+        externalDeps.forEach(dep => {
+            html += `<div class="flex items-center justify-between p-2 rounded-lg bg-gray-50 text-sm">
+                <span class="font-mono text-xs">${escapeHtml(dep.package || '')}</span>
+                <span class="text-xs text-gray-400">${dep.count || 0} 次引用</span>
+            </div>`;
+        });
+        if (externalDeps.length === 0) html += '<div class="text-xs text-gray-400 text-center py-4">暂无外部依赖数据</div>';
+        html += '</div></div>';
+        
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    // ===== 右侧面板 =====
+    function renderRightPanel(data) {
+        const panel = document.getElementById('rightPanel');
+        const content = document.getElementById('rightPanelContent');
+        panel.classList.remove('hidden');
+        
+        const nodeType = data.type || '';
+        
+        if (nodeType === 'function') {
+            renderFunctionPanel(data, content);
+        } else if (nodeType === 'endpoint') {
+            renderEndpointPanel(data, content);
+        } else if (nodeType === 'type') {
+            renderTypePanel(data, content);
+        } else if (nodeType === 'sink') {
+            renderSinkPanel(data, content);
+        } else if (nodeType === 'package') {
+            renderPackagePanel(data, content);
+        } else {
+            // 通用 fallback：展示所有基本信息
+            renderGenericPanel(data, content);
+        }
+    }
+
+    function renderGenericPanel(data, container) {
+        let html = '';
+        html += '<div class="cm-panel-header">';
+        html += '<div><div class="font-semibold text-sm text-gray-800">' + escapeHtml(data.name || '') + '</div>';
+        html += '<div class="text-xs text-gray-400 font-mono">' + escapeHtml(data.type || 'node') + '</div></div>';
+        html += '<button onclick="closeRightPanel()" class="text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100"><i class="fas fa-times"></i></button>';
+        html += '</div>';
+        html += '<div class="cm-panel-body">';
+        html += '<div class="cm-detail-section">';
+        html += '<div class="cm-detail-section-title">基本信息</div>';
+        if (data.file) html += '<div class="cm-detail-row"><span class="key">文件</span><span class="value">' + escapeHtml(data.file || '') + ':' + (data.line || 0) + '</span></div>';
+        if (data.package) html += '<div class="cm-detail-row"><span class="key">包</span><span class="value">' + escapeHtml(data.package || '') + '</span></div>';
+        if (data.is_exported !== undefined) html += '<div class="cm-detail-row"><span class="key">导出</span><span class="value">' + (data.is_exported ? '✓ exported' : 'internal') + '</span></div>';
+        html += '</div>';
+        
+        // 调用关系
+        const incoming = data.incoming_relations || [];
+        const outgoing = data.outgoing_relations || [];
+        if (incoming.length > 0) {
+            html += '<div class="cm-detail-section">';
+            html += '<div class="cm-detail-section-title">被调用 (' + incoming.length + ')</div>';
+            incoming.forEach(rel => {
+                html += '<div class="cm-relation-item" onclick="navigateToNode(\'' + escapeHtml(rel.from_id || '') + '\')">';
+                html += '<div class="font-medium text-xs">' + escapeHtml(rel.from_name || '') + '</div>';
+                html += '<div class="text-xs text-gray-400">' + escapeHtml(rel.from_file || '') + '</div>';
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+        if (outgoing.length > 0) {
+            html += '<div class="cm-detail-section">';
+            html += '<div class="cm-detail-section-title">调用 (' + outgoing.length + ')</div>';
+            outgoing.forEach(rel => {
+                html += '<div class="cm-relation-item" onclick="navigateToNode(\'' + escapeHtml(rel.to_id || '') + '\')">';
+                html += '<div class="font-medium text-xs">' + escapeHtml(rel.to_name || '') + '</div>';
+                html += '<div class="text-xs text-gray-400">' + escapeHtml(rel.to_file || '') + '</div>';
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    function renderSinkPanel(data, container) {
+        const props = data.properties || {};
+        let html = '';
+        html += '<div class="cm-panel-header">';
+        html += '<div><div class="font-semibold text-sm text-red-600"><i class="fas fa-exclamation-triangle mr-1"></i>' + escapeHtml(data.name || '') + '</div>';
+        html += '<div class="text-xs text-gray-400">Sink 节点</div></div>';
+        html += '<button onclick="closeRightPanel()" class="text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100"><i class="fas fa-times"></i></button>';
+        html += '</div>';
+        html += '<div class="cm-panel-body">';
+        html += '<div class="cm-detail-section">';
+        html += '<div class="cm-detail-section-title">基本信息</div>';
+        html += '<div class="cm-detail-row"><span class="key">类别</span><span class="value">' + escapeHtml(getStringProp(props, 'kind') || getStringProp(props, 'category') || 'sink') + '</span></div>';
+        html += '<div class="cm-detail-row"><span class="key">文件</span><span class="value">' + escapeHtml(data.file || '') + ':' + (data.line || 0) + '</span></div>';
+        if (data.package) html += '<div class="cm-detail-row"><span class="key">包</span><span class="value">' + escapeHtml(data.package) + '</span></div>';
+        html += '</div>';
+        
+        // 净化器
+        const sanitizers = getStringSliceProp(props, 'sanitizers');
+        if (sanitizers.length > 0) {
+            html += '<div class="cm-detail-section">';
+            html += '<div class="cm-detail-section-title">已配置净化器</div>';
+            sanitizers.forEach(s => {
+                html += '<div class="cm-tag bg-green-50 text-green-600 text-xs mr-1">' + escapeHtml(s) + '</div>';
+            });
+            html += '</div>';
+        }
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    function renderPackagePanel(data, container) {
+        let html = '';
+        html += '<div class="cm-panel-header">';
+        html += '<div><div class="font-semibold text-sm text-gray-800">📦 ' + escapeHtml(data.name || '') + '</div>';
+        html += '<div class="text-xs text-gray-400">Package 聚合</div></div>';
+        html += '<button onclick="closeRightPanel()" class="text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100"><i class="fas fa-times"></i></button>';
+        html += '</div>';
+        html += '<div class="cm-panel-body">';
+        html += '<div class="cm-detail-section">';
+        html += '<div class="cm-detail-section-title">统计</div>';
+        html += '<div class="cm-detail-row"><span class="key">函数数</span><span class="value">' + (data.function_count || 0) + '</span></div>';
+        html += '<div class="cm-detail-row"><span class="key">类型数</span><span class="value">' + (data.type_count || 0) + '</span></div>';
+        html += '<div class="cm-detail-row"><span class="key">端点数</span><span class="value">' + (data.endpoint_count || 0) + '</span></div>';
+        html += '</div>';
+        if (data.functions && data.functions.length > 0) {
+            html += '<div class="cm-detail-section">';
+            html += '<div class="cm-detail-section-title">函数列表</div>';
+            data.functions.forEach(fn => {
+                html += '<div class="text-xs font-mono py-1">' + escapeHtml(fn) + '</div>';
+            });
+            html += '</div>';
+        }
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    function renderFunctionPanel(data, container) {
+        const props = data.properties || {};
+        let html = '';
+        
+        html += '<div class="cm-panel-header">';
+        html += '<div><div class="font-semibold text-sm text-gray-800">' + escapeHtml(data.name || '') + '</div>';
+        html += '<div class="text-xs text-gray-400 font-mono">' + escapeHtml(data.package || '') + '</div></div>';
+        html += '<button onclick="closeRightPanel()" class="text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100"><i class="fas fa-times"></i></button>';
+        html += '</div>';
+        
+        html += '<div class="cm-panel-body">';
+        
+        // 基本信息
+        html += '<div class="cm-detail-section">';
+        html += '<div class="cm-detail-section-title">基本信息</div>';
+        html += '<div class="cm-detail-row"><span class="key">文件</span><span class="value">' + escapeHtml(data.file || '') + ':' + (data.line || 0) + '</span></div>';
+        html += '<div class="cm-detail-row"><span class="key">导出</span><span class="value">' + (data.is_exported ? '✓ exported' : 'internal') + '</span></div>';
+        const role = getStringProp(props, 'security_role');
+        if (role) html += '<div class="cm-detail-row"><span class="key">安全角色</span><span class="value">' + role + '</span></div>';
+        html += '</div>';
+        
+        // 度量
+        html += '<div class="cm-detail-section">';
+        html += '<div class="cm-detail-section-title">度量</div>';
+        const cc = getIntProp(props, 'complexity');
+        html += '<div class="cm-detail-row"><span class="key">圈复杂度</span><span class="value ' + (cc > 15 ? 'text-red-600 font-bold' : '') + '">' + (cc || '-') + '</span></div>';
+        html += '<div class="cm-detail-row"><span class="key">LOC</span><span class="value">' + (getIntProp(props, 'loc') || '-') + '</span></div>';
+        html += '<div class="cm-detail-row"><span class="key">嵌套深度</span><span class="value">' + (getIntProp(props, 'nested_depth') || '-') + '</span></div>';
+        html += '</div>';
+        
+        // 调用关系
+        const incoming = data.incoming_relations || [];
+        const outgoing = data.outgoing_relations || [];
+        if (incoming.length > 0) {
+            html += '<div class="cm-detail-section">';
+            html += '<div class="cm-detail-section-title">被调用 (' + incoming.length + ')</div>';
+            incoming.forEach(rel => {
+                html += '<div class="cm-relation-item" onclick="navigateToNode(\'' + escapeHtml(rel.from_id || '') + '\')">';
+                html += '<div class="font-medium text-xs">' + escapeHtml(rel.from_name || '') + '</div>';
+                html += '<div class="text-xs text-gray-400">' + escapeHtml(rel.from_file || '') + '</div>';
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+        if (outgoing.length > 0) {
+            html += '<div class="cm-detail-section">';
+            html += '<div class="cm-detail-section-title">调用 (' + outgoing.length + ')</div>';
+            outgoing.forEach(rel => {
+                html += '<div class="cm-relation-item" onclick="navigateToNode(\'' + escapeHtml(rel.to_id || '') + '\')">';
+                html += '<div class="font-medium text-xs">' + escapeHtml(rel.to_name || '') + '</div>';
+                html += '<div class="text-xs text-gray-400">' + escapeHtml(rel.to_file || '') + '</div>';
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+        
+        // 签名
+        if (data.signature) {
+            html += '<div class="cm-detail-section">';
+            html += '<div class="cm-detail-section-title">签名</div>';
+            html += '<div class="cm-code-block">' + escapeHtml(data.signature) + '</div>';
+            html += '</div>';
+        }
+        
+        // 代码片段（可展开，异步加载）
+        if (data.file) {
+            html += '<div class="cm-detail-section">';
+            html += '<div class="cm-detail-section-title cursor-pointer" onclick="toggleCodeSnippet(this)">🎨 代码片段 <i class="fas fa-chevron-down text-xs text-gray-400 ml-1 transition-transform"></i></div>';
+            html += '<div class="hidden mt-2">';
+            html += '<div id="codeSnippetLoading" class="text-xs text-gray-400 py-2"><i class="fas fa-spinner fa-spin mr-1"></i>加载中...</div>';
+            html += '<pre id="codeSnippetContent" class="hidden text-xs bg-gray-50 rounded p-2 overflow-x-auto border" style="max-height:300px;"></pre>';
+            html += '</div>';
+            html += '</div>';
+            
+            // 异步加载代码片段
+            setTimeout(() => loadCodeSnippet(data.file, data.line), 100);
+        }
+        
+        html += '</div>';
+        container.innerHTML = html;
+    }
+    
+    async function loadCodeSnippet(filePath, line) {
+        const loadingEl = document.getElementById('codeSnippetLoading');
+        const contentEl = document.getElementById('codeSnippetContent');
+        if (!loadingEl || !contentEl) return;
+        
+        try {
+            const res = await apiFetch(getApiBase() + '/projects/' + state.projectId + '/graph/files/content?file_path=' + encodeURIComponent(filePath));
+            if (!res.ok) throw new Error('加载失败');
+            const data = await res.json();
+            const content = data.content || '';
+            
+            // 提取行号附近的代码片段（前后各 15 行）
+            const lines = content.split('\n');
+            const targetLine = (line || 1) - 1;
+            const startLine = Math.max(0, targetLine - 15);
+            const endLine = Math.min(lines.length, targetLine + 16);
+            const snippetLines = lines.slice(startLine, endLine);
+            
+            // 高亮目标行
+            const snippetHtml = snippetLines.map((ln, idx) => {
+                const actualLine = startLine + idx + 1;
+                const isTarget = actualLine === (line || 1);
+                const lineNum = String(actualLine).padStart(4, ' ');
+                return `<span class="${isTarget ? 'bg-yellow-100' : ''}">${escapeHtml(lineNum)}| ${escapeHtml(ln)}</span>`;
+            }).join('\n');
+            
+            contentEl.innerHTML = '<code>' + snippetHtml + '</code>';
+            loadingEl.classList.add('hidden');
+            contentEl.classList.remove('hidden');
+        } catch (e) {
+            if (loadingEl) {
+                loadingEl.innerHTML = '<span class="text-red-400">加载失败: ' + escapeHtml(e.message) + '</span>';
+            }
+        }
+    }
+    
+    function toggleCodeSnippet(el) {
+        const content = el.nextElementSibling;
+        const icon = el.querySelector('.fa-chevron-down');
+        if (content) {
+            content.classList.toggle('hidden');
+            if (icon) {
+                icon.style.transform = content.classList.contains('hidden') ? '' : 'rotate(180deg)';
+            }
+        }
+    }
+
+    function renderEndpointPanel(data, container) {
+        const props = data.properties || {};
+        let html = '';
+        
+        html += '<div class="cm-panel-header">';
+        html += '<div><div class="font-semibold text-sm text-gray-800">' + escapeHtml(data.name || '') + '</div>';
+        html += '<div class="text-xs text-gray-400">' + (getStringProp(props, 'method') || 'GET') + '</div></div>';
+        html += '<button onclick="closeRightPanel()" class="text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100"><i class="fas fa-times"></i></button>';
+        html += '</div>';
+        
+        html += '<div class="cm-panel-body">';
+        html += '<div class="cm-detail-section">';
+        html += '<div class="cm-detail-section-title">端点信息</div>';
+        html += '<div class="cm-detail-row"><span class="key">路径</span><span class="value">' + escapeHtml(data.name || '') + '</span></div>';
+        html += '<div class="cm-detail-row"><span class="key">认证</span><span class="value">' + (getBoolProp(props, 'auth') ? '🔒 Required' : 'Open') + '</span></div>';
+        const rateLimit = getStringProp(props, 'rate_limit');
+        if (rateLimit) html += '<div class="cm-detail-row"><span class="key">限流</span><span class="value">' + rateLimit + '</span></div>';
+        html += '<div class="cm-detail-row"><span class="key">框架</span><span class="value">' + escapeHtml(getStringProp(props, 'framework') || '') + '</span></div>';
+        html += '<div class="cm-detail-row"><span class="key">文件</span><span class="value">' + escapeHtml(data.file || '') + ':' + (data.line || 0) + '</span></div>';
+        html += '</div>';
+        html += '</div>';
+        
+        container.innerHTML = html;
+    }
+
+    function renderTypePanel(data, container) {
+        const props = data.properties || {};
+        const fields = getStringSliceProp(props, 'fields') || [];
+        const methods = getStringSliceProp(props, 'methods') || [];
+        const implements = getStringSliceProp(props, 'implements') || [];
+        
+        let html = '';
+        html += '<div class="cm-panel-header">';
+        html += '<div><div class="font-semibold text-sm text-gray-800">' + escapeHtml(data.name || '') + '</div>';
+        html += '<div class="text-xs text-gray-400">' + (getStringProp(props, 'kind') || 'struct') + '</div></div>';
+        html += '<button onclick="closeRightPanel()" class="text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100"><i class="fas fa-times"></i></button>';
+        html += '</div>';
+        html += '<div class="cm-panel-body">';
+        
+        // 基本信息
+        html += '<div class="cm-detail-section">';
+        html += '<div class="cm-detail-section-title">基本信息</div>';
+        html += '<div class="cm-detail-row"><span class="key">文件</span><span class="value">' + escapeHtml(data.file || '') + ':' + (data.line || 0) + '</span></div>';
+        html += '<div class="cm-detail-row"><span class="key">包</span><span class="value">' + escapeHtml(data.package || '') + '</span></div>';
+        html += '<div class="cm-detail-row"><span class="key">导出</span><span class="value">' + (data.is_exported ? '✓ exported' : 'internal') + '</span></div>';
+        html += '</div>';
+        
+        // 字段列表
+        if (fields.length > 0) {
+            html += '<div class="cm-detail-section">';
+            html += '<div class="cm-detail-section-title">字段 (' + fields.length + ')</div>';
+            fields.forEach(f => {
+                html += '<div class="text-xs font-mono py-1 border-b border-gray-50">' + escapeHtml(f) + '</div>';
+            });
+            html += '</div>';
+        }
+        
+        // 方法列表
+        if (methods.length > 0) {
+            html += '<div class="cm-detail-section">';
+            html += '<div class="cm-detail-section-title">方法 (' + methods.length + ')</div>';
+            methods.forEach(m => {
+                html += '<div class="text-xs font-mono py-1 border-b border-gray-50">' + escapeHtml(m) + '</div>';
+            });
+            html += '</div>';
+        }
+        
+        // 实现接口
+        if (implements.length > 0) {
+            html += '<div class="cm-detail-section">';
+            html += '<div class="cm-detail-section-title">实现接口</div>';
+            implements.forEach(i => {
+                html += '<span class="cm-tag bg-orange-50 text-orange-600 text-xs mr-1">' + escapeHtml(i) + '</span>';
+            });
+            html += '</div>';
+        }
+        
+        // 调用关系
+        const incoming = data.incoming_relations || [];
+        const outgoing = data.outgoing_relations || [];
+        if (incoming.length > 0) {
+            html += '<div class="cm-detail-section">';
+            html += '<div class="cm-detail-section-title">被引用 (' + incoming.length + ')</div>';
+            incoming.forEach(rel => {
+                html += '<div class="cm-relation-item" onclick="navigateToNode(\'' + escapeHtml(rel.from_id || '') + '\')">';
+                html += '<div class="font-medium text-xs">' + escapeHtml(rel.from_name || '') + '</div>';
+                html += '<div class="text-xs text-gray-400">' + escapeHtml(rel.from_file || '') + '</div>';
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+        if (outgoing.length > 0) {
+            html += '<div class="cm-detail-section">';
+            html += '<div class="cm-detail-section-title">引用 (' + outgoing.length + ')</div>';
+            outgoing.forEach(rel => {
+                html += '<div class="cm-relation-item" onclick="navigateToNode(\'' + escapeHtml(rel.to_id || '') + '\')">';
+                html += '<div class="font-medium text-xs">' + escapeHtml(rel.to_name || '') + '</div>';
+                html += '<div class="text-xs text-gray-400">' + escapeHtml(rel.to_file || '') + '</div>';
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+        
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    function closeRightPanel() {
+        document.getElementById('rightPanel').classList.add('hidden');
+        state.selectedNodeId = null;
+    }
+
+    function navigateToNode(nodeId) {
+        state.selectedNodeId = nodeId;
+        loadNodeDetail(nodeId);
+        if (state.activeView !== 'graph') {
+            switchView('graph');
+        }
+        // 在 Graph 中高亮
+        if (state.network) {
+            state.network.selectNodes([nodeId]);
+            state.network.focus(nodeId, { scale: 1.2, animation: true });
+        }
+    }
+
+    // ===== 搜索 =====
+    function handleSearch(query) {
+        const dropdown = document.getElementById('searchDropdown');
+        if (!query || query.length < 2) {
+            dropdown.classList.add('hidden');
+            return;
+        }
+        
+        const data = state.overview;
+        if (!data) return;
+        
+        const results = [];
+        (data.functions || []).forEach(f => {
+            if ((f.name || '').toLowerCase().includes(query.toLowerCase())) {
+                results.push({ type: 'function', name: f.name, file: f.file, line: f.line, role: f.security_role });
+            }
+        });
+        (data.types || []).forEach(t => {
+            if ((t.name || '').toLowerCase().includes(query.toLowerCase())) {
+                results.push({ type: 'type', name: t.name, file: t.file, line: t.line });
+            }
+        });
+        (data.endpoints || []).forEach(ep => {
+            if ((ep.path || '').toLowerCase().includes(query.toLowerCase())) {
+                results.push({ type: 'endpoint', name: ep.path, method: ep.method });
+            }
+        });
+        
+        if (results.length === 0) {
+            dropdown.classList.add('hidden');
+            return;
+        }
+        
+        let html = '';
+        const groups = { function: '函数', type: '类型', endpoint: '端点' };
+        ['function', 'type', 'endpoint'].forEach(gtype => {
+            const group = results.filter(r => r.type === gtype);
+            if (group.length > 0) {
+                html += '<div class="cm-search-group"><div class="cm-search-group-title">' + groups[gtype] + '</div>';
+                group.slice(0, 5).forEach(r => {
+                    html += '<div class="cm-search-item" onclick="navigateToSearchResult(\'' + escapeHtml(r.name) + '\', \'' + r.type + '\')">';
+                    html += '<span class="cm-search-icon"><i class="fas fa-' + (r.type === 'function' ? 'cube' : r.type === 'type' ? 'layer-group' : 'link') + '"></i></span>';
+                    html += '<span>' + escapeHtml(r.name) + '</span>';
+                    if (r.file) html += '<span class="ml-auto text-xs text-gray-400">' + escapeHtml(r.file.split('/').pop() || '') + '</span>';
+                    html += '</div>';
+                });
+                html += '</div>';
+            }
+        });
+        
+        dropdown.innerHTML = html;
+        dropdown.classList.remove('hidden');
+    }
+
+    function hideSearchDropdown() {
+        document.getElementById('searchDropdown').classList.add('hidden');
+    }
+
+    function navigateToSearchResult(name, type) {
+        hideSearchDropdown();
+        if (type === 'endpoint') {
+            switchView('list');
+            switchListTab('endpoints');
+        } else if (type === 'type') {
+            switchView('list');
+            switchListTab('types');
+        } else {
+            switchView('list');
+            switchListTab('functions');
+        }
+    }
+
+    // ===== 工具函数 =====
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function formatDate(d) {
+        if (!d) return '-';
+        const date = new Date(d);
+        return date.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function showLoading(show) {
+        document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
+    }
+
+    function selectFile(filePath) {
+        state.filters.selectedFile = filePath;
+        // 高亮文件树中的项
+        document.querySelectorAll('.cm-tree-node').forEach(n => {
+            n.classList.toggle('active', n.dataset.file === filePath);
+        });
+    }
+
+    function filterSidebar(query) {
+        // 简单的文本过滤
+        document.querySelectorAll('.cm-tree-node').forEach(node => {
+            const text = node.textContent.toLowerCase();
+            node.style.display = text.includes(query.toLowerCase()) ? '' : 'none';
+        });
+    }
+
+    function refreshGraph() {
+        loadData();
+    }
+
+    function exportData() {
+        const exportData = {
+            project_id: state.projectId,
+            exported_at: new Date().toISOString(),
+            overview: state.overview,
+            files: state.files,
+            metrics: state.metrics,
+            dependencies: state.dependencies
+        };
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `code-map-project-${state.projectId}-${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    function buildGraph() {
+        if (!confirm('构建代码地图可能需要几分钟，确定要继续吗？')) return;
+        apiFetch(getApiBase() + '/projects/' + state.projectId + '/graph/build', { method: 'POST' })
+            .then(r => r.json())
+            .then(data => {
+                alert('代码地图构建已启动，请稍后刷新查看结果');
+            })
+            .catch(e => alert('启动失败: ' + e.message));
+    }
+
+    function showNodeDetail(nodeId) {
+        // List View 中点击行的处理（占位）
+    }
+
+    function getStringSliceProp(props, key) {
+        if (!props) return [];
+        const v = props[key];
+        if (v === undefined || v === null) return [];
+        if (Array.isArray(v)) return v.filter(x => typeof x === 'string');
+        if (typeof v === 'string') return [v];
+        return [];
+    }
+
+    function getStringProp(props, key) {
+        if (!props) return '';
+        if (props[key] !== undefined) {
+            if (typeof props[key] === 'string') return props[key];
+        }
+        return '';
+    }
+
+    function getIntProp(props, key) {
+        if (!props) return 0;
+        if (props[key] !== undefined) {
+            if (typeof props[key] === 'number') return props[key];
+            if (typeof props[key] === 'string') {
+                const n = parseInt(props[key], 10);
+                return isNaN(n) ? 0 : n;
+            }
+        }
+        return 0;
+    }
+
+    function getBoolProp(props, key) {
+        if (!props) return false;
+        if (props[key] !== undefined) {
+            if (typeof props[key] === 'boolean') return props[key];
+        }
+        return false;
+    }
+
+    // ===== 可拖拽面板 =====
+    function setupResizablePanels() {
+        let isResizing = false;
+        let currentHandle = null;
+        let startX = 0;
+        let startWidth = 0;
+        let targetEl = null;
+
+        document.querySelectorAll('.cm-resize-handle').forEach(handle => {
+            handle.addEventListener('mousedown', (e) => {
+                isResizing = true;
+                currentHandle = handle;
+                startX = e.clientX;
+                targetEl = handle.id === 'leftResizeHandle' ? document.getElementById('leftSidebar') : document.getElementById('rightPanel');
+                startWidth = targetEl.offsetWidth;
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+            });
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+            const delta = e.clientX - startX;
+            if (currentHandle.id === 'leftResizeHandle') {
+                targetEl.style.width = Math.max(200, Math.min(400, startWidth + delta)) + 'px';
+            } else {
+                targetEl.style.width = Math.max(250, Math.min(500, startWidth - delta)) + 'px';
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            isResizing = false;
+            currentHandle = null;
+            targetEl = null;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        });
+    }
+    </script>
+</body>
+</html>

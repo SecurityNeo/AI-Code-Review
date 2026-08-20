@@ -48,12 +48,17 @@ type SymbolGraphResult struct {
 func (sg *SymbolGraph) BuildFromASTs(projectID uint64, asts []*parser.UnifiedAST, adapters []ASTAdapter) (*SymbolGraphResult, error) {
 	graph := NewMemorySymbolGraph(projectID)
 
-	// 步骤1：摄入基础AST
+	// 步骤1：摄入所有基础节点（不添加调用关系）
 	for _, ast := range asts {
-		graph.ingestAST(ast)
+		graph.ingestASTNodes(ast)
 	}
 
-	// 步骤2：运行框架适配器（识别Endpoint、Sink、认证等）
+	// 步骤2：添加所有调用关系（此时所有节点都已存在，可正确解析跨文件引用）
+	for _, ast := range asts {
+		graph.ingestASTCalls(ast)
+	}
+
+	// 步骤3：运行框架适配器（识别Endpoint、Sink、认证等）
 	activatedFrameworks := make(map[string]bool)
 	for _, ast := range asts {
 		for _, adapter := range adapters {
@@ -64,7 +69,7 @@ func (sg *SymbolGraph) BuildFromASTs(projectID uint64, asts []*parser.UnifiedAST
 		}
 	}
 
-	// 步骤3：推断关系（实现接口、类型引用等）
+	// 步骤4：推断关系（实现接口、类型引用等）
 	sg.inferRelations(graph, asts)
 
 	result := &SymbolGraphResult{

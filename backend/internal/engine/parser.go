@@ -92,12 +92,54 @@ func ParseReviewResult(
 	}
 }
 
-// tryParseJSON 尝试解析 JSON
+// tryParseJSON 尝试解析 JSON（含结构修复兜底）
 func tryParseJSON(content string, deductCfg DeductScoreConfig) (*llm.AIReviewResult, error) {
 	var result llm.AIReviewResult
-	if err := json.Unmarshal([]byte(content), &result); err != nil {
-		return nil, err
+	// 第一次：标准解析
+	if err := json.Unmarshal([]byte(content), &result); err == nil {
+		return postParse(&result, deductCfg)
 	}
+	// 第二次：结构修复后解析（处理 dimensions 中混入标量值如 total_score）
+	var raw map[string]interface{}
+	if json.Unmarshal([]byte(content), &raw) == nil {
+		if fixDimensionsNesting(raw) {
+			fixedBytes, marshalErr := json.Marshal(raw)
+			if marshalErr == nil {
+				if err := json.Unmarshal(fixedBytes, &result); err == nil {
+					zap.L().Info("fixed malformed JSON: removed scalar from dimensions, parse success",
+						zap.Int("total_score", result.TotalScore))
+					return postParse(&result, deductCfg)
+				}
+			}
+		}
+	}
+	return nil, fmt.Errorf("json parse failed after all attempts")
+}
+
+// fixDimensionsNesting 修复 LLM 返回的 JSON 中 dimensions 对象内混入标量值的问题
+// 例如：dimensions 内部包含 "total_score": 48 这样的键值对
+func fixDimensionsNesting(raw map[string]interface{}) bool {
+	dims, ok := raw["dimensions"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	fixed := false
+	for k, v := range dims {
+		if _, isObj := v.(map[string]interface{}); isObj {
+			continue
+		}
+		// v 不是对象（map），说明是标量，将其移到顶层
+		if _, exists := raw[k]; !exists {
+			raw[k] = v
+		}
+		delete(dims, k)
+		fixed = true
+	}
+	return fixed
+}
+
+// postParse 解析成功后的统一后处理
+func postParse(result *llm.AIReviewResult, deductCfg DeductScoreConfig) (*llm.AIReviewResult, error) {
 	// 基础校验
 	if result.TotalScore < 0 || result.TotalScore > 100 {
 		return nil, fmt.Errorf("invalid total_score: %d", result.TotalScore)
@@ -116,13 +158,13 @@ func tryParseJSON(content string, deductCfg DeductScoreConfig) (*llm.AIReviewRes
 		}
 	}
 	// 非阻塞校验：权重之和
-	if err := ValidateResult(&result); err != nil {
+	if err := ValidateResult(result); err != nil {
 		zap.L().Warn("review result validation warning", zap.Error(err))
 	}
 
 	// 后置校验：从 Issue 扣分重新计算总分
 	result.OriginalTotalScore = result.TotalScore
-	calculated := RecalculateTotalScore(&result)
+	calculated := RecalculateTotalScore(result)
 	if abs(result.TotalScore-calculated) > 5 {
 		zap.L().Warn("LLM总分与计算值差异超过阈值，启用后置校验修正",
 			zap.Int("llm_score", result.TotalScore),
@@ -131,7 +173,7 @@ func tryParseJSON(content string, deductCfg DeductScoreConfig) (*llm.AIReviewRes
 		result.TotalScore = calculated
 	}
 
-	return &result, nil
+	return result, nil
 }
 
 // ValidateResult 校验评审结果数据质量（非阻塞，仅记录警告）
@@ -207,7 +249,7 @@ func fallbackMarkdown(content string) *llm.AIReviewResult {
 }
 
 // extractScoreFromText 从文本中提取分数
-var scoreRegex = regexp.MustCompile(`(?i)(?:总分|综合评分|score|AI评分)[:：\s]*(\d+)`)
+var scoreRegex = regexp.MustCompile(`(?i)(?:总分|综合评分|score|AI评分|total_score)[:：\s"]*(\d+)`)
 
 func extractScoreFromText(text string) int {
 	matches := scoreRegex.FindStringSubmatch(text)

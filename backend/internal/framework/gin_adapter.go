@@ -81,10 +81,19 @@ func (a *GinAdapter) enrichFromCallSites(ast *parser.UnifiedAST, g *graph.Memory
 				"framework": "gin",
 			},
 		}
+		// 从 arguments 中提取 handler 函数名（跳过字符串和匿名函数，取最后一个有效参数）
 		if len(cs.Arguments) >= 2 {
-			handler := strings.TrimSpace(cs.Arguments[1])
-			if handler != "" {
-				node.Properties["handler"] = handler
+			var handlerFunc string
+			for i := len(cs.Arguments) - 1; i >= 0; i-- {
+				arg := strings.TrimSpace(cs.Arguments[i])
+				if arg == "" || strings.HasPrefix(arg, `"`) || strings.HasPrefix(arg, "`") || strings.Contains(arg, "func(") || arg == "nil" {
+					continue
+				}
+				handlerFunc = arg
+				break
+			}
+			if handlerFunc != "" {
+				node.Properties["handler"] = handlerFunc
 			}
 		}
 		g.AddNode(node)
@@ -166,7 +175,7 @@ func (a *GinAdapter) enrichAuthMiddleware(ast *parser.UnifiedAST, g *graph.Memor
 			if node.Type == graph.NodeEndpoint && node.File == ast.FilePath {
 				handler, _ := node.Properties["handler"].(string)
 				if handler != "" && strings.Contains(fn.BodySnippet, handler) {
-					node.Properties["auth_required"] = authRequired
+					node.Properties["auth"] = authRequired
 					if authRequired {
 						g.AddNode(node) // 更新节点
 					}

@@ -7,6 +7,7 @@ const (
 	NodeField    = "field"
 	NodeEndpoint = "endpoint"
 	NodeSink     = "sink"
+	NodeTODO     = "todo"
 )
 
 // Relation type constants

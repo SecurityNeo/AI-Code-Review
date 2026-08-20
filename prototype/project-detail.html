@@ -87,112 +87,65 @@
             </div>
         </header>
 
-        <div class="p-8 space-y-6">
-            <!-- 元数据面板 -->
-            <div class="bg-white rounded-xl p-6 border">
-                <h3 class="font-bold text-gray-800 mb-4">项目信息</h3>
-                <div class="grid grid-cols-4 gap-6">
-                    <div>
-                        <div class="text-xs text-gray-500 mb-1">项目名称</div>
-                        <div class="font-medium text-sm" id="projectName">-</div>
+        <div class="p-6 space-y-4">
+            <!-- 项目信息卡片 -->
+            <div class="bg-white rounded-xl border overflow-hidden">
+                <!-- 上层：项目标识 + 核心指标 -->
+                <div class="px-5 py-4 flex items-center justify-between gap-6">
+                    <!-- 左侧：项目身份 -->
+                    <div class="flex items-center gap-3 min-w-0">
+                        <div class="w-9 h-9 bg-blue-50 rounded-lg flex items-center justify-center text-blue-600 flex-shrink-0">
+                            <i class="fab fa-gitlab text-base"></i>
+                        </div>
+                        <div class="min-w-0">
+                            <h1 class="text-base font-bold text-gray-900 truncate leading-tight" id="projectName">加载中...</h1>
+                            <a id="projectPath" href="#" target="_blank" class="text-xs text-gray-400 hover:text-blue-600 hover:underline truncate block mt-0.5" title="">-</a>
+                        </div>
                     </div>
-                    <div>
-                        <div class="text-xs text-gray-500 mb-1">仓库地址</div>
-                        <div class="font-medium text-sm text-blue-600 truncate" id="projectPath">-</div>
-                    </div>
-                    <div>
-                        <div class="text-xs text-gray-500 mb-1">创建时间</div>
-                        <div class="font-medium text-sm" id="createdAt">-</div>
-                    </div>
-                    <div>
-                        <div class="text-xs text-gray-500 mb-1">AI审核模版</div>
-                        <div class="font-medium text-sm" id="templateName">-</div>
-                    </div>
-                    <div>
-                        <div class="text-xs text-gray-500 mb-1">关联资源池</div>
-                        <div class="font-medium text-sm" id="poolName">-</div>
-                    </div>
-                    <div>
-                        <div class="text-xs text-gray-500 mb-1">默认模型</div>
-                        <div class="font-medium text-sm" id="modelName">-</div>
-                    </div>
-                    <div>
-                        <div class="text-xs text-gray-500 mb-1">更新时间</div>
-                        <div class="font-medium text-sm" id="updatedAt">-</div>
-                    </div>
-                </div>
-                <div class="grid grid-cols-3 gap-6 mt-6 pt-6 border-t">
-                    <div class="text-center">
-                        <div class="text-2xl font-bold text-gray-800" id="taskCount">0</div>
-                        <div class="text-xs text-gray-500">累计任务数</div>
-                    </div>
-                    <div class="text-center">
-                        <div class="text-2xl font-bold text-green-600" id="successRate">0%</div>
-                        <div class="text-xs text-gray-500">成功率</div>
-                    </div>
-                    <div class="text-center">
-                        <div class="text-2xl font-bold text-gray-800" id="recentTask">-</div>
-                        <div class="text-xs text-gray-500">最近任务</div>
-                    </div>
-                </div>
-            </div>
 
-            <!-- 代码地图区块 -->
-            <div class="bg-white rounded-xl p-6 border">
-                <div class="flex items-center justify-between mb-4">
-                    <div class="flex items-center gap-2">
-                        <h3 class="font-bold text-gray-800">代码地图</h3>
-                        <span id="graphStatusBadge" class="status-badge" style="background:#f3f4f6;color:#6b7280">未构建</span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <select id="graphBaseBranch" class="px-3 py-1 border rounded text-sm">
-                            <option value="main">main</option>
-                            <option value="master">master</option>
-                            <option value="develop">develop</option>
-                        </select>
-                        <button onclick="buildGraph()" id="buildGraphBtn" class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
-                            <i class="fas fa-hammer mr-1"></i>构建
-                        </button>
-                        <button onclick="refreshGraph()" id="refreshGraphBtn" class="px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 hidden">
-                            <i class="fas fa-redo mr-1"></i>重新构建
-                        </button>
-                        <button onclick="reloadGraphData()" id="reloadGraphBtn" class="px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 hidden">
-                            <i class="fas fa-sync-alt mr-1"></i>刷新
-                        </button>
-                        <button onclick="viewGraph()" id="viewGraphBtn" class="px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200 hidden">
-                            <i class="fas fa-project-diagram mr-1"></i>查看
-                        </button>
+                    <!-- 右侧：核心指标 -->
+                    <div class="flex items-center gap-5 flex-shrink-0">
+                        <div class="text-right">
+                            <div class="text-xl font-bold text-gray-900 leading-none" id="taskCount">0</div>
+                            <div class="text-[10px] text-gray-400 mt-1">累计任务</div>
+                        </div>
+                        <div class="w-px h-6 bg-gray-200"></div>
+                        <div class="text-right">
+                            <div class="text-xl font-bold text-green-600 leading-none" id="successRate">0%</div>
+                            <div class="text-[10px] text-gray-400 mt-1">成功率</div>
+                        </div>
                     </div>
                 </div>
-                <div id="graphProgressArea" class="hidden mb-4">
-                    <div class="flex items-center justify-between text-sm mb-1">
-                        <span id="graphProgressText">构建中...</span>
-                        <span id="graphProgressPercent">0%</span>
-                    </div>
-                    <div class="w-full bg-gray-200 rounded-full h-2">
-                        <div id="graphProgressBar" class="bg-blue-600 h-2 rounded-full" style="width:0%"></div>
-                    </div>
+
+                <!-- 下层：配置元数据 -->
+                <div class="px-5 py-2 bg-gray-50/80 border-t border-gray-100 flex items-center gap-6 text-xs">
+                    <span class="flex items-center gap-1.5">
+                        <i class="fas fa-file-code text-[10px] text-gray-400"></i>
+                        <span class="text-[10px] text-gray-400">AI模版</span>
+                        <span class="text-gray-800 font-semibold ml-0.5" id="templateName">-</span>
+                    </span>
+                    <span class="flex items-center gap-1.5">
+                        <i class="fas fa-server text-[10px] text-gray-400"></i>
+                        <span class="text-[10px] text-gray-400">资源池</span>
+                        <span class="text-gray-800 font-semibold ml-0.5" id="poolName">-</span>
+                    </span>
+                    <span class="flex items-center gap-1.5">
+                        <i class="fas fa-microchip text-[10px] text-gray-400"></i>
+                        <span class="text-[10px] text-gray-400">模型</span>
+                        <span class="text-gray-800 font-semibold ml-0.5" id="modelName">-</span>
+                    </span>
+                    <span class="text-gray-300">|</span>
+                    <span class="flex items-center gap-1.5">
+                        <i class="far fa-clock text-[10px] text-gray-400"></i>
+                        <span class="text-[10px] text-gray-400">创建</span>
+                        <span class="text-gray-800 font-medium ml-0.5" id="createdAt">-</span>
+                    </span>
+                    <span class="flex items-center gap-1.5">
+                        <i class="far fa-edit text-[10px] text-gray-400"></i>
+                        <span class="text-[10px] text-gray-400">更新</span>
+                        <span class="text-gray-800 font-medium ml-0.5" id="updatedAt">-</span>
+                    </span>
                 </div>
-                <div id="graphErrorArea" class="hidden bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 mb-4"></div>
-                <div id="graphStatsArea" class="hidden grid grid-cols-4 gap-4">
-                    <div class="bg-blue-50 rounded-lg p-4 text-center">
-                        <div class="text-2xl font-bold text-gray-800" id="graphNodeCount">0</div>
-                        <div class="text-xs text-gray-500">符号节点</div>
-                    </div>
-                    <div class="bg-purple-50 rounded-lg p-4 text-center">
-                        <div class="text-2xl font-bold text-gray-800" id="graphRelCount">0</div>
-                        <div class="text-xs text-gray-500">关系边</div>
-                    </div>
-                    <div class="bg-green-50 rounded-lg p-4 text-center">
-                        <div class="text-2xl font-bold text-gray-800" id="graphFrameworks">-</div>
-                        <div class="text-xs text-gray-500">框架</div>
-                    </div>
-                    <div class="bg-orange-50 rounded-lg p-4 text-center">
-                        <div class="text-2xl font-bold text-gray-800" id="graphEndpointCount">0</div>
-                        <div class="text-xs text-gray-500">API端点</div>
-                    </div>
-                </div>
-                <div id="graphBuiltAt" class="hidden text-xs text-gray-400 mt-3 text-right"></div>
             </div>
 
             <!-- Tabs -->
@@ -200,7 +153,10 @@
                 <div class="tab-btn active" onclick="switchTab('tasks', this)">
                     <i class="fas fa-tasks mr-1"></i>任务历史
                 </div>
-                <div class="tab-btn" onclick="switchTab('rules', this)">
+                <div class="tab-btn" onclick="switchTab('graph-history', this)">
+                    <i class="fas fa-project-diagram mr-1"></i>代码地图构建历史
+                </div>
+                <div class="tab-btn" onclick="switchTab('rules', this)" data-admin-only>
                     <i class="fas fa-shield-alt mr-1"></i>评审规则配置
                 </div>
                 <div class="tab-btn" onclick="switchTab('stewards', this)">
@@ -211,7 +167,7 @@
             <!-- 任务历史 Tab -->
             <div id="tab-tasks" class="tab-content active">
                 <div class="bg-white rounded-xl border overflow-hidden">
-                    <div class="px-6 py-4 border-b flex items-center justify-between">
+                    <div class="px-5 py-3 border-b flex items-center justify-between">
                         <h3 class="font-bold text-gray-800">任务历史</h3>
                         <div class="flex gap-2">
                             <select id="statusFilter" class="px-3 py-1 border rounded text-sm" onchange="filterTasks()">
@@ -240,7 +196,7 @@
                             </tr>
                         </tbody>
                     </table>
-                    <div class="px-6 py-4 border-t flex items-center justify-between">
+                    <div class="px-5 py-3 border-t flex items-center justify-between">
                         <span class="text-sm text-gray-500" id="taskPaginationInfo">共 0 条记录</span>
                         <div class="flex items-center gap-2" id="taskPagination">
                             <select id="taskPageSize" class="px-2 py-1 border rounded text-sm" onchange="changeTaskPageSize()">
@@ -265,7 +221,7 @@
                             <p class="text-sm text-gray-500 mt-1">勾选需要的规则并配置严重程度，用于 AI 代码评审</p>
                         </div>
                         <div class="flex gap-2">
-                            <button onclick="resetProjectRules()" class="px-3 py-2 border rounded-lg text-sm hover:bg-gray-50 text-gray-600">
+                            <button onclick="resetProjectRules()" data-admin-only class="px-3 py-2 border rounded-lg text-sm hover:bg-gray-50 text-gray-600">
                                 <i class="fas fa-undo mr-1"></i>重置默认
                             </button>
                         </div>
@@ -336,7 +292,7 @@
                             <thead class="bg-gray-50 border-b sticky top-0">
                                 <tr>
                                     <th class="px-3 py-3 text-center w-10">
-                                        <input type="checkbox" id="ruleSelectAll" onclick="toggleSelectAllPage(this.checked)" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer">
+                                        <input type="checkbox" id="ruleSelectAll" onclick="toggleSelectAllPage(this.checked)" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" data-admin-only>
                                     </th>
                                     <th class="px-4 py-3 text-left font-semibold text-gray-500">规则名称</th>
                                     <th class="px-4 py-3 text-left font-semibold text-gray-500">描述</th>
@@ -390,6 +346,45 @@
                                 <tr><td colspan="4" class="px-4 py-8 text-center text-gray-500">加载中...</td></tr>
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 代码地图构建历史 Tab -->
+            <div id="tab-graph-history" class="tab-content">
+                <div class="bg-white rounded-xl border overflow-hidden">
+                    <div class="px-5 py-3 border-b flex items-center justify-between">
+                        <h3 class="font-bold text-gray-800">代码地图构建历史</h3>
+                        <div class="flex gap-2">
+                            <button onclick="loadGraphBuildHistory()" class="px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200">
+                                <i class="fas fa-redo mr-1"></i>刷新
+                            </button>
+                            <button onclick="buildGraph()" data-admin-only class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+                                <i class="fas fa-hammer mr-1"></i>手动构建
+                            </button>
+                        </div>
+                    </div>
+                    <table class="w-full">
+                        <thead class="bg-gray-50 border-b">
+                            <tr>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">触发方式</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">分支</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">MR信息</th>
+                                <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500">节点/关系</th>
+                                <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500">状态</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">耗时</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">触发时间</th>
+                            </tr>
+                        </thead>
+                        <tbody id="graphHistoryBody" class="divide-y divide-gray-100">
+                            <tr>
+                                <td colspan="7" class="px-4 py-8 text-center text-gray-500">加载中...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <div class="px-5 py-3 border-t flex items-center justify-between">
+                        <span class="text-sm text-gray-500" id="graphHistoryInfo">共 0 条记录</span>
+                        <div class="flex items-center gap-2" id="graphHistoryPagination"></div>
                     </div>
                 </div>
             </div>
@@ -462,6 +457,7 @@
         }
         if (tab === 'stewards') loadProjectStewards();
         if (tab === 'rules') loadProjectRules();
+        if (tab === 'graph-history') loadGraphBuildHistory();
     }
 
     // ========== 项目信息加载 ==========
@@ -480,7 +476,10 @@
     function renderProject(p) {
         document.getElementById('projectName').textContent = p.name || '-';
         document.getElementById('projectTitle').textContent = p.name || '-';
-        document.getElementById('projectPath').textContent = p.project_path || '-';
+        const pathEl = document.getElementById('projectPath');
+        pathEl.textContent = p.project_path || '-';
+        pathEl.href = p.project_path || '#';
+        pathEl.title = p.project_path || '';
         document.getElementById('createdAt').textContent = formatDate(p.created_at);
         document.getElementById('updatedAt').textContent = formatDate(p.updated_at);
         document.getElementById('templateName').textContent = p.template?.name || '未设置';
@@ -489,11 +488,6 @@
         const aiSwitch = document.getElementById('aiEnabled');
         aiSwitch.checked = p.ai_enabled;
         aiSwitch.onchange = () => toggleAI(p.id, aiSwitch.checked);
-        // 代码地图状态
-        if (p.graph_base_branch) {
-            document.getElementById('graphBaseBranch').value = p.graph_base_branch;
-        }
-        renderGraphStatus(p);
         loadProjectStats(p.id);
         loadProjectTasks(p.id);
     }
@@ -567,15 +561,16 @@
     }
 
     async function buildGraph() {
-        const branch = document.getElementById('graphBaseBranch').value;
         try {
             const res = await apiFetch(`${API_BASE}/projects/${getProjectId()}/graph/build`, {
-                method: 'POST',
-                body: JSON.stringify({ branch })
+                method: 'POST'
             });
-            if (!res.ok) throw new Error('启动失败');
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.error || '启动失败');
+            }
             showToast('代码地图构建已启动', 'success');
-            startGraphPolling();
+            loadGraphBuildHistory();
         } catch (e) { showToast('启动失败: ' + e.message, 'error'); }
     }
 
@@ -586,18 +581,141 @@
             });
             if (!res.ok) throw new Error('刷新失败');
             showToast('代码地图刷新已启动', 'success');
-            startGraphPolling();
         } catch (e) { showToast('刷新失败: ' + e.message, 'error'); }
     }
 
     async function reloadGraphData() {
+        loadGraphBuildHistory();
+    }
+
+    // ========== 代码地图构建历史分页 ==========
+    let graphHistoryCurrentPage = 1, graphHistoryPageSize = 10, graphHistoryTotal = 0;
+
+    async function loadGraphBuildHistory(page, pageSize) {
+        page = page || graphHistoryCurrentPage;
+        pageSize = pageSize || graphHistoryPageSize;
+        graphHistoryCurrentPage = page;
+        graphHistoryPageSize = pageSize;
+
+        const tbody = document.getElementById('graphHistoryBody');
+        if (!tbody) return;
+        tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">加载中...</td></tr>';
         try {
-            const res = await apiFetch(`${API_BASE}/projects/${getProjectId()}`);
-            if (!res.ok) throw new Error('获取数据失败');
+            const res = await apiFetch(`${API_BASE}/projects/${getProjectId()}/graph/build-history?page=${page}&page_size=${pageSize}`);
+            if (!res.ok) throw new Error('加载失败');
             const json = await res.json();
-            const p = json.data;
-            renderGraphStatus(p);
-        } catch (e) { showToast('刷新失败: ' + e.message, 'error'); }
+            graphHistoryTotal = json.total || 0;
+            renderGraphBuildHistory(json.data || [], json.total || 0, page, pageSize);
+        } catch (e) {
+            const tr = document.createElement('tr');
+            const td = document.createElement('td');
+            td.colSpan = 7;
+            td.className = 'px-4 py-8 text-center text-red-500';
+            td.textContent = '加载失败: ' + (e.message || '');
+            tr.appendChild(td);
+            tbody.innerHTML = '';
+            tbody.appendChild(tr);
+        }
+    }
+
+    function renderGraphBuildHistory(items, total, page, pageSize) {
+        const tbody = document.getElementById('graphHistoryBody');
+        document.getElementById('graphHistoryInfo').textContent = `共 ${total} 条记录`;
+        if (!items || items.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">暂无构建历史</td></tr>';
+            renderGraphHistoryPagination(page, pageSize, total);
+            return;
+        }
+
+        const statusMap = {
+            pending: { text: '排队中', class: 'text-blue-600' },
+            running: { text: '构建中', class: 'text-blue-600' },
+            completed: { text: '成功', class: 'text-green-600' },
+            failed: { text: '失败', class: 'text-red-600' }
+        };
+        const triggerMap = {
+            manual: '手动构建',
+            mr_merge: 'MR合入触发'
+        };
+
+        tbody.innerHTML = items.map(item => {
+            const st = statusMap[item.status] || { text: item.status, class: 'text-gray-500' };
+            const trigger = triggerMap[item.trigger_type] || item.trigger_type;
+            const duration = item.duration_ms ? (item.duration_ms / 1000).toFixed(1) + 's' : '-';
+            let mrInfo = '-';
+            if (item.trigger_type === 'mr_merge' && item.mr_iid > 0) {
+                mrInfo = `<div class="text-xs">!${item.mr_iid} ${escapeHtml((item.mr_title || '').substring(0, 30))}</div>`;
+            }
+            return `<tr class="hover:bg-gray-50">
+                <td class="px-4 py-3 text-sm">
+                    <span class="px-2 py-0.5 rounded text-xs ${item.trigger_type === 'manual' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}">${escapeHtml(trigger)}</span>
+                </td>
+                <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(item.branch || '-')}</td>
+                <td class="px-4 py-3 text-sm text-gray-600">${mrInfo}</td>
+                <td class="px-4 py-3 text-sm text-center text-gray-600">${item.node_count || 0} / ${item.rel_count || 0}</td>
+                <td class="px-4 py-3 text-sm text-center ${st.class}">${escapeHtml(st.text)}</td>
+                <td class="px-4 py-3 text-sm text-gray-600">${duration}</td>
+                <td class="px-4 py-3 text-sm text-gray-500">${formatDate(item.created_at)}</td>
+            </tr>`;
+        }).join('');
+
+        renderGraphHistoryPagination(page, pageSize, total);
+    }
+
+    function renderGraphHistoryPagination(page, pageSize, total) {
+        const container = document.getElementById('graphHistoryPagination');
+        if (!container) return;
+        const totalPages = Math.ceil(total / pageSize) || 1;
+        if (totalPages <= 1) {
+            container.innerHTML = '';
+            return;
+        }
+
+        let html = '';
+        // 上一页
+        html += `<button class="px-3 py-1 border rounded text-sm ${page <= 1 ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-50'}" ${page <= 1 ? 'disabled' : ''} onclick="goGraphHistoryPage(${page - 1})">上一页</button>`;
+
+        // 页码
+        if (totalPages <= 5) {
+            for (let i = 1; i <= totalPages; i++) {
+                html += `<button class="px-3 py-1 border rounded text-sm ${i === page ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}" onclick="goGraphHistoryPage(${i})">${i}</button>`;
+            }
+        } else {
+            // 首页
+            html += `<button class="px-3 py-1 border rounded text-sm ${page === 1 ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}" onclick="goGraphHistoryPage(1)">1</button>`;
+            let startPage = Math.max(2, page - 1);
+            let endPage = Math.min(totalPages - 1, page + 1);
+            if (page <= 2) { endPage = Math.min(totalPages - 1, 4); }
+            if (page >= totalPages - 1) { startPage = Math.max(2, totalPages - 3); }
+            if (startPage > 2) html += `<span class="px-2 py-1 text-gray-400">...</span>`;
+            for (let i = startPage; i <= endPage; i++) {
+                html += `<button class="px-3 py-1 border rounded text-sm ${i === page ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}" onclick="goGraphHistoryPage(${i})">${i}</button>`;
+            }
+            if (endPage < totalPages - 1) html += `<span class="px-2 py-1 text-gray-400">...</span>`;
+            html += `<button class="px-3 py-1 border rounded text-sm ${page === totalPages ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}" onclick="goGraphHistoryPage(${totalPages})">${totalPages}</button>`;
+        }
+
+        // 下一页
+        html += `<button class="px-3 py-1 border rounded text-sm ${page >= totalPages ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-50'}" ${page >= totalPages ? 'disabled' : ''} onclick="goGraphHistoryPage(${page + 1})">下一页</button>`;
+
+        // 页码大小选择
+        html += `<select class="ml-2 px-2 py-1 border rounded text-sm" onchange="changeGraphHistoryPageSize(this.value)">
+            <option value="10" ${pageSize == 10 ? 'selected' : ''}>10条/页</option>
+            <option value="20" ${pageSize == 20 ? 'selected' : ''}>20条/页</option>
+            <option value="50" ${pageSize == 50 ? 'selected' : ''}>50条/页</option>
+        </select>`;
+
+        container.innerHTML = html;
+    }
+
+    function goGraphHistoryPage(page) {
+        if (page < 1 || page > Math.ceil(graphHistoryTotal / graphHistoryPageSize)) return;
+        loadGraphBuildHistory(page, graphHistoryPageSize);
+    }
+
+    function changeGraphHistoryPageSize(size) {
+        graphHistoryPageSize = parseInt(size, 10) || 10;
+        loadGraphBuildHistory(1, graphHistoryPageSize);
     }
 
     async function viewGraph() {
@@ -719,20 +837,37 @@
                 container.innerHTML = '<div style="text-align:center; color:#9ca3af; font-size:14px; padding:40px 0;">暂无 API 端点数据</div>';
                 return;
             }
+            // 认证/限速统计
+            var authCount = 0, rateLimitedCount = 0;
+            endpoints.forEach(function(ep) { if (ep.auth_required) authCount++; if (ep.rate_limit) rateLimitedCount++; });
+            var statsHtml = '';
+            if (authCount > 0 || rateLimitedCount > 0) {
+                statsHtml = '<div style="display:flex; gap:8px; margin-bottom:10px;">' +
+                    (authCount > 0 ? '<span style="font-size:11px; padding:2px 8px; border-radius:4px; background:#dbeafe; color:#1e40af;">🔒 需认证 ' + authCount + '</span>' : '') +
+                    (rateLimitedCount > 0 ? '<span style="font-size:11px; padding:2px 8px; border-radius:4px; background:#fef9c3; color:#854d0e;">⏱ 限流 ' + rateLimitedCount + '</span>' : '') +
+                    '</div>';
+            }
             var html = '<div style="font-size:12px; color:#6b7280; margin-bottom:8px;">共 ' + endpoints.length + ' 个端点</div>';
+            html += statsHtml;
             html += '<table style="width:100%; border-collapse:collapse; font-size:13px;">' +
                 '<thead><tr style="background:#f9fafb; border-bottom:2px solid #e5e7eb;">' +
                     '<th style="text-align:left; padding:10px 12px; font-weight:600; color:#374151;">Method</th>' +
                     '<th style="text-align:left; padding:10px 12px; font-weight:600; color:#374151;">Path</th>' +
+                    '<th style="text-align:left; padding:10px 12px; font-weight:600; color:#374151;">认证</th>' +
+                    '<th style="text-align:left; padding:10px 12px; font-weight:600; color:#374151;">限流</th>' +
                     '<th style="text-align:left; padding:10px 12px; font-weight:600; color:#374151;">Framework</th>' +
                     '<th style="text-align:left; padding:10px 12px; font-weight:600; color:#374151;">File</th>' +
                 '</tr></thead><tbody>';
             endpoints.forEach(function(ep) {
                 var method = (ep.method || 'GET').toUpperCase();
                 var methodStyle = 'display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; background:' + ({GET:'#dcfce7',POST:'#dbeafe',PUT:'#fef9c3',DELETE:'#fee2e2',PATCH:'#f3e8ff'}[method] || '#f3f4f6') + '; color:' + ({GET:'#166534',POST:'#1e40af',PUT:'#854d0e',DELETE:'#991b1b',PATCH:'#6b21a8'}[method] || '#374151') + ';';
+                var authBadge = ep.auth_required ? '<span style="font-size:10px; padding:1px 6px; border-radius:4px; background:#dbeafe; color:#1e40af;">🔒 Required</span>' : '<span style="font-size:10px; padding:1px 6px; border-radius:4px; background:#f3f4f6; color:#9ca3af;">Open</span>';
+                var rateBadge = ep.rate_limit ? '<span style="font-size:10px; padding:1px 6px; border-radius:4px; background:#fef9c3; color:#854d0e;">⏱ ' + escapeHtml(ep.rate_limit) + '</span>' : '<span style="font-size:10px; padding:1px 6px; border-radius:4px; background:#f3f4f6; color:#9ca3af;">-</span>';
                 html += '<tr style="border-bottom:1px solid #f3f4f6;">' +
                     '<td style="padding:10px 12px;"><span style="' + methodStyle + '">' + method + '</span></td>' +
                     '<td style="padding:10px 12px; font-family:monospace; color:#1f2937;">' + escapeHtml(ep.path || '') + '</td>' +
+                    '<td style="padding:10px 12px;">' + authBadge + '</td>' +
+                    '<td style="padding:10px 12px;">' + rateBadge + '</td>' +
                     '<td style="padding:10px 12px; color:#6b7280;">' + escapeHtml(ep.framework || '') + '</td>' +
                     '<td style="padding:10px 12px; color:#6b7280; font-size:12px;">' + escapeHtml(ep.file || '') + (ep.line ? ':' + ep.line : '') + '</td>' +
                     '</tr>';
@@ -745,15 +880,44 @@
                 container.innerHTML = '<div style="text-align:center; color:#9ca3af; font-size:14px; padding:40px 0;">暂无函数数据</div>';
                 return;
             }
+            // 安全角色分布统计
+            var roleStats = {};
+            funcs.forEach(function(fn) { if (fn.security_role) { roleStats[fn.security_role] = (roleStats[fn.security_role]||0)+1; } });
+            var statsHtml = '';
+            if (Object.keys(roleStats).length > 0) {
+                statsHtml = '<div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;">' +
+                    Object.entries(roleStats).map(function(pair) {
+                        var role = pair[0], cnt = pair[1];
+                        var roleColor = {auth:'#3b82f6', encryption:'#9333ea', sanitizer:'#10b981', validator:'#f59e0b', handler:'#4f46e5', service:'#6b7280', data_access:'#06b6d4', other:'#9ca3af'}[role] || '#9ca3af';
+                        return '<span style="font-size:11px; padding:2px 8px; border-radius:4px; background:' + roleColor + '15; color:' + roleColor + '; border:1px solid ' + roleColor + '30;">' + escapeHtml(role) + ' ' + cnt + '</span>';
+                    }).join('') + '</div>';
+            }
             var html = '<div style="font-size:12px; color:#6b7280; margin-bottom:8px;">共 ' + (data.function_count || funcs.length) + ' 个函数（展示前 ' + funcs.length + ' 个）</div>';
+            html += statsHtml;
             html += '<div style="display:flex; flex-direction:column; gap:6px;">';
             funcs.forEach(function(fn) {
                 var sig = fn.signature || (fn.name + '()');
                 var pkg = fn.package ? '<span style="font-size:11px; color:#8b5cf6; background:#f3f0ff; padding:1px 6px; border-radius:4px;">' + escapeHtml(fn.package) + '</span>' : '';
                 var recv = fn.receiver ? '<span style="font-size:11px; color:#0891b2;">(' + escapeHtml(fn.receiver) + ')</span> ' : '';
+                // 安全角色 badge
+                var roleBadge = '';
+                if (fn.security_role) {
+                    var roleColor = {auth:'bg-blue-50 text-blue-600', encryption:'bg-purple-50 text-purple-600', sanitizer:'bg-emerald-50 text-emerald-600', validator:'bg-amber-50 text-amber-600', handler:'bg-indigo-50 text-indigo-600', service:'bg-gray-50 text-gray-600', data_access:'bg-cyan-50 text-cyan-600', other:'bg-gray-50 text-gray-400'}[fn.security_role] || 'bg-gray-50 text-gray-400';
+                    roleBadge = '<span style="font-size:10px; padding:1px 6px; border-radius:4px; background:#f3f4f6; color:#4b5563;">' + escapeHtml(fn.security_role) + '</span>';
+                }
+                // 复杂度 badge
+                var complexityBadge = '';
+                if (fn.complexity > 0) {
+                    var cc = fn.complexity;
+                    var ccColor = cc > 15 ? '#dc2626' : cc > 10 ? '#ea580c' : cc > 5 ? '#ca8a04' : '#16a34a';
+                    complexityBadge = '<span style="font-size:10px; padding:1px 6px; border-radius:4px; background:' + ccColor + '15; color:' + ccColor + ';">CC=' + cc + '</span>';
+                }
+                // 导出标记
+                var exportedBadge = fn.is_exported ? '<span style="font-size:10px; padding:1px 6px; border-radius:4px; background:#d1fae5; color:#065f46;">exported</span>' : '';
                 html += '<div style="display:flex; align-items:center; gap:8px; padding:10px 12px; background:#f9fafb; border-radius:6px; border:1px solid #e5e7eb;">' +
                     '<i class="fas fa-cube" style="color:#8b5cf6; font-size:12px;"></i>' +
                     '<span style="font-family:monospace; font-size:13px; color:#1f2937; flex:1;">' + recv + escapeHtml(sig) + '</span>' +
+                    roleBadge + complexityBadge + exportedBadge +
                     pkg +
                     '<span style="font-size:12px; color:#6b7280; white-space:nowrap;">' + escapeHtml(fn.file || '') + (fn.line ? ':' + fn.line : '') + '</span>' +
                     '</div>';
@@ -794,11 +958,15 @@
                         '</tr></thead><tbody>' + rows + '</tbody></table>' +
                         '</div>';
                 }
+                var exportedBadge = tp.is_exported ? '<span style="font-size:10px; padding:1px 6px; border-radius:4px; background:#d1fae5; color:#065f46;">exported</span>' : '';
+                var methodCount = (tp.methods || []).length;
+                var methodsBadge = methodCount > 0 ? '<span style="font-size:11px; color:#0891b2; background:#ecfeff; padding:1px 8px; border-radius:4px;">' + methodCount + ' 方法</span>' : '';
                 html += '<div style="padding:10px 12px; background:#f9fafb; border-radius:6px; border:1px solid #e5e7eb;">' +
                     '<div style="display:flex; align-items:center; gap:12px; cursor:pointer;" onclick="toggleTypeFields(\'' + fieldsVisibleId + '\', this)">' +
                     '<i class="fas fa-layer-group" style="color:#06b6d4; font-size:12px;"></i>' +
                     '<span style="font-family:monospace; font-size:13px; color:#1f2937; flex:1;">' + escapeHtml(tp.name || '') + '</span>' +
                     '<span style="font-size:11px; color:#6b7280; background:#e5e7eb; padding:1px 6px; border-radius:4px;">' + escapeHtml(tp.kind || 'struct') + '</span>' +
+                    exportedBadge + methodsBadge +
                     (fieldCount > 0 ? '<span style="font-size:11px; color:#4f46e5; background:#eef2ff; padding:1px 8px; border-radius:4px;">' + fieldCount + ' 字段</span>' : '') +
                     '<i class="fas fa-chevron-down toggle-icon" style="font-size:10px; color:#9ca3af; transition:transform 0.2s;"></i>' +
                     '<span style="font-size:12px; color:#6b7280; white-space:nowrap;">' + escapeHtml(tp.file || '') + (tp.line ? ':' + tp.line : '') + '</span>' +
@@ -914,10 +1082,8 @@
             const total = json.total || tasks.length;
             const success = tasks.filter(t => t.status === 'success').length;
             const rate = total > 0 ? Math.round((success / total) * 100) : 0;
-            const recentTask = tasks.length > 0 ? tasks[0] : null;
             document.getElementById('taskCount').textContent = total;
             document.getElementById('successRate').textContent = rate + '%';
-            document.getElementById('recentTask').textContent = recentTask ? formatDate(recentTask.created_at) : '-';
         } catch (e) { console.error('加载统计失败:', e); }
     }
 
@@ -1129,6 +1295,8 @@ let ruleTotalPages = 1;
         const start = (ruleCurrentPage - 1) * rulePageSize;
         const pageItems = filtered.slice(start, start + rulePageSize);
 
+        const isAdminUser = isAdmin();
+
         tbody.innerHTML = pageItems.map(r => {
             const cfg = projectRulesMap[r.id] || {};
             // cfg.is_enabled 未定义时，以全局规则 is_enabled 为准
@@ -1138,7 +1306,7 @@ let ruleTotalPages = 1;
         return `
             <tr class="hover:bg-gray-50 ${isEnabled ? '' : 'status-disabled'}">
                 <td class="px-3 py-3 text-center">
-                    <input type="checkbox" class="rule-row-checkbox w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" data-rule-id="${r.id}" ${isSelected ? 'checked' : ''} onclick="onRuleRowCheckboxChange(${r.id}, this.checked)">
+                    <input type="checkbox" class="rule-row-checkbox w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" data-rule-id="${r.id}" ${isSelected ? 'checked' : ''} onclick="onRuleRowCheckboxChange(${r.id}, this.checked)" ${!isAdminUser ? 'disabled' : ''}>
                 </td>
                 <td class="px-4 py-3">
                         <div class="font-medium ${isEnabled ? 'text-gray-800' : ''}">${escapeHtml(r.name)}</div>
@@ -1153,7 +1321,7 @@ let ruleTotalPages = 1;
                     </td>
                     <td class="px-4 py-3 text-center">${renderSeverityBadge(r.severity)}</td>
                     <td class="px-4 py-3 text-center">
-                        <select class="severity-select text-xs border rounded px-2 py-1" data-rule-id="${r.id}" onchange="onSeverityChange(${r.id}, this.value)">
+                        <select class="severity-select text-xs border rounded px-2 py-1" data-rule-id="${r.id}" onchange="onSeverityChange(${r.id}, this.value)" ${!isAdminUser ? 'disabled' : ''}>
                             <option value="">默认</option>
                             <option value="critical" ${severity === 'critical' ? 'selected' : ''}>严重</option>
                             <option value="high" ${severity === 'high' ? 'selected' : ''}>高危</option>
@@ -1164,7 +1332,7 @@ let ruleTotalPages = 1;
                     </td>
                     <td class="px-4 py-3 text-center">
                         <label class="switch-sm" title="${isEnabled ? '点击禁用此规则' : '点击启用此规则'}">
-                            <input type="checkbox" class="rule-toggle" data-rule-id="${r.id}" ${isEnabled ? 'checked' : ''} onchange="onRuleToggleChange(${r.id}, this.checked)">
+                            <input type="checkbox" class="rule-toggle" data-rule-id="${r.id}" ${isEnabled ? 'checked' : ''} onchange="onRuleToggleChange(${r.id}, this.checked)" ${!isAdminUser ? 'disabled' : ''}>
                             <span class="slider-sm"></span>
                         </label>
                         <div class="rule-status-text text-[10px] mt-1 ${isEnabled ? 'text-blue-600 font-medium' : 'text-gray-400'}">${isEnabled ? '已启用' : '已禁用'}</div>
@@ -1509,7 +1677,7 @@ let ruleTotalPages = 1;
         loadReviewCategories();
         // 根据 URL 参数切换 Tab
         const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('tab') === 'rules') {
+        if (urlParams.get('tab') === 'rules' && isAdmin()) {
             switchTab('rules');
         } else if (urlParams.get('tab') === 'stewards') {
             switchTab('stewards');

@@ -1035,6 +1035,9 @@ func buildScoreRulesText(dsc DeductScoreConfig) string {
 	sb.WriteString("   结果四舍五入到整数（0-100）。\n\n")
 	sb.WriteString("5. 权重为 0 的维度不参与总分计算，但仍返回 score 供参考。\n\n")
 	sb.WriteString("【重要】total_score 必须与上述公式计算结果一致，不能随意填写。\n")
+	sb.WriteString("【重要】total_score 是顶层字段，与 dimensions 同级，绝对不能放在 dimensions 对象内部。\n")
+	sb.WriteString("错误示例：\"dimensions\": { \"security\": {...}, \"total_score\": 48 }\n")
+	sb.WriteString("正确示例：\"dimensions\": { \"security\": {...} }, \"total_score\": 48\n")
 	return sb.String()
 }
 

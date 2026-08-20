@@ -30,7 +30,13 @@ func tsLine(n *sitter.Node) int {
 	return int(n.StartPoint().Row) + 1
 }
 
-// findChildren recursively finds all nodes of a given type
+// tsEndLine extracts end line number (0-indexed)
+func tsEndLine(n *sitter.Node) int {
+	if n == nil {
+		return 0
+	}
+	return int(n.EndPoint().Row) + 1
+}
 func findChildren(n *sitter.Node, typ string) []*sitter.Node {
 	var result []*sitter.Node
 	if n == nil {

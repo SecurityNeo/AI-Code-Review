@@ -76,7 +76,7 @@ func (e *TreeSitterGoExtractor) ParseFile(filePath string, src []byte) (*Unified
 		result.Variables = append(result.Variables, e.parseVarSpecs(vd, src)...)
 	}
 
-	// Extract call sites
+	// Extract call sites (with caller func inference via parent traversal)
 	result.CallSites = e.extractCallSites(root, filePath, src)
 	// Extract variable bindings (for route group prefix derivation etc.)
 	result.VarBindings = e.extractVarBindings(root, filePath, src)
@@ -123,6 +123,7 @@ func (e *TreeSitterGoExtractor) parseFunc(n *sitter.Node, filePath string, src [
 		Location: SourceLocation{
 			File:      filePath,
 			LineStart: tsLine(n),
+			LineEnd:   tsEndLine(n),
 		},
 	}
 	if isMethod {
@@ -184,9 +185,39 @@ func (e *TreeSitterGoExtractor) parseFunc(n *sitter.Node, filePath string, src [
 	if block != nil {
 		body := tsText(block, src)
 		fn.BodySnippet = truncateBody(body)
+		fn.Complexity = EstimateComplexityFromSnippet(fn.BodySnippet)
+		fn.LOC = strings.Count(fn.BodySnippet, "\n")
+		fn.NestedDepth = estimateNestedDepthFromBlock(block)
 	}
+	fn.SecurityRole = InferSecurityRole(fn.Name, fn.Receiver)
 
 	return fn
+}
+
+func estimateNestedDepthFromBlock(block *sitter.Node) int {
+	if block == nil {
+		return 0
+	}
+	maxDepth := 0
+	var walk func(n *sitter.Node, depth int)
+	walk = func(n *sitter.Node, depth int) {
+		if n == nil {
+			return
+		}
+		if depth > maxDepth {
+			maxDepth = depth
+		}
+		switch n.Type() {
+		case "if_statement", "switch_statement", "type_switch_statement",
+			"for_statement", "range_statement", "select_statement":
+			depth++
+		}
+		for i := 0; i < int(n.ChildCount()); i++ {
+			walk(n.Child(i), depth)
+		}
+	}
+	walk(block, 0)
+	return maxDepth
 }
 
 func (e *TreeSitterGoExtractor) parseParams(n *sitter.Node, src []byte) []UnifiedParam {
@@ -400,7 +431,10 @@ func (e *TreeSitterGoExtractor) extractCallSites(root *sitter.Node, filePath str
 			Location: SourceLocation{
 				File:      filePath,
 				LineStart: tsLine(call),
+				LineEnd:   tsEndLine(call),
 			},
+			// 向上遍历 AST 父节点链，找到最近的函数/方法声明
+			CallerFunc: findCallerFuncName(call, src),
 		}
 		switch funcNode.Type() {
 		case "identifier":
@@ -434,6 +468,25 @@ func (e *TreeSitterGoExtractor) extractCallSites(root *sitter.Node, filePath str
 		sites = append(sites, site)
 	}
 	return sites
+}
+
+// findCallerFuncName 从 call expression 向上遍历父节点，找到最近的函数/方法名
+func findCallerFuncName(call *sitter.Node, src []byte) string {
+	for parent := call.Parent(); parent != nil; parent = parent.Parent() {
+		switch parent.Type() {
+		case "function_declaration":
+			nameNode := findFirstChild(parent, "identifier")
+			if nameNode != nil {
+				return tsText(nameNode, src)
+			}
+		case "method_declaration":
+			nameNode := findFirstChild(parent, "field_identifier")
+			if nameNode != nil {
+				return tsText(nameNode, src)
+			}
+		}
+	}
+	return ""
 }
 
 func isExported(name string) bool {

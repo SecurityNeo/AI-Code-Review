@@ -16,9 +16,10 @@ type JSONFileStorage struct {
 
 // graphData JSON序列化结构
 type graphData struct {
-	Nodes     []MemorySymbolNode `json:"nodes"`
-	Relations []MemoryRelation   `json:"relations"`
-	Version   string             `json:"version"`
+	Nodes     []MemorySymbolNode     `json:"nodes"`
+	Relations []MemoryRelation       `json:"relations"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	Version   string                 `json:"version"`
 }
 
 // NewJSONFileStorage 创建JSON文件存储
@@ -50,13 +51,14 @@ func (s *JSONFileStorage) Save(projectID uint64, graph *MemorySymbolGraph) error
 	}
 
 	data := graphData{
-		Version: "1.0",
-		Nodes:   make([]MemorySymbolNode, 0, len(graph.AllNodes())),
+		Version:  "1.0",
+		Nodes:    make([]MemorySymbolNode, 0, len(graph.AllNodes())),
+		Metadata: graph.AllMetadata(),
 	}
 	for _, node := range graph.AllNodes() {
 		data.Nodes = append(data.Nodes, *node)
 	}
-	for _, rel := range graph.relations {
+	for _, rel := range graph.GetAllRelations() {
 		data.Relations = append(data.Relations, rel)
 	}
 
@@ -94,6 +96,9 @@ func (s *JSONFileStorage) Load(projectID uint64) (*MemorySymbolGraph, error) {
 	}
 	for _, rel := range data.Relations {
 		graph.AddRelation(rel)
+	}
+	for k, v := range data.Metadata {
+		graph.SetMetadata(k, v)
 	}
 	return graph, nil
 }

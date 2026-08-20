@@ -43,6 +43,7 @@ type MemoryRelation struct {
 type MemorySymbolGraph struct {
 	nodes     map[string]*MemorySymbolNode
 	relations []MemoryRelation
+	metadata  map[string]interface{}
 	mu        sync.RWMutex
 	projectID uint64
 }
@@ -52,6 +53,7 @@ func NewMemorySymbolGraph(projectID uint64) *MemorySymbolGraph {
 	return &MemorySymbolGraph{
 		nodes:     make(map[string]*MemorySymbolNode),
 		relations: make([]MemoryRelation, 0),
+		metadata:  make(map[string]interface{}),
 		projectID: projectID,
 	}
 }
@@ -166,6 +168,12 @@ func (g *MemorySymbolGraph) Clone() *MemorySymbolGraph {
 	}
 	clone.relations = make([]MemoryRelation, len(g.relations))
 	copy(clone.relations, g.relations)
+	if g.metadata != nil {
+		clone.metadata = make(map[string]interface{}, len(g.metadata))
+		for mk, mv := range g.metadata {
+			clone.metadata[mk] = mv
+		}
+	}
 	return clone
 }
 
@@ -203,17 +211,23 @@ func (g *MemorySymbolGraph) OverlayFileChanges(filePath string, fileData []byte,
 	return nil
 }
 
-// ingestAST 将AST摄入图
+// ingestAST 将AST摄入图（单文件完整解析，用于 OverlayFileChanges 等场景）
 func (g *MemorySymbolGraph) ingestAST(ast *parser.UnifiedAST) {
+	g.ingestASTNodes(ast)
+	g.ingestASTCalls(ast)
+}
+
+// ingestASTNodes 摄入所有节点（第一阶段：先添加所有节点，不添加跨文件关系）
+func (g *MemorySymbolGraph) ingestASTNodes(ast *parser.UnifiedAST) {
 	pkg := ""
-	// 尝试从文件路径推断包名
 	if parts := strings.Split(ast.FilePath, "/"); len(parts) >= 2 {
 		pkg = parts[len(parts)-2]
 	}
 
 	for _, fn := range ast.Functions {
+		id := g.generateFuncID(ast.FilePath, pkg, fn.Receiver, fn.Name)
 		node := &MemorySymbolNode{
-			ID:         g.generateFuncID(ast.FilePath, pkg, fn.Receiver, fn.Name),
+			ID:         id,
 			Type:       NodeFunc,
 			Name:       fn.Name,
 			Language:   ast.Language,
@@ -223,9 +237,9 @@ func (g *MemorySymbolGraph) ingestAST(ast *parser.UnifiedAST) {
 			IsExported: fn.IsExported,
 			Location:   fn.Location,
 			Properties: map[string]interface{}{
-				"receiver": fn.Receiver,
+				"receiver":      fn.Receiver,
 				"security_role": fn.SecurityRole,
-				"complexity": fn.Complexity,
+				"complexity":    fn.Complexity,
 			},
 		}
 		if node.ID == "" {
@@ -245,14 +259,15 @@ func (g *MemorySymbolGraph) ingestAST(ast *parser.UnifiedAST) {
 			IsExported: tp.IsExported,
 			Location:   tp.Location,
 			Properties: map[string]interface{}{
-				"kind":     tp.Kind,
-				"methods":  getMethodNames(tp.Methods),
-				"fields":   getFieldNames(tp.Fields),
+				"kind":       tp.Kind,
+				"methods":    getMethodNames(tp.Methods),
+				"fields":     getFieldNames(tp.Fields),
+				"implements": tp.Implements,
 			},
 		}
 		g.AddNode(node)
 
-		// 字段关系
+		// 字段节点和 contains 关系（同文件内，可立即添加）
 		for _, f := range tp.Fields {
 			fieldNode := &MemorySymbolNode{
 				ID:       fmt.Sprintf("field:%s:%s:%s", ast.FilePath, tp.Name, f.Name),
@@ -298,15 +313,89 @@ func (g *MemorySymbolGraph) ingestAST(ast *parser.UnifiedAST) {
 		g.AddNode(node)
 	}
 
-	// 调用关系
+	for _, td := range ast.TODOComments {
+		todoNode := &MemorySymbolNode{
+			ID:   fmt.Sprintf("todo:%s:%d", ast.FilePath, td.Line),
+			Type: NodeTODO,
+			Name: td.Text,
+			File: ast.FilePath,
+			Location: parser.SourceLocation{
+				File:      ast.FilePath,
+				LineStart: td.Line,
+				LineEnd:   td.Line,
+			},
+			Properties: map[string]interface{}{
+				"comment_type": td.Type,
+				"function":     td.Function,
+			},
+		}
+		g.AddNode(todoNode)
+	}
+}
+
+// ingestASTCalls 摄入调用关系（第二阶段：所有节点添加完毕后，再解析跨文件引用）
+func (g *MemorySymbolGraph) ingestASTCalls(ast *parser.UnifiedAST) {
+	pkg := ""
+	if parts := strings.Split(ast.FilePath, "/"); len(parts) >= 2 {
+		pkg = parts[len(parts)-2]
+	}
+
+	// 为本文件函数建立 name -> ID 映射（用于确定 caller）
+	funcNameToID := make(map[string]string)
+	for _, fn := range ast.Functions {
+		id := g.generateFuncID(ast.FilePath, pkg, fn.Receiver, fn.Name)
+		funcNameToID[fn.Name] = id
+	}
+
 	for _, cs := range ast.CallSites {
 		if cs.TargetFunc == "" {
 			continue
 		}
+		fromID := funcNameToID[cs.CallerFunc]
+		if fromID == "" {
+			continue
+		}
+
+		// 在所有已加载节点中搜索目标函数（跨文件引用此时已存在）
+		var toID string
+		targetPkg := cs.TargetPkg
+		if targetPkg == "" {
+			targetPkg = pkg
+		}
+
+		// 1. 尝试精确匹配 func:pkg:name（适配器生成的节点格式）
+		tryID := fmt.Sprintf("func:%s:%s", targetPkg, cs.TargetFunc)
+		if _, ok := g.GetNode(tryID); ok {
+			toID = tryID
+		} else {
+			// 2. 按函数名全局查找
+			matches := g.GetNodeByName(cs.TargetFunc)
+			if len(matches) > 0 {
+				// 优先匹配同包的
+				for _, n := range matches {
+					if n.Package == targetPkg {
+						toID = n.ID
+						break
+					}
+				}
+				if toID == "" {
+					toID = matches[0].ID
+				}
+			}
+		}
+
+		if toID == "" {
+			// 3. fallback：使用 fallback 格式，后续可能通过 inferRelations 补充
+			toID = fmt.Sprintf("func:%s:%s", targetPkg, cs.TargetFunc)
+		}
+
 		g.AddRelation(MemoryRelation{
-			From: fmt.Sprintf("func:%s:%s", ast.FilePath, cs.CallerFunc),
-			To:   fmt.Sprintf("func:%s", cs.TargetFunc),
+			From: fromID,
+			To:   toID,
 			Type: RelCalls,
+			Extra: map[string]string{
+				"caller_file": ast.FilePath,
+			},
 		})
 	}
 }
@@ -359,4 +448,38 @@ func getFieldNames(fields []parser.UnifiedField) []string {
 		names = append(names, f.Name)
 	}
 	return names
+}
+
+// SetMetadata 设置图谱元数据
+func (g *MemorySymbolGraph) SetMetadata(key string, value interface{}) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.metadata == nil {
+		g.metadata = make(map[string]interface{})
+	}
+	g.metadata[key] = value
+}
+
+// GetMetadata 获取图谱元数据
+func (g *MemorySymbolGraph) GetMetadata(key string) interface{} {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	if g.metadata == nil {
+		return nil
+	}
+	return g.metadata[key]
+}
+
+// AllMetadata 获取所有元数据
+func (g *MemorySymbolGraph) AllMetadata() map[string]interface{} {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	if g.metadata == nil {
+		return nil
+	}
+	result := make(map[string]interface{}, len(g.metadata))
+	for k, v := range g.metadata {
+		result[k] = v
+	}
+	return result
 }

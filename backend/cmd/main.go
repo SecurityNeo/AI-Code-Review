@@ -256,6 +256,9 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 	r.GET("/project-detail.html", func(c *gin.Context) {
 		c.File(frontendPath + "/project-detail.html")
 	})
+	r.GET("/code-map.html", func(c *gin.Context) {
+		c.File(frontendPath + "/code-map.html")
+	})
 	r.GET("/pool-detail.html", func(c *gin.Context) {
 		c.File(frontendPath + "/pool-detail.html")
 	})
@@ -431,6 +434,13 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 
 		// 项目选项（任务列表/通知配置等下拉框使用，不含敏感字段）
 		common.GET("/projects/options", handler.NewProjectHandler().Options)
+		// 项目列表与详情（管理员+项目负责人均可见）
+		common.GET("/projects", handler.NewProjectHandler().List)
+		common.GET("/projects/:id", handler.NewProjectHandler().Get)
+		common.GET("/projects/:id/tasks", handler.NewProjectHandler().Tasks)
+		// 项目评审规则查看（项目负责人可看，但不可改）
+		reviewHC := handler.NewProjectReviewHandler()
+		common.GET("/projects/:id/review-rules", reviewHC.ListRules)
 
 		// 站内信中心（通知中心）+ 工作台 / 开发者 Dashboard
 		common.GET("/notifications", notifH.List)
@@ -480,19 +490,15 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 			adminTask.DELETE("/:id/session", h.DeleteSession)
 		}
 
-		// 项目管理
+		// 项目管理（仅管理员可写）
 		project := adminOnly.Group("/projects")
 		{
 			h := handler.NewProjectHandler()
-			project.GET("", h.List)
 			project.POST("", h.Create)
-			project.GET("/:id", h.Get)
 			project.PUT("/:id", h.Update)
 			project.DELETE("/:id", h.Delete)
-			project.GET("/:id/tasks", h.Tasks)
-			// 项目评审规则配置
+			// 项目评审规则配置（仅管理员可改）
 			reviewH := handler.NewProjectReviewHandler()
-			project.GET("/:id/review-rules", reviewH.ListRules)
 			project.PUT("/:id/review-rules", reviewH.UpdateRules)
 			project.POST("/:id/review-rules/reset", reviewH.ResetRules)
 		}
@@ -660,9 +666,9 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 			sys.GET("/info", h.Info)
 		}
 
-		// 知识图谱管理
+		// 知识图谱管理 —— 只读路由给 common，写入路由给 adminOnly
 		graphH := handler.NewGraphHandler(model.DB, getWorkspace())
-		graphH.RegisterRoutes(adminOnly)
+		graphH.RegisterRoutes(common, adminOnly)
 
 		// 报表管理
 		report := adminOnly.Group("/reports")

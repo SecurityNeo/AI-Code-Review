@@ -2625,6 +2625,7 @@ function createSubStageRow(stage, type) {
         html += `<span class="text-[10px] text-gray-400 font-mono">${((stage.input_tokens||0)+(stage.output_tokens||0)).toLocaleString()}</span>`;
     }
 
+    html += '</div>';
     return html;
 }
 
@@ -2973,6 +2974,20 @@ function renderGenericDetail(json) {
     return html;
 }
 
+function formatListText(text) {
+    if (!text) return '';
+    let escaped = escapeHtml(text);
+    // 处理 JSON 中的 \\n 转义（两个反斜杠 + n）→ 在 JS 字符串中是 \\n（一个反斜杠 + n）
+    escaped = escaped.replace(/\\n/g, '<br/>');
+    // 处理真实换行符（兼容性）
+    escaped = escaped.replace(/\n/g, '<br/>');
+    // 处理单行内嵌数字编号（如 "1. xxx 2. yyy 3. zzz"）
+    if (/\d+[.)]\s/.test(escaped) && !/<br\/>/.test(escaped)) {
+        escaped = escaped.replace(/\s*(\d+[.)]\s)/g, '<br/>$1').replace(/^<br\/>/, '');
+    }
+    return escaped;
+}
+
 function renderImpactAnalysisDetail(json) {
     const outSnap = json.output_snapshot || {};
     let html = '';
@@ -3024,9 +3039,9 @@ function renderImpactAnalysisDetail(json) {
             html += `<div class="text-xs font-semibold">${escapeHtml(f.SymbolName || f.symbol_name || '未知')}</div>`;
             html += `<div class="text-[11px] text-gray-600">${escapeHtml(f.FilePath || f.file_path || '')}</div>`;
             html += `</div></div>`;
-            html += `<div class="text-[11px] text-gray-700">`;
-            if (f.ChangeDesc || f.change_desc) html += `<div class="mb-1">变更: ${escapeHtml(f.ChangeDesc || f.change_desc)}</div>`;
-            if (f.Suggestion || f.suggestion) html += `<div class="mb-1">建议: ${escapeHtml(f.Suggestion || f.suggestion)}</div>`;
+            html += `<div class="text-[11px] text-gray-700 leading-relaxed">`;
+            if (f.ChangeDesc || f.change_desc) html += `<div class="mb-1 whitespace-pre-wrap">变更: ${formatListText(f.ChangeDesc || f.change_desc)}</div>`;
+            if (f.Suggestion || f.suggestion) html += `<div class="mb-1 whitespace-pre-wrap">建议: ${formatListText(f.Suggestion || f.suggestion)}</div>`;
             if (f.AffectedFiles && f.AffectedFiles.length > 0) {
                 html += `<div class="text-gray-500">影响文件: ${f.AffectedFiles.map(a => escapeHtml(a)).join(', ')}</div>`;
             }

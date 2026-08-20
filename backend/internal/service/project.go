@@ -13,7 +13,7 @@ func NewProjectService() *ProjectService {
 	return &ProjectService{}
 }
 
-func (s *ProjectService) List(page, pageSize int, keyword, status, source string) ([]model.Project, int64, error) {
+func (s *ProjectService) List(page, pageSize int, keyword, status, source string, projectIDs []uint) ([]model.Project, int64, error) {
 	var projects []model.Project
 	var total int64
 
@@ -28,6 +28,10 @@ func (s *ProjectService) List(page, pageSize int, keyword, status, source string
 	}
 	if source != "" {
 		db = db.Where("source = ?", source)
+	}
+	// 按项目ID过滤（非管理员）
+	if len(projectIDs) > 0 {
+		db = db.Where("id IN ?", projectIDs)
 	}
 
 	if err := db.Count(&total).Error; err != nil {
@@ -194,12 +198,15 @@ type ProjectOption struct {
 	Name string `json:"name"`
 }
 
-func (s *ProjectService) Options() ([]ProjectOption, error) {
+func (s *ProjectService) Options(projectIDs []uint) ([]ProjectOption, error) {
 	var opts []ProjectOption
-	if err := model.DB.Model(&model.Project{}).
+	db := model.DB.Model(&model.Project{}).
 		Select("id", "name").
-		Order("name ASC").
-		Find(&opts).Error; err != nil {
+		Order("name ASC")
+	if len(projectIDs) > 0 {
+		db = db.Where("id IN ?", projectIDs)
+	}
+	if err := db.Find(&opts).Error; err != nil {
 		return nil, err
 	}
 	return opts, nil

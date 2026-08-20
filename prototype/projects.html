@@ -108,7 +108,7 @@
                         </button>
                     </div>
                     <div class="flex items-center gap-2 ml-auto">
-                        <button onclick="showModal('createModal')" class="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700">
+                        <button onclick="showModal('createModal')" data-admin-only class="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700">
                             <i class="fas fa-plus mr-1"></i>新建项目
                         </button>
                         <button onclick="loadProjects()" class="bg-gray-100 text-gray-600 px-3 py-2 rounded-lg text-sm hover:bg-gray-200">
@@ -123,14 +123,12 @@
                         <thead class="bg-gray-50 border-b">
                         <tr>
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">项目名称</th>
-                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">语言</th>
-                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">GitLab项目ID</th>
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">项目地址</th>
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">AI审核模版</th>
                             <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">规则数</th>
                             <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">最近5个任务</th>
                             <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">启用AI</th>
-                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">修改时间</th>
+                            <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">代码地图</th>
                             <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">操作</th>
                         </tr>
                         </thead>
@@ -192,6 +190,11 @@
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">项目地址</label>
                     <input type="text" id="projectPath" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="https://gitlab.com/team/project">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">主线分支</label>
+                    <input type="text" id="graphBaseBranch" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="main" value="main">
+                    <p class="text-xs text-gray-400 mt-1">代码地图将基于此分支构建</p>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">开发语言</label>
@@ -348,43 +351,6 @@
                         <textarea id="tmplCustomInstruction" rows="2" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="输入项目的特殊审查要求或背景信息..."></textarea>
                     </div>
                 </div>
-
-                <!-- GitLab 评论模板 -->
-                <div class="rounded-xl border border-blue-200 overflow-hidden">
-                    <div class="px-5 py-3 bg-blue-50 border-b border-blue-200 flex items-center justify-between">
-                        <label class="text-sm font-semibold text-blue-800">
-                            <i class="fab fa-gitlab mr-1"></i>GitLab 评论模板
-                        </label>
-                        <div class="flex gap-2">
-                            <button onclick="resetCommentTemplate()" type="button" class="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 bg-blue-100 rounded-lg transition">恢复默认</button>
-                            <button onclick="previewCommentTemplate()" type="button" class="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 bg-blue-100 rounded-lg transition">预览效果</button>
-                        </div>
-                    </div>
-                    <div class="p-4">
-                        <textarea id="tmplCommentTemplate" rows="8" class="code-block w-full px-4 py-3 rounded-lg border-blue-200 focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm" placeholder="输入 Markdown 模板..."></textarea>
-                        <div class="mt-2 flex flex-wrap gap-2">
-                            <span class="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 font-mono">{{.ProjectName}}</span>
-                            <span class="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 font-mono">{{.MRTitle}}</span>
-                            <span class="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 font-mono">{{.TotalScore}}</span>
-                            <span class="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 font-mono">{{.Summary}}</span>
-                            <span class="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 font-mono">{{.DimensionsTable}}</span>
-                            <span class="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 font-mono">{{.IssuesList}}</span>
-                            <span class="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 font-mono">{{.RecommendationsList}}</span>
-                        </div>
-                        <p class="text-xs text-gray-500 mt-2">Go text/template 语法，支持 {{range}} / {{if}} 控制流</p>
-                    </div>
-                </div>
-
-                <!-- 兼容性：旧提示词 -->
-                <div class="rounded-xl border border-gray-200 overflow-hidden opacity-70 hover:opacity-100 transition-opacity">
-                    <div class="px-4 py-2 bg-gray-100 border-b flex items-center gap-2">
-                        <i class="fas fa-history text-gray-400 text-xs"></i>
-                        <span class="text-xs font-medium text-gray-500">旧版 AI 提示词（兼容模式）</span>
-                    </div>
-                    <div class="p-4">
-                        <textarea id="tmplPrompt" rows="3" class="code-block w-full px-3 py-2 rounded-lg bg-gray-50 border-gray-200 text-gray-500 text-sm" placeholder="仅供兼容旧版本..."></textarea>
-                    </div>
-                </div>
             </div>
             <div class="px-6 py-4 border-t flex justify-end gap-3 flex-shrink-0">
                 <button onclick="hideModal('templateModal')" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">取消</button>
@@ -458,22 +424,6 @@
                     <h4 class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2"><i class="fas fa-terminal text-gray-500"></i>项目自定义指令</h4>
                     <div class="bg-gray-50 rounded-lg p-3">
                         <pre class="text-xs text-gray-600 whitespace-pre-wrap font-mono" id="detailCustomInstruction"></pre>
-                    </div>
-                </div>
-
-                <!-- GitLab 评论模板 -->
-                <div id="detailCommentTemplateSection" class="hidden">
-                    <h4 class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2"><i class="fab fa-gitlab text-blue-600"></i>GitLab 评论模板</h4>
-                    <div class="bg-gray-50 rounded-lg p-3">
-                        <pre class="text-xs text-gray-600 whitespace-pre-wrap font-mono" id="detailCommentTemplate"></pre>
-                    </div>
-                </div>
-
-                <!-- 旧版提示词 -->
-                <div id="detailPromptSection" class="hidden">
-                    <h4 class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2"><i class="fas fa-history text-gray-400"></i>旧版 AI 提示词</h4>
-                    <div class="bg-gray-50 rounded-lg p-3">
-                        <pre class="text-xs text-gray-600 whitespace-pre-wrap font-mono" id="detailPrompt"></pre>
                     </div>
                 </div>
             </div>
@@ -566,48 +516,59 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             if (!tbody) return;
             
             if (projects.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="9" class="px-6 py-8 text-center text-gray-500">暂无数据</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" class="px-6 py-8 text-center text-gray-500">暂无数据</td></tr>';
                 return;
             }
 
-            tbody.innerHTML = projects.map(p => `
+            tbody.innerHTML = projects.map(p => {
+                // 代码地图状态判断
+                const graphBuilt = p.graph_scan_status === 'completed' && p.graph_built_at;
+                const graphStatusText = graphBuilt ? '已构建' : (p.graph_scan_status === 'running' ? '构建中' : '未构建');
+                const graphStatusClass = graphBuilt ? 'text-green-600' : (p.graph_scan_status === 'running' ? 'text-blue-600' : 'text-gray-400');
+
+                return `
                 <tr class="hover:bg-gray-50">
                     <td class="px-6 py-4">
                         <div class="flex items-center gap-3">
                             <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center text-blue-600">
                                 <i class="fab fa-gitlab text-sm"></i>
                             </div>
-                            <a href="project-detail.html?id=${p.id}" class="font-medium text-sm text-blue-600 hover:text-blue-700">${p.name || '-'}</a>
+                            <a href="project-detail.html?id=${p.id}" class="font-medium text-sm text-blue-600 hover:text-blue-700">${escapeHtml(p.name || '-')}</a>
                         </div>
                     </td>
+                    <td class="px-6 py-4 text-sm text-gray-600 max-w-xs truncate" title="${escapeHtml(p.project_path || '')}">${escapeHtml(p.project_path || '-')}</td>
+                    <td class="px-6 py-4 text-sm">${escapeHtml(p.template?.name || '-')}</td>
                     <td class="px-6 py-4 text-center">
-                        <span class="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs font-medium">${(languageLabels[p.language] || p.language) || 'Go'}</span>
-                    </td>
-                    <td class="px-6 py-4 text-sm text-gray-600">${p.gitlab_project_id || '-'}</td>
-                    <td class="px-6 py-4 text-sm text-gray-600 max-w-xs truncate" title="${p.project_path || ''}">${p.project_path || '-'}</td>
-                    <td class="px-6 py-4 text-sm">${p.template?.name || '-'}</td>
-                    <td class="px-6 py-4 text-center">
-                        <a href="project-detail.html?id=${p.id}&tab=rules" class="text-sm text-gray-600 hover:text-blue-600" title="查看规则配置">
+                        ${isAdmin() ? `<a href="project-detail.html?id=${p.id}&tab=rules" class="text-sm text-gray-600 hover:text-blue-600" title="查看规则配置">
                             <span class="font-medium">${p.enabled_rule_count ?? 0}</span><span class="text-gray-400">/${p.total_rule_count ?? 0}</span>
-                        </a>
+                        </a>` : `<span class="text-sm text-gray-600">
+                            <span class="font-medium">${p.enabled_rule_count ?? 0}</span><span class="text-gray-400">/${p.total_rule_count ?? 0}</span>
+                        </span>`}
                     </td>
                     <td class="px-6 py-4 text-center">
                         ${p.tasks && p.tasks.length > 0 ? p.tasks.map(t => `<span class="inline-block w-3 h-3 mr-1 mb-1 rounded-full ${getTaskStatusDotClass(t.status)}" title="${getTaskStatusText(t.status)}"></span>`).join('') : '-'}
                     </td>
                     <td class="px-6 py-4 text-center">
                         <label class="switch">
-                            <input type="checkbox" ${p.ai_enabled ? 'checked' : ''} onchange="toggleAI(${p.id}, this.checked)">
+                            <input type="checkbox" ${p.ai_enabled ? 'checked' : ''} onchange="toggleAI(${p.id}, this.checked)" ${!isAdmin() ? 'disabled' : ''}>
                             <span class="slider"></span>
                         </label>
                     </td>
-                    <td class="px-6 py-4 text-sm text-gray-500">${formatDate(p.updated_at)}</td>
+                    <td class="px-6 py-4 text-center text-xs">
+                        <span class="${graphStatusClass}">${graphStatusText}</span>
+                    </td>
                     <td class="px-6 py-4 text-center">
-                        <a href="project-detail.html?id=${p.id}" class="text-blue-600 hover:text-blue-700 text-sm mr-3">详情</a>
-                        <button onclick="editProject(${p.id})" class="text-gray-600 hover:text-gray-800 text-sm mr-3">编辑</button>
-                        <button onclick="deleteProject(${p.id})" class="text-red-600 hover:text-red-700 text-sm">删除</button>
+                        <a href="project-detail.html?id=${p.id}" class="text-blue-600 hover:text-blue-700 text-sm mr-2">详情</a>
+                        ${isAdmin() ? `<button onclick="editProject(${p.id})" class="text-gray-600 hover:text-gray-800 text-sm mr-2">编辑</button>` : ''}
+                        ${graphBuilt
+                            ? `<a href="code-map.html?project_id=${p.id}" target="_blank" class="text-indigo-600 hover:text-indigo-700 text-sm mr-2" title="查看代码地图">代码地图</a>`
+                            : `<span class="text-gray-300 text-sm mr-2 cursor-not-allowed" title="未构建代码地图">代码地图</span>`
+                        }
+                        ${isAdmin() ? `<button onclick="buildGraph(${p.id})" class="text-emerald-600 hover:text-emerald-700 text-sm mr-2" title="构建代码地图">构建地图</button>` : ''}
+                        ${isAdmin() ? `<button onclick="deleteProject(${p.id})" class="text-red-600 hover:text-red-700 text-sm">删除</button>` : ''}
                     </td>
                 </tr>
-            `).join('');
+            `}).join('');
         }
 
         function renderPagination(total, page) {
@@ -742,6 +703,7 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             document.getElementById('projectName').value = p.name || '';
             document.getElementById('gitlabProjectId').value = p.gitlab_project_id || '';
             document.getElementById('projectPath').value = p.project_path || '';
+            document.getElementById('graphBaseBranch').value = p.graph_base_branch || 'main';
             document.getElementById('projectLanguage').value = p.language || 'golang';
             document.getElementById('projectToken').value = p.access_token || '';
             document.getElementById('aiEnabled').checked = p.ai_enabled || false;
@@ -776,6 +738,7 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             const data = {
                 name: document.getElementById('projectName').value,
                 project_path: document.getElementById('projectPath').value,
+                graph_base_branch: document.getElementById('graphBaseBranch').value || 'main',
                 language: document.getElementById('projectLanguage').value,
                 access_token: document.getElementById('projectToken').value,
                 ai_enabled: document.getElementById('aiEnabled').checked
@@ -817,6 +780,7 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                 document.getElementById('projectName').value = '';
                 document.getElementById('gitlabProjectId').value = '';
                 document.getElementById('projectPath').value = '';
+                document.getElementById('graphBaseBranch').value = 'main';
                 document.getElementById('projectLanguage').value = 'golang';
                 document.getElementById('projectToken').value = '';
                 document.getElementById('projectToken').type = 'password';
@@ -828,6 +792,20 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                 renderTemplateSelect(templatesData);
             }
             document.getElementById(id).classList.add('active');
+        }
+
+        async function buildGraph(projectId) {
+            if (!confirm('构建代码地图可能需要几分钟，确定要继续吗？')) return;
+            try {
+                const res = await apiFetch(`${API_BASE}/projects/${projectId}/graph/build`, { method: 'POST' });
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.error || '构建失败');
+                }
+                showToast('代码地图构建已启动', 'success');
+            } catch (e) {
+                showToast('构建失败: ' + e.message, 'error');
+            }
         }
         
         function switchTab(tab, evt) {
@@ -946,7 +924,6 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             container.innerHTML = templates.map(t => {
                 const dimResult = parseDimWeights(t.dimension_weights);
                 const hasCustom = !!t.custom_instruction;
-                const hasComment = !!t.gitlab_comment_template;
                 
                 return `
                 <div class="bg-white rounded-xl border hover:shadow-lg hover:border-blue-200 transition-all duration-200 cursor-pointer group" onclick="openTemplateDetailModal(${t.id})">
@@ -979,7 +956,6 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                                         最多 ${t.max_rules_per_review || 5} 条规则
                                     </span>
                                     ${hasCustom ? '<span class="flex items-center gap-1 text-teal-500" title="包含项目自定义指令"><i class="fas fa-terminal text-teal-400"></i>自定义指令</span>' : ''}
-                                    ${hasComment ? '<span class="flex items-center gap-1 text-blue-500" title="包含 GitLab 评论模板"><i class="fab fa-gitlab text-blue-400"></i>评论模板</span>' : ''}
                                 </div>
                             </div>
                         </div>
@@ -1140,39 +1116,12 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             el.className = 'text-xs font-bold px-2.5 py-1 rounded-full ' + (ok ? 'bg-green-100 text-green-700' : 'bg-red-50 text-red-600');
         }
 
-        const DEFAULT_COMMENT_TEMPLATE = `## 🤖 AI 代码评审报告
-
-{{if gt .CriticalCount 0}}
-⚠️ **发现 {{.CriticalCount}} 个严重问题，请立即处理！**
-{{end}}
-
-**综合评分：{{.TotalScore}}/100**
-
-{{if .Summary}}
-> 📋 **评审摘要：** {{.Summary}}
-{{end}}
-
-### 📊 维度评分
-{{.DimensionsTable}}
-
-{{if gt .IssueCount 0}}
-### ⚠️ 发现的问题（共 {{.IssueCount}} 个）
-{{.IssuesList}}
-{{end}}
-
-{{if .Recommendations}}
-### 💡 改进建议
-{{.RecommendationsList}}
-{{end}}`;
-
         function openNewTemplateModal() {
             editingTemplateId = null;
             document.getElementById('modalTitle').textContent = '新建AI审核模版';
             document.getElementById('tmplName').value = '';
             document.getElementById('tmplDesc').value = '';
-            document.getElementById('tmplPrompt').value = '';
             document.getElementById('tmplCustomInstruction').value = '';
-            document.getElementById('tmplCommentTemplate').value = DEFAULT_COMMENT_TEMPLATE;
             document.getElementById('tmplMaxRules').value = 5;
             // 重置扣分规则为默认值
             document.getElementById('tmplDeductCritical').value = 10;
@@ -1201,9 +1150,7 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             document.getElementById('modalTitle').textContent = '编辑AI审核模版';
             document.getElementById('tmplName').value = t.name || '';
             document.getElementById('tmplDesc').value = t.description || '';
-            document.getElementById('tmplPrompt').value = t.prompt || '';
             document.getElementById('tmplCustomInstruction').value = t.custom_instruction || '';
-            document.getElementById('tmplCommentTemplate').value = t.gitlab_comment_template || '';
             document.getElementById('tmplMaxRules').value = t.max_rules_per_review || 5;
 
             // 加载扣分规则配置
@@ -1262,62 +1209,6 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             }
         }
 
-        function resetCommentTemplate() {
-            document.getElementById('tmplCommentTemplate').value = DEFAULT_COMMENT_TEMPLATE;
-            showToast('已恢复默认评论模板', 'info');
-        }
-
-        async function previewCommentTemplate() {
-            const templateId = editingTemplateId || (templatesData.length > 0 ? templatesData[0].id : null);
-            if (!templateId) {
-                showToast('请先保存模版再预览', 'info');
-                return;
-            }
-            const template = document.getElementById('tmplCommentTemplate').value;
-            try {
-                const res = await apiFetch(`${API_BASE}/templates/${templateId}/preview-comment`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        total_score: 85,
-                        summary: '代码整体质量良好，发现 3 个中等问题',
-                        dimensions: {
-                            security: { score: 90, weight: 30 },
-                            code_quality: { score: 82, weight: 25 },
-                            readability: { score: 88, weight: 20 }
-                        },
-                        issues: [
-                            { rule_code: 'common-magic-number', severity: 'low', category: 'readability', file: 'main.go', line_start: 45, line_end: 45, code_snippet: 'const timeout = 30000', message: '魔法数字', suggestion: '使用具名常量' }
-                        ],
-                        recommendations: ['建议增加单元测试覆盖', '部分函数过长，建议拆分']
-                    })
-                });
-                if (!res.ok) throw new Error('预览请求失败');
-                const json = await res.json();
-                const markdown = json.data || '无内容';
-                // 创建预览弹窗
-                const modal = document.createElement('div');
-                modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
-                modal.innerHTML = `
-                    <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
-                        <div class="px-6 py-4 border-b flex items-center justify-between">
-                            <h3 class="font-bold text-lg">评论模板预览</h3>
-                            <button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
-                        </div>
-                        <div class="p-6 overflow-auto">
-                            <pre class="whitespace-pre-wrap text-sm font-mono bg-gray-50 p-4 rounded-lg border">${escapeHtml(markdown)}</pre>
-                        </div>
-                        <div class="px-6 py-4 border-t flex justify-end">
-                            <button onclick="this.closest('.fixed').remove()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">关闭</button>
-                        </div>
-                    </div>
-                `;
-                document.body.appendChild(modal);
-            } catch (e) {
-                showToast('预览失败: ' + e.message, 'error');
-            }
-        }
-
         function openTemplateDetailModal(id) {
             const t = templatesData.find(x => x.id === id);
             if (!t) return;
@@ -1362,24 +1253,6 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                 customSection.classList.add('hidden');
             }
 
-            // GitLab 评论模板
-            const commentSection = document.getElementById('detailCommentTemplateSection');
-            if (t.gitlab_comment_template) {
-                commentSection.classList.remove('hidden');
-                document.getElementById('detailCommentTemplate').textContent = t.gitlab_comment_template;
-            } else {
-                commentSection.classList.add('hidden');
-            }
-
-            // 旧版提示词
-            const promptSection = document.getElementById('detailPromptSection');
-            if (t.prompt) {
-                promptSection.classList.remove('hidden');
-                document.getElementById('detailPrompt').textContent = t.prompt;
-            } else {
-                promptSection.classList.add('hidden');
-            }
-
             showModal('templateDetailModal');
         }
 
@@ -1419,11 +1292,9 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             const data = {
                 name,
                 description: document.getElementById('tmplDesc').value,
-                prompt: document.getElementById('tmplPrompt').value,
                 custom_instruction: document.getElementById('tmplCustomInstruction').value,
                 dimension_weights: JSON.stringify(dimensionWeights),
                 max_rules_per_review: parseInt(document.getElementById('tmplMaxRules').value) || 5,
-                gitlab_comment_template: document.getElementById('tmplCommentTemplate').value,
                 deduct_score_config: JSON.stringify({
                     critical: parseInt(document.getElementById('tmplDeductCritical').value) || 0,
                     high:     parseInt(document.getElementById('tmplDeductHigh').value) || 0,
