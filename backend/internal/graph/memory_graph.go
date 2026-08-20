@@ -224,20 +224,29 @@ func (g *MemorySymbolGraph) ingestASTNodes(ast *parser.UnifiedAST, changedFiles 
 	if changedFiles != nil && !changedFiles[ast.FilePath] {
 		return
 	}
-	pkg := ""
+
+	// displayPkg 用于前端展示所属目录
+	displayPkg := ""
 	if parts := strings.Split(ast.FilePath, "/"); len(parts) >= 2 {
-		pkg = parts[len(parts)-2]
+		displayPkg = parts[len(parts)-2]
+	}
+
+	// idPkg 仅 Go 语言使用 package 名作为函数 ID 的一部分（Go 有 package 语义）。
+	// 其他语言使用完整文件路径作为 ID，避免同目录下同名函数互相覆盖。
+	idPkg := ""
+	if ast.Language == "golang" {
+		idPkg = displayPkg
 	}
 
 	for _, fn := range ast.Functions {
-		id := g.generateFuncID(ast.FilePath, pkg, fn.Receiver, fn.Name)
+		id := g.generateFuncID(ast.FilePath, idPkg, fn.Receiver, fn.Name)
 		node := &MemorySymbolNode{
 			ID:         id,
 			Type:       NodeFunc,
 			Name:       fn.Name,
 			Language:   ast.Language,
 			File:       ast.FilePath,
-			Package:    pkg,
+			Package:    displayPkg,
 			Signature:  buildSignature(fn),
 			IsExported: fn.IsExported,
 			Location:   fn.Location,
@@ -262,7 +271,7 @@ func (g *MemorySymbolGraph) ingestASTNodes(ast *parser.UnifiedAST, changedFiles 
 			Name:       tp.Name,
 			Language:   ast.Language,
 			File:       ast.FilePath,
-			Package:    pkg,
+			Package:    displayPkg,
 			IsExported: tp.IsExported,
 			Location:   tp.Location,
 			Properties: map[string]interface{}{
@@ -282,7 +291,7 @@ func (g *MemorySymbolGraph) ingestASTNodes(ast *parser.UnifiedAST, changedFiles 
 				Name:     f.Name,
 				Language: ast.Language,
 				File:     ast.FilePath,
-				Package:  pkg,
+				Package:  displayPkg,
 				Location: f.Location,
 				Properties: map[string]interface{}{
 					"type": f.Type,
@@ -305,7 +314,7 @@ func (g *MemorySymbolGraph) ingestASTNodes(ast *parser.UnifiedAST, changedFiles 
 			Name:     ep.Path,
 			Language: ast.Language,
 			File:     ast.FilePath,
-			Package:  pkg,
+			Package:  displayPkg,
 			Location: parser.SourceLocation{File: ep.File, LineStart: ep.Line},
 			Properties: map[string]interface{}{
 				"method":                ep.Method,
@@ -349,15 +358,19 @@ func (g *MemorySymbolGraph) ingestASTCalls(ast *parser.UnifiedAST, changedFiles 
 		return
 	}
 
-	pkg := ""
+	displayPkg := ""
 	if parts := strings.Split(ast.FilePath, "/"); len(parts) >= 2 {
-		pkg = parts[len(parts)-2]
+		displayPkg = parts[len(parts)-2]
+	}
+	idPkg := ""
+	if ast.Language == "golang" {
+		idPkg = displayPkg
 	}
 
 	// 为本文件函数建立 name -> ID 映射（用于确定 caller）
 	funcNameToID := make(map[string]string)
 	for _, fn := range ast.Functions {
-		id := makeFuncID(ast.FilePath, pkg, fn.Receiver, fn.Name)
+		id := makeFuncID(ast.FilePath, idPkg, fn.Receiver, fn.Name)
 		funcNameToID[fn.Name] = id
 	}
 
@@ -372,35 +385,48 @@ func (g *MemorySymbolGraph) ingestASTCalls(ast *parser.UnifiedAST, changedFiles 
 
 		// 解析目标函数（与 ingestASTCallsFull 一致）
 		var toID string
-		targetPkg := cs.TargetPkg
-		if targetPkg == "" {
-			targetPkg = pkg
+		// 优先尝试同文件内的函数引用（TargetPkg 为空时）
+		if cs.TargetPkg == "" {
+			if id, ok := funcNameToID[cs.TargetFunc]; ok {
+				toID = id
+			}
 		}
-		tryID := fmt.Sprintf("func:%s:%s", targetPkg, cs.TargetFunc)
-		if _, ok := g.GetNode(tryID); ok {
-			toID = tryID
-		} else {
-			matches := g.GetNodeByName(cs.TargetFunc)
-			if len(matches) > 0 {
-				for _, n := range matches {
-					if n.Package == targetPkg {
-						toID = n.ID
-						break
+
+		if toID == "" {
+			targetPkg := cs.TargetPkg
+			if targetPkg == "" {
+				targetPkg = displayPkg
+			}
+			tryID := fmt.Sprintf("func:%s:%s", targetPkg, cs.TargetFunc)
+			if _, ok := g.GetNode(tryID); ok {
+				toID = tryID
+			} else {
+				matches := g.GetNodeByName(cs.TargetFunc)
+				if len(matches) > 0 {
+					for _, n := range matches {
+						if n.Package == targetPkg {
+							toID = n.ID
+							break
+						}
 					}
-				}
-				if toID == "" {
-					toID = matches[0].ID
+					if toID == "" {
+						toID = matches[0].ID
+					}
 				}
 			}
 		}
 		if toID == "" {
+			targetPkg := cs.TargetPkg
+			if targetPkg == "" {
+				targetPkg = displayPkg
+			}
 			toID = fmt.Sprintf("func:%s:%s", targetPkg, cs.TargetFunc)
 		}
 		// 【关键修复】有 receiver 的函数（如 func:pkg:receiver.name）其 funcIndex key 与
 		// fallback ID（func:pkg:name）格式不一致，需在 funcIndex 中按 (pkg, name) 模糊搜索
 		if _, ok := funcIndex[toID]; !ok {
 			for id, meta := range funcIndex {
-				if meta.Pkg == targetPkg && meta.Fn.Name == cs.TargetFunc {
+				if meta.Pkg == displayPkg && meta.Fn.Name == cs.TargetFunc {
 					toID = id
 					break
 				}
@@ -461,15 +487,19 @@ func (g *MemorySymbolGraph) ingestASTCalls(ast *parser.UnifiedAST, changedFiles 
 
 // ingestASTCallsFull 全量摄入调用关系（原有逻辑，保持向后兼容）
 func (g *MemorySymbolGraph) ingestASTCallsFull(ast *parser.UnifiedAST) {
-	pkg := ""
+	displayPkg := ""
 	if parts := strings.Split(ast.FilePath, "/"); len(parts) >= 2 {
-		pkg = parts[len(parts)-2]
+		displayPkg = parts[len(parts)-2]
+	}
+	idPkg := ""
+	if ast.Language == "golang" {
+		idPkg = displayPkg
 	}
 
 	// 为本文件函数建立 name -> ID 映射（用于确定 caller）
 	funcNameToID := make(map[string]string)
 	for _, fn := range ast.Functions {
-		id := g.generateFuncID(ast.FilePath, pkg, fn.Receiver, fn.Name)
+		id := g.generateFuncID(ast.FilePath, idPkg, fn.Receiver, fn.Name)
 		funcNameToID[fn.Name] = id
 	}
 
@@ -482,36 +512,49 @@ func (g *MemorySymbolGraph) ingestASTCallsFull(ast *parser.UnifiedAST) {
 			continue
 		}
 
-		// 在所有已加载节点中搜索目标函数（跨文件引用此时已存在）
+		// 解析目标函数
 		var toID string
-		targetPkg := cs.TargetPkg
-		if targetPkg == "" {
-			targetPkg = pkg
+		// 优先尝试同文件内的函数引用（TargetPkg 为空时，直接从 funcNameToID 查找）
+		if cs.TargetPkg == "" {
+			if id, ok := funcNameToID[cs.TargetFunc]; ok {
+				toID = id
+			}
 		}
 
-		// 1. 尝试精确匹配 func:pkg:name（适配器生成的节点格式）
-		tryID := fmt.Sprintf("func:%s:%s", targetPkg, cs.TargetFunc)
-		if _, ok := g.GetNode(tryID); ok {
-			toID = tryID
-		} else {
-			// 2. 按函数名全局查找
-			matches := g.GetNodeByName(cs.TargetFunc)
-			if len(matches) > 0 {
-				// 优先匹配同包的
-				for _, n := range matches {
-					if n.Package == targetPkg {
-						toID = n.ID
-						break
+		if toID == "" {
+			targetPkg := cs.TargetPkg
+			if targetPkg == "" {
+				targetPkg = displayPkg
+			}
+
+			// 1. 尝试精确匹配 func:pkg:name（适配器生成的节点格式）
+			tryID := fmt.Sprintf("func:%s:%s", targetPkg, cs.TargetFunc)
+			if _, ok := g.GetNode(tryID); ok {
+				toID = tryID
+			} else {
+				// 2. 按函数名全局查找
+				matches := g.GetNodeByName(cs.TargetFunc)
+				if len(matches) > 0 {
+					// 优先匹配同包的
+					for _, n := range matches {
+						if n.Package == targetPkg {
+							toID = n.ID
+							break
+						}
 					}
-				}
-				if toID == "" {
-					toID = matches[0].ID
+					if toID == "" {
+						toID = matches[0].ID
+					}
 				}
 			}
 		}
 
 		if toID == "" {
 			// 3. fallback：使用 fallback 格式，后续可能通过 inferRelations 补充
+			targetPkg := cs.TargetPkg
+			if targetPkg == "" {
+				targetPkg = displayPkg
+			}
 			toID = fmt.Sprintf("func:%s:%s", targetPkg, cs.TargetFunc)
 		}
 
@@ -562,15 +605,19 @@ type funcMeta struct {
 func buildFuncIndex(asts []*parser.UnifiedAST) map[string]funcMeta {
 	idx := make(map[string]funcMeta)
 	for _, ast := range asts {
-		pkg := ""
+		displayPkg := ""
 		if parts := strings.Split(ast.FilePath, "/"); len(parts) >= 2 {
-			pkg = parts[len(parts)-2]
+			displayPkg = parts[len(parts)-2]
+		}
+		idPkg := ""
+		if ast.Language == "golang" {
+			idPkg = displayPkg
 		}
 		for _, fn := range ast.Functions {
-			id := makeFuncID(ast.FilePath, pkg, fn.Receiver, fn.Name)
+			id := makeFuncID(ast.FilePath, idPkg, fn.Receiver, fn.Name)
 			idx[id] = funcMeta{
 				FilePath: ast.FilePath,
-				Pkg:      pkg,
+				Pkg:      displayPkg,
 				Fn:       fn,
 				Language: ast.Language,
 			}
