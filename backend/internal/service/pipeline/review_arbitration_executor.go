@@ -206,6 +206,7 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 		"security_findings_count": len(result.SecurityFindings),
 		"testing_notes_count":     len(result.TestingNotes),
 		"impact_notes_count":      len(result.ImpactNotes),
+		"impact_notes":            result.ImpactNotes,
 		"total_score":             result.TotalScore,
 		"dimensions":              result.Dimensions,
 		"dedup_log":               result.DedupLog,

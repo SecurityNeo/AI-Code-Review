@@ -1383,14 +1383,10 @@ func formatReportText(report *CodeUnderstandingReport, changedFiles []string) st
 		}
 	}
 
-	// 跨文件调用链上下文（截断以控制 Prompt 长度）
+	// 跨文件调用链上下文
 	if report.CrossFileCallChain != "" {
 		b.WriteString("\n### 跨文件调用链上下文\n")
-		chainText := report.CrossFileCallChain
-		if len(chainText) > 8000 {
-			chainText = chainText[:8000] + "\n\n...（跨文件调用链过长，已截断）..."
-		}
-		b.WriteString(chainText)
+		b.WriteString(report.CrossFileCallChain)
 	}
 
 	return b.String()
