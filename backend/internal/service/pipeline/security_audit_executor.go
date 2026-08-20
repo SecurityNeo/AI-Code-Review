@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -239,18 +240,21 @@ func (e *SecurityAuditExecutor) matchRegex(files []map[string]interface{}, rules
 			continue
 		}
 
-		changedLines := extractChangedLines(diff)
+		// 【关键修复】使用带真实文件行号的 diff 解析，替代 extractChangedLines（后者返回 diff 列表索引）
+		diffLines := extractDiffLinesWithLineNumbers(diff)
 
-		for lineNum, line := range changedLines {
+		for _, dl := range diffLines {
 			for _, rule := range rules {
 				re, ok := reCache[rule.Code]
 				if !ok {
 					continue
 				}
-				if loc := re.FindStringIndex(line); loc != nil {
-					fullStmt := strings.TrimSpace(line)
+				if loc := re.FindStringIndex(dl.Text); loc != nil {
+					fullStmt := strings.TrimSpace(dl.Text)
 					if content, ok := fileContents[path]; ok && triggerSnippetMaxLen > 0 {
-						extracted := extractStatementByLine(content, lineNum, triggerSnippetMaxLen)
+						// 【关键修复】dl.LineNumber 是 1-based 真实文件行号，
+						// extractStatementByLine 按 0-based 数组索引访问，因此需要 -1
+						extracted := extractStatementByLine(content, dl.LineNumber-1, triggerSnippetMaxLen)
 						if extracted != "" {
 							fullStmt = extracted
 						}
@@ -259,8 +263,8 @@ func (e *SecurityAuditExecutor) matchRegex(files []map[string]interface{}, rules
 						TaskID:         taskID,
 						RuleCode:       rule.Code,
 						FilePath:       path,
-						LineNumber:     lineNum + 1,
-						Snippet:        strings.TrimSpace(line),
+						LineNumber:     dl.LineNumber,
+						Snippet:        strings.TrimSpace(dl.Text),
 						TriggerSnippet: fullStmt,
 						Severity:       rule.Severity,
 						Message:        rule.Description,
@@ -272,6 +276,65 @@ func (e *SecurityAuditExecutor) matchRegex(files []map[string]interface{}, rules
 	}
 
 	return findings
+}
+
+// changedLine 表示 diff 中一行新增/修改的内容及其在新文件中的真实行号
+type changedLine struct {
+	Text       string // 去掉 + 前缀后的内容
+	LineNumber int    // 在新文件中的 1-based 行号
+}
+
+// extractDiffLinesWithLineNumbers 从 unified diff 中提取所有 + 行，并计算其在新文件中的真实行号。
+// 通过解析 hunk header（@@ -a,b +c,d @@）来跟踪新文件行号。
+func extractDiffLinesWithLineNumbers(diff string) []changedLine {
+	var lines []changedLine
+	currentNewLine := 0
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "@@") {
+			// 解析 hunk header：@@ -oldStart,oldCount +newStart,newCount @@
+			plusIdx := strings.Index(line, "+")
+			if plusIdx >= 0 {
+				// 找到 + 后面的数字，直到空格或逗号
+				sail := plusIdx + 1
+				for sail < len(line) && (line[sail] == ' ' || line[sail] == '\t') {
+					sail++
+				}
+				end := sail
+				for end < len(line) && line[end] >= '0' && line[end] <= '9' {
+					end++
+				}
+				if end > sail {
+					if num, err := strconv.Atoi(line[sail:end]); err == nil {
+						currentNewLine = num
+					}
+				}
+			}
+			continue
+		}
+		if len(line) == 0 {
+			if currentNewLine > 0 {
+				currentNewLine++
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") {
+			continue
+		}
+		switch line[0] {
+		case '+':
+			if currentNewLine > 0 {
+				lines = append(lines, changedLine{Text: line[1:], LineNumber: currentNewLine})
+				currentNewLine++
+			}
+		case ' ':
+			if currentNewLine > 0 {
+				currentNewLine++
+			}
+		case '-':
+			// 旧文件行，不消耗新文件行号
+		}
+	}
+	return lines
 }
 
 // matchAST AST 模式匹配（基于已有 ASTContext 结构做简化匹配）

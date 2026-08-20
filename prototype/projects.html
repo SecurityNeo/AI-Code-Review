@@ -433,6 +433,27 @@
         </div>
     </div>
 
+    <!-- 构建代码地图确认弹窗 -->
+    <div id="buildGraphConfirmModal" class="modal fixed inset-0 bg-black/50 items-center justify-center z-50">
+        <div class="bg-white rounded-xl w-[420px] max-w-[90vw]">
+            <div class="px-6 py-5 text-center">
+                <div class="w-12 h-12 rounded-full bg-emerald-50 flex items-center justify-center mx-auto mb-3">
+                    <i class="fas fa-project-diagram text-emerald-600 text-xl"></i>
+                </div>
+                <h3 class="font-bold text-lg text-gray-900 mb-2">构建代码地图</h3>
+                <p class="text-sm text-gray-500 leading-relaxed">
+                    系统将扫描项目全量代码并解析 AST 结构，<br>此过程可能需要几分钟，请确认是否继续？
+                </p>
+            </div>
+            <div class="px-6 py-4 border-t flex justify-center gap-3">
+                <button onclick="hideModal('buildGraphConfirmModal')" class="px-5 py-2 border rounded-lg text-sm hover:bg-gray-50 text-gray-600">取消</button>
+                <button id="buildGraphConfirmBtn" class="px-5 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700">
+                    <i class="fas fa-hammer mr-1"></i>确认构建
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script>
         function showToast(message, type = 'success') {
             const colors = { success: 'bg-green-500', error: 'bg-red-500', info: 'bg-blue-500' };
@@ -794,8 +815,16 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             document.getElementById(id).classList.add('active');
         }
 
-        async function buildGraph(projectId) {
-            if (!confirm('构建代码地图可能需要几分钟，确定要继续吗？')) return;
+        let pendingBuildProjectId = null;
+        function buildGraph(projectId) {
+            pendingBuildProjectId = projectId;
+            showModal('buildGraphConfirmModal');
+        }
+        document.getElementById('buildGraphConfirmBtn').addEventListener('click', async function() {
+            hideModal('buildGraphConfirmModal');
+            if (!pendingBuildProjectId) return;
+            const projectId = pendingBuildProjectId;
+            pendingBuildProjectId = null;
             try {
                 const res = await apiFetch(`${API_BASE}/projects/${projectId}/graph/build`, { method: 'POST' });
                 if (!res.ok) {
@@ -806,7 +835,7 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             } catch (e) {
                 showToast('构建失败: ' + e.message, 'error');
             }
-        }
+        });
         
         function switchTab(tab, evt) {
             const event = evt || window.event;

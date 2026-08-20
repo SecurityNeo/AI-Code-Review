@@ -378,14 +378,35 @@ func (e *ReviewArbitrationExecutor) localDeduplicationAndMerge(
 
 	var impactNotes []llm.ImpactNote
 	for _, f := range promptCtx.ImpactFindings {
+		// 截断过长的 suggestion，避免污染最终报告
+		suggestion := f.Suggestion
+		if len(suggestion) > 500 {
+			suggestion = suggestion[:500] + "..."
+		}
+		// 截断过长的 migration_steps，避免前端展示爆炸
+		migrationSteps := f.MigrationSteps
+		if len(migrationSteps) > 500 {
+			migrationSteps = migrationSteps[:500] + "..."
+		}
+		// 将启发式 Type 映射为前端期望的 Compatibility 枚举值
+		// enrichment 阶段若成功执行，f.Type 已被覆盖为 LLM 返回值（breaking/behavioral/backward_compatible）
+		compatibility := f.Type
+		switch f.Type {
+		case "breaking_change", "migration":
+			compatibility = "breaking"
+		case "config_change", "schema_change":
+			compatibility = "behavioral"
+		}
 		impactNotes = append(impactNotes, llm.ImpactNote{
 			Type:           f.Type,
 			FilePath:       f.FilePath,
 			SymbolName:     f.SymbolName,
 			Description:    f.ChangeDesc,
 			Severity:       f.Severity,
-			Suggestion:     f.Suggestion,
-			MigrationSteps: "",
+			Suggestion:     suggestion,
+			AffectedFiles:  f.AffectedFiles,
+			Compatibility:  compatibility,
+			MigrationSteps: migrationSteps,
 		})
 	}
 

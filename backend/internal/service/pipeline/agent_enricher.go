@@ -715,8 +715,11 @@ func (e *AgentEnricher) buildImpactEnrichPrompt(findings []engine.ImpactFinding,
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString("请以符号名为 key 的 JSON 对象格式返回判定结果。\n")
-	sb.WriteString(`格式示例: {"GetUser": {"is_breaking":true, "breaking_type":"signature_change", "compatibility":"breaking", ...}}`)
+	sb.WriteString("输出要求:\n")
+	sb.WriteString("1. 请以符号名为 key 的 JSON 对象格式返回判定结果。\n")
+	sb.WriteString("2. migration_steps 字段必须精简：只列出核心迁移要点（3-5 条以内），每条不超过 30 字，总长度控制在 200 字以内。禁止生成详细教程或冗长说明。\n")
+	sb.WriteString("3. 如果变更仅为兼容性行为变更（非 Breaking Change），migration_steps 可留空或填写 '无需迁移'。\n\n")
+	sb.WriteString(`格式示例: {"GetUser": {"is_breaking":true, "breaking_type":"signature_change", "compatibility":"breaking", "migration_steps":"1. 更新调用处参数顺序 2. 重新编译依赖模块"}}`)
 	e.lastPrompt = sb.String()
 	return sb.String()
 }
@@ -861,7 +864,7 @@ func getImpactEnrichJSONSchema() map[string]interface{} {
 				"compatibility":    map[string]interface{}{"type": "string", "enum": []string{"breaking", "behavioral", "backward_compatible"}},
 				"affected_scope":   map[string]interface{}{"type": "string"},
 				"migration_needed": map[string]interface{}{"type": "boolean"},
-				"migration_steps":  map[string]interface{}{"type": "string"},
+				"migration_steps":  map[string]interface{}{"type": "string", "maxLength": 200},
 			},
 			"required": []string{"is_breaking", "breaking_type", "compatibility", "affected_scope", "migration_needed"},
 		},

@@ -144,6 +144,9 @@ func (e *CodeUnderstandingExecutor) Execute(ctx StageContext) error {
 		return nil
 	}
 	ctxStage.Status = "success"
+	// 【关键修复】将完整文件内容保存到 output，供下游 secret_scan / security_audit / test_suggestion / impact_analysis 使用
+	// （context_extract 阶段已被废弃合并到 code_understanding，因此在此处补设）
+	ctx.SetOutput("file_contents", fullFileMap)
 	ctxStage.Output = map[string]interface{}{
 		"parsed_files": parsedCount,
 		"total_files":  len(files),
@@ -373,6 +376,8 @@ func (e *CodeUnderstandingExecutor) contextExtract(ctx StageContext, files []map
 			contentBytes, err := os.ReadFile(filepath.Join(repoDir, path))
 			if err == nil {
 				content = string(contentBytes)
+				// 【关键修复】将从本地仓库读取的内容写回 fullFileMap，供下游阶段使用
+				fullFileMap[path] = content
 			}
 		}
 		if content == "" {

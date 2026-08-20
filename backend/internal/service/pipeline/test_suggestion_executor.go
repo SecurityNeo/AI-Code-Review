@@ -438,7 +438,12 @@ func (e *ImpactAnalysisExecutor) Execute(ctx StageContext) error {
 	// 获取当前 fileContents 和基线 fileContents 用于对比
 	fileContents, _ := ctx.GetOutput("file_contents").(map[string]string)
 	baselineContents := make(map[string]string)
-	if repoPath, ok := ctx.GetInput("repo_path").(string); ok && repoPath != "" {
+	// 【关键修复】git_clone 阶段将 repo_dir 保存到 output，而不是 input 中的 repo_path
+	repoPath, _ := ctx.GetOutput("repo_dir").(string)
+	if repoPath == "" {
+		repoPath, _ = ctx.GetInput("repo_path").(string)
+	}
+	if repoPath != "" {
 		// 并发获取基线文件（限制 10 并发，避免 git 进程爆炸）
 		var wg sync.WaitGroup
 		var mu sync.Mutex
@@ -497,7 +502,7 @@ func (e *ImpactAnalysisExecutor) Execute(ctx StageContext) error {
 			for i := range findings {
 				if note, ok := enriched[findings[i].SymbolName]; ok {
 					if note.MigrationSteps != "" {
-						findings[i].Suggestion = note.MigrationSteps
+						findings[i].MigrationSteps = note.MigrationSteps
 					}
 					if note.Compatibility != "" {
 						findings[i].Type = note.Compatibility
@@ -711,17 +716,50 @@ func hasSignatureChangeIndicators(fn FunctionSignature) bool {
 	return len(fn.Params) > 0
 }
 
+// extractAffectedFiles 从 buildCrossFileCallChainText 输出的文本中提取与 symbolName 相关的下游调用者文件。
+// buildCrossFileCallChainText 格式示例：
+//
+//	### 文件: models/host.go
+//	**被以下文件调用：**
+//	- handler/host.go:45 GetHostList -> GetHost(ctx)
+//	- service/host.go:30 UpdateHost -> Save(h)
 func extractAffectedFiles(crossFileText, symbolName string) []string {
 	var files []string
-	lines := strings.Split(crossFileText, "\n")
-	for _, line := range lines {
-		if strings.Contains(line, symbolName) && strings.Contains(line, "文件:") {
-			parts := strings.Split(line, "文件:")
-			if len(parts) > 1 {
-				file := strings.TrimSpace(parts[1])
-				if file != "" && !strContains(files, file) {
-					files = append(files, file)
-				}
+	if crossFileText == "" || symbolName == "" {
+		return files
+	}
+	// 按 "### 文件: " 分段解析（buildCrossFileCallChainText 的 section header）
+	sections := strings.Split(crossFileText, "### 文件: ")
+	for _, section := range sections {
+		section = strings.TrimSpace(section)
+		if section == "" {
+			continue
+		}
+		lines := strings.Split(section, "\n")
+		if len(lines) == 0 {
+			continue
+		}
+		// 第一段的第一行是当前变更文件路径
+		changedFile := strings.TrimSpace(lines[0])
+
+		// 在后续行中查找包含 symbolName 的 caller 行
+		for _, line := range lines[1:] {
+			if !strings.Contains(line, symbolName) {
+				continue
+			}
+			// caller 行必须以 "- " 开头，格式："- caller_file.go:45 FuncName -> CallExpr"
+			if !strings.HasPrefix(line, "- ") {
+				continue
+			}
+			trimmed := strings.TrimPrefix(line, "- ")
+			parts := strings.Fields(trimmed)
+			if len(parts) == 0 {
+				continue
+			}
+			// parts[0] 形如 "handler/host.go:45"
+			callerFile := strings.SplitN(parts[0], ":", 2)[0]
+			if callerFile != "" && callerFile != changedFile && !strContains(files, callerFile) {
+				files = append(files, callerFile)
 			}
 		}
 	}

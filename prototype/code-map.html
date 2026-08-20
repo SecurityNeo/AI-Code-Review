@@ -178,7 +178,7 @@
             <button onclick="exportData()" class="h-9 px-3 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition" title="导出数据">
                 <i class="fas fa-download"></i>
             </button>
-            <button onclick="buildGraph()" class="h-9 px-3 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition" title="构建代码地图">
+            <button onclick="buildGraph()" data-admin-only class="h-9 px-3 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition" title="构建代码地图">
                 <i class="fas fa-hammer mr-1"></i>构建
             </button>
         </div>
@@ -347,6 +347,7 @@
         loadProjectInfo();
         loadData();
         setupResizablePanels();
+        if (typeof applyAdminVisibility === 'function') applyAdminVisibility();
     });
 
     function getProjectId() {
@@ -2126,6 +2127,10 @@
     }
 
     function buildGraph() {
+        if (typeof isAdmin === 'function' && !isAdmin()) {
+            showToast('只有系统管理员可以构建代码地图', 'error');
+            return;
+        }
         if (!confirm('构建代码地图可能需要几分钟，确定要继续吗？')) return;
         apiFetch(getApiBase() + '/projects/' + state.projectId + '/graph/build', { method: 'POST' })
             .then(r => r.json())

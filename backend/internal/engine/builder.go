@@ -78,6 +78,9 @@ type ImpactFinding struct {
 	AfterSig     string   `json:"after_sig,omitempty"`     // 变更后签名
 	BeforeFields []string `json:"before_fields,omitempty"` // 变更前字段列表
 	AfterFields  []string `json:"after_fields,omitempty"`  // 变更后字段列表
+
+	// 【新增】LLM enrichment 生成的迁移步骤（独立字段，避免与 Suggestion 混用）
+	MigrationSteps string `json:"migration_steps,omitempty"` // 迁移步骤
 }
 
 // LicenseFinding 许可证检查单条结果

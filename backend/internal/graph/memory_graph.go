@@ -240,6 +240,8 @@ func (g *MemorySymbolGraph) ingestASTNodes(ast *parser.UnifiedAST) {
 				"receiver":      fn.Receiver,
 				"security_role": fn.SecurityRole,
 				"complexity":    fn.Complexity,
+				"loc":           fn.LOC,
+				"nested_depth":  fn.NestedDepth,
 			},
 		}
 		if node.ID == "" {
