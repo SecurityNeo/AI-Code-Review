@@ -73,19 +73,14 @@ type SymbolInfo struct {
 type CrossFileAnalyzer struct {
 	repoDir      string
 	lang         string
-	depth        int
 	excludedDirs []string
 }
 
 // NewCrossFileAnalyzer 创建分析器
-func NewCrossFileAnalyzer(repoDir, lang string, depth int) *CrossFileAnalyzer {
-	if depth <= 0 {
-		depth = 1
-	}
+func NewCrossFileAnalyzer(repoDir, lang string) *CrossFileAnalyzer {
 	return &CrossFileAnalyzer{
 		repoDir:      repoDir,
 		lang:         lang,
-		depth:        depth,
 		excludedDirs: []string{"vendor", "node_modules", ".git", "dist", "build", "target"},
 	}
 }

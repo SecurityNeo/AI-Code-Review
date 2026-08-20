@@ -45,22 +45,30 @@ type SymbolGraphResult struct {
 }
 
 // BuildFromASTs 从多个AST构建符号图
-func (sg *SymbolGraph) BuildFromASTs(projectID uint64, asts []*parser.UnifiedAST, adapters []ASTAdapter) (*SymbolGraphResult, error) {
+// changedFiles 不为空时构建增量评审图（仅收录变更文件 + 上下游被引用节点）
+// changedFiles 为 nil 时保持全仓库构建（基线图/ code-map 场景）
+func (sg *SymbolGraph) BuildFromASTs(projectID uint64, asts []*parser.UnifiedAST, adapters []ASTAdapter, changedFiles map[string]bool) (*SymbolGraphResult, error) {
 	graph := NewMemorySymbolGraph(projectID)
 
-	// 步骤1：摄入所有基础节点（不添加调用关系）
+	// 构建全量函数索引，供按需补录使用
+	funcIndex := buildFuncIndex(asts)
+
+	// 步骤1：摄入基础节点（增量模式下仅变更文件）
 	for _, ast := range asts {
-		graph.ingestASTNodes(ast)
+		graph.ingestASTNodes(ast, changedFiles)
 	}
 
-	// 步骤2：添加所有调用关系（此时所有节点都已存在，可正确解析跨文件引用）
+	// 步骤2：添加调用关系（增量模式下按需补录缺失节点）
 	for _, ast := range asts {
-		graph.ingestASTCalls(ast)
+		graph.ingestASTCalls(ast, changedFiles, funcIndex)
 	}
 
-	// 步骤3：运行框架适配器（识别Endpoint、Sink、认证等）
+	// 步骤3：运行框架适配器（增量模式下仅处理变更文件）
 	activatedFrameworks := make(map[string]bool)
 	for _, ast := range asts {
+		if changedFiles != nil && !changedFiles[ast.FilePath] {
+			continue
+		}
 		for _, adapter := range adapters {
 			if adapter.Detect(ast) {
 				adapter.Enrich(ast, graph)
@@ -127,7 +135,7 @@ func (sg *SymbolGraph) LoadBaseline(projectID uint64) (*MemorySymbolGraph, error
 }
 
 // BuildReviewView 构建评审视图（核心方法：基线只读 + 内存叠加）
-func (sg *SymbolGraph) BuildReviewView(ctx context.Context, projectID uint64, changedFiles map[string][]byte) (*ReviewView, error) {
+func (sg *SymbolGraph) BuildReviewView(ctx context.Context, projectID uint64, changedFiles map[string][]byte, adapters []ASTAdapter) (*ReviewView, error) {
 	// 1. 加载基线（只读，从缓存或磁盘）
 	baseline, err := sg.LoadBaseline(projectID)
 	if err != nil {
@@ -137,7 +145,8 @@ func (sg *SymbolGraph) BuildReviewView(ctx context.Context, projectID uint64, ch
 	// 2. 克隆基线到内存（评审副本）
 	viewGraph := baseline.Clone()
 
-	// 3. 叠加变更文件
+	// 3. 叠加变更文件，并运行框架适配器重建 endpoint/sink/auth 等节点
+	activatedFrameworks := make(map[string]bool)
 	for filePath, content := range changedFiles {
 		if ext := filepathExt(filePath); ext != "" {
 			extractor, ok := parser.GlobalRegistry.GetExtractorByExt(ext)
@@ -151,17 +160,25 @@ func (sg *SymbolGraph) BuildReviewView(ctx context.Context, projectID uint64, ch
 				)
 				continue
 			}
+			// 解析 AST 并运行框架适配器（重建 endpoint、sink、auth 等框架特有节点）
+			ast, parseErr := extractor.ParseFile(filePath, content)
+			if parseErr == nil {
+				for _, adapter := range adapters {
+					if adapter.Detect(ast) {
+						adapter.Enrich(ast, viewGraph)
+						activatedFrameworks[adapter.Name()] = true
+					}
+				}
+			}
 		}
 	}
-
-	// 4. 运行框架适配器（新文件可能引入新路由）
-	// 在实际实现中，需要对变更的文件解析后再运行适配器
 
 	view := &ReviewView{
 		baseGraph: viewGraph,
 		overlay:   NewMemorySymbolGraph(projectID),
 		projectID: projectID,
 	}
+	_ = activatedFrameworks // 可在 ReviewView 中扩展 frameworks 字段时使用
 
 	return view, nil
 }

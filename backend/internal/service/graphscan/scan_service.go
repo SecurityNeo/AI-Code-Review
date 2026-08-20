@@ -209,7 +209,7 @@ func (s *ScanService) runScan(taskID uint64, projectID uint64, branch string) {
 		}
 	}
 
-	graphResult, err := sg.BuildFromASTs(projectID, allASTs, activeAdapters)
+	graphResult, err := sg.BuildFromASTs(projectID, allASTs, activeAdapters, nil)
 	if err != nil {
 		s.logger.Error("build graph failed", zap.Error(err))
 		s.failTask(taskID, projectID, err.Error())
@@ -346,11 +346,11 @@ func (s *ScanService) GetGraphOverview(projectID uint64) (map[string]interface{}
 	var types []map[string]interface{}
 	var todos []map[string]interface{}
 	frameworkSet := make(map[string]bool)
-	
+
 	// 认证覆盖率统计
 	var authTotal, authProtected, authRequired int
 	var unprotectedHighRisk []map[string]interface{}
-	
+
 	for _, node := range g.AllNodes() {
 		switch node.Type {
 		case graph.NodeEndpoint:
@@ -374,7 +374,7 @@ func (s *ScanService) GetGraphOverview(projectID uint64) (map[string]interface{}
 			if fw := getStringProp(node.Properties, "framework"); fw != "" {
 				frameworkSet[fw] = true
 			}
-			
+
 			// 认证统计
 			authTotal++
 			if isAuthRequired {
@@ -387,24 +387,24 @@ func (s *ScanService) GetGraphOverview(projectID uint64) (map[string]interface{}
 			// 未认证的高风险端点（POST/DELETE/PATCH + 无认证）
 			if !isAuthRequired && (method == "POST" || method == "DELETE" || method == "PUT" || method == "PATCH") {
 				unprotectedHighRisk = append(unprotectedHighRisk, map[string]interface{}{
-					"path":    node.Name,
-					"method":  method,
-					"file":    node.File,
-					"line":    node.Location.LineStart,
+					"path":      node.Name,
+					"method":    method,
+					"file":      node.File,
+					"line":      node.Location.LineStart,
 					"framework": getStringProp(node.Properties, "framework"),
 				})
 			}
 		case graph.NodeFunc:
 			funcEntry := map[string]interface{}{
-				"id":            node.ID,
-				"name":          node.Name,
-				"signature":     node.Signature,
-				"file":          node.File,
-				"line":          node.Location.LineStart,
-				"language":      node.Language,
-				"is_exported":   node.IsExported,
-				"security_role": getStringProp(node.Properties, "security_role"),
-				"complexity":    getIntProp(node.Properties, "complexity"),
+				"id":             node.ID,
+				"name":           node.Name,
+				"signature":      node.Signature,
+				"file":           node.File,
+				"line":           node.Location.LineStart,
+				"language":       node.Language,
+				"is_exported":    node.IsExported,
+				"security_role":  getStringProp(node.Properties, "security_role"),
+				"complexity":     getIntProp(node.Properties, "complexity"),
 				"incoming_calls": len(g.GetIncomingRelations(node.ID, graph.RelCalls)),
 			}
 			if node.Package != "" {
@@ -453,7 +453,7 @@ func (s *ScanService) GetGraphOverview(projectID uint64) (map[string]interface{}
 			})
 		}
 	}
-	
+
 	// 从 RelImplements 关系填充 implements（Tree-sitter extractor 不直接解析 implements）
 	for _, rel := range g.GetAllRelations() {
 		if rel.Type != graph.RelImplements {
@@ -578,10 +578,10 @@ func (s *ScanService) GetGraphOverview(projectID uint64) (map[string]interface{}
 		"taint_paths":          taintPaths,
 		"sink_infos":           sinkInfos,
 		"auth_coverage": map[string]interface{}{
-			"total":                authTotal,
-			"protected":            authProtected,
-			"required":             authRequired,
-			"coverage_rate":        fmt.Sprintf("%.0f%%", safeDiv(authProtected, authRequired)*100),
+			"total":                 authTotal,
+			"protected":             authProtected,
+			"required":              authRequired,
+			"coverage_rate":         fmt.Sprintf("%.0f%%", safeDiv(authProtected, authRequired)*100),
 			"unprotected_high_risk": unprotectedHighRisk,
 		},
 	}

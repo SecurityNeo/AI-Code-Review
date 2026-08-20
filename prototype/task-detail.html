@@ -4156,33 +4156,6 @@ function renderReviewArbitrationDetail(json) {
         html += `</div></div>`;
     }
 
-    // 影响分析结果
-    const impactNotes = out.impact_notes || [];
-    if (impactNotes.length > 0) {
-        html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center gap-1"><i class="fas fa-project-diagram text-blue-500"></i>影响分析结果 (${impactNotes.length} 条)</div>`;
-        html += `<div class="space-y-2">`;
-        impactNotes.forEach((f, idx) => {
-            const severityCls = (f.type || f.Type) === 'breaking' || (f.type || f.Type) === 'breaking_change' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-yellow-50 border-yellow-200 text-yellow-700';
-            const severityIcon = (f.type || f.Type) === 'breaking' || (f.type || f.Type) === 'breaking_change' ? 'fa-exclamation-circle text-red-500' : 'fa-info-circle text-yellow-500';
-            html += `<div class="border rounded-lg p-2.5 ${severityCls}">`;
-            html += `<div class="flex items-start gap-2 mb-1">`;
-            html += `<i class="fas ${severityIcon} mt-0.5"></i>`;
-            html += `<div class="flex-1 min-w-0">`;
-            html += `<div class="text-xs font-semibold">${escapeHtml(f.symbol_name || f.SymbolName || '未知')}</div>`;
-            html += `<div class="text-[11px] text-gray-600">${escapeHtml(f.file_path || f.FilePath || '')}</div>`;
-            html += `</div></div>`;
-            html += `<div class="text-[11px] text-gray-700 leading-relaxed">`;
-            if (f.change_desc || f.ChangeDesc) html += `<div class="mb-1 whitespace-pre-wrap">变更: ${formatListText(f.change_desc || f.ChangeDesc)}</div>`;
-            if (f.suggestion || f.Suggestion) html += `<div class="mb-1 whitespace-pre-wrap">建议: ${formatListText(f.suggestion || f.Suggestion)}</div>`;
-            if (f.migration_steps || f.MigrationSteps) html += `<div class="mb-1 whitespace-pre-wrap text-emerald-700">迁移步骤: ${formatListText(f.migration_steps || f.MigrationSteps)}</div>`;
-            if ((f.affected_files || f.AffectedFiles) && (f.affected_files || f.AffectedFiles).length > 0) {
-                html += `<div class="text-gray-500">影响文件: ${(f.affected_files || f.AffectedFiles).map(a => escapeHtml(a)).join(', ')}</div>`;
-            }
-            html += `</div></div>`;
-        });
-        html += `</div></div>`;
-    }
-
     // 去重统计
     if (out.dedup_stats) {
         const ds = out.dedup_stats;

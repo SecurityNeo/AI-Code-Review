@@ -213,12 +213,17 @@ func (g *MemorySymbolGraph) OverlayFileChanges(filePath string, fileData []byte,
 
 // ingestAST 将AST摄入图（单文件完整解析，用于 OverlayFileChanges 等场景）
 func (g *MemorySymbolGraph) ingestAST(ast *parser.UnifiedAST) {
-	g.ingestASTNodes(ast)
-	g.ingestASTCalls(ast)
+	g.ingestASTNodes(ast, nil)
+	g.ingestASTCalls(ast, nil, nil)
 }
 
 // ingestASTNodes 摄入所有节点（第一阶段：先添加所有节点，不添加跨文件关系）
-func (g *MemorySymbolGraph) ingestASTNodes(ast *parser.UnifiedAST) {
+// changedFiles == nil 时等价于全量收录（向后兼容）
+func (g *MemorySymbolGraph) ingestASTNodes(ast *parser.UnifiedAST, changedFiles map[string]bool) {
+	// 增量模式：非变更文件直接跳过（其节点由 ingestASTCalls 按需补录）
+	if changedFiles != nil && !changedFiles[ast.FilePath] {
+		return
+	}
 	pkg := ""
 	if parts := strings.Split(ast.FilePath, "/"); len(parts) >= 2 {
 		pkg = parts[len(parts)-2]
@@ -336,7 +341,126 @@ func (g *MemorySymbolGraph) ingestASTNodes(ast *parser.UnifiedAST) {
 }
 
 // ingestASTCalls 摄入调用关系（第二阶段：所有节点添加完毕后，再解析跨文件引用）
-func (g *MemorySymbolGraph) ingestASTCalls(ast *parser.UnifiedAST) {
+// changedFiles == nil 时等价于全量收录（向后兼容）；非 nil 时为增量模式：
+// 只保留 caller/callee 至少一方在变更文件中的调用关系，缺失节点通过 funcIndex 按需补录。
+func (g *MemorySymbolGraph) ingestASTCalls(ast *parser.UnifiedAST, changedFiles map[string]bool, funcIndex map[string]funcMeta) {
+	if changedFiles == nil {
+		g.ingestASTCallsFull(ast)
+		return
+	}
+
+	pkg := ""
+	if parts := strings.Split(ast.FilePath, "/"); len(parts) >= 2 {
+		pkg = parts[len(parts)-2]
+	}
+
+	// 为本文件函数建立 name -> ID 映射（用于确定 caller）
+	funcNameToID := make(map[string]string)
+	for _, fn := range ast.Functions {
+		id := makeFuncID(ast.FilePath, pkg, fn.Receiver, fn.Name)
+		funcNameToID[fn.Name] = id
+	}
+
+	for _, cs := range ast.CallSites {
+		if cs.TargetFunc == "" {
+			continue
+		}
+		fromID := funcNameToID[cs.CallerFunc]
+		if fromID == "" {
+			continue
+		}
+
+		// 解析目标函数（与 ingestASTCallsFull 一致）
+		var toID string
+		targetPkg := cs.TargetPkg
+		if targetPkg == "" {
+			targetPkg = pkg
+		}
+		tryID := fmt.Sprintf("func:%s:%s", targetPkg, cs.TargetFunc)
+		if _, ok := g.GetNode(tryID); ok {
+			toID = tryID
+		} else {
+			matches := g.GetNodeByName(cs.TargetFunc)
+			if len(matches) > 0 {
+				for _, n := range matches {
+					if n.Package == targetPkg {
+						toID = n.ID
+						break
+					}
+				}
+				if toID == "" {
+					toID = matches[0].ID
+				}
+			}
+		}
+		if toID == "" {
+			toID = fmt.Sprintf("func:%s:%s", targetPkg, cs.TargetFunc)
+		}
+		// 【关键修复】有 receiver 的函数（如 func:pkg:receiver.name）其 funcIndex key 与
+		// fallback ID（func:pkg:name）格式不一致，需在 funcIndex 中按 (pkg, name) 模糊搜索
+		if _, ok := funcIndex[toID]; !ok {
+			for id, meta := range funcIndex {
+				if meta.Pkg == targetPkg && meta.Fn.Name == cs.TargetFunc {
+					toID = id
+					break
+				}
+			}
+		}
+
+		// 确定 caller / callee 所属文件路径
+		fromFile := ""
+		toFile := ""
+		if n, ok := g.GetNode(fromID); ok {
+			fromFile = n.File
+		} else if meta, ok := funcIndex[fromID]; ok {
+			fromFile = meta.FilePath
+		}
+		if n, ok := g.GetNode(toID); ok {
+			toFile = n.File
+		} else if meta, ok := funcIndex[toID]; ok {
+			toFile = meta.FilePath
+		}
+
+		// 【核心过滤】保留与变更文件相关的调用关系
+		keep := false
+		if fromFile != "" && toFile != "" {
+			keep = changedFiles[fromFile] || changedFiles[toFile]
+		} else if fromFile != "" && toFile == "" {
+			keep = changedFiles[fromFile]
+		} else if fromFile == "" && toFile != "" {
+			keep = changedFiles[toFile]
+		} else {
+			keep = false // 双方都未知（外部依赖间调用），跳过
+		}
+		if !keep {
+			continue
+		}
+
+		// 按需补录缺失节点
+		if _, ok := g.GetNode(fromID); !ok {
+			if meta, ok2 := funcIndex[fromID]; ok2 {
+				g.addFuncNodeFromIndex(fromID, meta)
+			}
+		}
+		if _, ok := g.GetNode(toID); !ok {
+			if meta, ok2 := funcIndex[toID]; ok2 {
+				g.addFuncNodeFromIndex(toID, meta)
+			}
+		}
+
+		g.AddRelation(MemoryRelation{
+			From: fromID,
+			To:   toID,
+			Type: RelCalls,
+			Extra: map[string]string{
+				"caller_file": ast.FilePath,
+			},
+		})
+	}
+}
+
+// ingestASTCallsFull 全量摄入调用关系（原有逻辑，保持向后兼容）
+func (g *MemorySymbolGraph) ingestASTCallsFull(ast *parser.UnifiedAST) {
 	pkg := ""
 	if parts := strings.Split(ast.FilePath, "/"); len(parts) >= 2 {
 		pkg = parts[len(parts)-2]
@@ -410,8 +534,8 @@ func (g *MemorySymbolGraph) generateID(node *MemorySymbolNode) string {
 	return fmt.Sprintf("%s:%s:%s", node.Type, node.File, node.Name)
 }
 
-// generateFuncID 生成函数ID
-func (g *MemorySymbolGraph) generateFuncID(file, pkg, receiver, name string) string {
+// makeFuncID 包级函数ID生成（不依赖MemorySymbolGraph实例）
+func makeFuncID(file, pkg, receiver, name string) string {
 	if receiver != "" {
 		return fmt.Sprintf("func:%s:%s.%s", file, receiver, name)
 	}
@@ -419,6 +543,69 @@ func (g *MemorySymbolGraph) generateFuncID(file, pkg, receiver, name string) str
 		return fmt.Sprintf("func:%s:%s", pkg, name)
 	}
 	return fmt.Sprintf("func:%s:%s", file, name)
+}
+
+// generateFuncID 生成函数ID（委托给包级函数）
+func (g *MemorySymbolGraph) generateFuncID(file, pkg, receiver, name string) string {
+	return makeFuncID(file, pkg, receiver, name)
+}
+
+// funcMeta 函数索引条目，用于按需补录缺失节点
+type funcMeta struct {
+	FilePath string
+	Pkg      string
+	Fn       parser.UnifiedFunction
+	Language string
+}
+
+// buildFuncIndex 从所有AST构建函数ID到定义的索引，供按需补录使用
+func buildFuncIndex(asts []*parser.UnifiedAST) map[string]funcMeta {
+	idx := make(map[string]funcMeta)
+	for _, ast := range asts {
+		pkg := ""
+		if parts := strings.Split(ast.FilePath, "/"); len(parts) >= 2 {
+			pkg = parts[len(parts)-2]
+		}
+		for _, fn := range ast.Functions {
+			id := makeFuncID(ast.FilePath, pkg, fn.Receiver, fn.Name)
+			idx[id] = funcMeta{
+				FilePath: ast.FilePath,
+				Pkg:      pkg,
+				Fn:       fn,
+				Language: ast.Language,
+			}
+		}
+	}
+	return idx
+}
+
+// addFuncNodeFromIndex 根据索引中的元数据创建并添加函数节点（按需补录）
+func (g *MemorySymbolGraph) addFuncNodeFromIndex(id string, meta funcMeta) {
+	if _, ok := g.GetNode(id); ok {
+		return
+	}
+	node := &MemorySymbolNode{
+		ID:         id,
+		Type:       NodeFunc,
+		Name:       meta.Fn.Name,
+		Language:   meta.Language,
+		File:       meta.FilePath,
+		Package:    meta.Pkg,
+		Signature:  buildSignature(meta.Fn),
+		IsExported: meta.Fn.IsExported,
+		Location:   meta.Fn.Location,
+		Properties: map[string]interface{}{
+			"receiver":      meta.Fn.Receiver,
+			"security_role": meta.Fn.SecurityRole,
+			"complexity":    meta.Fn.Complexity,
+			"loc":           meta.Fn.LOC,
+			"nested_depth":  meta.Fn.NestedDepth,
+		},
+	}
+	if node.ID == "" {
+		node.ID = fmt.Sprintf("func:%s:%d", meta.FilePath, meta.Fn.Location.LineStart)
+	}
+	g.AddNode(node)
 }
 
 // buildSignature 构建函数签名

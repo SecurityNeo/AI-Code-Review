@@ -276,18 +276,10 @@ func (e *ContextExtractExecutor) Execute(ctx StageContext) error {
 	var crossFileCtx *CrossFileContext
 	var perFileResults []map[string]interface{}
 	var astCtx *ASTContext
-	depth := 1
 
-	// 优先从全局配置读取深度参数，fallback 到系统配置
-	if d, ok := ctx.GetInput("_code_understanding_depth").(int); ok && d >= 0 {
-		depth = d
-	} else if d := SysCfgCallChainDepth(); d > 0 {
-		depth = d
-	}
-
-	if repoDir != "" && depth > 0 {
+	if repoDir != "" {
 		// ========== 方案 C：基于完整代码库的跨文件分析 ==========
-		analyzer := NewCrossFileAnalyzer(repoDir, lang, depth)
+		analyzer := NewCrossFileAnalyzer(repoDir, lang)
 		var err error
 		crossFileCtx, err = analyzer.Analyze(changedPaths)
 		if err != nil {
@@ -403,7 +395,6 @@ func (e *ContextExtractExecutor) Execute(ctx StageContext) error {
 		output["cross_file_total_files"] = crossFileCtx.TotalFiles
 		output["cross_file_total_symbols"] = crossFileCtx.TotalSymbols
 		output["cross_file_total_call_edges"] = crossFileCtx.TotalCallEdges
-		output["cross_file_depth"] = depth
 
 		// 每个变更文件的调用链
 		for path, fc := range crossFileCtx.FileContexts {

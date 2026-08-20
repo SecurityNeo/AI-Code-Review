@@ -173,14 +173,8 @@ func (e *CodeUnderstandingExecutor) Execute(ctx StageContext) error {
 				changedPaths = append(changedPaths, p)
 			}
 		}
-		depth := 1
-		if d, ok := ctx.GetInput("_code_understanding_depth").(int); ok && d > 0 {
-			depth = d
-		} else if d := SysCfgCallChainDepth(); d > 0 {
-			depth = d
-		}
-		if len(changedPaths) > 0 && depth > 0 {
-			analyzer := NewCrossFileAnalyzer(repoDir, lang, depth)
+		if len(changedPaths) > 0 {
+			analyzer := NewCrossFileAnalyzer(repoDir, lang)
 			crossFileCtx, crossErr := analyzer.Analyze(changedPaths)
 			if crossErr == nil && crossFileCtx != nil {
 				callChainText = buildCrossFileCallChainText(crossFileCtx)
@@ -206,13 +200,30 @@ func (e *CodeUnderstandingExecutor) Execute(ctx StageContext) error {
 	var reviewView *graph.ReviewView
 
 	if hasBaseline {
+		// 【修复】在 hasBaseline 路径下同样需要收集活跃的框架适配器，
+		// 以便在 OverlayFileChanges 之后重建 endpoint/sink/auth 等框架特有节点
+		var activeAdapters []graph.ASTAdapter
+		for _, ast := range asts {
+			for _, adapter := range framework.GlobalAdapterRegistry.GetAdaptersForAST(ast) {
+				found := false
+				for _, existing := range activeAdapters {
+					if existing.Name() == adapter.Name() {
+						found = true
+						break
+					}
+				}
+				if !found {
+					activeAdapters = append(activeAdapters, adapter)
+				}
+			}
+		}
 		changedFiles := make(map[string][]byte)
 		for _, ast := range asts {
 			if content, ok := fullFileMap[ast.FilePath]; ok {
 				changedFiles[ast.FilePath] = []byte(content)
 			}
 		}
-		reviewView, err = e.buildReviewView(ctx, projectID, changedFiles)
+		reviewView, err = e.buildReviewView(ctx, projectID, changedFiles, activeAdapters)
 		if err != nil {
 			zap.L().Warn("build review view failed, using baseline only", zap.Error(err))
 			graphStage.Output = map[string]interface{}{"review_view_built": false, "error": err.Error()}
@@ -236,7 +247,12 @@ func (e *CodeUnderstandingExecutor) Execute(ctx StageContext) error {
 				}
 			}
 		}
-		graphResult, err = sg.BuildFromASTs(projectID, asts, activeAdapters)
+		// 构建增量评审图（仅收录变更文件 + 上下游调用者节点）
+		changedFileSet := make(map[string]bool)
+		for _, ast := range asts {
+			changedFileSet[ast.FilePath] = true
+		}
+		graphResult, err = sg.BuildFromASTs(projectID, asts, activeAdapters, changedFileSet)
 		if err != nil {
 			zap.L().Warn("build symbol graph from ASTs failed", zap.Error(err))
 			graphStage.Output = map[string]interface{}{"graph_built": false, "error": err.Error()}
@@ -449,9 +465,9 @@ func (e *CodeUnderstandingExecutor) buildASTContext(asts []*parser.UnifiedAST, l
 }
 
 // buildReviewView 构建评审视图
-func (e *CodeUnderstandingExecutor) buildReviewView(ctx StageContext, projectID uint64, changedFiles map[string][]byte) (*graph.ReviewView, error) {
+func (e *CodeUnderstandingExecutor) buildReviewView(ctx StageContext, projectID uint64, changedFiles map[string][]byte, adapters []graph.ASTAdapter) (*graph.ReviewView, error) {
 	sg := graph.NewSymbolGraph(e.graphStorage, e.graphCache, zap.L(), "")
-	return sg.BuildReviewView(ctx, projectID, changedFiles)
+	return sg.BuildReviewView(ctx, projectID, changedFiles, adapters)
 }
 
 // buildReport 阶段三：生成报告
@@ -513,17 +529,17 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 				"is_exported":   fn.IsExported,
 				"params":        paramList,
 				"returns":       fn.Returns,
-			"security_role": fn.SecurityRole,
-			// P2-5 复杂度：同时输出扁平字段（向后兼容）和嵌套 metrics（新格式）
-			"complexity":    fn.Complexity,
-			"loc":           fn.LOC,
-			"nested_depth":  fn.NestedDepth,
-			"metrics": map[string]interface{}{
+				"security_role": fn.SecurityRole,
+				// P2-5 复杂度：同时输出扁平字段（向后兼容）和嵌套 metrics（新格式）
+				"complexity":   fn.Complexity,
 				"loc":          fn.LOC,
-				"cyclomatic":   fn.Complexity,
 				"nested_depth": fn.NestedDepth,
-			},
-		})
+				"metrics": map[string]interface{}{
+					"loc":          fn.LOC,
+					"cyclomatic":   fn.Complexity,
+					"nested_depth": fn.NestedDepth,
+				},
+			})
 		}
 		var typeDetails []map[string]interface{}
 		for _, tp := range ast.Types {
@@ -814,19 +830,19 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 			report.EndpointCount = len(endpoints)
 			report.Endpoints = nil // 清空之前从 baseline 提取的，重新填充
 			for _, ep := range endpoints {
-			report.Endpoints = append(report.Endpoints, EndpointSummary{
-				Path:                ep.Name,
-				Method:              getStringProp(ep.Properties, "method"),
-				Handler:             getStringProp(ep.Properties, "handler"),
-				File:                ep.File,
-				Line:                ep.Location.LineStart,
-				Framework:           getStringProp(ep.Properties, "framework"),
-				AuthRequired:        getBoolProp(ep.Properties, "auth"),
-				AuthzPolicy:         getStringProp(ep.Properties, "authz_policy"),
-				RateLimit:           getStringProp(ep.Properties, "rate_limit"),
-				ProducesContentType: getStringSliceProp(ep.Properties, "produces_content_type"),
-				ConsumesContentType: getStringSliceProp(ep.Properties, "consumes_content_type"),
-			})
+				report.Endpoints = append(report.Endpoints, EndpointSummary{
+					Path:                ep.Name,
+					Method:              getStringProp(ep.Properties, "method"),
+					Handler:             getStringProp(ep.Properties, "handler"),
+					File:                ep.File,
+					Line:                ep.Location.LineStart,
+					Framework:           getStringProp(ep.Properties, "framework"),
+					AuthRequired:        getBoolProp(ep.Properties, "auth"),
+					AuthzPolicy:         getStringProp(ep.Properties, "authz_policy"),
+					RateLimit:           getStringProp(ep.Properties, "rate_limit"),
+					ProducesContentType: getStringSliceProp(ep.Properties, "produces_content_type"),
+					ConsumesContentType: getStringSliceProp(ep.Properties, "consumes_content_type"),
+				})
 			}
 		}
 
@@ -836,17 +852,35 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 		if report.GraphData != nil {
 			g := reviewView.GetGraph()
 			if g != nil {
-				allNodes := g.AllNodes()
+				allNodesMap := g.AllNodes()
 				allRelations := g.GetAllRelations()
 
+				// 【增量过滤】序列化前仅保留变更文件节点及其上下游调用者
+				changedFileSet := make(map[string]bool)
+				for _, ast := range asts {
+					changedFileSet[ast.FilePath] = true
+				}
+				// 将 map 转换为 slice 供过滤函数使用
+				var allNodes []*graph.MemorySymbolNode
+				for _, n := range allNodesMap {
+					allNodes = append(allNodes, n)
+				}
+				filteredNodes, filteredRels := filterNodesForIncrementalReview(allNodes, allRelations, changedFileSet)
+				// 将过滤结果还原为 map（与现有迭代兼容）
+				allNodesMap = make(map[string]*graph.MemorySymbolNode)
+				for _, n := range filteredNodes {
+					allNodesMap[n.ID] = n
+				}
+				allRelations = filteredRels
+
 				// 节点序列化（限制数量）
-				nodeCount := len(allNodes)
+				nodeCount := len(allNodesMap)
 				if nodeCount > maxSerializedNodes {
 					report.GraphData.Nodes = []map[string]interface{}{{
 						"_warning": fmt.Sprintf("节点数 %d 超过上限 %d，仅展示统计", nodeCount, maxSerializedNodes),
 					}}
 				} else {
-					for _, node := range allNodes {
+					for _, node := range allNodesMap {
 						props := node.Properties
 						if props == nil {
 							props = map[string]interface{}{}
@@ -881,6 +915,14 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 						})
 					}
 				}
+
+				// 【关键修复】过滤后同步更新摘要统计，避免前端显示旧数据
+				report.GraphData.NodeCount = nodeCount
+				report.GraphData.RelationCount = relCount
+				report.SymbolGraphSummary = SymbolGraphSummary{
+					NodeCount: nodeCount,
+					RelCount:  relCount,
+				}
 			}
 		}
 
@@ -911,17 +953,17 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 					})
 				}
 			}
-		report.TaintFlows = append(report.TaintFlows, TaintFlowSummary{
-			SourceFunc:  flow.Source.Function,
-			SourceFile:  flow.Source.File,
-			SinkFunc:    flow.Sink.Function,
-			SinkFile:    flow.Sink.File,
-			Category:    flow.Category,
-			RiskLevel:   flow.RiskLevel,
-			Path:        path,
-			Sanitizers:  sanitizers,
-			IsSanitized: flow.IsSanitized,
-		})
+			report.TaintFlows = append(report.TaintFlows, TaintFlowSummary{
+				SourceFunc:  flow.Source.Function,
+				SourceFile:  flow.Source.File,
+				SinkFunc:    flow.Sink.Function,
+				SinkFile:    flow.Sink.File,
+				Category:    flow.Category,
+				RiskLevel:   flow.RiskLevel,
+				Path:        path,
+				Sanitizers:  sanitizers,
+				IsSanitized: flow.IsSanitized,
+			})
 		}
 		if report.GraphData != nil {
 			report.GraphData.SecurityPaths = make([]string, 0, len(dfResult.Flows))
@@ -940,12 +982,12 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 						fmt.Sprintf("%s: %s", f.Category, strings.Join(chain, " \u2192 ")))
 				} else {
 					// 无传播路径时回退到两点式
-			report.GraphData.SecurityPaths = append(report.GraphData.SecurityPaths,
-				fmt.Sprintf("%s: %s \u2192 %s", f.Category, f.Source.Function, f.Sink.Function))
+					report.GraphData.SecurityPaths = append(report.GraphData.SecurityPaths,
+						fmt.Sprintf("%s: %s \u2192 %s", f.Category, f.Source.Function, f.Sink.Function))
+				}
 			}
 		}
 	}
-}
 
 	// P2-1 补充：基于 dfResult.Flows 为函数标注 Source / Sink / Sanitizer 角色
 	if dfResult != nil && len(dfResult.Flows) > 0 {
@@ -1173,9 +1215,9 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 				files = append(files, ref.File)
 			}
 			importedByList = append(importedByList, map[string]interface{}{
-				"package":         pkg,
-				"imported_by":     files,
-				"imported_count":  len(files),
+				"package":        pkg,
+				"imported_by":    files,
+				"imported_count": len(files),
 			})
 		}
 		report.ImportDependencyNet = append(report.ImportDependencyNet, importedByList...)
@@ -1477,10 +1519,10 @@ type CodeUnderstandingReport struct {
 	CrossFileCallChain  string                   `json:"cross_file_call_chain,omitempty"` // 跨文件调用链文本
 	ReportText          string                   `json:"report_text,omitempty"`           // Prompt注入文本
 	PromptInjection     string                   `json:"prompt_injection"`                // 同上，兼容命名
-	ReverseCallIndex    map[string][]string      `json:"reverse_call_index,omitempty"`     // P2-2 反向调用索引：被调用函数 -> 调用者列表
+	ReverseCallIndex    map[string][]string      `json:"reverse_call_index,omitempty"`    // P2-2 反向调用索引：被调用函数 -> 调用者列表
 	ImportDependencyNet []map[string]interface{} `json:"import_dependency_net,omitempty"` // P2-4 Import 依赖网络
 	DuplicatedFunctions []map[string]interface{} `json:"duplicated_functions,omitempty"`  // P3-2 代码重复检测
-	BreakingChanges     []BreakingChange         `json:"breaking_changes,omitempty"`        // P0-3 破坏性变更
+	BreakingChanges     []BreakingChange         `json:"breaking_changes,omitempty"`      // P0-3 破坏性变更
 	Summary             CodeUnderstandingSummary `json:"summary"`
 }
 
@@ -1509,11 +1551,11 @@ type FileASTResult struct {
 	ParseError      string                   `json:"parse_error,omitempty"`
 	FunctionDetails []map[string]interface{} `json:"function_details,omitempty"`
 	TypeDetails     []map[string]interface{} `json:"type_details,omitempty"`
-	ImportList      []map[string]interface{} `json:"import_list,omitempty"`    // P1-2 Import 包路径明细
-	CallSites       []map[string]interface{} `json:"call_sites,omitempty"`     // P1-7 调用站点
-	Variables       []map[string]interface{} `json:"variables,omitempty"`      // P1-8 变量列表
-	Constants       []map[string]interface{} `json:"constants,omitempty"`      // P1-8 常量列表
-	TODOComments    []map[string]interface{} `json:"todo_comments,omitempty"`  // P2-3 TODO/FIXME/HACK扫描
+	ImportList      []map[string]interface{} `json:"import_list,omitempty"`      // P1-2 Import 包路径明细
+	CallSites       []map[string]interface{} `json:"call_sites,omitempty"`       // P1-7 调用站点
+	Variables       []map[string]interface{} `json:"variables,omitempty"`        // P1-8 变量列表
+	Constants       []map[string]interface{} `json:"constants,omitempty"`        // P1-8 常量列表
+	TODOComments    []map[string]interface{} `json:"todo_comments,omitempty"`    // P2-3 TODO/FIXME/HACK扫描
 	ComplexityScore int                      `json:"complexity_score,omitempty"` // P2-5 文件级复杂度
 }
 
@@ -1557,9 +1599,9 @@ type EndpointSummary struct {
 	File                string   `json:"file"`
 	Line                int      `json:"line"`
 	Framework           string   `json:"framework,omitempty"`
-	AuthRequired        bool     `json:"auth_required,omitempty"`        // P2-6
-	AuthzPolicy         string   `json:"authz_policy,omitempty"`         // P2-6
-	RateLimit           string   `json:"rate_limit,omitempty"`           // P2-6
+	AuthRequired        bool     `json:"auth_required,omitempty"`         // P2-6
+	AuthzPolicy         string   `json:"authz_policy,omitempty"`          // P2-6
+	RateLimit           string   `json:"rate_limit,omitempty"`            // P2-6
 	ProducesContentType []string `json:"produces_content_type,omitempty"` // P2-6
 	ConsumesContentType []string `json:"consumes_content_type,omitempty"` // P2-6
 }
@@ -1727,6 +1769,73 @@ func buildFuncSignatureFromDetails(fd map[string]interface{}) string {
 		}
 	}
 	return b.String()
+}
+
+// filterNodesForIncrementalReview 从完整基线图中过滤出仅与本次变更相关的节点和关系
+// 保留规则：变更文件节点 + 与变更文件有直接调用关系的上下游节点
+func filterNodesForIncrementalReview(
+	allNodes []*graph.MemorySymbolNode,
+	allRelations []graph.MemoryRelation,
+	changedFiles map[string]bool,
+) ([]*graph.MemorySymbolNode, []graph.MemoryRelation) {
+	nodeMap := make(map[string]*graph.MemorySymbolNode, len(allNodes))
+	for _, n := range allNodes {
+		nodeMap[n.ID] = n
+	}
+
+	relevant := make(map[string]bool)
+
+	// Phase 1：所有变更文件内的节点
+	for _, n := range allNodes {
+		if changedFiles[n.File] {
+			relevant[n.ID] = true
+		}
+	}
+
+	// Phase 2：与变更节点有直接调用关系的上下游节点
+	for _, rel := range allRelations {
+		fromNode := nodeMap[rel.From]
+		toNode := nodeMap[rel.To]
+
+		fromChanged := fromNode != nil && changedFiles[fromNode.File]
+		toChanged := toNode != nil && changedFiles[toNode.File]
+
+		keepRel := false
+		if fromNode != nil && toNode != nil {
+			keepRel = fromChanged || toChanged
+		} else if fromNode != nil && toNode == nil {
+			keepRel = fromChanged
+		} else if fromNode == nil && toNode != nil {
+			keepRel = toChanged
+		}
+
+		if keepRel {
+			if fromNode != nil {
+				relevant[rel.From] = true
+			}
+			if toNode != nil {
+				relevant[rel.To] = true
+			}
+		}
+	}
+
+	// 构建过滤后的节点列表
+	filteredNodes := make([]*graph.MemorySymbolNode, 0, len(relevant))
+	for _, n := range allNodes {
+		if relevant[n.ID] {
+			filteredNodes = append(filteredNodes, n)
+		}
+	}
+
+	// 构建过滤后的关系列表（双方都在 relevant 集合中的才保留）
+	filteredRels := make([]graph.MemoryRelation, 0)
+	for _, rel := range allRelations {
+		if relevant[rel.From] && relevant[rel.To] {
+			filteredRels = append(filteredRels, rel)
+		}
+	}
+
+	return filteredNodes, filteredRels
 }
 
 func init() {

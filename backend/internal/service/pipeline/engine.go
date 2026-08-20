@@ -124,8 +124,6 @@ func (e *Engine) ExecuteTask(taskID uint, inputs map[string]interface{}, broadca
 	}
 	// 注入全局智能体配置，供各阶段读取
 	pipelineInputs["_agent_config"] = agentCfg
-	// 将代码理解器深度配置注入 inputs
-	pipelineInputs["_code_understanding_depth"] = agentCfg.CodeUnderstandingDepth()
 
 	// 将 batch_review_frame 的并行批次上限注入 inputs
 	if brCfg := agentCfg.StageConfig("batch_review_frame"); brCfg != nil {

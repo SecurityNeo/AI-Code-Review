@@ -129,6 +129,7 @@ func (c *ReviewAgentConfig) GetStageParamFloat(stageCode, key string, defaultVal
 }
 
 // CodeUnderstandingDepth 便捷方法：读取 code_understanding 的 AST 分析深度参数
+// Deprecated: 该配置从未被实际使用，增量图谱过滤已替代其语义。保留方法仅用于向后兼容读取旧配置。
 func (c *ReviewAgentConfig) CodeUnderstandingDepth() int {
 	cfg := c.StageConfig("code_understanding")
 	if cfg == nil {
