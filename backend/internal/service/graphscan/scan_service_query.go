@@ -91,7 +91,11 @@ func (s *ScanService) GetGraphVisualization(projectID uint64, detailLevel, focus
 				// 尝试从 ID 解析，或模糊匹配函数名
 				parts := strings.Split(rel.To, ":")
 				if len(parts) >= 3 {
-					toPkg = parts[1] // func:pkg:FuncName
+					candidate := parts[1]
+					// 仅当候选包名是简单标识符（不含路径分隔符/扩展名）时才使用
+					if !strings.Contains(candidate, "/") && !strings.Contains(candidate, ".") {
+						toPkg = candidate
+					}
 				}
 				if toPkg == "" {
 					// 尝试用函数名查找所属包
@@ -717,9 +721,14 @@ func (s *ScanService) GetGraphDependencies(projectID uint64) (map[string]interfa
 			toPkg = toNode.Package
 		} else if rel.To != "" {
 			// 从 To ID 解析包名（func:pkg:FuncName 格式）
+			// 仅当 parts[1] 是简单标识符（不含路径分隔符/扩展名）时才使用，
+			// 避免非Go语言 fallback ID 中的文件路径被误判为包名
 			parts := strings.Split(rel.To, ":")
 			if len(parts) >= 3 {
-				toPkg = parts[1] // func:pkg:name
+				candidate := parts[1]
+				if !strings.Contains(candidate, "/") && !strings.Contains(candidate, ".") {
+					toPkg = candidate
+				}
 			}
 		}
 

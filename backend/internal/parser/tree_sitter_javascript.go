@@ -3,6 +3,7 @@
 package parser
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"strings"
@@ -35,9 +36,10 @@ func (e *TreeSitterJavaScriptExtractor) FileExts() []string { return e.exts }
 
 // ParseFile 解析JS/TS/Vue文件
 func (e *TreeSitterJavaScriptExtractor) ParseFile(filePath string, src []byte) (*UnifiedAST, error) {
+	vueLineOffset := 0
 	// Vue SFC: 提取 <script> 标签内的内容
 	if strings.HasSuffix(filePath, ".vue") {
-		scriptContent := extractVueScript(src)
+		scriptContent, offset := extractVueScript(src)
 		if scriptContent == nil {
 			// 没有 <script> 标签，返回空 AST（template-only 组件）
 			return &UnifiedAST{
@@ -47,6 +49,7 @@ func (e *TreeSitterJavaScriptExtractor) ParseFile(filePath string, src []byte) (
 		}
 		// 将 src 改写为 script body，确保后续所有 tsText 的 byte offset 与 tree-sitter 解析结果对齐
 		src = scriptContent
+		vueLineOffset = offset
 	}
 
 	parser := sitter.NewParser()
@@ -68,7 +71,7 @@ func (e *TreeSitterJavaScriptExtractor) ParseFile(filePath string, src []byte) (
 	}
 
 	// Extract functions (多种声明方式)
-	// 1. function_declaration
+	// 1. function_declaration（递归查找会覆盖 export_statement 内部的函数）
 	for _, fn := range findChildren(root, "function_declaration") {
 		result.Functions = append(result.Functions, e.parseFunc(fn, filePath, src))
 	}
@@ -83,16 +86,7 @@ func (e *TreeSitterJavaScriptExtractor) ParseFile(filePath string, src []byte) (
 			}
 		}
 	}
-	// 3. export default 中的函数对象
-	for _, exp := range findChildren(root, "export_statement") {
-		for i := 0; i < int(exp.ChildCount()); i++ {
-			c := exp.Child(i)
-			if c.Type() == "function_declaration" {
-				result.Functions = append(result.Functions, e.parseFunc(c, filePath, src))
-			}
-		}
-	}
-	// 4. object 中的方法（常用于 Vue options API: methods: { foo() {} }）
+	// 3. object 中的方法（常用于 Vue options API: methods: { foo() {} }）
 	for _, obj := range findChildren(root, "object") {
 		for i := 0; i < int(obj.ChildCount()); i++ {
 			c := obj.Child(i)
@@ -125,17 +119,34 @@ func (e *TreeSitterJavaScriptExtractor) ParseFile(filePath string, src []byte) (
 	// Extract call sites
 	result.CallSites = e.extractCallSites(root, filePath, src)
 
+	// 修正 Vue 文件的行号偏移（script 内容在原始文件中的起始行偏移）
+	if vueLineOffset > 0 {
+		for i := range result.Functions {
+			result.Functions[i].Location.LineStart += vueLineOffset
+		}
+		for i := range result.Types {
+			result.Types[i].Location.LineStart += vueLineOffset
+		}
+		for i := range result.CallSites {
+			result.CallSites[i].Location.LineStart += vueLineOffset
+		}
+	}
+
 	return result, nil
 }
 
-// extractVueScript 从 Vue 单文件组件中提取 <script> 标签内的内容
-func extractVueScript(src []byte) []byte {
+// extractVueScript 从 Vue 单文件组件中提取 <script> 标签内的内容，
+// 并返回 script 内容在原始文件中的起始行偏移量（0-based，用于后续行号修正）。
+func extractVueScript(src []byte) ([]byte, int) {
 	re := regexp.MustCompile(`(?s)<script[^>]*>(.*?)</script>`)
-	matches := re.FindSubmatch(src)
-	if len(matches) >= 2 {
-		return matches[1]
+	loc := re.FindSubmatchIndex(src)
+	if loc == nil || len(loc) < 4 {
+		return nil, 0
 	}
-	return nil
+	// 计算 <script> 标签结束位置（loc[2] 为 script 内容的起始位置）在原始文件中的行号偏移
+	// 0-based offset: scriptContent 第 1 行对应的原始文件行号 = offset + 1
+	lineOffset := bytes.Count(src[:loc[2]], []byte("\n"))
+	return src[loc[2]:loc[3]], lineOffset
 }
 
 func (e *TreeSitterJavaScriptExtractor) parseImport(n *sitter.Node, src []byte) UnifiedImport {
@@ -213,9 +224,9 @@ func (e *TreeSitterJavaScriptExtractor) parseVariableDeclaratorFunc(n *sitter.No
 	}
 
 	if valueNode.Type() == "arrow_function" {
-		// async check on declarator itself
-		for i := 0; i < int(n.ChildCount()); i++ {
-			if n.Child(i).Type() == "async" {
+		// async check: 在 arrow_function 子节点中查找 async keyword
+		for i := 0; i < int(valueNode.ChildCount()); i++ {
+			if valueNode.Child(i).Type() == "async" {
 				fn.IsAsync = true
 				break
 			}
