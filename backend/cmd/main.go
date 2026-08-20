@@ -703,44 +703,37 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 			objStorage.POST("/configs/:id/set-default", storageH.SetDefault)
 		}
 
-		// 漏洞数据库管理
+		// 漏洞数据库管理（读操作对所有用户开放，写操作仅管理员）
 		vulnH := handler.NewVulnerabilityHandler()
-		vulnGroup := adminOnly.Group("/vulnerabilities")
-		{
-			vulnGroup.GET("", vulnH.List)
-			vulnGroup.GET("/stats", vulnH.Stats)
-			vulnGroup.GET("/ecosystems", vulnH.Ecosystems)
-			vulnGroup.POST("/import", vulnH.Import)
-			vulnGroup.POST("/sync", vulnH.Sync)
-			vulnGroup.GET("/:id", vulnH.Get)
-			vulnGroup.POST("", vulnH.Create)
-			vulnGroup.PUT("/:id", vulnH.Update)
-			vulnGroup.DELETE("/:id", vulnH.Delete)
-		}
+		// 读操作：所有认证用户
+		common.GET("/vulnerabilities", vulnH.List)
+		common.GET("/vulnerabilities/stats", vulnH.Stats)
+		common.GET("/vulnerabilities/ecosystems", vulnH.Ecosystems)
+		common.GET("/vulnerabilities/:id", vulnH.Get)
+		// 写操作：仅管理员
+		adminOnly.POST("/vulnerabilities/import", vulnH.Import)
+		adminOnly.POST("/vulnerabilities/sync", vulnH.Sync)
+		adminOnly.POST("/vulnerabilities", vulnH.Create)
+		adminOnly.PUT("/vulnerabilities/:id", vulnH.Update)
+		adminOnly.DELETE("/vulnerabilities/:id", vulnH.Delete)
 
-		// 漏洞白名单管理
+		// 漏洞白名单管理（读操作对所有用户开放，写操作仅管理员）
 		allowH := handler.NewVulnerabilityAllowlistHandler()
-		allowGroup := adminOnly.Group("/vulnerability-allowlist")
-		{
-			allowGroup.GET("", allowH.List)
-			allowGroup.POST("", allowH.Create)
-			allowGroup.PUT("/:id", allowH.Update)
-			allowGroup.DELETE("/:id", allowH.Delete)
-		}
+		common.GET("/vulnerability-allowlist", allowH.List)
+		adminOnly.POST("/vulnerability-allowlist", allowH.Create)
+		adminOnly.PUT("/vulnerability-allowlist/:id", allowH.Update)
+		adminOnly.DELETE("/vulnerability-allowlist/:id", allowH.Delete)
 
-		// 漏洞库同步源管理
+		// 漏洞库同步源管理（读操作对所有用户开放，写操作仅管理员）
 		syncH := handler.NewVulnerabilitySyncSourceHandler()
-		syncGroup := adminOnly.Group("/vulnerability-sync-sources")
-		{
-			syncGroup.GET("", syncH.List)
-			syncGroup.GET("/:id", syncH.Get)
-			syncGroup.POST("", syncH.Create)
-			syncGroup.PUT("/:id", syncH.Update)
-			syncGroup.DELETE("/:id", syncH.Delete)
-			syncGroup.POST("/:id/check-version", syncH.CheckVersion)
-			syncGroup.GET("/check-all", syncH.CheckAllVersions)
-			syncGroup.POST("/:id/sync", syncH.Sync)
-		}
+		common.GET("/vulnerability-sync-sources", syncH.List)
+		common.GET("/vulnerability-sync-sources/:id", syncH.Get)
+		common.GET("/vulnerability-sync-sources/check-all", syncH.CheckAllVersions)
+		common.POST("/vulnerability-sync-sources/:id/check-version", syncH.CheckVersion)
+		adminOnly.POST("/vulnerability-sync-sources", syncH.Create)
+		adminOnly.PUT("/vulnerability-sync-sources/:id", syncH.Update)
+		adminOnly.DELETE("/vulnerability-sync-sources/:id", syncH.Delete)
+		adminOnly.POST("/vulnerability-sync-sources/:id/sync", syncH.Sync)
 
 		// AI 评审智能体全局配置
 		agentCfgH := handler.NewReviewAgentConfigHandler()
