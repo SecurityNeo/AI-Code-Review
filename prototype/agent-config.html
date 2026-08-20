@@ -521,11 +521,12 @@ function renderStageCard(stage, enabledSet, triggerEventSet, stageConfigs) {
                             </div>
                             <p class="text-xs text-gray-500 leading-relaxed">${stage.desc}</p>
                         </div>
-                        <div class="flex items-center gap-2 flex-shrink-0">
-                            ${hasConfig ? `<button type="button" onclick="event.stopPropagation(); toggleStageConfig('${stage.code}')" class="text-[11px] text-gray-400 hover:text-blue-600 transition-colors px-2 py-1 rounded hover:bg-gray-50" id="configToggle_${stage.code}"><i class="fas fa-cog mr-0.5"></i>配置</button>` : ''}
-                            <div class="relative inline-flex items-center">
-                                <input type="checkbox" id="stage_${stage.code}" ${isEnabled ? 'checked' : ''} ${isDisabled ? 'disabled' : ''} onchange="toggleStage('${stage.code}')" class="sr-only peer" role="switch">
-                                <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[\'\'] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600 ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}"></div>
+                            <div class="flex items-center gap-2 flex-shrink-0">
+                                ${hasConfig ? `<button type="button" onclick="event.stopPropagation(); toggleStageConfig('${stage.code}')" class="text-[11px] text-gray-400 hover:text-blue-600 transition-colors px-2 py-1 rounded hover:bg-gray-50" id="configToggle_${stage.code}"><i class="fas fa-cog mr-0.5"></i>配置</button>` : ''}
+                                <label for="stage_${stage.code}" class="relative inline-flex items-center cursor-pointer" onclick="event.stopPropagation()">
+                                    <input type="checkbox" id="stage_${stage.code}" ${isEnabled ? 'checked' : ''} ${isDisabled ? 'disabled' : ''} onchange="toggleStage('${stage.code}')" class="sr-only peer" role="switch">
+                                    <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600 ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}"></div>
+                                </label>
                             </div>
                         </div>
                     </div>
