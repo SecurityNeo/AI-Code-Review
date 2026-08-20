@@ -25,6 +25,7 @@ func NewExtractorRegistry() *ExtractorRegistry {
 			".ts":   "typescript",
 			".jsx":  "javascript",
 			".tsx":  "typescript",
+			".vue":  "javascript",
 		},
 	}
 }

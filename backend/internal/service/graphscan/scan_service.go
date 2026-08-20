@@ -145,12 +145,16 @@ func (s *ScanService) runScan(taskID uint64, projectID uint64, branch string) {
 	processedCount := 0
 	startTime := time.Now()
 
-	err = filepath.Walk(repoDir, func(path string, info os.FileInfo, err error) error {
+		err = filepath.Walk(repoDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
 		}
 		if strings.Contains(path, "vendor/") || strings.Contains(path, "node_modules/") ||
-			strings.Contains(path, ".git/") {
+			strings.Contains(path, ".git/") || strings.Contains(path, "public/") ||
+			strings.Contains(path, "dist/") || strings.Contains(path, "build/") ||
+			strings.Contains(path, "/target/") || strings.Contains(path, ".gradle/") ||
+			strings.HasSuffix(path, ".min.js") || strings.HasSuffix(path, ".bundle.js") ||
+			strings.HasSuffix(path, ".map") {
 			return nil
 		}
 

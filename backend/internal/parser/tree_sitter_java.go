@@ -77,7 +77,6 @@ func (e *TreeSitterJavaExtractor) ParseFile(filePath string, src []byte) (*Unifi
 
 func (e *TreeSitterJavaExtractor) parseImport(n *sitter.Node, src []byte) UnifiedImport {
 	imp := UnifiedImport{}
-	// Find the scoped_identifier or identifier child
 	for i := 0; i < int(n.ChildCount()); i++ {
 		c := n.Child(i)
 		if c.Type() == "scoped_identifier" || c.Type() == "identifier" {
@@ -142,7 +141,7 @@ func (e *TreeSitterJavaExtractor) parseType(n *sitter.Node, filePath string, src
 		}
 	}
 
-	// fields
+	// fields & methods from body
 	body := findFirstChild(n, "class_body")
 	if body == nil {
 		body = findFirstChild(n, "interface_body")
@@ -157,7 +156,16 @@ func (e *TreeSitterJavaExtractor) parseType(n *sitter.Node, filePath string, src
 				}
 			}
 			if c.Type() == "method_declaration" {
-				// methods inside types are collected globally above
+				fn := e.parseMethod(c, filePath, src)
+				if fn != nil {
+					ms := UnifiedMethodSignature{
+						Name:       fn.Name,
+						IsExported: fn.IsExported,
+						Params:     fn.Params,
+						Location:   fn.Location,
+					}
+					t.Methods = append(t.Methods, ms)
+				}
 			}
 		}
 	}
@@ -234,11 +242,17 @@ func (e *TreeSitterJavaExtractor) parseMethod(n *sitter.Node, filePath string, s
 		}
 	}
 
-	// body snippet
+	// body snippet + metrics
 	body := findFirstChild(n, "block")
 	if body != nil {
-		fn.BodySnippet = truncateBody(tsText(body, src))
+		bodyText := tsText(body, src)
+		fn.BodySnippet = truncateBody(bodyText)
+		fn.Complexity = EstimateComplexityFromSnippet(bodyText)
+		fn.LOC = strings.Count(bodyText, "\n")
+		fn.NestedDepth = estimateNestedDepthJava(body)
 	}
+
+	fn.SecurityRole = InferSecurityRoleJava(fn.Name, "")
 
 	return fn
 }
@@ -268,7 +282,11 @@ func (e *TreeSitterJavaExtractor) parseConstructor(n *sitter.Node, filePath stri
 	}
 	body := findFirstChild(n, "block")
 	if body != nil {
-		fn.BodySnippet = truncateBody(tsText(body, src))
+		bodyText := tsText(body, src)
+		fn.BodySnippet = truncateBody(bodyText)
+		fn.Complexity = EstimateComplexityFromSnippet(bodyText)
+		fn.LOC = strings.Count(bodyText, "\n")
+		fn.NestedDepth = estimateNestedDepthJava(body)
 	}
 	return fn
 }
@@ -297,7 +315,6 @@ func (e *TreeSitterJavaExtractor) parseParams(n *sitter.Node, src []byte) []Unif
 			case "annotation":
 				annotations = append(annotations, tsText(child, src))
 			case "modifiers":
-				// modifiers 中可能包含 annotation
 				for k := 0; k < int(child.ChildCount()); k++ {
 					modChild := child.Child(k)
 					if modChild.Type() == "annotation" {
@@ -315,7 +332,8 @@ func (e *TreeSitterJavaExtractor) extractCallSites(root *sitter.Node, filePath s
 	var sites []UnifiedCallSite
 	for _, call := range findChildren(root, "method_invocation") {
 		site := UnifiedCallSite{
-			Location: SourceLocation{File: filePath, LineStart: tsLine(call)},
+			Location:   SourceLocation{File: filePath, LineStart: tsLine(call)},
+			CallerFunc: findCallerFuncNameJava(call, src),
 		}
 		for i := 0; i < int(call.ChildCount()); i++ {
 			c := call.Child(i)
@@ -348,4 +366,93 @@ func (e *TreeSitterJavaExtractor) extractCallSites(root *sitter.Node, filePath s
 		sites = append(sites, site)
 	}
 	return sites
+}
+
+// findCallerFuncNameJava 从 method_invocation 向上遍历父节点，找到最近的函数/方法名
+func findCallerFuncNameJava(call *sitter.Node, src []byte) string {
+	for parent := call.Parent(); parent != nil; parent = parent.Parent() {
+		switch parent.Type() {
+		case "method_declaration":
+			nameNode := findFirstChild(parent, "identifier")
+			if nameNode != nil {
+				return tsText(nameNode, src)
+			}
+		case "constructor_declaration":
+			return "<init>"
+		}
+	}
+	return ""
+}
+
+// estimateNestedDepthJava 估算 Java 方法体的最大嵌套深度
+func estimateNestedDepthJava(body *sitter.Node) int {
+	if body == nil {
+		return 0
+	}
+	maxDepth := 0
+	var walk func(n *sitter.Node, depth int)
+	walk = func(n *sitter.Node, depth int) {
+		if n == nil {
+			return
+		}
+		if depth > maxDepth {
+			maxDepth = depth
+		}
+		switch n.Type() {
+		case "if_statement", "switch_statement", "for_statement", "while_statement",
+			"do_statement", "try_statement", "synchronized_statement":
+			depth++
+		}
+		for i := 0; i < int(n.ChildCount()); i++ {
+			walk(n.Child(i), depth)
+		}
+	}
+	walk(body, 0)
+	return maxDepth
+}
+
+// InferSecurityRoleJava 推断 Java 函数的安全角色
+func InferSecurityRoleJava(name, receiver string) string {
+	lower := strings.ToLower(name)
+	recvLower := strings.ToLower(receiver)
+
+	if strings.Contains(lower, "auth") || strings.Contains(lower, "login") || strings.Contains(lower, "logout") ||
+		strings.Contains(lower, "token") || strings.Contains(lower, "session") || strings.Contains(lower, "permission") ||
+		strings.Contains(lower, "credential") || strings.Contains(lower, "jwt") || strings.Contains(lower, "oauth") {
+		return "auth"
+	}
+	if strings.Contains(lower, "encrypt") || strings.Contains(lower, "decrypt") || strings.Contains(lower, "hash") ||
+		strings.Contains(lower, "sign") || strings.Contains(lower, "verify") || strings.Contains(lower, "cipher") {
+		return "encryption"
+	}
+	if strings.Contains(lower, "sanitiz") || strings.Contains(lower, "escape") || strings.Contains(lower, "clean") ||
+		strings.Contains(lower, "filter") || strings.Contains(lower, "validat") || strings.Contains(lower, "check") {
+		return "sanitizer"
+	}
+	if strings.Contains(lower, "parse") || strings.Contains(lower, "bind") || strings.Contains(lower, "decode") ||
+		strings.Contains(lower, "deserialize") || strings.Contains(lower, "unmarshal") || strings.Contains(lower, "convert") {
+		return "validator"
+	}
+	if strings.Contains(lower, "get") || strings.Contains(lower, "list") || strings.Contains(lower, "find") ||
+		strings.Contains(lower, "fetch") || strings.Contains(lower, "query") || strings.Contains(lower, "search") ||
+		strings.Contains(lower, "save") || strings.Contains(lower, "create") || strings.Contains(lower, "insert") ||
+		strings.Contains(lower, "update") || strings.Contains(lower, "modify") || strings.Contains(lower, "delete") ||
+		strings.Contains(lower, "remove") || strings.Contains(lower, "destroy") {
+		return "data_access"
+	}
+	if strings.HasPrefix(lower, "handle") || strings.HasPrefix(lower, "serve") ||
+		strings.Contains(recvLower, "handler") || strings.Contains(recvLower, "controller") ||
+		strings.Contains(recvLower, "router") || strings.Contains(recvLower, "resource") ||
+		strings.Contains(recvLower, "servlet") || strings.Contains(recvLower, "endpoint") {
+		return "handler"
+	}
+	if strings.Contains(recvLower, "service") || strings.Contains(recvLower, "manager") ||
+		strings.Contains(recvLower, "facade") || strings.Contains(recvLower, "biz") {
+		return "service"
+	}
+	if strings.Contains(recvLower, "repo") || strings.Contains(recvLower, "dao") ||
+		strings.Contains(recvLower, "store") || strings.Contains(recvLower, "database") {
+		return "data_access"
+	}
+	return "other"
 }

@@ -121,11 +121,17 @@ func (e *TreeSitterPythonExtractor) parseFunc(n *sitter.Node, filePath string, s
 		fn.Params = e.parseParams(paramsNode, src)
 	}
 
-	// body snippet
+	// body snippet + metrics
 	bodyNode := findFirstChild(n, "block")
 	if bodyNode != nil {
-		fn.BodySnippet = truncateBody(tsText(bodyNode, src))
+		body := tsText(bodyNode, src)
+		fn.BodySnippet = truncateBody(body)
+		fn.Complexity = EstimateComplexityFromSnippet(body)
+		fn.LOC = strings.Count(body, "\n")
+		fn.NestedDepth = estimateNestedDepthPython(bodyNode)
 	}
+
+	fn.SecurityRole = InferSecurityRolePython(fn.Name)
 
 	return fn
 }
@@ -137,7 +143,8 @@ func (e *TreeSitterPythonExtractor) parseParams(n *sitter.Node, src []byte) []Un
 	}
 	for i := 0; i < int(n.ChildCount()); i++ {
 		c := n.Child(i)
-		if c.Type() != "identifier" && c.Type() != "typed_parameter" && c.Type() != "default_parameter" {
+		if c.Type() != "identifier" && c.Type() != "typed_parameter" && c.Type() != "default_parameter" &&
+			c.Type() != "list_splat_pattern" && c.Type() != "dictionary_splat_pattern" {
 			continue
 		}
 		var name, typ string
@@ -158,7 +165,21 @@ func (e *TreeSitterPythonExtractor) parseParams(n *sitter.Node, src []byte) []Un
 			}
 		case "default_parameter":
 			nameNode := findFirstChild(c, "identifier")
-			if nameNode != nil {
+			if nameNode == nil {
+				nameNode = findFirstChild(c, "typed_parameter")
+				if nameNode != nil {
+					innerName := findFirstChild(nameNode, "identifier")
+					if innerName != nil {
+						name = tsText(innerName, src)
+					}
+					for k := 0; k < int(nameNode.ChildCount()); k++ {
+						child := nameNode.Child(k)
+						if child.Type() == "type" {
+							typ = tsText(child, src)
+						}
+					}
+				}
+			} else {
 				name = tsText(nameNode, src)
 			}
 			// 提取类型注解和默认值中的注解（如 FastAPI Query/Body/Header）
@@ -168,19 +189,18 @@ func (e *TreeSitterPythonExtractor) parseParams(n *sitter.Node, src []byte) []Un
 				case "type":
 					typ = tsText(child, src)
 				case "call":
-					// 默认值是函数调用，如 Query(...)、Body(...)
 					funcNode := child.Child(0)
 					if funcNode != nil {
 						annotations = append(annotations, tsText(funcNode, src))
 					}
 				case "identifier":
-					// 默认值是标识符，可能是别名导入的 Query。
-					// 使用 tree-sitter Node.ID() 比较节点身份：跳过参数名自身，只收集其他标识符。
 					if nameNode != nil && child.ID() != nameNode.ID() {
 						annotations = append(annotations, tsText(child, src))
 					}
 				}
 			}
+		case "list_splat_pattern", "dictionary_splat_pattern":
+			name = tsText(c, src)
 		}
 		if name == "self" || name == "cls" {
 			continue
@@ -232,7 +252,6 @@ func (e *TreeSitterPythonExtractor) parseClass(n *sitter.Node, filePath string, 
 				t.Methods = append(t.Methods, ms)
 			}
 			if c.Type() == "expression_statement" {
-				// simple field detection: self.x = ...
 				child := c.Child(0)
 				if child != nil && child.Type() == "assignment" {
 					left := child.Child(0)
@@ -260,24 +279,99 @@ func (e *TreeSitterPythonExtractor) extractCallSites(root *sitter.Node, filePath
 			continue
 		}
 		site := UnifiedCallSite{
-			Location: SourceLocation{File: filePath, LineStart: tsLine(call)},
+			Location:   SourceLocation{File: filePath, LineStart: tsLine(call)},
+			CallerFunc: findCallerFuncNamePython(call, src),
 		}
 		switch funcNode.Type() {
 		case "identifier":
 			site.TargetFunc = tsText(funcNode, src)
 		case "attribute":
-			pkgNode := findFirstChild(funcNode, "identifier")
-			if pkgNode != nil {
-				// first identifier is the object, last is the method
-				// simplified: just take the text
-				parts := strings.Split(tsText(funcNode, src), ".")
-				if len(parts) >= 2 {
-					site.TargetPkg = parts[0]
-					site.TargetFunc = parts[len(parts)-1]
-				}
+			parts := strings.Split(tsText(funcNode, src), ".")
+			if len(parts) >= 2 {
+				site.TargetPkg = parts[0]
+				site.TargetFunc = parts[len(parts)-1]
 			}
 		}
 		sites = append(sites, site)
 	}
 	return sites
+}
+
+// findCallerFuncNamePython 从 call 向上遍历父节点，找到最近的函数/方法名
+func findCallerFuncNamePython(call *sitter.Node, src []byte) string {
+	for parent := call.Parent(); parent != nil; parent = parent.Parent() {
+		switch parent.Type() {
+		case "function_definition":
+			nameNode := findFirstChild(parent, "identifier")
+			if nameNode != nil {
+				return tsText(nameNode, src)
+			}
+		}
+	}
+	return ""
+}
+
+// estimateNestedDepthPython 估算 Python 函数体的最大嵌套深度
+func estimateNestedDepthPython(body *sitter.Node) int {
+	if body == nil {
+		return 0
+	}
+	maxDepth := 0
+	var walk func(n *sitter.Node, depth int)
+	walk = func(n *sitter.Node, depth int) {
+		if n == nil {
+			return
+		}
+		if depth > maxDepth {
+			maxDepth = depth
+		}
+		switch n.Type() {
+		case "if_statement", "for_statement", "while_statement", "with_statement",
+			"try_statement", "match_statement":
+			depth++
+		}
+		for i := 0; i < int(n.ChildCount()); i++ {
+			walk(n.Child(i), depth)
+		}
+	}
+	walk(body, 0)
+	return maxDepth
+}
+
+// InferSecurityRolePython 推断 Python 函数的安全角色
+func InferSecurityRolePython(name string) string {
+	lower := strings.ToLower(name)
+
+	if strings.Contains(lower, "auth") || strings.Contains(lower, "login") || strings.Contains(lower, "logout") ||
+		strings.Contains(lower, "token") || strings.Contains(lower, "session") || strings.Contains(lower, "permission") {
+		return "auth"
+	}
+	if strings.Contains(lower, "encrypt") || strings.Contains(lower, "decrypt") || strings.Contains(lower, "hash") ||
+		strings.Contains(lower, "sign") || strings.Contains(lower, "verify") {
+		return "encryption"
+	}
+	if strings.Contains(lower, "sanitiz") || strings.Contains(lower, "escape") || strings.Contains(lower, "clean") ||
+		strings.Contains(lower, "filter") || strings.Contains(lower, "validat") || strings.Contains(lower, "check") {
+		return "sanitizer"
+	}
+	if strings.Contains(lower, "parse") || strings.Contains(lower, "bind") || strings.Contains(lower, "decode") ||
+		strings.Contains(lower, "deserialize") || strings.Contains(lower, "format") {
+		return "validator"
+	}
+	if strings.Contains(lower, "get") || strings.Contains(lower, "list") || strings.Contains(lower, "find") ||
+		strings.Contains(lower, "fetch") || strings.Contains(lower, "query") || strings.Contains(lower, "search") ||
+		strings.Contains(lower, "save") || strings.Contains(lower, "create") || strings.Contains(lower, "insert") ||
+		strings.Contains(lower, "update") || strings.Contains(lower, "modify") || strings.Contains(lower, "delete") ||
+		strings.Contains(lower, "remove") || strings.Contains(lower, "destroy") {
+		return "data_access"
+	}
+	if strings.HasPrefix(lower, "handle") || strings.HasPrefix(lower, "on") ||
+		strings.Contains(lower, "endpoint") || strings.Contains(lower, "route") {
+		return "handler"
+	}
+	if strings.Contains(lower, "service") || strings.Contains(lower, "manager") ||
+		strings.Contains(lower, "business") || strings.Contains(lower, "usecase") {
+		return "service"
+	}
+	return "other"
 }
