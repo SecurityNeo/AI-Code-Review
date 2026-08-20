@@ -981,29 +981,38 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 		}
 	}
 
-	// P0-3: Breaking Changes 检测（对比基线图中的导出符号与当前 AST）
+	// P0-3: Breaking Changes 检测（对比基线图中的导出符号与当前 AST，仅限变更文件范围）
 	if reviewView != nil {
+		// 构建变更文件集合，用于过滤范围
+		changedFileSet := make(map[string]bool)
+		for _, ast := range asts {
+			changedFileSet[ast.FilePath] = true
+		}
+
 		baselineGraph := reviewView.GetGraph()
 		baselineNodes := baselineGraph.AllNodes()
 		baselineRelations := baselineGraph.GetAllRelations()
 
-		// 构建基线导出符号映射
+		// 构建基线导出符号映射（仅限变更文件）
 		baselineExported := make(map[string]bool)
-		baselineFuncSigs := make(map[string]string)                    // key -> signature
-		baselineTypeFields := make(map[string]map[string]string)       // key -> fieldName -> "type:tag"
+		baselineFuncSigs := make(map[string]string)
+		baselineTypeFields := make(map[string]map[string]string)
 
 		for _, node := range baselineNodes {
 			if !node.IsExported {
+				continue
+			}
+			// 只处理变更文件范围中的基线节点
+			if !changedFileSet[node.File] {
 				continue
 			}
 			key := fmt.Sprintf("%s:%s:%s", node.Type, node.Name, node.File)
 			baselineExported[key] = true
 
 			if node.Type == "function" {
-				baselineFuncSigs[key] = node.Signature
+				baselineFuncSigs[key] = normalizeFuncSignature(node.Signature)
 			} else if node.Type == "type" {
 				fieldMap := make(map[string]string)
-				// 遍历 contains 关系获取 fieldNode 的详细信息
 				for _, rel := range baselineRelations {
 					if rel.Type == "contains" && rel.From == node.ID {
 						if fieldNode, ok := baselineGraph.GetNode(rel.To); ok {
@@ -1030,7 +1039,7 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 						name, _ := fd["name"].(string)
 						key := fmt.Sprintf("function:%s:%s", name, fr.Path)
 						currentExported[key] = true
-						currentFuncSigs[key] = buildFuncSignatureFromDetails(fd)
+						currentFuncSigs[key] = normalizeFuncSignature(buildFuncSignatureFromDetails(fd))
 					}
 				}
 				for _, td := range fr.TypeDetails {
@@ -1057,7 +1066,7 @@ func (e *CodeUnderstandingExecutor) buildReport(asts []*parser.UnifiedAST, graph
 			}
 		}
 
-		// 阶段1: 检测导出符号的删除/更名
+		// 阶段1: 检测导出符号的删除/更名（仅变更文件范围内）
 		for key := range baselineExported {
 			if !currentExported[key] {
 				parts := strings.SplitN(key, ":", 3)
@@ -1369,10 +1378,14 @@ func formatReportText(report *CodeUnderstandingReport, changedFiles []string) st
 		}
 	}
 
-	// 跨文件调用链上下文
+	// 跨文件调用链上下文（截断以控制 Prompt 长度）
 	if report.CrossFileCallChain != "" {
 		b.WriteString("\n### 跨文件调用链上下文\n")
-		b.WriteString(report.CrossFileCallChain)
+		chainText := report.CrossFileCallChain
+		if len(chainText) > 8000 {
+			chainText = chainText[:8000] + "\n\n...（跨文件调用链过长，已截断）..."
+		}
+		b.WriteString(chainText)
 	}
 
 	return b.String()
@@ -1662,6 +1675,21 @@ func extractPackageFromImport(impPath string) string {
 		return impPath[idx+1:]
 	}
 	return impPath
+}
+
+// normalizeFuncSignature 归一化函数签名，消除 "func" 前缀差异
+// baseline 签名可能是 "Save()" 或 "func Save()"
+// current 签名是 "func Save()"（由 buildFuncSignatureFromDetails 构建）
+func normalizeFuncSignature(sig string) string {
+	if sig == "" {
+		return sig
+	}
+	// 统一去掉 "func " 前缀，并压缩连续空格
+	sig = strings.TrimPrefix(sig, "func ")
+	for strings.Contains(sig, "  ") {
+		sig = strings.ReplaceAll(sig, "  ", " ")
+	}
+	return strings.TrimSpace(sig)
 }
 
 // buildFuncSignatureFromDetails 从 funcDetails 构建函数签名字符串，用于 Breaking Change 对比

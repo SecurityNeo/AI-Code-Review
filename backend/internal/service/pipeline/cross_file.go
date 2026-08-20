@@ -349,16 +349,25 @@ func (a *CrossFileAnalyzer) analyzeGo(changedFiles []string, ctx *CrossFileConte
 			fileCtx.UpstreamCallers = append(fileCtx.UpstreamCallers, callers...)
 		}
 
-		// Step 3: 同包符号收集
+		// Step 3: 同包中与变更文件相关的符号（被变更文件调用或引用）
 		for path, fs := range symTable.Files {
 			if fs.Package == fileSyms.Package && path != absPath {
+				// 只收集被当前变更文件引用的同包符号
 				for _, fn := range fs.Functions {
-					fileCtx.SamePackageSymbols = append(fileCtx.SamePackageSymbols, *fn)
+					if a.isReferencedByFile(fileSyms, fn) {
+						fileCtx.SamePackageSymbols = append(fileCtx.SamePackageSymbols, *fn)
+					}
 				}
 				for _, t := range fs.Types {
-					fileCtx.SamePackageSymbols = append(fileCtx.SamePackageSymbols, *t)
+					if a.isReferencedByFile(fileSyms, t) {
+						fileCtx.SamePackageSymbols = append(fileCtx.SamePackageSymbols, *t)
+					}
 				}
 			}
+		}
+		// 限制数量，避免无关符号过多
+		if len(fileCtx.SamePackageSymbols) > 10 {
+			fileCtx.SamePackageSymbols = fileCtx.SamePackageSymbols[:10]
 		}
 
 		// Step 4: 依赖分析（imports 中项目内的包）
@@ -537,6 +546,35 @@ func (a *CrossFileAnalyzer) relPath(absPath string) string {
 func (a *CrossFileAnalyzer) isExcludedDir(path string) bool {
 	for _, ex := range a.excludedDirs {
 		if strings.Contains(path, "/"+ex+"/") || strings.HasSuffix(path, "/"+ex) {
+			return true
+		}
+	}
+	return false
+}
+
+// isReferencedByFile 判断目标符号是否被变更文件引用（调用或使用）
+func (a *CrossFileAnalyzer) isReferencedByFile(fileSyms *goFileSymbols, target *SymbolInfo) bool {
+	// 读取变更文件内容
+	content, err := os.ReadFile(fileSyms.Path)
+	if err != nil {
+		return false
+	}
+	contentStr := string(content)
+	// 搜索符号名称的使用（排除注释和定义）
+	lines := strings.Split(contentStr, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// 跳过注释行
+		if strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		// 跳过自身定义行（如 "func TargetName(" 或 "type TargetName struct"）
+		if strings.HasPrefix(trimmed, "func "+target.Name+"(") ||
+			strings.HasPrefix(trimmed, "type "+target.Name+" ") {
+			continue
+		}
+		// 检查是否包含符号名（后面跟括号表示调用，或作为类型使用）
+		if strings.Contains(line, target.Name) {
 			return true
 		}
 	}

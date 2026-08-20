@@ -458,22 +458,6 @@ func buildCrossFileCallChainText(cfc *CrossFileContext) string {
 			}
 			sb.WriteString("\n")
 		}
-
-		if len(fc.SamePackageSymbols) > 0 {
-			relevant := fc.SamePackageSymbols
-			if len(relevant) > 10 {
-				relevant = relevant[:10]
-			}
-			sb.WriteString("**同包其他符号：**\n")
-			for _, sym := range relevant {
-				if sym.Type == "func" {
-					sb.WriteString(fmt.Sprintf("- func %s\n", sym.Name))
-				} else {
-					sb.WriteString(fmt.Sprintf("- %s %s\n", sym.Type, sym.Name))
-				}
-			}
-			sb.WriteString("\n")
-		}
 	}
 	return sb.String()
 }
