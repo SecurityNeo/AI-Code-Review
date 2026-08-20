@@ -36,7 +36,6 @@ func (e *TreeSitterJavaScriptExtractor) FileExts() []string { return e.exts }
 // ParseFile 解析JS/TS/Vue文件
 func (e *TreeSitterJavaScriptExtractor) ParseFile(filePath string, src []byte) (*UnifiedAST, error) {
 	// Vue SFC: 提取 <script> 标签内的内容
-	body := src
 	if strings.HasSuffix(filePath, ".vue") {
 		scriptContent := extractVueScript(src)
 		if scriptContent == nil {
@@ -46,12 +45,13 @@ func (e *TreeSitterJavaScriptExtractor) ParseFile(filePath string, src []byte) (
 				FilePath: filePath,
 			}, nil
 		}
-		body = scriptContent
+		// 将 src 改写为 script body，确保后续所有 tsText 的 byte offset 与 tree-sitter 解析结果对齐
+		src = scriptContent
 	}
 
 	parser := sitter.NewParser()
 	parser.SetLanguage(javascript.GetLanguage())
-	tree := parser.Parse(nil, body)
+	tree := parser.Parse(nil, src)
 	if tree == nil {
 		return nil, fmt.Errorf("tree-sitter parse failed for %s", filePath)
 	}
@@ -573,17 +573,28 @@ func findCallerFuncNameJS(call *sitter.Node, src []byte) string {
 				return tsText(nameNode, src)
 			}
 		case "arrow_function":
-			// 尝试从变量声明器获取名字
+			// 匿名函数：尝试从变量声明器或对象属性获取名字
 			gp := parent.Parent()
-			if gp != nil && gp.Type() == "variable_declarator" {
-				nameNode := findFirstChild(gp, "identifier")
-				if nameNode != nil {
-					return tsText(nameNode, src)
+			if gp != nil {
+				switch gp.Type() {
+				case "variable_declarator":
+					nameNode := findFirstChild(gp, "identifier")
+					if nameNode != nil {
+						return tsText(nameNode, src)
+					}
+				case "pair":
+					nameNode := findFirstChild(gp, "property_identifier")
+					if nameNode == nil {
+						nameNode = findFirstChild(gp, "identifier")
+					}
+					if nameNode != nil {
+						return strings.Trim(tsText(nameNode, src), `"'`)
+					}
 				}
 			}
-			return "<arrow>"
+			return "<anonymous>"
 		case "function":
-			// 匿名函数：尝试从变量声明器或对象属性获取名字
+			// function 匿名表达式（如 const foo = function() {}）
 			gp := parent.Parent()
 			if gp != nil {
 				switch gp.Type() {
