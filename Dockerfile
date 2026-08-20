@@ -1,14 +1,20 @@
 FROM golang:1.26-alpine AS builder
 
-ENV GOPROXY=https://mirrors.aliyun.com/goproxy/,direct
+# 配置 Go 代理与构建环境
+ENV GOPROXY=https://goproxy.cn,https://mirrors.aliyun.com/goproxy/,direct
 ENV GOFLAGS="-buildvcs=false"
+ENV HOME=/root
+ENV CGO_ENABLED=1
+
+# 安装 CGO 编译工具链（gcc、musl-dev 等）
+RUN apk --no-cache add build-base git
 
 WORKDIR /build
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 
 COPY backend/ .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o codeguard ./cmd/main.go
+RUN go build -ldflags="-w -s" -o codeguard ./cmd/main.go
 
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates tzdata wget git && \

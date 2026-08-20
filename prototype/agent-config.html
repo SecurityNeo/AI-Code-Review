@@ -18,9 +18,6 @@
         @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         .stage-item { transition: all 0.2s; }
         .stage-item.disabled { opacity: 0.5; pointer-events: none; }
-        .depth-option { transition: all 0.2s; }
-        .depth-option.disabled { opacity: 0.4; pointer-events: none; }
-        .depth-option input[type="radio"]:checked + .depth-label { border-color: #3b82f6; background-color: #eff6ff; }
         .trigger-events { transition: all 0.2s; }
         .trigger-events.disabled { opacity: 0.4; pointer-events: none; }
         .stage-timeout { transition: all 0.2s; }
@@ -187,7 +184,7 @@ const STAGE_DEFS = [
     {
         code: 'trigger_check',
         name: '触发过滤器',
-        desc: '检查触发条件与事件过滤',
+        desc: '校验 Merge Request 事件类型与目标分支规则，决定是否触发完整评审流水线',
         impact: '关闭后：所有 MR 直接进入评审，不做触发过滤',
         removable: true,
         triggerEvents: true,
@@ -196,8 +193,8 @@ const STAGE_DEFS = [
     {
         code: 'git_clone',
         name: '代码克隆',
-        desc: '拉取完整仓库镜像',
-        impact: '关闭后：AST 分析降级为 GitLab API 模式',
+        desc: '全量克隆目标仓库并提取变更文件内容与 diff 上下文，为 AST 提取与符号图构建提供原始数据源',
+        impact: '关闭后：AST 分析降级为 GitLab API 模式（无文件内容，仅能获取 diff 行号）',
         warning: true,
         removable: true,
         timeout: 60
@@ -205,30 +202,29 @@ const STAGE_DEFS = [
     {
         code: 'code_understanding',
         name: '代码理解器',
-        desc: 'AST + 知识图谱 + 数据流分析（三阶段）',
-        impact: '关闭后：AI 评审缺少函数/结构体/数据流的深度理解',
+        desc: '基于 Tree-sitter（CGO）解析 AST，构建增量符号图与跨文件调用链；集成 Framework Adapter 识别 HTTP Endpoint、Sink 与 Auth 中间件；运行 Taint Engine 分析数据流路径与 Breaking Changes',
+        impact: '关闭后：下游安全审计、测试建议、影响分析均无法获取 AST 语义与符号关系',
         removable: true,
-        depthConfig: true,
         timeout: 100,
         subTimeouts: [
-            {key: 'context_extract_timeout', label: 'AST 提取', desc: '解析变更文件结构', default: 30},
-            {key: 'symbol_graph_timeout', label: '知识图谱', desc: '符号图叠加与安全分析', default: 60},
-            {key: 'report_merge_timeout', label: '报告合并', desc: '生成 Prompt 注入文本', default: 10}
+            {key: 'context_extract_timeout', label: 'AST 提取', desc: 'Tree-sitter 解析变更文件 AST 结构', default: 30},
+            {key: 'symbol_graph_timeout', label: '符号图构建', desc: '增量图叠加、框架适配器 Enrich、安全路径检测', default: 60},
+            {key: 'report_merge_timeout', label: '报告合并', desc: '生成 Prompt 注入文本与结构化输出', default: 10}
         ]
     },
     {
         code: 'dependency_scan',
-        name: '漏洞扫描',
-        desc: '依赖漏洞扫描',
-        impact: '关闭后：不扫描 go.mod / package.json 等依赖文件',
+        name: '依赖漏洞扫描',
+        desc: '扫描 go.mod / package.json / requirements.txt 等依赖文件，匹配已知 CVE 漏洞数据库',
+        impact: '关闭后：不检测第三方依赖中的已知安全漏洞',
         removable: true,
         timeout: 30
     },
     {
         code: 'secret_scan',
-        name: '密钥扫描',
-        desc: '扫描 diff 中泄露的密钥 / Token / 密码',
-        impact: '关闭后：不扫描 diff 中的密钥泄露',
+        name: '密钥泄露扫描',
+        desc: '基于多模式正则引擎扫描 diff 文本中的 API Key、私钥、Token、密码等高熵字符串',
+        impact: '关闭后：diff 中泄露的密钥无法被自动识别',
         removable: true,
         timeout: 30,
         llmEnhanceTimeout: 300
@@ -236,17 +232,17 @@ const STAGE_DEFS = [
     {
         code: 'security_audit',
         name: '安全审计',
-        desc: 'SQL 注入 / unsafe eval / 反序列化检测',
-        impact: '关闭后：不检测 SQL 注入等安全敏感操作',
+        desc: '基于 Taint Engine 的数据流分析，检测 SQL 注入、命令注入、反序列化、不安全反射、路径遍历等 OWASP Top 10 漏洞模式；支持跨函数污点追踪',
+        impact: '关闭后：无法检测基于数据流的安全敏感操作（如用户输入直达 SQL 执行点）',
         removable: true,
         timeout: 30,
         llmEnhanceTimeout: 300
     },
     {
         code: 'test_suggestion',
-        name: '测试建议',
-        desc: '基于分支结构生成测试场景建议',
-        impact: '关闭后：不生成测试场景建议',
+        name: '测试建议生成',
+        desc: '基于 AST 分析变更函数的分支结构与边界条件（null / 空值 / 越界 / 异常路径），生成结构化测试场景、输入数据与断言模板，输出可执行的测试建议',
+        impact: '关闭后：不生成针对变更代码的自动化测试场景建议',
         removable: true,
         timeout: 30,
         llmEnhanceTimeout: 300
@@ -254,17 +250,17 @@ const STAGE_DEFS = [
     {
         code: 'impact_analysis',
         name: '影响分析',
-        desc: '识别 Breaking Change 和跨模块影响',
-        impact: '需启用代码理解器且深度≥1，否则影响范围可能不完整',
+        desc: '对比变更前后符号签名（归一化处理），识别 Breaking Change；基于增量符号图分析上下游调用链影响范围；生成迁移步骤（Migration Steps）与受影响文件列表（Affected Files）',
+        impact: '关闭后：无法自动识别 API 变更对下游模块的影响及迁移路径',
         removable: true,
         timeout: 30,
         llmEnhanceTimeout: 300
     },
     {
         code: 'batch_review_frame',
-        name: 'AI代码评审',
-        desc: 'LLM 结构化评审',
-        impact: '关闭后：无任何 AI 评审产出，仅执行静态分析',
+        name: 'AI 代码评审',
+        desc: '将变更文件按 Token 预算自动拆分为多个批次（Batch），并行调度 LLM 执行结构化评审；输出多维度评分（Maintainability / Performance / Security / Readability / Test Coverage）与具体改进建议',
+        impact: '关闭后：无 AI 驱动的代码质量评审产出，仅保留静态分析结果',
         warning: true,
         removable: false,
         timeout: 300,
@@ -274,25 +270,19 @@ const STAGE_DEFS = [
     {
         code: 'review_arbitration',
         name: '评审裁决',
-        desc: 'Agent-LLM 协同去重、分类与汇总裁决',
-        impact: '关闭后：Agent 发现与 LLM 评审结果无法合并去重',
+        desc: '合并 Agent 自动发现（静态分析、安全审计、影响分析）与 LLM 评审结果；执行多源去重（文件+行号+问题类型聚类）、维度评分归一化与加权总分计算；生成最终裁决报告与影响摘要（Impact Notes）',
+        impact: '关闭后：多源评审结果无法合并去重，可能出现重复问题与冲突评分',
         warning: true,
         removable: false,
         timeout: 60
     },
     {
         code: 'post_process',
-        name: '发布',
-        desc: '发布 GitLab 评论 + 状态持久化',
+        name: '结果发布',
+        desc: '将评审结果持久化至数据库，生成 GitLab MR 评论 Markdown，推送评审状态与统计看板数据',
         removable: false,
         timeout: 30
     }
-];
-
-const DEPTH_OPTIONS = [
-    { value: 0, label: '0层', desc: '仅分析变更文件自身（关闭跨文件）' },
-    { value: 1, label: '1层', desc: '分析变更文件 + 直接关联文件', recommended: true },
-    { value: 2, label: '2层', desc: '再扩展一级（调用者的调用者）' }
 ];
 
 const TRIGGER_EVENT_DEFS = [
@@ -341,7 +331,6 @@ let currentConfig = null;
 function renderStages(enabledStages, stageConfigs, triggerEvents) {
     const container = document.getElementById('stagesContainer');
     const enabledSet = new Set(enabledStages || []);
-    const depth = (stageConfigs && stageConfigs.code_understanding && stageConfigs.code_understanding.depth) || 1;
     const triggerEventSet = new Set();
     const rawEvents = triggerEvents || TRIGGER_EVENT_DEFS.map(e => e.code);
     // 兼容旧数据：merge_request 总开关包含所有子事件
@@ -354,27 +343,6 @@ function renderStages(enabledStages, stageConfigs, triggerEvents) {
     container.innerHTML = STAGE_DEFS.map(stage => {
         const isEnabled = enabledSet.has(stage.code);
         const isDisabled = !stage.removable;
-
-        let depthHtml = '';
-        if (stage.depthConfig) {
-            depthHtml = `
-                <div class="depth-options mt-2 pl-6 ${isEnabled ? '' : 'disabled'}" id="depthOptions">
-                    <div class="text-xs text-gray-500 mb-1.5">跨文件调用链深度：</div>
-                    <div class="flex gap-2">
-                        ${DEPTH_OPTIONS.map(opt => `
-                            <label class="depth-option cursor-pointer">
-                                <input type="radio" name="depth" value="${opt.value}" ${opt.value === depth ? 'checked' : ''} class="hidden">
-                                <div class="depth-label px-3 py-1.5 border rounded-lg text-xs ${opt.value === depth ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}">
-                                    <div class="font-medium">${opt.label}</div>
-                                    <div class="text-[10px] text-gray-400 mt-0.5">${opt.desc}</div>
-                                    <div class="text-[10px] mt-0.5 ${opt.recommended ? 'text-blue-500' : 'invisible'}">${opt.recommended ? '← 推荐' : '&nbsp;'}</div>
-                                </div>
-                            </label>
-                        `).join('')}
-                    </div>
-                </div>
-            `;
-        }
 
         let triggerEventsHtml = '';
         if (stage.triggerEvents) {
@@ -544,7 +512,6 @@ function renderStages(enabledStages, stageConfigs, triggerEvents) {
                                 <span class="text-[10px] px-1.5 py-0.5 rounded border ${enabledSet.has(dep) ? 'border-green-200 bg-green-50 text-green-700' : 'border-red-200 bg-red-50 text-red-700'}">${STAGE_NAMES[dep] || dep}</span>
                             `).join('')}
                         </div>` : ''}
-                        ${depthHtml}
                         ${triggerEventsHtml}
                         ${timeoutHtml}
                         ${parallelMaxHtml}
@@ -670,7 +637,7 @@ function toggleStage(code) {
         }
     }
 
-    const subPanels = item.querySelectorAll('.depth-options, .trigger-events, .stage-timeout, .stage-parallel-max, .sub-timeouts');
+    const subPanels = item.querySelectorAll('.trigger-events, .stage-timeout, .stage-parallel-max, .sub-timeouts');
     subPanels.forEach(panel => {
         if (checkbox.checked) {
             panel.classList.remove('disabled');
@@ -716,9 +683,6 @@ function loadConfig() {
                 if (s.llmEnhanceTimeout) {
                     defaultStageConfigs[s.code].llm_enhance_timeout = s.llmEnhanceTimeout;
                 }
-                if (s.depthConfig) {
-                    defaultStageConfigs[s.code].depth = 1;
-                }
                 if (s.subTimeouts && Array.isArray(s.subTimeouts)) {
                     s.subTimeouts.forEach(st => {
                         defaultStageConfigs[s.code][st.key] = st.default;
@@ -759,9 +723,6 @@ function loadConfig() {
                 }
                 if (s.llmEnhanceTimeout) {
                     defaultStageConfigs[s.code].llm_enhance_timeout = s.llmEnhanceTimeout;
-                }
-                if (s.depthConfig) {
-                    defaultStageConfigs[s.code].depth = 1;
                 }
                 if (s.subTimeouts && Array.isArray(s.subTimeouts)) {
                     s.subTimeouts.forEach(st => {
@@ -819,13 +780,6 @@ function saveConfig() {
         return;
     }
 
-    // 读取深度
-    let depth = 1;
-    const depthRadio = document.querySelector('input[name="depth"]:checked');
-    if (depthRadio) {
-        depth = parseInt(depthRadio.value, 10);
-    }
-
     // 读取触发事件
     const triggerEvents = [];
     const triggerEventCheckboxes = document.querySelectorAll('input[name="trigger_event"]:checked');
@@ -860,9 +814,6 @@ function saveConfig() {
             if (letEl) {
                 cfg.llm_enhance_timeout = parseInt(letEl.value, 10) || stage.llmEnhanceTimeout;
             }
-        }
-        if (stage.depthConfig) {
-            cfg.depth = depth;
         }
         if (stage.subTimeouts && Array.isArray(stage.subTimeouts)) {
             stage.subTimeouts.forEach(st => {
@@ -936,9 +887,6 @@ function resetToDefault() {
         defaultStageConfigs[s.code] = { timeout: s.timeout };
         if (s.parallelMax) {
             defaultStageConfigs[s.code].parallel_max = 3;
-        }
-        if (s.depthConfig) {
-            defaultStageConfigs[s.code].depth = 1;
         }
     });
     renderStages(defaultStages, defaultStageConfigs, TRIGGER_EVENT_DEFS.map(e => e.code));
