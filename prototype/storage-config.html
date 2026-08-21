@@ -99,10 +99,19 @@
         .empty-state-icon { width: 64px; height: 64px; background: #f1f5f9; border-radius: 16px; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 24px; color: #94a3b8; }
         .empty-state-title { font-size: 16px; font-weight: 600; color: #334155; margin-bottom: 8px; }
         .empty-state-desc { font-size: 14px; color: #94a3b8; margin-bottom: 24px; }
+
+        /* Toast */
+        .toast-container { position: fixed; top: 16px; right: 16px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+        .toast { pointer-events: auto; display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.15); animation: toastIn 0.3s ease, toastOut 0.3s ease 3.7s forwards; max-width: 360px; }
+        .toast.success { background: #16a34a; }
+        .toast.error { background: #dc2626; }
+        @keyframes toastIn { from { opacity: 0; transform: translateX(100%); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes toastOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(100%); } }
     </style>
 </head>
 <body class="bg-gray-50 font-sans">
 <div id="page-transition" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#1e293b;z-index:99999;transition:opacity .25s ease;"></div>
+<div id="toastContainer" class="toast-container"></div>
 <script>
 (function(){
   function hide(){var el=document.getElementById('page-transition');if(el){el.style.opacity='0';setTimeout(function(){el.remove();},250);}}
@@ -336,6 +345,17 @@ function getTypeLabel(type) {
     return map[type] || type.toUpperCase();
 }
 
+function showToast(message, type) {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+    const el = document.createElement('div');
+    el.className = 'toast ' + (type || 'success');
+    const icon = type === 'error' ? 'fa-times-circle' : 'fa-check-circle';
+    el.innerHTML = '<i class="fas ' + icon + '"></i><span>' + message + '</span>';
+    container.appendChild(el);
+    setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 4000);
+}
+
 async function apiCall(url, opts) {
     const res = await apiFetch(url, opts);
     if (!res.ok) {
@@ -521,10 +541,11 @@ async function saveConfig() {
         const url = editingId ? `${API_BASE}/object-storage/configs/${editingId}` : `${API_BASE}/object-storage/configs`;
         const method = editingId ? 'PUT' : 'POST';
         await apiCall(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        showToast('保存成功', 'success');
         closeModal();
         loadConfigs();
     } catch (e) {
-        alert('保存失败: ' + e.message);
+        showToast('保存失败: ' + e.message, 'error');
     }
 }
 
@@ -546,12 +567,12 @@ async function testConnection() {
         const res = await apiFetch(`${API_BASE}/object-storage/configs/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const result = await res.json();
         if (result.success) {
-            alert('连接测试成功: ' + (result.message || ''));
+            showToast('连接测试成功: ' + (result.message || ''), 'success');
         } else {
-            alert('连接测试失败: ' + (result.message || '未知错误'));
+            showToast('连接测试失败: ' + (result.message || '未知错误'), 'error');
         }
     } catch (e) {
-        alert('连接测试失败: ' + e.message);
+        showToast('连接测试失败: ' + e.message, 'error');
     }
 }
 
@@ -559,19 +580,20 @@ async function testConfig(id) {
     try {
         const res = await apiFetch(`${API_BASE}/object-storage/configs/${id}/test`, { method: 'POST' });
         const json = await res.json();
-        alert(json.success ? '连接成功: ' + json.message : '连接失败: ' + json.message);
+        showToast(json.success ? '连接成功: ' + json.message : '连接失败: ' + json.message, json.success ? 'success' : 'error');
         loadConfigs();
     } catch (e) {
-        alert('测试失败: ' + e.message);
+        showToast('测试失败: ' + e.message, 'error');
     }
 }
 
 async function setDefault(id) {
     try {
         await apiCall(`${API_BASE}/object-storage/configs/${id}/set-default`, { method: 'POST' });
+        showToast('已设为默认', 'success');
         loadConfigs();
     } catch (e) {
-        alert('设置失败: ' + e.message);
+        showToast('设置失败: ' + e.message, 'error');
     }
 }
 
@@ -590,10 +612,11 @@ async function confirmDelete() {
     if (!deletingId) return;
     try {
         await apiCall(`${API_BASE}/object-storage/configs/${deletingId}`, { method: 'DELETE' });
+        showToast('删除成功', 'success');
         closeDeleteModal();
         loadConfigs();
     } catch (e) {
-        alert('删除失败: ' + e.message);
+        showToast('删除失败: ' + e.message, 'error');
         closeDeleteModal();
     }
 }
