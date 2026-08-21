@@ -90,6 +90,7 @@ func (e *SecurityAuditExecutor) Execute(ctx StageContext) error {
 	verifiedFindings := findings
 	verifiedCount := 0
 	var verificator *AgentVerificator
+	llmFallbackReason := ""
 	if e.llmService != nil && len(findings) > 0 {
 		modelID := e.modelID
 		if modelID == 0 && task.UsedModelID > 0 {
@@ -132,6 +133,7 @@ func (e *SecurityAuditExecutor) Execute(ctx StageContext) error {
 			ctx.SetOutput("security_audit_verified_count", verifiedCount)
 		} else if err != nil {
 			zap.L().Warn("security_audit LLM verification failed, falling back to rule engine results", zap.Error(err))
+			llmFallbackReason = "规则引擎结果（LLM验证超时/失败）"
 		}
 	}
 
@@ -197,6 +199,7 @@ func (e *SecurityAuditExecutor) Execute(ctx StageContext) error {
 		"input_tokens":         inputTokens,
 		"output_tokens":        outputTokens,
 		"prompt_injection":     securityAuditMarkdown,
+		"llm_fallback_reason":  llmFallbackReason,
 	})
 
 	return nil

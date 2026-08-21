@@ -38,7 +38,7 @@ func NewEngine(db *gorm.DB, llm LLMService) *Engine {
 	e.Register(NewTestSuggestionExecutor(llm, 0))
 	e.Register(NewImpactAnalysisExecutor(llm, 0))
 	e.Register(NewBatchReviewFrameExecutor(llm))
-	e.Register(NewReviewArbitrationExecutor(llm, 0, 60)) // modelID=0 表示使用 task.UsedModelID
+	e.Register(NewReviewArbitrationExecutor(llm, 0)) // modelID=0 表示使用 task.UsedModelID
 	e.Register(&PostProcessExecutor{})
 	return e
 }

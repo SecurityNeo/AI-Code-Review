@@ -147,7 +147,7 @@ func (v *AgentVerificator) VerifySecretScan(
 	result, err := v.callLLM(ctx, taskID, actualModelID, "secret_scan_verify", prompt, rf)
 	if err != nil {
 		zap.L().Warn("AgentVerificator LLM 调用失败，降级为规则引擎结果", zap.Error(err))
-		return v.fallbackVerify(findings), nil
+		return v.fallbackVerify(findings), err
 	}
 	v.lastRawContent = result.Content
 	v.lastModelName = result.ModelName
@@ -158,7 +158,7 @@ func (v *AgentVerificator) VerifySecretScan(
 	var verdicts []VerificationResult
 	if err := json.Unmarshal([]byte(result.Content), &verdicts); err != nil {
 		zap.L().Warn("AgentVerificator JSON 解析失败，降级", zap.Error(err), zap.String("raw", result.Content))
-		return v.fallbackVerify(findings), nil
+		return v.fallbackVerify(findings), err
 	}
 
 	// 对齐 verdicts 与 findings（假设顺序一致）
@@ -306,7 +306,7 @@ func (v *AgentVerificator) VerifySecurityAudit(
 	result, err := v.callLLM(ctx, taskID, actualModelID, "security_audit_verify", prompt, rf)
 	if err != nil {
 		zap.L().Warn("AgentVerificator LLM 调用失败，降级为规则引擎结果", zap.Error(err))
-		return v.fallbackVerifySecurityAudit(findings), nil
+		return v.fallbackVerifySecurityAudit(findings), err
 	}
 	v.lastRawContent = result.Content
 	v.lastModelName = result.ModelName
@@ -316,7 +316,7 @@ func (v *AgentVerificator) VerifySecurityAudit(
 	var verdicts []VerificationResult
 	if err := json.Unmarshal([]byte(result.Content), &verdicts); err != nil {
 		zap.L().Warn("AgentVerificator JSON 解析失败，降级", zap.Error(err), zap.String("raw", result.Content))
-		return v.fallbackVerifySecurityAudit(findings), nil
+		return v.fallbackVerifySecurityAudit(findings), err
 	}
 
 	var verified []VerifiedSecurityAuditFinding
@@ -544,7 +544,7 @@ func (e *AgentEnricher) EnrichTestSuggestions(
 	result, err := e.callLLM(ctx, taskID, actualModelID, "test_suggestion_enrich", prompt, rf)
 	if err != nil {
 		zap.L().Warn("AgentEnricher LLM 调用失败", zap.Error(err))
-		return nil, nil
+		return nil, err
 	}
 	e.lastRawContent = result.Content
 	e.lastModelName = result.ModelName
@@ -554,7 +554,7 @@ func (e *AgentEnricher) EnrichTestSuggestions(
 	var enriched map[string][]EnrichedTestScenario
 	if err := json.Unmarshal([]byte(result.Content), &enriched); err != nil {
 		zap.L().Warn("AgentEnricher JSON 解析失败", zap.Error(err), zap.String("raw", result.Content))
-		return nil, nil
+		return nil, err
 	}
 	return enriched, nil
 }
@@ -586,7 +586,7 @@ func (e *AgentEnricher) EnrichImpactAnalysis(
 	result, err := e.callLLM(ctx, taskID, actualModelID, "impact_analysis_enrich", prompt, rf)
 	if err != nil {
 		zap.L().Warn("AgentEnricher LLM 调用失败", zap.Error(err))
-		return nil, nil
+		return nil, err
 	}
 	e.lastRawContent = result.Content
 	e.lastModelName = result.ModelName
@@ -596,7 +596,7 @@ func (e *AgentEnricher) EnrichImpactAnalysis(
 	var enriched map[string]EnrichedImpactNote
 	if err := json.Unmarshal([]byte(result.Content), &enriched); err != nil {
 		zap.L().Warn("AgentEnricher JSON 解析失败", zap.Error(err), zap.String("raw", result.Content))
-		return nil, nil
+		return nil, err
 	}
 	return enriched, nil
 }

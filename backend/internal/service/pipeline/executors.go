@@ -880,11 +880,17 @@ func (e *BatchReviewFrameExecutor) Execute(ctx StageContext) error {
 
 		// 单批场景也需要更新批次进度和 output_snapshot，保证前端详情面板能正确显示批次进度
 		ctx.UpdateProgress(nil, 1, plan.BatchCount)
-		ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
+		outputSnap := map[string]interface{}{
 			"plan":        plan,
 			"batch_count": plan.BatchCount,
 			"model_id":    actualModelID,
-		})
+		}
+		if selfExec := ctx.GetSelfExec(); selfExec != nil {
+			outputSnap["input_tokens"] = selfExec.InputTokens
+			outputSnap["output_tokens"] = selfExec.OutputTokens
+			outputSnap["model_name"] = selfExec.ModelName
+		}
+		ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, outputSnap)
 		// 【注意】不再直接组装报告，由 review_arbitration 阶段处理
 		return nil
 	}
@@ -921,7 +927,7 @@ func (e *BatchReviewFrameExecutor) Execute(ctx StageContext) error {
 					return
 				default:
 				}
-				result, modelID, err := e.executeBatchCollection(ctx, plan.Batches[batchIdx], promptCtx, task)
+				result, modelID, inTk, outTk, mName, err := e.executeBatchCollection(ctx, plan.Batches[batchIdx], promptCtx, task)
 				if err != nil {
 					errCh <- fmt.Errorf("wave %d, batch %d 失败: %w", waveIdx+1, batchIdx+1, err)
 					return
@@ -930,6 +936,17 @@ func (e *BatchReviewFrameExecutor) Execute(ctx StageContext) error {
 				batchResults[batchIdx] = result
 				if actualModelID == 0 {
 					actualModelID = modelID
+				}
+				// 累加 token 用量
+				if exec := ctx.GetSelfExec(); exec != nil {
+					exec.InputTokens += inTk
+					exec.OutputTokens += outTk
+					if mName != "" && exec.ModelName == "" {
+						exec.ModelName = mName
+					}
+					if exec.LLMModelID == nil {
+						exec.LLMModelID = &modelID
+					}
 				}
 				mu.Unlock()
 				completed := int(atomic.AddInt32(&completedCount, 1))
@@ -953,11 +970,17 @@ func (e *BatchReviewFrameExecutor) Execute(ctx StageContext) error {
 	ctx.SetOutput("batch_review_results", batchResults)
 	ctx.SetOutput("model_id", actualModelID)
 
-	ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
+	outputSnap := map[string]interface{}{
 		"plan":        plan,
 		"batch_count": plan.BatchCount,
 		"model_id":    actualModelID,
-	})
+	}
+	if selfExec := ctx.GetSelfExec(); selfExec != nil {
+		outputSnap["input_tokens"] = selfExec.InputTokens
+		outputSnap["output_tokens"] = selfExec.OutputTokens
+		outputSnap["model_name"] = selfExec.ModelName
+	}
+	ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, outputSnap)
 
 	return nil
 }
@@ -1164,6 +1187,16 @@ func (e *BatchReviewFrameExecutor) executeSingleBatchStructured(ctx StageContext
 		exec.LLMModelID = &result.ModelID
 	}
 
+	// 【修复】将 token 同步到 selfExec，供 Pipeline 列表页展示
+	if selfExec := ctx.GetSelfExec(); selfExec != nil {
+		selfExec.InputTokens = result.InputTokens
+		selfExec.OutputTokens = result.OutputTokens
+		selfExec.ModelName = result.ModelName
+		if selfExec.LLMModelID == nil {
+			selfExec.LLMModelID = &result.ModelID
+		}
+	}
+
 	ctx.SaveOutputSnapshot(exec, map[string]interface{}{
 		"batch_index":   1,
 		"file_count":    detail.FileCount,
@@ -1245,18 +1278,19 @@ func filterCrossFileContextForBatch(crossFileText string, batchFilePaths []strin
 }
 
 // executeBatchCollection 场景 B：分批评审收集模式
-func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, detail BatchDetail, promptCtx *engine.PromptContext, task *model.Task) (*llm.BatchReviewResult, uint, error) {
+// 返回 (batchResult, modelID, inputTokens, outputTokens, modelName, error)
+func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, detail BatchDetail, promptCtx *engine.PromptContext, task *model.Task) (*llm.BatchReviewResult, uint, int, int, string, error) {
 	exec := ctx.CreateChildExecution(fmt.Sprintf("batch_review_%d", detail.Index), detail.Index)
 	ctx.MarkRunning(exec)
 
 	c, ok := ctx.(*stageContextImpl)
 	if !ok {
-		return nil, 0, fmt.Errorf("invalid context type")
+		return nil, 0, 0, 0, "", fmt.Errorf("invalid context type")
 	}
 	batchFiles := c.GetBatchFiles(detail.Index - 1)
 	if batchFiles == nil {
 		ctx.MarkFailed(exec, "批次文件未找到")
-		return nil, 0, fmt.Errorf("批次 %d 文件未找到", detail.Index)
+		return nil, 0, 0, 0, "", fmt.Errorf("批次 %d 文件未找到", detail.Index)
 	}
 
 	plan := ctx.GetOutput("batch_plan").(*BatchPlan)
@@ -1327,13 +1361,13 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 			"prompt":      userPrompt,
 		})
 		ctx.MarkFailed(exec, err.Error())
-		return nil, 0, err
+		return nil, 0, 0, 0, "", err
 	}
 
 	// Refusal 检测
 	if result.Response != nil && len(result.Response.Choices) > 0 && result.Response.Choices[0].Message.Refusal != "" {
 		ctx.MarkFailed(exec, "模型拒绝回答")
-		return nil, 0, fmt.Errorf("模型拒绝回答: %s", result.Response.Choices[0].Message.Refusal)
+		return nil, 0, 0, 0, "", fmt.Errorf("模型拒绝回答: %s", result.Response.Choices[0].Message.Refusal)
 	}
 
 	// 解析简化结果
@@ -1346,7 +1380,7 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 			"prompt":      userPrompt,
 		})
 		ctx.MarkFailed(exec, err.Error())
-		return nil, 0, err
+		return nil, 0, 0, 0, "", err
 	}
 
 	exec.InputTokens = result.InputTokens
@@ -1390,7 +1424,7 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 
 	ctx.MarkSuccess(exec)
 
-	return batchResult, result.ModelID, nil
+	return batchResult, result.ModelID, result.InputTokens, result.OutputTokens, result.ModelName, nil
 }
 
 // executeScoreArbitration 场景 C：汇总裁决模式

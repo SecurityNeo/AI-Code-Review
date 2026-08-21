@@ -85,6 +85,7 @@ func (e *SecretScanExecutor) Execute(ctx StageContext) error {
 	verifiedFindings := findings
 	verifiedCount := 0
 	var verificator *AgentVerificator
+	llmFallbackReason := ""
 	if e.llmService != nil && len(findings) > 0 {
 		fileContents, _ := ctx.GetOutput("file_contents").(map[string]string)
 		modelID := e.modelID
@@ -117,6 +118,7 @@ func (e *SecretScanExecutor) Execute(ctx StageContext) error {
 			ctx.SetOutput("secret_scan_verified_count", verifiedCount)
 		} else if err != nil {
 			zap.L().Warn("secret_scan LLM verification failed, falling back to rule engine results", zap.Error(err))
+			llmFallbackReason = "规则引擎结果（LLM验证超时/失败）"
 		}
 	}
 
@@ -180,6 +182,7 @@ func (e *SecretScanExecutor) Execute(ctx StageContext) error {
 		"input_tokens":         inputTokens,
 		"output_tokens":        outputTokens,
 		"prompt_injection":     secretScanMarkdown,
+		"llm_fallback_reason":  llmFallbackReason,
 	})
 
 	return nil

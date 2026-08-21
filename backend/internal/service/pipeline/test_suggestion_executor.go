@@ -107,6 +107,7 @@ func (e *TestSuggestionExecutor) Execute(ctx StageContext) error {
 
 	// 3. LLM 增强（Phase 3）
 	var enricher *AgentEnricher
+	llmFallbackReason := ""
 	if e.llmService != nil && len(suggestions) > 0 {
 		task := ctx.Task()
 		fileContents, _ := ctx.GetOutput("file_contents").(map[string]string)
@@ -148,6 +149,7 @@ func (e *TestSuggestionExecutor) Execute(ctx StageContext) error {
 			ctx.SetOutput("test_suggestion_llm_enriched", true)
 		} else if err != nil {
 			zap.L().Warn("test_suggestion LLM enrichment failed, using heuristic results", zap.Error(err))
+			llmFallbackReason = "AST启发式分析（LLM增强超时/失败）"
 		}
 	}
 
@@ -201,6 +203,7 @@ func (e *TestSuggestionExecutor) Execute(ctx StageContext) error {
 		"input_tokens":         inputTokens,
 		"output_tokens":        outputTokens,
 		"prompt_injection":     testSuggestionMarkdown,
+		"llm_fallback_reason":  llmFallbackReason,
 	})
 
 	return nil
@@ -491,6 +494,7 @@ func (e *ImpactAnalysisExecutor) Execute(ctx StageContext) error {
 
 	// 6. LLM 增强（Phase 3）
 	var enricher *AgentEnricher
+	llmFallbackReason := ""
 	if e.llmService != nil && len(findings) > 0 {
 		task := ctx.Task()
 		crossFileText := getCrossFileCallChainText(ctx)
@@ -525,6 +529,7 @@ func (e *ImpactAnalysisExecutor) Execute(ctx StageContext) error {
 			ctx.SetOutput("impact_analysis_llm_enriched", true)
 		} else if err != nil {
 			zap.L().Warn("impact_analysis LLM enrichment failed, using heuristic results", zap.Error(err))
+			llmFallbackReason = "调用链分析（LLM增强超时/失败）"
 		}
 	}
 
@@ -579,6 +584,7 @@ func (e *ImpactAnalysisExecutor) Execute(ctx StageContext) error {
 		"input_tokens":         inputTokens,
 		"output_tokens":        outputTokens,
 		"prompt_injection":     impactAnalysisMarkdown,
+		"llm_fallback_reason":  llmFallbackReason,
 	})
 
 	return nil

@@ -18,15 +18,13 @@ import (
 type ReviewArbitrationExecutor struct {
 	llmService LLMService
 	modelID    uint
-	timeoutSec int
 }
 
 // NewReviewArbitrationExecutor 创建 ReviewArbitrationExecutor
-func NewReviewArbitrationExecutor(llm LLMService, modelID uint, timeoutSec int) *ReviewArbitrationExecutor {
+func NewReviewArbitrationExecutor(llm LLMService, modelID uint) *ReviewArbitrationExecutor {
 	return &ReviewArbitrationExecutor{
 		llmService: llm,
 		modelID:    modelID,
-		timeoutSec: timeoutSec,
 	}
 }
 
@@ -197,7 +195,7 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 	ctx.SaveInputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, inputSnapshot)
 
 	// 7. 执行裁决（三层降级）
-	result, rawLLMOutput, err := e.arbitrate(ctx, promptCtx, userPrompt, responseFormat, deductCfg)
+	result, rawLLMOutput, fallbackReason, err := e.arbitrate(ctx, promptCtx, userPrompt, responseFormat, deductCfg)
 	if err != nil {
 		return fmt.Errorf("评审裁决失败: %w", err)
 	}
@@ -220,6 +218,7 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 		"model_name":              getStrFromCtxOutput(ctx, "model_name"),
 		"input_tokens":            getIntFromCtxOutput(ctx, "input_tokens"),
 		"output_tokens":           getIntFromCtxOutput(ctx, "output_tokens"),
+		"llm_fallback_reason":     fallbackReason,
 	}
 	ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, outputSnapshot)
 
@@ -237,13 +236,14 @@ func (e *ReviewArbitrationExecutor) arbitrate(
 	userPrompt string,
 	responseFormat *llm.ResponseFormat,
 	deductCfg engine.DeductScoreConfig,
-) (result *llm.AIReviewResult, rawLLMOutput string, err error) {
+) (result *llm.AIReviewResult, rawLLMOutput string, fallbackReason string, err error) {
 	// Layer 3 最终兜底（recover panic）
 	defer func() {
 		if r := recover(); r != nil {
 			zap.L().Error("review_arbitration panic", zap.Any("panic", r), zap.ByteString("stack", debug.Stack()))
 			result = e.fallbackMerge(promptCtx, deductCfg)
 			rawLLMOutput = ""
+			fallbackReason = "兜底合并模式（裁决引擎 panic）"
 			err = fmt.Errorf("裁决引擎 panic，已降级: %v", r)
 		}
 	}()
@@ -251,13 +251,15 @@ func (e *ReviewArbitrationExecutor) arbitrate(
 	// Layer 1: 尝试完整 LLM 汇总裁决（结构化 Prompt + JSON Schema 严格约束）
 	result, rawLLMOutput, err = e.callLLMWithStructuredPrompt(ctx, promptCtx, userPrompt, responseFormat, deductCfg)
 	if err == nil && isValidResult(result) {
-		return result, rawLLMOutput, nil
+		return result, rawLLMOutput, "", nil
 	}
+
+	fallbackReason = "本地去重模式（LLM汇总裁决失败/超时）"
 	zap.L().Warn("review_arbitration: LLM 汇总失败/超时，降级到本地去重模式", zap.Error(err))
 
 	// Layer 2: 本地去重 + 评分（不调用 LLM）
 	result = e.localDeduplicationAndMerge(promptCtx, deductCfg)
-	return result, "", nil
+	return result, "", fallbackReason, nil
 }
 
 // callLLMWithStructuredPrompt 调用 LLM 进行结构化裁决
@@ -277,11 +279,15 @@ func (e *ReviewArbitrationExecutor) callLLMWithStructuredPrompt(
 		modelID = task.UsedModelID
 	}
 
-	// 使用本阶段独立的 LLM 调用超时配置
+	// 使用本阶段独立的 LLM 调用超时配置（优先读取 stage_configs，默认60秒）
+	llmTimeoutSec := 60
+	if cfg, ok := ctx.GetInput("_agent_config").(model.ReviewAgentConfig); ok {
+		llmTimeoutSec = cfg.GetStageParam("review_arbitration", "timeout", llmTimeoutSec)
+	}
 	llmCtx := context.Context(ctx)
-	if e.timeoutSec > 0 {
+	if llmTimeoutSec > 0 {
 		var cancel context.CancelFunc
-		llmCtx, cancel = context.WithTimeout(llmCtx, time.Duration(e.timeoutSec)*time.Second)
+		llmCtx, cancel = context.WithTimeout(llmCtx, time.Duration(llmTimeoutSec)*time.Second)
 		defer cancel()
 	}
 
@@ -317,6 +323,16 @@ func (e *ReviewArbitrationExecutor) callLLMWithStructuredPrompt(
 	ctx.SetOutput("model_name", result.ModelName)
 	ctx.SetOutput("input_tokens", result.InputTokens)
 	ctx.SetOutput("output_tokens", result.OutputTokens)
+
+	// 【修复】将 token 同步到 selfExec，供 Pipeline 列表页展示
+	if exec := ctx.GetSelfExec(); exec != nil {
+		exec.InputTokens = result.InputTokens
+		exec.OutputTokens = result.OutputTokens
+		exec.ModelName = result.ModelName
+		if exec.LLMModelID == nil {
+			exec.LLMModelID = &result.ModelID
+		}
+	}
 
 	return parsedResult, result.Content, nil
 }

@@ -2464,6 +2464,11 @@ function createPipelineStageNode(stage, index, totalCount) {
     if (tokenText) metas.push(`<span class="text-[11px] text-gray-500"><i class="fas fa-coins mr-0.5"></i>${tokenText}</span>`);
     if (stage.model_name) metas.push(`<span class="text-[11px] text-gray-500"><i class="fas fa-robot mr-0.5"></i>${escapeHtml(stage.model_name)}</span>`);
     if (stage.error_message) metas.push(`<span class="text-[11px] text-red-500"><i class="fas fa-exclamation-circle mr-0.5"></i>${escapeHtml(stage.error_message.substring(0, 40))}${stage.error_message.length > 40 ? '...' : ''}</span>`);
+    // 【新增】LLM 降级提示
+    const fallbackReason = stage.output_snapshot?.llm_fallback_reason || stage.llm_fallback_reason;
+    if (fallbackReason) {
+        metas.push(`<span class="text-[11px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200" title="${escapeHtml(fallbackReason)}"><i class="fas fa-exclamation-triangle mr-0.5"></i>LLM 降级</span>`);
+    }
 
     if (metas.length > 0) {
         html += `<div class="flex flex-wrap items-center gap-x-3 gap-y-1">${metas.join('')}</div>`;
@@ -2655,9 +2660,6 @@ function createCodeUnderstandingSubflow(subStages, parentStage) {
         html += `<div onclick="${parentExecId ? `showCodeUnderstandingSubDetail('${sub.name}', ${parentExecId})` : ''}" class="flex items-center gap-2 py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors ${parentExecId ? 'cursor-pointer' : ''}">`;
         html += `<span class="w-2 h-2 rounded-full ${dotColor} flex-shrink-0"></span>`;
         html += `<span class="text-xs text-gray-700 flex-1">${escapeHtml(label)}</span>`;
-        if (sub.duration_ms) {
-            html += `<span class="text-[10px] text-gray-400 font-mono">${Math.round(sub.duration_ms/1000)}s</span>`;
-        }
         if (sub.error && status === 'failed') {
             html += `<span class="text-[10px] text-red-500"><i class="fas fa-exclamation-circle mr-0.5"></i>失败</span>`;
         } else if (status === 'success') {
@@ -2835,7 +2837,6 @@ async function showCodeUnderstandingSubDetail(subName, parentExecId) {
         const stCls = { success: 'text-green-600 bg-green-50 border-green-200', running: 'text-blue-600 bg-blue-50 border-blue-200', failed: 'text-red-600 bg-red-50 border-red-200', skipped: 'text-gray-600 bg-gray-50 border-gray-200', pending: 'text-gray-600 bg-gray-50 border-gray-200' }[status];
         html += `<div class="mb-3 flex items-center gap-2">`;
         html += `<span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium border ${stCls}">${stLabel}</span>`;
-        if (sub.duration_ms) html += `<span class="text-xs text-gray-400 font-mono">${Math.round(sub.duration_ms/1000)}s</span>`;
         html += '</div>';
 
         if (subName === 'context_extract') {
@@ -2876,10 +2877,18 @@ function renderGenericDetail(json) {
     if (metaItems.length) html += `<div class="flex flex-wrap gap-2 mb-2">${metaItems.join('')}</div>`;
 
     // Token 用量
+    const fallbackReason = outSnap.llm_fallback_reason || '';
     if (inputTokens || outputTokens) {
         html += `<div class="mb-3 bg-blue-50 border border-blue-100 rounded-lg p-2 flex justify-between items-center">`;
         html += `<span class="text-xs text-blue-700 font-medium">Token 用量</span>`;
         html += `<span class="text-[11px] font-mono text-blue-600">in: ${(inputTokens||0).toLocaleString()} / out: ${(outputTokens||0).toLocaleString()}</span>`;
+        html += `</div>`;
+    }
+    // 【新增】LLM 降级提示
+    if (fallbackReason) {
+        html += `<div class="mb-3 bg-amber-50 border border-amber-200 rounded-lg p-2 flex items-center gap-2">`;
+        html += `<i class="fas fa-exclamation-triangle text-amber-500 text-xs"></i>`;
+        html += `<span class="text-xs text-amber-700 font-medium">${escapeHtml(fallbackReason)}</span>`;
         html += `</div>`;
     }
 
@@ -3006,6 +3015,15 @@ function renderImpactAnalysisDetail(json) {
         html += `<div class="mb-3 bg-blue-50 border border-blue-100 rounded-lg p-2 flex justify-between items-center">`;
         html += `<span class="text-xs text-blue-700 font-medium">Token 用量</span>`;
         html += `<span class="text-[11px] font-mono text-blue-600">in: ${(inputTokens).toLocaleString()} / out: ${(outputTokens).toLocaleString()}</span>`;
+        html += `</div>`;
+    }
+
+    // 【新增】LLM 降级提示
+    const fallbackReason = outSnap.llm_fallback_reason || '';
+    if (fallbackReason) {
+        html += `<div class="mb-3 bg-amber-50 border border-amber-200 rounded-lg p-2 flex items-center gap-2">`;
+        html += `<i class="fas fa-exclamation-triangle text-amber-500 text-xs"></i>`;
+        html += `<span class="text-xs text-amber-700 font-medium">${escapeHtml(fallbackReason)}</span>`;
         html += `</div>`;
     }
 
@@ -4131,6 +4149,15 @@ function renderReviewArbitrationDetail(json) {
         html += `<div class="mb-3 bg-blue-50 border border-blue-100 rounded-lg p-2 flex justify-between items-center">`;
         html += `<span class="text-xs text-blue-700 font-medium">Token 用量</span>`;
         html += `<span class="text-[11px] font-mono text-blue-600">in: ${(inputTokens).toLocaleString()} / out: ${(outputTokens).toLocaleString()}</span>`;
+        html += `</div>`;
+    }
+
+    // 【新增】LLM 降级提示
+    const fallbackReason = out.llm_fallback_reason || '';
+    if (fallbackReason) {
+        html += `<div class="mb-3 bg-amber-50 border border-amber-200 rounded-lg p-2 flex items-center gap-2">`;
+        html += `<i class="fas fa-exclamation-triangle text-amber-500 text-xs"></i>`;
+        html += `<span class="text-xs text-amber-700 font-medium">${escapeHtml(fallbackReason)}</span>`;
         html += `</div>`;
     }
 

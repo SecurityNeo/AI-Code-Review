@@ -1092,6 +1092,17 @@ func (s *TaskService) fetchMRCommits(task model.Task) []gitlab.CommitInfo {
 // executePipelineReviewTask Pipeline 结构化评审任务执行
 // 复用 engine/builder.go + engine/parser.go 的完整能力
 func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride string) error {
+	// 【修复】在进入 Pipeline 前先将任务状态从 pending 转为 running，
+	// 确保后续 fetchMRDiffFiles 失败时 failReviewTask 的 WHERE status=running 能命中
+	if task.Status == model.TaskPending {
+		task.Status = model.TaskRunning
+		now := time.Now()
+		task.StartedAt = &now
+		if err := model.DB.Model(&task).Select("Status", "StartedAt").Updates(task).Error; err != nil {
+			zap.L().Warn("Pipeline 任务启动时更新状态失败", zap.Uint("task_id", task.ID), zap.Error(err))
+		}
+	}
+
 	// 1. 获取 diff 文件
 	diffFiles, additions, deletions, err := s.fetchMRDiffFiles(task)
 	if err != nil {
