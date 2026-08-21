@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -1368,7 +1369,7 @@ func (s *TaskService) runAIReview(taskID *uint, caller string, diffFiles []gitla
 
 	if isSingleBatch(diffFiles) {
 		userPrompt = buildSingleBatchPrompt(diffFiles, commitsText, mrTitle, projectTemplate)
-		result, err := NewLLMService().ChatCompletion(taskID, modelID, caller, "", userPrompt)
+		result, err := NewLLMService().ChatCompletion(context.Background(), taskID, modelID, caller, "", userPrompt)
 		if err != nil {
 			return "", 0, "", 0, "", fmt.Errorf("LLM 调用失败: %w", err)
 		}
@@ -1381,7 +1382,7 @@ func (s *TaskService) runAIReview(taskID *uint, caller string, diffFiles []gitla
 
 		for i, batch := range batches {
 			batchPrompt := buildBatchPrompt(batch, i+1, len(batches), commitsText, mrTitle, projectTemplate)
-			result, err := NewLLMService().ChatCompletion(taskID, modelID, caller, "", batchPrompt)
+			result, err := NewLLMService().ChatCompletion(context.Background(), taskID, modelID, caller, "", batchPrompt)
 			if err != nil {
 				return "", 0, "", 0, "", fmt.Errorf("批次 %d/%d 评审失败: %w", i+1, len(batches), err)
 			}
@@ -1395,7 +1396,7 @@ func (s *TaskService) runAIReview(taskID *uint, caller string, diffFiles []gitla
 		}
 
 		userPrompt = buildSummaryPrompt(batchReviews, commitsText, mrTitle, projectTemplate)
-		result, err := NewLLMService().ChatCompletion(taskID, modelID, caller, "", userPrompt)
+		result, err := NewLLMService().ChatCompletion(context.Background(), taskID, modelID, caller, "", userPrompt)
 		if err != nil {
 			return "", 0, "", 0, "", fmt.Errorf("汇总评审失败: %w", err)
 		}
@@ -1895,7 +1896,7 @@ func (s *TaskService) runStructuredAIReview(task model.Task, diffFiles []gitlab.
 	llmService := NewLLMService()
 
 	if isSingleBatch(diffFiles) {
-		result, err := llmService.ChatCompletionStructured(&task.ID, 0, "runAIReviewStructured", "", userPrompt, responseFormat)
+		result, err := llmService.ChatCompletionStructured(context.Background(), &task.ID, 0, "runAIReviewStructured", "", userPrompt, responseFormat)
 		if err != nil {
 			return "", 0, userPrompt, 0, "", err
 		}
@@ -1914,7 +1915,7 @@ func (s *TaskService) runStructuredAIReview(task model.Task, diffFiles []gitlab.
 		// 更新 promptCtx 并重建 userPrompt
 		promptCtx.Files = truncatedFiles
 		userPrompt = engine.BuildReviewPrompt(promptCtx)
-		result, err := llmService.ChatCompletionStructured(&task.ID, 0, "runAIReviewStructuredTruncated", "", userPrompt, responseFormat)
+		result, err := llmService.ChatCompletionStructured(context.Background(), &task.ID, 0, "runAIReviewStructuredTruncated", "", userPrompt, responseFormat)
 		if err != nil {
 			return "", 0, userPrompt, 0, "", err
 		}
@@ -1951,7 +1952,7 @@ func (s *TaskService) runStructuredAIReview(task model.Task, diffFiles []gitlab.
 
 	// 重试回调：重新调用 LLM
 	retryCall := func() (string, error) {
-		result, err := llmService.ChatCompletionStructured(&task.ID, 0, "retry", "", userPrompt, responseFormat)
+		result, err := llmService.ChatCompletionStructured(context.Background(), &task.ID, 0, "retry", "", userPrompt, responseFormat)
 		if err != nil {
 			return "", err
 		}
@@ -2141,8 +2142,8 @@ type pipelineLLMAdapter struct {
 	svc *LLMService
 }
 
-func (a *pipelineLLMAdapter) ChatCompletion(taskID *uint, modelID uint, caller, customInstruction, userPrompt string) (*pipeline.ChatResult, error) {
-	r, err := a.svc.ChatCompletion(taskID, modelID, caller, customInstruction, userPrompt)
+func (a *pipelineLLMAdapter) ChatCompletion(ctx context.Context, taskID *uint, modelID uint, caller, customInstruction, userPrompt string) (*pipeline.ChatResult, error) {
+	r, err := a.svc.ChatCompletion(ctx, taskID, modelID, caller, customInstruction, userPrompt)
 	if err != nil {
 		return nil, err
 	}
@@ -2155,8 +2156,8 @@ func (a *pipelineLLMAdapter) ChatCompletion(taskID *uint, modelID uint, caller, 
 	}, nil
 }
 
-func (a *pipelineLLMAdapter) ChatCompletionStructured(taskID *uint, modelID uint, caller, systemPrompt, userPrompt string, responseFormat *llm.ResponseFormat) (*pipeline.StructuredChatResult, error) {
-	r, err := a.svc.ChatCompletionStructured(taskID, modelID, caller, systemPrompt, userPrompt, responseFormat)
+func (a *pipelineLLMAdapter) ChatCompletionStructured(ctx context.Context, taskID *uint, modelID uint, caller, systemPrompt, userPrompt string, responseFormat *llm.ResponseFormat) (*pipeline.StructuredChatResult, error) {
+	r, err := a.svc.ChatCompletionStructured(ctx, taskID, modelID, caller, systemPrompt, userPrompt, responseFormat)
 	if err != nil {
 		return nil, err
 	}

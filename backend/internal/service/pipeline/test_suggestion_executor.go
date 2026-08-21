@@ -44,13 +44,13 @@ func (e *TestSuggestionExecutor) Execute(ctx StageContext) error {
 
 	// 读取本阶段可配置参数
 	llmMaxTokens := 3000
-	llmTimeoutSec := 300
 	functionBodyMaxLen := 2000
 	contextLinesBefore := 3
 	contextLinesAfter := 10
+	llmTimeoutSec := int(getStageLLMEnhanceTimeout("test_suggestion").Seconds())
 	if cfg != nil {
 		llmMaxTokens = cfg.GetStageParam("test_suggestion", "llm_max_tokens", llmMaxTokens)
-		llmTimeoutSec = cfg.GetStageParam("test_suggestion", "llm_timeout_sec", llmTimeoutSec)
+		llmTimeoutSec = cfg.GetStageParam("test_suggestion", "llm_enhance_timeout", llmTimeoutSec)
 		functionBodyMaxLen = cfg.GetStageParam("test_suggestion", "function_body_max_len", functionBodyMaxLen)
 		contextLinesBefore = cfg.GetStageParam("test_suggestion", "context_lines_before", contextLinesBefore)
 		contextLinesAfter = cfg.GetStageParam("test_suggestion", "context_lines_after", contextLinesAfter)
@@ -123,7 +123,7 @@ func (e *TestSuggestionExecutor) Execute(ctx StageContext) error {
 			ContextLinesBefore: contextLinesBefore,
 			ContextLinesAfter:  contextLinesAfter,
 		})
-		enriched, err := enricher.EnrichTestSuggestions(context.Background(), &task.ID, modelID, suggestions, fileContents)
+		enriched, err := enricher.EnrichTestSuggestions(ctx, &task.ID, modelID, suggestions, fileContents)
 		if err == nil && len(enriched) > 0 {
 			for funcName, scenarios := range enriched {
 				for i := range suggestions {
@@ -171,6 +171,19 @@ func (e *TestSuggestionExecutor) Execute(ctx StageContext) error {
 		modelName = enricher.LastModelName()
 		inputTokens = enricher.LastInputTokens()
 		outputTokens = enricher.LastOutputTokens()
+
+		// 【修复】将 token 同步到 selfExec，供 MarkSuccess 写入 task_pipeline_executions
+		if exec := ctx.GetSelfExec(); exec != nil {
+			if inputTokens > 0 {
+				exec.InputTokens = inputTokens
+			}
+			if outputTokens > 0 {
+				exec.OutputTokens = outputTokens
+			}
+			if modelName != "" {
+				exec.ModelName = modelName
+			}
+		}
 	}
 
 	// 5. 保存 Pipeline 快照
@@ -387,12 +400,12 @@ func (e *ImpactAnalysisExecutor) Execute(ctx StageContext) error {
 
 	// 读取本阶段可配置参数
 	llmMaxTokens := 3000
-	llmTimeoutSec := 300
 	callerSnippetMaxLen := 500
 	maxCallersPerFinding := 3
+	llmTimeoutSec := int(getStageLLMEnhanceTimeout("impact_analysis").Seconds())
 	if cfg != nil {
 		llmMaxTokens = cfg.GetStageParam("impact_analysis", "llm_max_tokens", llmMaxTokens)
-		llmTimeoutSec = cfg.GetStageParam("impact_analysis", "llm_timeout_sec", llmTimeoutSec)
+		llmTimeoutSec = cfg.GetStageParam("impact_analysis", "llm_enhance_timeout", llmTimeoutSec)
 		callerSnippetMaxLen = cfg.GetStageParam("impact_analysis", "caller_snippet_max_len", callerSnippetMaxLen)
 		maxCallersPerFinding = cfg.GetStageParam("impact_analysis", "max_callers_per_finding", maxCallersPerFinding)
 	}
@@ -497,7 +510,7 @@ func (e *ImpactAnalysisExecutor) Execute(ctx StageContext) error {
 			CallerSnippetMaxLen:  callerSnippetMaxLen,
 			MaxCallersPerFinding: maxCallersPerFinding,
 		})
-		enriched, err := enricher.EnrichImpactAnalysis(context.Background(), &task.ID, modelID, findings, callChains)
+		enriched, err := enricher.EnrichImpactAnalysis(ctx, &task.ID, modelID, findings, callChains)
 		if err == nil && len(enriched) > 0 {
 			for i := range findings {
 				if note, ok := enriched[findings[i].SymbolName]; ok {
@@ -535,6 +548,19 @@ func (e *ImpactAnalysisExecutor) Execute(ctx StageContext) error {
 		modelName = enricher.LastModelName()
 		inputTokens = enricher.LastInputTokens()
 		outputTokens = enricher.LastOutputTokens()
+
+		// 【修复】将 token 同步到 selfExec，供 MarkSuccess 写入 task_pipeline_executions
+		if exec := ctx.GetSelfExec(); exec != nil {
+			if inputTokens > 0 {
+				exec.InputTokens = inputTokens
+			}
+			if outputTokens > 0 {
+				exec.OutputTokens = outputTokens
+			}
+			if modelName != "" {
+				exec.ModelName = modelName
+			}
+		}
 	}
 
 	// 7. 保存 Pipeline 快照

@@ -300,6 +300,9 @@ func (e *Engine) executeWithTimeout(ctx StageContext, exec StageExecutor, timeou
 	if timeoutCtx.Err() == context.DeadlineExceeded {
 		return fmt.Errorf("阶段执行超时 (%ds)", timeoutSec)
 	}
+	if timeoutCtx.Err() == context.Canceled && err == nil {
+		return fmt.Errorf("任务已取消")
+	}
 	return err
 }
 

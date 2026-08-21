@@ -26,6 +26,7 @@ type StageContext interface {
 
 	// 子阶段管理
 	CreateChildExecution(stageCode string, batchIndex int) *model.TaskPipelineExecution
+	GetSelfExec() *model.TaskPipelineExecution
 	MarkRunning(exec *model.TaskPipelineExecution)
 	MarkSuccess(exec *model.TaskPipelineExecution)
 	MarkFailed(exec *model.TaskPipelineExecution, errMsg string)
@@ -78,9 +79,24 @@ func (c *stageContextImpl) Done() <-chan struct{} {
 	return c.Context.Done()
 }
 
+// Err 返回 context.Canceled（若 cancelCh 已被关闭），否则返回嵌入 context 的 Err()
+// 必须覆盖，否则 context.WithTimeout 的 propagateCancel 会传 nil err 导致 panic:
+// "missing cancel error"
+func (c *stageContextImpl) Err() error {
+	if c.cancelCh != nil {
+		select {
+		case <-c.cancelCh:
+			return context.Canceled
+		default:
+		}
+	}
+	return c.Context.Err()
+}
+
 func (c *stageContextImpl) Task() *model.Task               { return c.task }
 func (c *stageContextImpl) ExecutionID() uint               { return c.executionID }
 func (c *stageContextImpl) ParentExecutionID() *uint        { return c.parentExecutionID }
+func (c *stageContextImpl) GetSelfExec() *model.TaskPipelineExecution { return c.selfExec }
 func (c *stageContextImpl) GetInput(key string) interface{} { return c.inputData[key] }
 func (c *stageContextImpl) SetInput(key string, val interface{}) {
 	c.inputData[key] = val
@@ -217,7 +233,7 @@ func (c *stageContextImpl) SetBroadcaster(fn func(uint, string, map[string]inter
 
 // WithTimeout 创建一个带超时的子上下文，保留所有数据和状态
 func (c *stageContextImpl) WithTimeout(timeout time.Duration) (StageContext, context.CancelFunc) {
-	newCtx, cancel := context.WithTimeout(c.Context, timeout)
+	newCtx, cancel := context.WithTimeout(c, timeout)
 	child := &stageContextImpl{
 		Context:           newCtx,
 		task:              c.task,

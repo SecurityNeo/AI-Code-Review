@@ -48,8 +48,9 @@ func NewRepoManager() *RepoManager {
 }
 
 // GetRepoDir 获取仓库目录路径
+// 按照设计，仓库放在 {CODEGUARD_WORKSPACE}/repos/project_{id}/{branch}/
 func (m *RepoManager) GetRepoDir(projectID uint, branch string) string {
-	return filepath.Join(m.baseDir, fmt.Sprintf("project_%d", projectID), branch)
+	return filepath.Join(m.baseDir, "repos", fmt.Sprintf("project_%d", projectID), branch)
 }
 
 // EnsureRepo 确保本地仓库存在且是最新代码

@@ -852,6 +852,7 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                     throw new Error(err.error || '构建失败');
                 }
                 showToast('代码地图构建已启动', 'success');
+                loadProjects();
             } catch (e) {
                 showToast('构建失败: ' + e.message, 'error');
             }

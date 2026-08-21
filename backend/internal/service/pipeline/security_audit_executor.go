@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"context"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -47,13 +46,13 @@ func (e *SecurityAuditExecutor) Execute(ctx StageContext) error {
 
 	// 读取本阶段可配置参数
 	llmMaxTokens := 2000
-	llmTimeoutSec := 300
 	functionBodyMaxLen := 1500
 	triggerSnippetMaxLen := 300
 	confidenceThreshold := 0.5
+	llmTimeoutSec := int(getStageLLMEnhanceTimeout("security_audit").Seconds())
 	if cfg != nil {
 		llmMaxTokens = cfg.GetStageParam("security_audit", "llm_max_tokens", llmMaxTokens)
-		llmTimeoutSec = cfg.GetStageParam("security_audit", "llm_timeout_sec", llmTimeoutSec)
+		llmTimeoutSec = cfg.GetStageParam("security_audit", "llm_enhance_timeout", llmTimeoutSec)
 		functionBodyMaxLen = cfg.GetStageParam("security_audit", "function_body_max_len", functionBodyMaxLen)
 		triggerSnippetMaxLen = cfg.GetStageParam("security_audit", "trigger_snippet_max_len", triggerSnippetMaxLen)
 		confidenceThreshold = cfg.GetStageParamFloat("security_audit", "verify_confidence_threshold", confidenceThreshold)
@@ -118,7 +117,7 @@ func (e *SecurityAuditExecutor) Execute(ctx StageContext) error {
 			fileContentsWithTaint[k+"_taint"] = v
 		}
 
-		vres, err := verificator.VerifySecurityAudit(context.Background(), &task.ID, modelID, findings, fileContentsWithTaint)
+		vres, err := verificator.VerifySecurityAudit(ctx, &task.ID, modelID, findings, fileContentsWithTaint)
 		if err == nil && len(vres) > 0 {
 			var updated []model.SecurityAuditFinding
 			for _, vr := range vres {
@@ -164,6 +163,19 @@ func (e *SecurityAuditExecutor) Execute(ctx StageContext) error {
 		modelName = verificator.LastModelName()
 		inputTokens = verificator.LastInputTokens()
 		outputTokens = verificator.LastOutputTokens()
+
+		// 【修复】将 token 同步到 selfExec，供 MarkSuccess 写入 task_pipeline_executions
+		if exec := ctx.GetSelfExec(); exec != nil {
+			if inputTokens > 0 {
+				exec.InputTokens = inputTokens
+			}
+			if outputTokens > 0 {
+				exec.OutputTokens = outputTokens
+			}
+			if modelName != "" {
+				exec.ModelName = modelName
+			}
+		}
 	}
 
 	// 9. 保存 Pipeline 快照

@@ -1127,7 +1127,7 @@ func (e *BatchReviewFrameExecutor) executeSingleBatchStructured(ctx StageContext
 		"mode":         "single_batch_structured",
 	})
 
-	result, err := e.llmService.ChatCompletionStructured(&task.ID, task.UsedModelID, "single_batch_structured", "", userPrompt, responseFormat)
+	result, err := e.llmService.ChatCompletionStructured(ctx, &task.ID, task.UsedModelID, "single_batch_structured", "", userPrompt, responseFormat)
 	if err != nil {
 		ctx.SaveOutputSnapshot(exec, map[string]interface{}{
 			"batch_index": 1,
@@ -1319,7 +1319,7 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 		},
 	}
 
-	result, err := e.llmService.ChatCompletionStructured(&task.ID, task.UsedModelID, "batch_collection", "", userPrompt, responseFormat)
+	result, err := e.llmService.ChatCompletionStructured(ctx, &task.ID, task.UsedModelID, "batch_collection", "", userPrompt, responseFormat)
 	if err != nil {
 		ctx.SaveOutputSnapshot(exec, map[string]interface{}{
 			"batch_index": detail.Index,

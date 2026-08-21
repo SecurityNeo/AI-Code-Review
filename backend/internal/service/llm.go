@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -116,15 +117,16 @@ var (
 )
 
 // ChatCompletion 直接调用大模型 Chat Completion API
+// ctx 用于支持调用取消和超时中断传递
 // taskID 为关联任务 ID（用于 Token 用量统计），传 nil 表示无关联任务
 // caller 用于在 Token 用量日志中标记调用方（runAIReview / runAIReviewStructured / runAIReviewFallback / retry）
 // modelID: 指定模型 ID
 //   - modelID > 0: 强制使用指定模型，失败直接报错（不走主备）
 //   - modelID == 0: 走全局主备链路（主模型 → 备用1 → 备用2...）
-func (s *LLMService) ChatCompletion(taskID *uint, modelID uint, caller, systemPrompt, userPrompt string) (*ChatResult, error) {
+func (s *LLMService) ChatCompletion(ctx context.Context, taskID *uint, modelID uint, caller, systemPrompt, userPrompt string) (*ChatResult, error) {
 	// ① 用户强制指定了模型 → 直接调用，不走主备
 	if modelID > 0 {
-		resp, m, err := s.callSpecificModel(taskID, modelID, caller, systemPrompt, userPrompt, nil)
+		resp, m, err := s.callSpecificModel(ctx, taskID, modelID, caller, systemPrompt, userPrompt, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -138,7 +140,7 @@ func (s *LLMService) ChatCompletion(taskID *uint, modelID uint, caller, systemPr
 	}
 
 	// ② 未指定 modelID → 走全局主备链路
-	resp, m, err := s.tryChain(taskID, nil, caller, systemPrompt, userPrompt)
+	resp, m, err := s.tryChain(ctx, taskID, nil, caller, systemPrompt, userPrompt)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +154,8 @@ func (s *LLMService) ChatCompletion(taskID *uint, modelID uint, caller, systemPr
 }
 
 // callSpecificModel 调用指定 ID 的模型，失败时返回"指定模型 X (#Y): <err>"格式错误。
-func (s *LLMService) callSpecificModel(taskID *uint, modelID uint, caller, systemPrompt, userPrompt string, responseFormat *llm.ResponseFormat) (*llm.ChatResponse, *model.LLMModel, error) {
+// ctx 用于支持调用取消和超时中断传递。
+func (s *LLMService) callSpecificModel(ctx context.Context, taskID *uint, modelID uint, caller, systemPrompt, userPrompt string, responseFormat *llm.ResponseFormat) (*llm.ChatResponse, *model.LLMModel, error) {
 	var m model.LLMModel
 	if err := model.DB.First(&m, modelID).Error; err != nil {
 		return nil, nil, fmt.Errorf("指定的模型不存在: %w", err)
@@ -160,7 +163,7 @@ func (s *LLMService) callSpecificModel(taskID *uint, modelID uint, caller, syste
 	if m.Status != "active" {
 		return nil, nil, fmt.Errorf("指定的模型[%s]当前状态异常: %s", m.ModelID, m.Status)
 	}
-	content, err := s.callLLMAPI(taskID, &m, caller, systemPrompt, userPrompt, responseFormat)
+	content, err := s.callLLMAPI(ctx, taskID, &m, caller, systemPrompt, userPrompt, responseFormat)
 	if err != nil {
 		return nil, &m, fmt.Errorf("指定模型 %s (#%d): %w", m.ModelID, m.ID, err)
 	}
@@ -172,13 +175,14 @@ func (s *LLMService) callSpecificModel(taskID *uint, modelID uint, caller, syste
 
 // tryChain 主备链调用尝试：依次尝试主模型和所有备用模型，记录每个尝试的错误。
 // 成功时返回 resp 和所用模型；全部失败时返回 *ChainError。
-func (s *LLMService) tryChain(taskID *uint, responseFormat *llm.ResponseFormat, caller, systemPrompt, userPrompt string) (*llm.ChatResponse, *model.LLMModel, error) {
+// ctx 用于支持调用取消和超时中断传递。
+func (s *LLMService) tryChain(ctx context.Context, taskID *uint, responseFormat *llm.ResponseFormat, caller, systemPrompt, userPrompt string) (*llm.ChatResponse, *model.LLMModel, error) {
 	attempts := make([]ModelAttempt, 0, 4)
 
 	// ① 主模型
 	var primary model.LLMModel
 	if err := model.DB.Where("is_primary = ? AND status = ?", true, "active").First(&primary).Error; err == nil {
-		resp, callErr := s.callLLMAPI(taskID, &primary, caller, systemPrompt, userPrompt, responseFormat)
+		resp, callErr := s.callLLMAPI(ctx, taskID, &primary, caller, systemPrompt, userPrompt, responseFormat)
 		if callErr == nil && len(resp.Choices) > 0 {
 			zap.L().Info("主模型调用成功",
 				zap.Uint("model_id", primary.ID),
@@ -205,7 +209,7 @@ func (s *LLMService) tryChain(taskID *uint, responseFormat *llm.ResponseFormat, 
 	model.DB.Where("backup_order > 0 AND status = ?", "active").Order("backup_order ASC, id ASC").Find(&backups)
 
 	for i, b := range backups {
-		resp, callErr := s.callLLMAPI(taskID, &b, caller, systemPrompt, userPrompt, responseFormat)
+		resp, callErr := s.callLLMAPI(ctx, taskID, &b, caller, systemPrompt, userPrompt, responseFormat)
 		if callErr == nil && len(resp.Choices) > 0 {
 			zap.L().Info("备用模型调用成功",
 				zap.Int("backup_index", i+1),
@@ -233,10 +237,11 @@ func (s *LLMService) tryChain(taskID *uint, responseFormat *llm.ResponseFormat, 
 }
 
 // callLLMAPI 实际发起 HTTP 调用（内部辅助函数）
+// ctx 用于支持调用取消和超时中断传递
 // responseFormat 为 nil 时使用普通文本输出
 // taskID 用于关联 Token 用量日志，nil 表示无任务关联
 // caller 用于在 Token 用量日志中标记调用方（为空时记 "unknown"）
-func (s *LLMService) callLLMAPI(taskID *uint, llmModel *model.LLMModel, caller, systemPrompt, userPrompt string, responseFormat *llm.ResponseFormat) (respResult *llm.ChatResponse, retErr error) {
+func (s *LLMService) callLLMAPI(ctx context.Context, taskID *uint, llmModel *model.LLMModel, caller, systemPrompt, userPrompt string, responseFormat *llm.ResponseFormat) (respResult *llm.ChatResponse, retErr error) {
 	if llmModel == nil {
 		return nil, errors.New("callLLMAPI: llmModel is nil")
 	}
@@ -345,15 +350,20 @@ func (s *LLMService) callLLMAPI(taskID *uint, llmModel *model.LLMModel, caller, 
 				zap.Int("max_attempts", maxAttempts),
 				zap.Int("delay_ms", delay),
 				zap.Error(lastErr))
-			time.Sleep(time.Duration(delay) * time.Millisecond)
-			delay = int(float64(delay) * backoffMult)
-			if delay > maxDelayMs {
-				delay = maxDelayMs
+			select {
+			case <-ctx.Done():
+				return nil, fmt.Errorf("LLM 调用被取消: %w", ctx.Err())
+			case <-time.After(time.Duration(delay) * time.Millisecond):
+				delay = int(float64(delay) * backoffMult)
+				if delay > maxDelayMs {
+					delay = maxDelayMs
+				}
+				// 继续下一轮
 			}
 		}
 
 		// 每次重试需重建 Request（body 是 reader，已被前次 Do 消费完）
-		req, err := http.NewRequest("POST", url, bytes.NewReader(jsonBody))
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
 		if err != nil {
 			return nil, fmt.Errorf("create request failed: %w", err)
 		}
@@ -362,7 +372,11 @@ func (s *LLMService) callLLMAPI(taskID *uint, llmModel *model.LLMModel, caller, 
 
 		resp, err := client.Do(req)
 		if err != nil {
-			// 网络层瞬时错误：可重试
+			// 网络层瞬时错误：可重试。ctx 取消时也会走到这里（返回 context.Canceled）
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				// 被取消或超时：不应再重试，直接返回
+				return nil, fmt.Errorf("LLM 调用被取消: %w", err)
+			}
 			lastErr = fmt.Errorf("LLM API call failed: %w", err)
 			continue
 		}
@@ -604,12 +618,13 @@ func indexCI(s, sub string) int {
 
 // ChatCompletionStructured 调用大模型并返回结构化响应（含完整 ChatResponse）
 // 用于 AI 评审结构化输出场景
+// ctx 用于支持取消和中断传递
 // taskID 用于关联 Token 用量日志，nil 表示无任务关联
 // caller 用于在 Token 用量日志中标记调用方
-func (s *LLMService) ChatCompletionStructured(taskID *uint, modelID uint, caller, systemPrompt, userPrompt string, responseFormat *llm.ResponseFormat) (*StructuredChatResult, error) {
+func (s *LLMService) ChatCompletionStructured(ctx context.Context, taskID *uint, modelID uint, caller, systemPrompt, userPrompt string, responseFormat *llm.ResponseFormat) (*StructuredChatResult, error) {
 	// ① 用户强制指定了模型 → 直接调用，不走主备
 	if modelID > 0 {
-		resp, m, err := s.callSpecificModel(taskID, modelID, caller, systemPrompt, userPrompt, responseFormat)
+		resp, m, err := s.callSpecificModel(ctx, taskID, modelID, caller, systemPrompt, userPrompt, responseFormat)
 		if err != nil {
 			return nil, err
 		}
@@ -628,7 +643,7 @@ func (s *LLMService) ChatCompletionStructured(taskID *uint, modelID uint, caller
 	}
 
 	// ② 未指定 modelID → 走全局主备链路
-	resp, m, err := s.tryChain(taskID, responseFormat, caller, systemPrompt, userPrompt)
+	resp, m, err := s.tryChain(ctx, taskID, responseFormat, caller, systemPrompt, userPrompt)
 	if err != nil {
 		return nil, err
 	}

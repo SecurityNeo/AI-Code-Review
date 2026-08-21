@@ -1,6 +1,10 @@
 package pipeline
 
-import "github.com/ai-optimizer/backend/pkg/llm"
+import (
+	"context"
+
+	"github.com/ai-optimizer/backend/pkg/llm"
+)
 
 // StageExecutor 阶段执行器接口
 type StageExecutor interface {
@@ -29,6 +33,6 @@ type StructuredChatResult struct {
 
 // LLMService LLM 调用接口（由上层注入，避免 import cycle）
 type LLMService interface {
-	ChatCompletion(taskID *uint, modelID uint, caller, customInstruction, userPrompt string) (*ChatResult, error)
-	ChatCompletionStructured(taskID *uint, modelID uint, caller, systemPrompt, userPrompt string, responseFormat *llm.ResponseFormat) (*StructuredChatResult, error)
+	ChatCompletion(ctx context.Context, taskID *uint, modelID uint, caller, customInstruction, userPrompt string) (*ChatResult, error)
+	ChatCompletionStructured(ctx context.Context, taskID *uint, modelID uint, caller, systemPrompt, userPrompt string, responseFormat *llm.ResponseFormat) (*StructuredChatResult, error)
 }

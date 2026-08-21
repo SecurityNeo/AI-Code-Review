@@ -1595,7 +1595,7 @@ Please output in the following JSON format (do not include markdown code block):
 }
 `, sampleText)
 
-	resp, err := llmSvc.ChatCompletion(nil, 0, "rule_refine", systemPrompt, userPrompt)
+	resp, err := llmSvc.ChatCompletion(context.Background(), nil, 0, "rule_refine", systemPrompt, userPrompt)
 	if err != nil {
 		return fmt.Errorf("llm refine failed: %w", err)
 	}
@@ -1911,7 +1911,7 @@ func (s *IncubatorService) runSandboxTest(incubationID uint) (bool, error) {
 		userPrompt := fmt.Sprintf("Rule description:\n%s\n\nCode to review:\n```\n%s\n```\n\nDoes this code violate the rule? Answer YES or NO only.",
 			cand.Prompt, cases[i].Code)
 
-		resp, err := llmSvc.ChatCompletion(nil, 0, "sandbox_test", systemPrompt, userPrompt)
+		resp, err := llmSvc.ChatCompletion(context.Background(), nil, 0, "sandbox_test", systemPrompt, userPrompt)
 		if err != nil {
 			cases[i].Pass = false
 			cases[i].Reason = "LLM call failed: " + err.Error()
@@ -2029,7 +2029,7 @@ Requirements:
 	userPrompt := fmt.Sprintf("Review rule:\n%s\n\nGenerate test code snippets.", cand.Prompt)
 
 	llmSvc := NewLLMService()
-	resp, err := llmSvc.ChatCompletion(nil, 0, "sandbox_test", systemPrompt, userPrompt)
+	resp, err := llmSvc.ChatCompletion(context.Background(), nil, 0, "sandbox_test", systemPrompt, userPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("llm generate test cases failed: %w", err)
 	}

@@ -742,7 +742,11 @@ func (v *AgentVerificator) callLLM(
 	}, 1)
 
 	go func() {
-		r, err := v.llmService.ChatCompletionStructured(taskID, modelID, caller, "", prompt, responseFormat)
+		r, err := v.llmService.ChatCompletionStructured(c, taskID, modelID, caller, "", prompt, responseFormat)
+		if c.Err() != nil {
+			// context 已取消（超时或主动取消），丢弃结果，避免与 done channel 发送产生竞态
+			return
+		}
 		done <- struct {
 			r   *StructuredChatResult
 			err error
@@ -777,7 +781,11 @@ func (e *AgentEnricher) callLLM(
 	}, 1)
 
 	go func() {
-		r, err := e.llmService.ChatCompletionStructured(taskID, modelID, caller, "", prompt, responseFormat)
+		r, err := e.llmService.ChatCompletionStructured(c, taskID, modelID, caller, "", prompt, responseFormat)
+		if c.Err() != nil {
+			// context 已取消（超时或主动取消），丢弃结果，避免与 done channel 发送产生竞态
+			return
+		}
 		done <- struct {
 			r   *StructuredChatResult
 			err error

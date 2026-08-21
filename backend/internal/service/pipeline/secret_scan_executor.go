@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -45,13 +44,13 @@ func (e *SecretScanExecutor) Execute(ctx StageContext) error {
 
 	// 读取本阶段可配置参数（均有默认值）
 	llmMaxTokens := 2000
-	llmTimeoutSec := 300
+	llmTimeoutSec := int(getStageLLMEnhanceTimeout("secret_scan").Seconds())
 	matchTextMaxLen := 80
 	functionBodyMaxLen := 800
 	confidenceThreshold := 0.5
 	if cfg != nil {
 		llmMaxTokens = cfg.GetStageParam("secret_scan", "llm_max_tokens", llmMaxTokens)
-		llmTimeoutSec = cfg.GetStageParam("secret_scan", "llm_timeout_sec", llmTimeoutSec)
+		llmTimeoutSec = cfg.GetStageParam("secret_scan", "llm_enhance_timeout", llmTimeoutSec)
 		matchTextMaxLen = cfg.GetStageParam("secret_scan", "match_text_max_len", matchTextMaxLen)
 		functionBodyMaxLen = cfg.GetStageParam("secret_scan", "function_body_max_len", functionBodyMaxLen)
 		confidenceThreshold = cfg.GetStageParamFloat("secret_scan", "verify_confidence_threshold", confidenceThreshold)
@@ -103,7 +102,7 @@ func (e *SecretScanExecutor) Execute(ctx StageContext) error {
 			ContextLinesAfter:   4,
 			ConfidenceThreshold: confidenceThreshold,
 		})
-		vres, err := verificator.VerifySecretScan(context.Background(), &task.ID, modelID, findings, fileContents)
+		vres, err := verificator.VerifySecretScan(ctx, &task.ID, modelID, findings, fileContents)
 		if err == nil && len(vres) > 0 {
 			var updated []model.SecretScanFinding
 			for _, vr := range vres {
@@ -149,6 +148,19 @@ func (e *SecretScanExecutor) Execute(ctx StageContext) error {
 		modelName = verificator.LastModelName()
 		inputTokens = verificator.LastInputTokens()
 		outputTokens = verificator.LastOutputTokens()
+
+		// 【修复】将 token 同步到 selfExec，供 MarkSuccess 写入 task_pipeline_executions
+		if exec := ctx.GetSelfExec(); exec != nil {
+			if inputTokens > 0 {
+				exec.InputTokens = inputTokens
+			}
+			if outputTokens > 0 {
+				exec.OutputTokens = outputTokens
+			}
+			if modelName != "" {
+				exec.ModelName = modelName
+			}
+		}
 	}
 
 	// 7. 保存 Pipeline 快照

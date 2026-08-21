@@ -1,10 +1,12 @@
 package pipeline
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime/debug"
 	"strconv"
+	"time"
 
 	"github.com/ai-optimizer/backend/internal/engine"
 	"github.com/ai-optimizer/backend/internal/model"
@@ -275,7 +277,16 @@ func (e *ReviewArbitrationExecutor) callLLMWithStructuredPrompt(
 		modelID = task.UsedModelID
 	}
 
+	// 使用本阶段独立的 LLM 调用超时配置
+	llmCtx := context.Context(ctx)
+	if e.timeoutSec > 0 {
+		var cancel context.CancelFunc
+		llmCtx, cancel = context.WithTimeout(llmCtx, time.Duration(e.timeoutSec)*time.Second)
+		defer cancel()
+	}
+
 	result, err := e.llmService.ChatCompletionStructured(
+		llmCtx,
 		&task.ID,
 		modelID,
 		"review_arbitration",
