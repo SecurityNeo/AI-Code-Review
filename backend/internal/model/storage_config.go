@@ -6,7 +6,7 @@ import "time"
 type ObjectStorageConfig struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	Name      string    `gorm:"size:64;not null" json:"name"` // 配置名称（原uniqueIndex已移除，支持同名多配置）
-	IsDefault bool      `gorm:"default:true" json:"is_default"`
+	IsDefault bool      `gorm:"default:false" json:"is_default"`
 	Enabled   bool      `gorm:"default:false" json:"enabled"`
 
 	// 连接参数
