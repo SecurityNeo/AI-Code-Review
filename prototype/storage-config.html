@@ -543,8 +543,13 @@ async function testConnection() {
         test_connection: true
     };
     try {
-        await apiCall(`${API_BASE}/object-storage/configs/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        alert('连接测试成功');
+        const res = await apiFetch(`${API_BASE}/object-storage/configs/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const result = await res.json();
+        if (result.success) {
+            alert('连接测试成功: ' + (result.message || ''));
+        } else {
+            alert('连接测试失败: ' + (result.message || '未知错误'));
+        }
     } catch (e) {
         alert('连接测试失败: ' + e.message);
     }
