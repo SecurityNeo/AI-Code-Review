@@ -699,7 +699,8 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 			objStorage.POST("/configs", storageH.CreateConfig)
 			objStorage.PUT("/configs/:id", storageH.UpdateConfig)
 			objStorage.DELETE("/configs/:id", storageH.DeleteConfig)
-			objStorage.POST("/configs/:id/test", storageH.TestConfig)
+			objStorage.POST("/configs/test", storageH.TestConfigWithBody)
+		objStorage.POST("/configs/:id/test", storageH.TestConfig)
 			objStorage.POST("/configs/:id/set-default", storageH.SetDefault)
 		}
 

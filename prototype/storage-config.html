@@ -543,7 +543,7 @@ async function testConnection() {
         test_connection: true
     };
     try {
-        await apiCall(`${API_BASE}/object-storage/configs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        await apiCall(`${API_BASE}/object-storage/configs/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         alert('连接测试成功');
     } catch (e) {
         alert('连接测试失败: ' + e.message);

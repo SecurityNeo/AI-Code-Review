@@ -316,6 +316,34 @@ type storageConfigRequest struct {
 	TestConnection bool  `json:"test_connection"`
 }
 
+// TestConfigWithBody 用请求体中的参数测试连接（不保存到数据库）
+func (h *ObjectStorageHandler) TestConfigWithBody(c *gin.Context) {
+	var req storageConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	cfg := model.ObjectStorageConfig{
+		Type:     req.Type,
+		Region:   req.Region,
+		Bucket:   req.Bucket,
+		Endpoint: req.Endpoint,
+		Prefix:   req.Prefix,
+		UseSSL:   req.UseSSL,
+		AccessKey: req.AccessKey,
+		SecretKey: req.SecretKey,
+	}
+
+	provider, err := service.BuildStorageFromConfig(cfg)
+	if err != nil {
+		c.JSON(400, gin.H{"success": false, "message": "凭据解析失败: " + err.Error()})
+		return
+	}
+	ok, msg := provider.CheckConnection()
+	c.JSON(200, gin.H{"success": ok, "message": msg})
+}
+
 // helper
 func init() {
 	// ensure service.Now is available
