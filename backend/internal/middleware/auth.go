@@ -119,6 +119,13 @@ func Auth() gin.HandlerFunc {
 			return
 		}
 
+		// 校验用户是否被禁用（enabled=false 的用户不应继续访问）
+		if !user.Enabled {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "用户已被禁用"})
+			c.Abort()
+			return
+		}
+
 		c.Set("user_id", userID)
 		c.Set("user", user)
 		c.Set("role", user.Role)

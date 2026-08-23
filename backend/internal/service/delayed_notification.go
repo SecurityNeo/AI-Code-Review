@@ -185,10 +185,10 @@ func (q *DelayedNotificationQueue) executeJob(taskID uint, job *pendingNotifyJob
 	var task model.Task
 	model.DB.First(&task, taskID)
 
-	// 查找用户 ID 用于站内信
+	// 查找用户 ID 用于站内信（过滤已禁用用户）
 	var user model.User
 	ownerID := uint(0)
-	if err := model.DB.Where("gitlab_username = ?", payload.MRAuthor).First(&user).Error; err == nil {
+	if err := model.DB.Where("gitlab_username = ? AND enabled = ?", payload.MRAuthor, true).First(&user).Error; err == nil {
 		ownerID = user.ID
 	}
 
