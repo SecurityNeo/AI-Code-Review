@@ -33,7 +33,7 @@ func (h *ProjectHandler) List(c *gin.Context) {
 	var projectIDs []uint
 	if user.Role != model.RoleAdmin {
 		// 非管理员：只查询自己负责的项目
-		projectIDs = GetResponsibleProjectIDs(user.GitlabUsername)
+		projectIDs = GetResponsibleProjectIDs(user)
 		if len(projectIDs) == 0 {
 			c.JSON(200, gin.H{"data": []model.Project{}, "total": 0, "page": page, "page_size": pageSize})
 			return
@@ -49,19 +49,13 @@ func (h *ProjectHandler) List(c *gin.Context) {
 	c.JSON(200, gin.H{"data": projects, "total": total, "page": page, "page_size": pageSize})
 }
 
-// GetResponsibleProjectIDs 根据 GitLab 用户名获取负责的项目 ID 列表
-func GetResponsibleProjectIDs(gitlabUsername string) []uint {
-	if gitlabUsername == "" {
+// GetResponsibleProjectIDs 根据 User 对象获取负责的项目 ID 列表
+func GetResponsibleProjectIDs(user model.User) []uint {
+	if user.ID == 0 {
 		return nil
 	}
-	// 通过 GitLab 用户名找 TeamMember
-	var member model.TeamMember
-	if err := model.DB.Where("gitlab_username = ?", gitlabUsername).First(&member).Error; err != nil {
-		return nil
-	}
-	// 通过 MemberID 找 ProjectResponsibility
 	var responsibilities []model.ProjectResponsibility
-	if err := model.DB.Where("member_id = ?", member.ID).Find(&responsibilities).Error; err != nil {
+	if err := model.DB.Where("user_id = ?", user.ID).Find(&responsibilities).Error; err != nil {
 		return nil
 	}
 	ids := make([]uint, 0, len(responsibilities))
@@ -81,7 +75,7 @@ func (h *ProjectHandler) Options(c *gin.Context) {
 
 	var projectIDs []uint
 	if user.Role != model.RoleAdmin {
-		projectIDs = GetResponsibleProjectIDs(user.GitlabUsername)
+		projectIDs = GetResponsibleProjectIDs(user)
 		if len(projectIDs) == 0 {
 			c.JSON(200, gin.H{"data": []service.ProjectOption{}})
 			return
@@ -113,7 +107,7 @@ func (h *ProjectHandler) Get(c *gin.Context) {
 
 	// 非管理员只能查看自己负责的项目
 	if user.Role != model.RoleAdmin {
-		projectIDs := GetResponsibleProjectIDs(user.GitlabUsername)
+		projectIDs := GetResponsibleProjectIDs(user)
 		found := false
 		for _, pid := range projectIDs {
 			if pid == uint(id) {

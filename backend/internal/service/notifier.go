@@ -186,14 +186,14 @@ func (s *NotifierService) NotifyAIReviewCompleted(task model.Task) {
 
 	// 查询开发人员的 IM 用户 ID（用于 @）
 	var mentionUserId string
-	var member model.TeamMember
-	if err := model.DB.Where("gitlab_username = ? AND im_platform = ? AND enabled = ?", task.MRAuthor, "wecom", true).First(&member).Error; err == nil {
-		mentionUserId = member.IMUserID
-		zap.L().Info("notify ai review: found team member",
+	var user model.User
+	if err := model.DB.Where("gitlab_username = ? AND im_platform = ? AND enabled = ?", task.MRAuthor, "wecom", true).First(&user).Error; err == nil {
+		mentionUserId = user.IMUserID
+		zap.L().Info("notify ai review: found user",
 			zap.String("gitlab_username", task.MRAuthor),
 			zap.String("im_user_id", mentionUserId))
 	} else {
-		zap.L().Warn("notify ai review: no team member for @mention",
+		zap.L().Warn("notify ai review: no user for @mention",
 			zap.String("gitlab_username", task.MRAuthor))
 	}
 
@@ -260,10 +260,10 @@ func buildMessageFromRule(trigger string, fallbackTemplate string, task *model.T
 
 	// 查询开发人员展示名映射
 	developer := task.MRAuthor
-	var tm model.TeamMember
+	var user model.User
 	if err := model.DB.Where("gitlab_username = ? AND enabled = ?", task.MRAuthor, true).
-		First(&tm).Error; err == nil && tm.DisplayName != "" {
-		developer = task.MRAuthor + "(" + tm.DisplayName + ")"
+		First(&user).Error; err == nil && user.DisplayName != "" {
+		developer = task.MRAuthor + "(" + user.DisplayName + ")"
 	}
 
 	// 获取 ReviewLog 的代码变更量
@@ -281,17 +281,17 @@ func buildMessageFromRule(trigger string, fallbackTemplate string, task *model.T
 
 	stats := CalcIssueStats(task.ID, task.MRMergeID)
 
-	// 查询项目默认负责人（用于 {{STEWARD_NAME}}）
+	// 查询项目默认负责人（用于 {{STEWARD_NAME}}），过滤已禁用用户
 	var stewardName string
 	var resp model.ProjectResponsibility
-	if err := model.DB.Preload("Member").Where("project_id = ? AND scope_type = 'default'", task.ProjectID).
-		Order("priority ASC, created_at ASC").First(&resp).Error; err == nil && resp.MemberID > 0 && resp.Member.ID > 0 {
-		stewardName = resp.Member.DisplayName
+	if err := model.DB.Preload("User").Where("project_id = ? AND scope_type = 'default' AND scope_value = ''", task.ProjectID).
+		Order("priority ASC, created_at ASC").First(&resp).Error; err == nil && resp.UserID > 0 && resp.User.ID > 0 && resp.User.Enabled {
+		stewardName = resp.User.DisplayName
 		if stewardName == "" {
-			stewardName = resp.Member.Username
+			stewardName = resp.User.Username
 		}
 		if stewardName == "" {
-			stewardName = resp.Member.GitlabUsername
+			stewardName = resp.User.GitlabUsername
 		}
 	}
 

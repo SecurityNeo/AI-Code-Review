@@ -349,7 +349,7 @@
         createChangePasswordModal();
         // 若当前在通知管理子页面，自动展开通知管理菜单
         const path = window.location.pathname;
-        if (path === '/notifiers.html' || path === '/mail.html' || path === '/staff-management.html' || path === '/report.html') {
+        if (path === '/notifiers.html' || path === '/mail.html' || path === '/report.html') {
             const menu = document.getElementById('notifyMenu');
             const icon = document.getElementById('notifyMenuIcon');
             if (menu) menu.classList.remove('hidden');

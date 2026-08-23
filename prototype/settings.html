@@ -461,6 +461,8 @@
                                     <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">显示名</th>
                                     <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">角色</th>
                                     <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">登录类型</th>
+                                    <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">职责</th>
+                                    <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">状态</th>
                                     <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">创建时间</th>
                                     <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">操作</th>
                                 </tr>
@@ -705,6 +707,9 @@
 
     <script>
         const API_BASE = '/api/v1';
+        let currentDutyUserId = null;
+        let allProjectsForDuty = [];
+        let editingDutyId = null;
         let currentLogsPage = 1;
         let logsPageSize = 10;
         let logsTotal = 0;
@@ -875,7 +880,7 @@
 
         async function loadAlertMentionUsers(selectedIds) {
             try {
-                const res = await apiFetch(`${API_BASE}/team-members?page=1&page_size=100`);
+                const res = await apiFetch(`${API_BASE}/users?page=1&page_size=100`);
                 const json = await res.json();
                 const container = document.getElementById('alertMentionUsers');
                 if (!container) return;
@@ -1271,7 +1276,7 @@ function previewTemplate() {
         function renderUsers(users) {
             const tbody = document.getElementById('usersBody');
             if (users.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">暂无数据</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-500">暂无数据</td></tr>';
                 return;
             }
             const roleMap = { admin: '管理员', user: '普通用户' };
@@ -1282,10 +1287,13 @@ function previewTemplate() {
                     <td class="px-4 py-3 text-gray-600">${escapeHtml(u.display_name || '-')}</td>
                     <td class="px-4 py-3"><span class="${u.role === 'admin' ? 'bg-purple-50 text-purple-600' : 'bg-gray-50 text-gray-600'} px-2 py-0.5 rounded text-xs">${roleMap[u.role] || u.role}</span></td>
                     <td class="px-4 py-3"><span class="bg-blue-50 text-blue-600 px-2 py-0.5 rounded text-xs">${loginTypeMap[u.login_type] || u.login_type}</span></td>
+                    <td class="px-4 py-3"><span class="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-xs font-mono">${u.responsibility_count !== undefined ? u.responsibility_count : '-'}</span></td>
+                    <td class="px-4 py-3"><span class="${u.enabled === false ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'} px-2 py-0.5 rounded text-xs">${u.enabled === false ? '禁用' : '启用'}</span></td>
                     <td class="px-4 py-3 text-gray-500">${formatDate(u.created_at)}</td>
                     <td class="px-4 py-3">
                         <div class="flex items-center gap-3">
                             <button onclick="openEditUserModal(${u.id}, '${escapeHtml(u.display_name || '')}', '${u.role}')" class="text-blue-600 hover:text-blue-800 text-xs font-medium" title="编辑">编辑</button>
+                            <button onclick="openDutyDrawer(${u.id}, '${escapeHtml(u.display_name || u.username)}', '${escapeHtml(u.username)}', '${u.role}', '${escapeHtml(u.im_platform || '')}', '${escapeHtml(u.im_user_id || '')}')" class="text-teal-600 hover:text-teal-800 text-xs font-medium" title="职责">职责</button>
                             ${u.login_type !== 'gitlab' ? `<button onclick="openResetPasswordModal(${u.id}, '${escapeHtml(u.username)}')" class="text-orange-600 hover:text-orange-800 text-xs font-medium" title="重置密码">重置密码</button>` : ''}
                             ${u.role !== 'admin' ? `<button onclick="deleteUser(${u.id}, '${escapeHtml(u.username)}')" class="text-red-600 hover:text-red-800 text-xs font-medium" title="删除">删除</button>` : ''}
                         </div>
@@ -1668,10 +1676,328 @@ function previewTemplate() {
             } catch (e) { alert('删除失败: ' + e.message); }
         }
 
+        // ========== 职责分配 Drawer ==========
+        function openDutyDrawer(userId, displayName, username, role, imPlatform, imUserId) {
+            currentDutyUserId = userId;
+            document.getElementById('dutyDrawerSubtitle').textContent = displayName || username || '';
+            loadDutyUserInfo(username, role, imPlatform, imUserId);
+
+            // 重置表单
+            document.getElementById('dutyProject').value = '';
+            document.getElementById('dutyScopeType').value = 'default';
+            document.getElementById('dutyScopeValue').value = '';
+            document.getElementById('dutyScopeValue').disabled = true;
+            document.getElementById('dutyScopeValue').classList.add('bg-gray-50', 'text-gray-400');
+            document.getElementById('dutyPriority').value = '1';
+
+            // 显示 drawer
+            const overlay = document.getElementById('dutyOverlay');
+            const drawer = document.getElementById('dutyDrawer');
+            overlay.classList.remove('hidden');
+            setTimeout(() => { overlay.classList.remove('opacity-0'); }, 10);
+            drawer.classList.remove('translate-x-full');
+
+            // 加载数据
+            loadDutyProjects();
+            loadUserDuties(userId);
+        }
+
+        function closeDutyDrawer() {
+            const overlay = document.getElementById('dutyOverlay');
+            const drawer = document.getElementById('dutyDrawer');
+            overlay.classList.add('opacity-0');
+            drawer.classList.add('translate-x-full');
+            setTimeout(() => { overlay.classList.add('hidden'); }, 200);
+            currentDutyUserId = null;
+            resetDutyForm();
+        }
+
+        function loadDutyUserInfo(username, role, imPlatform, imUserId) {
+            const metaParts = [];
+            if (username) metaParts.push('用户名: ' + escapeHtml(username));
+            if (role) metaParts.push('角色: ' + (role === 'admin' ? '管理员' : '普通用户'));
+            document.getElementById('dutyUserMeta').textContent = metaParts.join('  |  ') || '-';
+
+            const imParts = [];
+            if (imPlatform) imParts.push(imPlatform);
+            if (imUserId) imParts.push(imUserId);
+            document.getElementById('dutyUserIM').textContent = imParts.length ? 'IM: ' + imParts.join(' / ') : '未配置 IM';
+        }
+
+        async function loadDutyProjects() {
+            try {
+                const res = await apiFetch(`${API_BASE}/projects?page=1&page_size=1000`);
+                const json = await res.json();
+                allProjectsForDuty = json.data || [];
+                const sel = document.getElementById('dutyProject');
+                sel.innerHTML = '<option value="">选择项目...</option>' +
+                    allProjectsForDuty.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+            } catch (e) {
+                console.error('加载项目列表失败:', e);
+            }
+        }
+
+        async function loadUserDuties(userId) {
+            const listEl = document.getElementById('dutyList');
+            const badge = document.getElementById('dutyCountBadge');
+            if (!userId) {
+                listEl.innerHTML = '<p class="text-sm text-gray-400 py-4 text-center">暂无项目职责</p>';
+                badge.textContent = '0';
+                return;
+            }
+            try {
+                const res = await apiFetch(`${API_BASE}/users/${userId}/responsibilities`);
+                const json = await res.json();
+                const duties = json.data || [];
+                badge.textContent = duties.length;
+
+                if (duties.length === 0) {
+                    listEl.innerHTML = '<p class="text-sm text-gray-400 py-4 text-center">暂无项目职责</p>';
+                    return;
+                }
+
+                const typeLabels = { default: '默认', rule_category: '规则分类', language: '语言' };
+                const typeColors = { default: 'gray', rule_category: 'blue', language: 'green' };
+                const priorityLabels = {0: '首要', 1: '首要', 2: '第二', 3: '第三'};
+
+                listEl.innerHTML = duties.map(d => {
+                    const typeLabel = typeLabels[d.scope_type] || d.scope_type || '-';
+                    const typeColor = typeColors[d.scope_type] || 'gray';
+                    const priorityLabel = priorityLabels[d.priority] || '首要';
+                    const scopeValue = d.scope_value ? ' / ' + escapeHtml(d.scope_value) : '';
+                    const projectName = escapeHtml(d.project_name || '项目#' + d.project_id);
+
+                    return `<div class="flex items-center justify-between bg-white rounded-lg px-4 py-3 border border-gray-200 hover:border-gray-300 transition-colors">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                                <i class="fas fa-folder text-blue-500 text-xs"></i>
+                            </div>
+                            <div>
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <span class="font-medium text-sm text-gray-800">${projectName}</span>
+                                    <span class="bg-${typeColor}-50 text-${typeColor}-600 px-1.5 py-0.5 rounded text-xs border border-${typeColor}-100">${typeLabel}${scopeValue}</span>
+                                    <span class="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded text-xs border border-blue-200">${priorityLabel}</span>
+                                </div>
+                                <div class="text-xs text-gray-400 mt-0.5">项目ID: #${d.project_id}</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-1">
+                            <button onclick="startEditDuty(${d.id}, ${d.project_id}, '${d.scope_type}', '${(d.scope_value || '').replace(/'/g, "\\'")}', ${d.priority})" class="w-7 h-7 flex items-center justify-center rounded hover:bg-blue-50 text-gray-300 hover:text-blue-500 transition-colors" title="编辑">
+                                <i class="fas fa-pen text-xs"></i>
+                            </button>
+                            <button onclick="deleteDuty(${d.id})" class="w-7 h-7 flex items-center justify-center rounded hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors" title="移除职责">
+                                <i class="fas fa-trash-alt text-xs"></i>
+                            </button>
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch (e) {
+                console.error('加载职责列表失败:', e);
+                listEl.innerHTML = '<p class="text-sm text-red-400 py-4 text-center">加载失败</p>';
+                badge.textContent = '0';
+            }
+        }
+
+        function onDutyScopeChange() {
+            const scopeType = document.getElementById('dutyScopeType').value;
+            const scopeValueInput = document.getElementById('dutyScopeValue');
+            if (scopeType === 'default') {
+                scopeValueInput.value = '';
+                scopeValueInput.disabled = true;
+                scopeValueInput.classList.add('bg-gray-50', 'text-gray-400');
+                scopeValueInput.placeholder = '留空表示匹配所有';
+            } else {
+                scopeValueInput.disabled = false;
+                scopeValueInput.classList.remove('bg-gray-50', 'text-gray-400');
+                scopeValueInput.placeholder = scopeType === 'language' ? '例如：golang、python、java' : '例如：security、performance';
+            }
+        }
+
+        function startEditDuty(id, projectId, scopeType, scopeValue, priority) {
+            editingDutyId = id;
+            document.getElementById('dutyProject').value = projectId;
+            document.getElementById('dutyScopeType').value = scopeType;
+            onDutyScopeChange();
+            document.getElementById('dutyScopeValue').value = scopeValue || '';
+            document.getElementById('dutyPriority').value = String(priority);
+            document.getElementById('dutyProject').disabled = true;
+            document.getElementById('dutyScopeType').disabled = true;
+            document.getElementById('dutyScopeValue').disabled = true;
+            const submitBtn = document.querySelector('#dutyDrawer button[onclick="addDuty()"]');
+            if (submitBtn) {
+                submitBtn.innerHTML = '<i class="fas fa-save text-xs"></i>保存修改';
+                submitBtn.classList.remove('bg-teal-600', 'hover:bg-teal-700');
+                submitBtn.classList.add('bg-blue-600', 'hover:bg-blue-700');
+            }
+        }
+
+        function resetDutyForm() {
+            editingDutyId = null;
+            document.getElementById('dutyProject').value = '';
+            document.getElementById('dutyScopeType').value = 'default';
+            onDutyScopeChange();
+            document.getElementById('dutyPriority').value = '1';
+            document.getElementById('dutyProject').disabled = false;
+            document.getElementById('dutyScopeType').disabled = false;
+            const submitBtn = document.querySelector('#dutyDrawer button[onclick="addDuty()"]');
+            if (submitBtn) {
+                submitBtn.innerHTML = '<i class="fas fa-plus text-xs"></i>添加职责';
+                submitBtn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+                submitBtn.classList.add('bg-teal-600', 'hover:bg-teal-700');
+            }
+        }
+
+        async function addDuty() {
+            if (!currentDutyUserId) return;
+
+            const projectId = document.getElementById('dutyProject').value;
+            const scopeType = document.getElementById('dutyScopeType').value;
+            const scopeValue = document.getElementById('dutyScopeValue').value.trim();
+            const priority = parseInt(document.getElementById('dutyPriority').value) || 1;
+
+            if (!projectId) { showToast('请选择项目', 'error'); return; }
+
+            const data = {
+                scope_type: scopeType,
+                scope_value: scopeType === 'default' ? '' : scopeValue,
+                priority: priority
+            };
+
+            try {
+                let res;
+                if (editingDutyId) {
+                    // 编辑模式：调用 PUT /users/responsibilities/:rid
+                    res = await apiFetch(`${API_BASE}/users/responsibilities/${editingDutyId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                } else {
+                    // 新增模式：调用 POST /users/:id/responsibilities
+                    data.project_id = parseInt(projectId);
+                    res = await apiFetch(`${API_BASE}/users/${currentDutyUserId}/responsibilities`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                }
+                const result = await res.json();
+                if (!res.ok) { showToast(result.error || (editingDutyId ? '修改失败' : '添加失败'), 'error'); return; }
+                showToast(result.message || (editingDutyId ? '修改成功' : '添加成功'), 'success');
+                resetDutyForm();
+                loadUserDuties(currentDutyUserId);
+                loadUsers();
+            } catch (e) {
+                showToast((editingDutyId ? '修改' : '添加') + '失败: ' + e.message, 'error');
+            }
+        }
+
+        async function deleteDuty(respId) {
+            if (!confirm('确定移除该职责？')) return;
+            try {
+                const res = await apiFetch(`${API_BASE}/users/responsibilities/${respId}`, { method: 'DELETE' });
+                const result = await res.json();
+                if (!res.ok) { showToast(result.error || '移除失败', 'error'); return; }
+                showToast(result.message || '已移除', 'success');
+                if (currentDutyUserId) loadUserDuties(currentDutyUserId);
+                loadUsers(); // 刷新用户列表中的职责数量
+            } catch (e) {
+                showToast('移除失败: ' + e.message, 'error');
+            }
+        }
+
+        // ESC 键关闭 Drawer
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeDutyDrawer();
+        });
+
         // 页面加载时根据 query 参数初始化
         initTabFromHash();
         renderSidebar(getSettingsActiveId());
     </script>
+
+    <!-- 职责分配 Drawer -->
+    <div id="dutyOverlay" onclick="closeDutyDrawer()" class="fixed inset-0 bg-black/50 z-40 hidden transition-opacity opacity-0" style="transition-duration: 200ms;"></div>
+    <div id="dutyDrawer" class="fixed right-0 top-0 h-full w-full max-w-lg bg-white shadow-2xl z-50 transform translate-x-full transition-transform" style="transition-duration: 300ms; will-change: transform;">
+        <div class="flex flex-col h-full">
+            <!-- 头部 -->
+            <div class="flex items-center justify-between px-6 py-4 border-b bg-gray-50">
+                <div>
+                    <h3 class="text-base font-semibold text-gray-800">分配项目职责</h3>
+                    <p id="dutyDrawerSubtitle" class="text-xs text-gray-500 mt-0.5"></p>
+                </div>
+                <button onclick="closeDutyDrawer()" class="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-200">
+                    <i class="fas fa-times text-sm"></i>
+                </button>
+            </div>
+
+            <!-- 内容区 -->
+            <div class="flex-1 overflow-y-auto p-6 space-y-6">
+                <!-- 用户信息摘要 -->
+                <div class="bg-slate-50 rounded-lg p-4 border space-y-1 text-sm">
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-user text-slate-400 text-xs"></i>
+                        <span id="dutyUserMeta" class="text-slate-700 font-medium"></span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-comment text-slate-400 text-xs"></i>
+                        <span id="dutyUserIM" class="text-slate-500"></span>
+                    </div>
+                </div>
+
+                <!-- 新增职责表单 -->
+                <div class="border rounded-lg p-4 space-y-3">
+                    <h4 class="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                        <i class="fas fa-plus-circle text-teal-500 text-xs"></i>添加新职责
+                    </h4>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700 mb-1">项目 <span class="text-red-500">*</span></label>
+                            <select id="dutyProject" class="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-500">
+                                <option value="">选择项目...</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700 mb-1">职责类型 <span class="text-red-500">*</span></label>
+                            <select id="dutyScopeType" onchange="onDutyScopeChange()" class="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-500">
+                                <option value="default">默认</option>
+                                <option value="language">语言</option>
+                                <option value="rule_category">规则分类</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-700 mb-1">范围值</label>
+                        <input id="dutyScopeValue" type="text" placeholder="留空表示匹配所有" disabled class="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50 text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-60" />
+                        <p class="text-xs text-gray-400 mt-1">仅当职责类型为「语言」或「规则分类」时填写</p>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-700 mb-1">优先级 <span class="text-red-500">*</span></label>
+                        <select id="dutyPriority" class="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-500">
+                            <option value="1">首要责任人（优先级 1）</option>
+                            <option value="2">第二责任人（优先级 2）</option>
+                            <option value="3">第三责任人（优先级 3）</option>
+                        </select>
+                    </div>
+                    <button onclick="addDuty()" class="w-full bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium py-2 rounded-lg transition-colors flex items-center justify-center gap-2">
+                        <i class="fas fa-plus text-xs"></i>添加职责
+                    </button>
+                </div>
+
+                <!-- 现有职责列表 -->
+                <div>
+                    <h4 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                        <i class="fas fa-list text-slate-500 text-xs"></i>现有职责
+                        <span id="dutyCountBadge" class="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-xs font-mono">0</span>
+                    </h4>
+                    <div id="dutyList" class="space-y-2">
+                        <p class="text-sm text-gray-400 py-4 text-center">暂无项目职责</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script defer src="/static/js/tailwindcss.min.js"></script>
 </body>
 </html>

@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script src="js/theme.js?v=1"></script>
+    <style>html{background-color:#1e293b;}</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP 调用日志 - CodeGuard</title>
+    <script src="js/auth.js?v=6"></script>
+    <script src="js/menu-config.js?v=7"></script>
+    <script src="js/sidebar.js?v=6"></script>
+    <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="css/theme.css?v=1">
+    <script src="/static/js/tailwindcss.min.js"></script>
+    <style>
+        :root { --bg-page:#f8fafc; --card-bg:#fff; --text-primary:#1e293b; --text-secondary:#475569; --border-color:#e2e8f0; --accent:#3b82f6; }
+        .page-container { padding:1.25rem 1.75rem; }
+        .page-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.25rem; }
+        .page-title { font-size:1.1rem; font-weight:700; }
+        .data-table { width:100%; border-collapse:separate; border-spacing:0; background:var(--card-bg); border-radius:0.625rem; border:1px solid var(--border-color); overflow:hidden; }
+        .data-table th { padding:0.55rem 0.875rem; font-size:0.75rem; font-weight:600; text-transform:uppercase; color:#64748b; text-align:left; border-bottom:1px solid var(--border-color); }
+        .data-table td { padding:0.55rem 0.875rem; font-size:0.8125rem; color:var(--text-secondary); border-bottom:1px solid #f1f5f9; vertical-align:top; }
+        .data-table tbody tr:hover { background:#f8fafc; }
+        .badge-success { display:inline-flex; align-items:center; gap:0.25rem; padding:0.1rem 0.4rem; border-radius:999px; font-size:0.7rem; font-weight:500; background:#dcfce7; color:#166534; }
+        .badge-danger { display:inline-flex; align-items:center; gap:0.25rem; padding:0.1rem 0.4rem; border-radius:999px; font-size:0.7rem; font-weight:500; background:#fee2e2; color:#991b1b; }
+        .toolbar { display:flex; align-items:center; gap:0.625rem; margin-bottom:1rem; background:var(--card-bg); padding:0.5rem 0.75rem; border-radius:0.625rem; border:1px solid var(--border-color); flex-wrap:wrap; }
+        .toolbar input, .toolbar select { padding:0.4rem 0.6rem; border:1px solid var(--border-color); border-radius:0.375rem; font-size:0.8125rem; }
+        .pagination { display:flex; align-items:center; justify-content:center; gap:0.5rem; margin-top:1rem; }
+        .pagination button { padding:0.35rem 0.75rem; border:1px solid var(--border-color); border-radius:0.375rem; background:#fff; font-size:0.8125rem; cursor:pointer; }
+        .pagination button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+        .detail-row { background:#f8fafc !important; }
+        .detail-cell { padding:0.75rem 1rem !important; }
+        .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; font-size:0.75rem; }
+        .detail-grid .label { color:#64748b; }
+        .detail-grid .value { color:var(--text-primary); font-family:monospace; word-break:break-all; }
+        .json-box { background:#1e293b; color:#e2e8f0; padding:0.5rem; border-radius:0.375rem; font-family:monospace; font-size:0.75rem; max-height:120px; overflow:auto; white-space:pre-wrap; word-break:break-all; }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans">
+
+<div id="page-transition" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#1e293b;z-index:99999;transition:opacity .25s ease;"></div>
+<script>
+(function(){
+  function hide(){var el=document.getElementById('page-transition');if(el){el.style.opacity='0';setTimeout(function(){el.remove();},250);}}
+  if(document.readyState==='complete'){hide();}else{window.addEventListener('load',hide);}
+})();
+</script>
+
+<div class="flex h-screen">
+    <aside id="sidebar" class="w-64 bg-slate-900 text-white flex-shrink-0 flex flex-col">
+        <nav style="padding:20px; text-align:center; color:#94a3b8; font-size:13px;">加载中...</nav>
+    </aside>
+    <main class="flex-1 overflow-y-auto">
+        <div class="page-container">
+            <div class="page-header">
+                <div>
+                    <div class="page-title"><i class="fas fa-clipboard-list text-blue-600 mr-2"></i>MCP 调用审计日志</div>
+                    <div style="font-size:0.8125rem; color:#64748b; margin-top:0.15rem;">查看第三方智能体调用 CodeGuard 的详细记录</div>
+                </div>
+            </div>
+
+            <div class="toolbar">
+                <input type="text" id="filterTool" placeholder="Tool 名称" onchange="loadLogs()">
+                <input type="text" id="filterIMUser" placeholder="IM 用户 ID" onchange="loadLogs()">
+                <select id="filterStatus" onchange="loadLogs()">
+                    <option value="">全部状态</option>
+                    <option value="success">成功</option>
+                    <option value="error">失败</option>
+                </select>
+                <input type="datetime-local" id="filterStart" onchange="loadLogs()">
+                <input type="datetime-local" id="filterEnd" onchange="loadLogs()">
+                <button onclick="loadLogs()" style="padding:0.4rem 0.75rem; background:var(--accent); color:#fff; border:none; border-radius:0.375rem; font-size:0.8125rem; cursor:pointer;">
+                    <i class="fas fa-search mr-1"></i>查询
+                </button>
+                <div style="margin-left:auto;">
+                    <button onclick="loadLogs()" class="px-3 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200 transition">
+                        <i class="fas fa-redo mr-1"></i>刷新
+                    </button>
+                </div>
+            </div>
+
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width:60px;">ID</th>
+                        <th>时间</th>
+                        <th>密钥</th>
+                        <th>IM 用户</th>
+                        <th>Method / Tool</th>
+                        <th>状态</th>
+                        <th>耗时</th>
+                        <th style="width:50px;"></th>
+                    </tr>
+                </thead>
+                <tbody id="logTableBody">
+                    <tr><td colspan="8" style="text-align:center; padding:2rem; color:#94a3b8;">加载中...</td></tr>
+                </tbody>
+            </table>
+
+            <!-- 分页区域（参考项目列表页风格） -->
+            <div class="px-6 py-4 border-t flex items-center justify-between" style="background:var(--card-bg); border:1px solid var(--border-color); border-top:none; border-radius:0 0 0.625rem 0.625rem;">
+                <span id="totalCount" class="text-sm text-gray-500">共 0 条记录</span>
+                <div class="flex items-center gap-4">
+                    <select id="pageSizeSelect" onchange="changePageSize()" class="px-2 py-1 border rounded text-sm">
+                        <option value="10">10条/页</option>
+                        <option value="20" selected>20条/页</option>
+                        <option value="50">50条/页</option>
+                    </select>
+                    <div id="pagination" class="flex gap-2"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script>
+const API_BASE = '/api/v1';
+let currentPage = 1;
+let pageSize = 20;
+let expandedRows = new Set();
+
+async function loadLogs() {
+    try {
+        const params = new URLSearchParams();
+        params.set('page', currentPage);
+        params.set('page_size', pageSize);
+        const tool = document.getElementById('filterTool').value;
+        const imUser = document.getElementById('filterIMUser').value;
+        const status = document.getElementById('filterStatus').value;
+        const start = document.getElementById('filterStart').value;
+        const end = document.getElementById('filterEnd').value;
+        if (tool) params.set('tool_name', tool);
+        if (imUser) params.set('im_user_id', imUser);
+        if (status) params.set('status', status);
+        if (start) params.set('start_time', start);
+        if (end) params.set('end_time', end);
+
+        const res = await apiFetch(`${API_BASE}/mcp/logs?${params}`);
+        const json = await res.json();
+        const logs = json.data || [];
+        const total = json.total || 0;
+
+        const tbody = document.getElementById('logTableBody');
+        if (logs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:2rem; color:#94a3b8;">暂无数据</td></tr>';
+        } else {
+            let html = '';
+            logs.forEach(log => {
+                const statusBadge = log.status === 'success'
+                    ? '<span class="badge-success"><i class="fas fa-check" style="font-size:0.6rem;"></i>成功</span>'
+                    : '<span class="badge-danger"><i class="fas fa-times" style="font-size:0.6rem;"></i>失败</span>';
+                const timeStr = new Date(log.created_at).toLocaleString('zh-CN');
+                const methodTool = log.tool_name ? `${log.method} / ${log.tool_name}` : log.method;
+                const isExpanded = expandedRows.has(log.id);
+
+                html += `
+                    <tr style="cursor:pointer;" onclick="toggleDetail(${log.id})">
+                        <td>${log.id}</td>
+                        <td style="font-size:0.75rem; white-space:nowrap;">${timeStr}</td>
+                        <td>${escapeHtml(log.api_key_name || '-')}</td>
+                        <td><code style="background:#f1f5f9; padding:0.1rem 0.3rem; border-radius:0.25rem; font-size:0.75rem;">${escapeHtml(log.im_user_id)}</code></td>
+                        <td style="font-size:0.75rem;">${escapeHtml(methodTool)}</td>
+                        <td>${statusBadge}</td>
+                        <td style="font-size:0.75rem;">${log.duration_ms}ms</td>
+                        <td style="text-align:center;"><i class="fas fa-chevron-${isExpanded ? 'up' : 'down'}" style="color:#94a3b8; font-size:0.7rem;"></i></td>
+                    </tr>
+                `;
+
+                if (isExpanded) {
+                    html += `
+                        <tr class="detail-row">
+                            <td colspan="8" class="detail-cell">
+                                <div class="detail-grid">
+                                    <div><span class="label">User ID:</span> <span class="value">${log.user_id || '-'}</span></div>
+                                    <div><span class="label">Provider:</span> <span class="value">${escapeHtml(log.im_provider)}</span></div>
+                                    <div><span class="label">Client IP:</span> <span class="value">${escapeHtml(log.client_ip)}</span></div>
+                                    <div><span class="label">Response Size:</span> <span class="value">${log.response_size || 0} bytes</span></div>
+                                </div>
+                                <div style="margin-top:0.5rem;">
+                                    <div style="font-size:0.7rem; color:#64748b; margin-bottom:0.25rem;">请求参数:</div>
+                                    <div class="json-box">${escapeHtml(formatJSON(log.params))}</div>
+                                </div>
+                                ${log.error_msg ? `
+                                <div style="margin-top:0.5rem;">
+                                    <div style="font-size:0.7rem; color:#991b1b; margin-bottom:0.25rem;">错误信息:</div>
+                                    <div class="json-box" style="background:#450a0a;">${escapeHtml(log.error_msg)}</div>
+                                </div>
+                                ` : ''}
+                            </td>
+                        </tr>
+                    `;
+                }
+            });
+            tbody.innerHTML = html;
+        }
+        renderPagination(total, currentPage);
+    } catch (err) {
+        console.error('load logs failed', err);
+        document.getElementById('logTableBody').innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:#ef4444;">加载失败: ${err.message}</td></tr>`;
+    }
+}
+
+function toggleDetail(id) {
+    if (expandedRows.has(id)) {
+        expandedRows.delete(id);
+    } else {
+        expandedRows.add(id);
+    }
+    loadLogs();
+}
+
+function renderPagination(total, page) {
+    const pagination = document.getElementById('pagination');
+    if (!pagination) return;
+
+    const totalText = document.getElementById('totalCount');
+    if (totalText) totalText.textContent = `共 ${total} 条记录`;
+
+    const totalPages = Math.ceil(total / pageSize);
+    const pages = totalPages;
+    if (pages <= 1) {
+        pagination.innerHTML = '';
+        return;
+    }
+
+    let html = '';
+    // 上一页
+    html += `<button class="px-3 py-1 border rounded text-sm ${page <= 1 ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-50'}" ${page <= 1 ? 'disabled' : ''} onclick="goPage(${page - 1})">上一页</button>`;
+
+    // 首页
+    if (page > 3) {
+        html += `<button class="px-3 py-1 border rounded text-sm text-gray-500 hover:bg-gray-50" onclick="goPage(1)">1</button>`;
+        if (page > 4) {
+            html += `<span class="px-2 py-1 text-gray-400">...</span>`;
+        }
+    }
+
+    // 中间页码（以当前页为中心，最多5个）
+    let start = Math.max(1, page - 2);
+    let end = Math.min(pages, page + 2);
+    if (end - start < 4) {
+        if (start === 1) {
+            end = Math.min(pages, start + 4);
+        } else if (end === pages) {
+            start = Math.max(1, end - 4);
+        }
+    }
+    for (let i = start; i <= end; i++) {
+        html += `<button class="px-3 py-1 border rounded text-sm ${i === page ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}" onclick="goPage(${i})">${i}</button>`;
+    }
+
+    // 尾页
+    if (page < pages - 2) {
+        if (page < pages - 3) {
+            html += `<span class="px-2 py-1 text-gray-400">...</span>`;
+        }
+        html += `<button class="px-3 py-1 border rounded text-sm text-gray-500 hover:bg-gray-50" onclick="goPage(${pages})">${pages}</button>`;
+    }
+
+    // 下一页
+    html += `<button class="px-3 py-1 border rounded text-sm ${page >= pages ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-50'}" ${page >= pages ? 'disabled' : ''} onclick="goPage(${page + 1})">下一页</button>`;
+
+    pagination.innerHTML = html;
+}
+
+function changePageSize() {
+    pageSize = parseInt(document.getElementById('pageSizeSelect').value) || 20;
+    currentPage = 1;
+    loadLogs();
+}
+
+function goPage(p) { if (p < 1) return; currentPage = p; loadLogs(); }
+function escapeHtml(text) { if (!text) return ''; const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
+function formatJSON(str) { try { return JSON.stringify(JSON.parse(str), null, 2); } catch(e) { return str || '{}'; } }
+
+loadLogs();
+</script>
+
+</body>
+</html>

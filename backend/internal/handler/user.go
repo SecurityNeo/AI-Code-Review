@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -118,6 +119,9 @@ func (h *UserHandler) GetCurrentUser(c *gin.Context) {
 			"login_type":      user.LoginType,
 			"gitlab_username": user.GitlabUsername,
 			"gitlab_email":    user.GitlabEmail,
+			"im_platform":     user.IMPlatform,
+			"im_user_id":      user.IMUserID,
+			"enabled":         user.Enabled,
 			"avatar_url":      user.AvatarURL,
 		},
 	})
@@ -146,19 +150,45 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 		return
 	}
 
+	// 批量查询职责数量
+	respCounts := make(map[uint]int64)
+	if len(users) > 0 {
+		userIDs := make([]uint, len(users))
+		for i, u := range users {
+			userIDs[i] = u.ID
+		}
+		type result struct {
+			UserID uint  `gorm:"column:user_id"`
+			Count  int64 `gorm:"column:count"`
+		}
+		var results []result
+		model.DB.Model(&model.ProjectResponsibility{}).
+			Select("user_id, COUNT(*) as count").
+			Where("user_id IN ?", userIDs).
+			Group("user_id").
+			Scan(&results)
+		for _, r := range results {
+			respCounts[r.UserID] = r.Count
+		}
+	}
+
 	// 不返回密码字段
 	list := make([]gin.H, 0, len(users))
 	for _, u := range users {
 		list = append(list, gin.H{
-			"id":              u.ID,
-			"username":        u.Username,
-			"display_name":    u.DisplayName,
-			"role":            u.Role,
-			"login_type":      u.LoginType,
-			"gitlab_username": u.GitlabUsername,
-			"gitlab_email":    u.GitlabEmail,
-			"avatar_url":      u.AvatarURL,
-			"created_at":      u.CreatedAt,
+			"id":                   u.ID,
+			"username":             u.Username,
+			"display_name":         u.DisplayName,
+			"role":                 u.Role,
+			"login_type":           u.LoginType,
+			"gitlab_username":      u.GitlabUsername,
+			"gitlab_email":         u.GitlabEmail,
+			"im_platform":          u.IMPlatform,
+			"im_user_id":           u.IMUserID,
+			"enabled":              u.Enabled,
+			"responsibility_count": respCounts[u.ID],
+			"avatar_url":           u.AvatarURL,
+			"created_at":           u.CreatedAt,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": list, "total": total, "page": page, "page_size": pageSize})
@@ -278,4 +308,119 @@ func (h *UserHandler) ResetPassword(c *gin.Context) {
 
 	model.RecordOpLog("重置密码", "用户ID:"+c.Param("id"), uint(id), currentUserID.(uint), "success", "", c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{"message": "密码已重置"})
+}
+
+// GetUserResponsibilities 获取用户的项目职责列表（基于 user_id）。
+// GET /api/v1/users/:id/responsibilities
+func (h *UserHandler) GetUserResponsibilities(c *gin.Context) {
+	userID, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的用户ID"})
+		return
+	}
+
+	var user model.User
+	if err := model.DB.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
+		return
+	}
+
+	list, err := service.NewTeamMemberService().ListResponsibilitiesByUser(user.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": responsibilitiesToViews(list)})
+}
+
+// AddUserResponsibility 为用户添加项目职责（基于 user_id）。
+// POST /api/v1/users/:id/responsibilities
+func (h *UserHandler) AddUserResponsibility(c *gin.Context) {
+	userID, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的用户ID"})
+		return
+	}
+
+	var user model.User
+	if err := model.DB.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
+		return
+	}
+
+	var data map[string]interface{}
+	if err := c.ShouldBindJSON(&data); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	resp, err := service.NewTeamMemberService().AddResponsibilityByUser(user.ID, data)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	currentUserID, exists := c.Get("user_id")
+	if exists {
+		model.RecordOpLog("添加用户职责",
+			fmt.Sprintf("用户ID:%d 职责ID:%d", userID, resp.ID),
+			uint(userID), currentUserID.(uint), "success", "", c.ClientIP())
+	}
+	c.JSON(http.StatusOK, gin.H{"data": toResponsibilityView(*resp)})
+}
+
+// UpdateUserResponsibility 更新用户的项目职责（基于 responsibility id）。
+// PUT /api/v1/users/responsibilities/:rid
+func (h *UserHandler) UpdateUserResponsibility(c *gin.Context) {
+	rid, err := strconv.Atoi(c.Param("rid"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的职责ID"})
+		return
+	}
+
+	var data map[string]interface{}
+	if err := c.ShouldBindJSON(&data); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := service.NewTeamMemberService().UpdateResponsibility(uint(rid), data); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	currentUserID, exists := c.Get("user_id")
+	if exists {
+		model.RecordOpLog("更新用户职责", fmt.Sprintf("职责ID:%d", rid), 0, currentUserID.(uint), "success", "", c.ClientIP())
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "updated"})
+}
+
+// DeleteUserResponsibility 删除用户的项目职责（基于 user_id）。
+// DELETE /api/v1/users/responsibilities/:rid
+func (h *UserHandler) DeleteUserResponsibility(c *gin.Context) {
+	rid, err := strconv.Atoi(c.Param("rid"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的职责ID"})
+		return
+	}
+
+	if err := service.NewTeamMemberService().DeleteResponsibility(uint(rid)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	currentUserID, exists := c.Get("user_id")
+	if exists {
+		model.RecordOpLog("删除用户职责", fmt.Sprintf("职责ID:%d", rid), 0, currentUserID.(uint), "success", "", c.ClientIP())
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+}
+
+func responsibilitiesToViews(list []model.ProjectResponsibility) []ResponsibilityView {
+	views := make([]ResponsibilityView, len(list))
+	for i, r := range list {
+		views[i] = toResponsibilityView(r)
+	}
+	return views
 }

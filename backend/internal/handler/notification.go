@@ -207,10 +207,8 @@ func (h *NotificationHandler) ProjectOwnerDashboard(c *gin.Context) {
 	} else {
 		// 普通用户：只返回自己负责的项目
 		var responsibilities []model.ProjectResponsibility
-		if user.GitlabUsername != "" {
-			model.DB.Joins("INNER JOIN team_members ON team_members.id = project_responsibilities.member_id").
-				Where("team_members.gitlab_username = ?", user.GitlabUsername).
-				Find(&responsibilities)
+		if user.ID > 0 {
+			model.DB.Where("user_id = ?", user.ID).Find(&responsibilities)
 		}
 		projectIDs = make([]uint, 0, len(responsibilities))
 		for _, r := range responsibilities {
@@ -296,11 +294,11 @@ func (h *NotificationHandler) ProjectOwnerDashboard(c *gin.Context) {
 		// 查询负责人名称列表
 		var stewards []struct{ Username string }
 		model.DB.Raw(`
-			SELECT COALESCE(tm.display_name, tm.username) AS username 
+			SELECT COALESCE(u.display_name, u.username) AS username 
 			FROM project_responsibilities pr
-			JOIN team_members tm ON tm.id = pr.member_id
+			JOIN users u ON u.id = pr.user_id
 			WHERE pr.project_id = ?
-			ORDER BY tm.display_name
+			ORDER BY u.display_name
 		`, p.ID).Scan(&stewards)
 		p.Stewards = make([]string, 0, len(stewards))
 		for _, s := range stewards {

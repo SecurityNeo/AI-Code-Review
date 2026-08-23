@@ -49,7 +49,7 @@ func (s *IssueGovernanceService) ProcessTaskCompletion(taskID uint, newIssues []
 		// 尝试根据 MRAuthor(git 用户名) 匹配平台用户
 		if task.MRAuthor != "" {
 			var user model.User
-			if err := tx.Where("gitlab_username = ? OR gitlab_username = ?",
+			if err := tx.Where("gitlab_username = ? OR username = ?",
 				task.MRAuthor, task.MRAuthor).First(&user).Error; err == nil {
 				ownerID = user.ID
 			}

@@ -46,7 +46,7 @@ func (h *GraphHandler) ProjectAccessCheck() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		projectIDs := GetResponsibleProjectIDs(user.GitlabUsername)
+		projectIDs := GetResponsibleProjectIDs(user)
 		found := false
 		for _, pid := range projectIDs {
 			if pid == uint(projectID) {

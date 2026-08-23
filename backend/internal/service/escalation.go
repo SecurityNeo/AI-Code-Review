@@ -491,21 +491,17 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 			var imMentions []string
 			if len(stewards) > 0 {
 				// 更新 current_owner_id，让 steward 能在 Dashboard 看到
-				primaryUserID, err := s.getUserIDByMemberID(stewards[0].MemberID)
-				if err == nil && primaryUserID > 0 {
+				primaryUserID := stewards[0].UserID
+				if primaryUserID > 0 {
 					model.DB.Model(issue).UpdateColumn("current_owner_id", primaryUserID)
 					issue.CurrentOwnerID = &primaryUserID
-				} else if err != nil {
-					zap.L().Error("escalation L2: failed to map primary steward to user id",
-						zap.Uint("member_id", stewards[0].MemberID), zap.Error(err))
 				}
 				for _, st := range stewards {
-					notifyUserID, err := s.getUserIDByMemberID(st.MemberID)
-					if err != nil {
+					notifyUserID := st.UserID
+					if notifyUserID == 0 {
 						zap.L().Warn("escalation L2: skip steward alert, no mapped user id",
-							zap.Uint("member_id", st.MemberID),
-							zap.String("gitlab_username", st.Member.GitlabUsername),
-							zap.Error(err))
+							zap.Uint("user_id", st.UserID),
+							zap.String("gitlab_username", st.User.GitlabUsername))
 					} else {
 						s.collectAlert(notifyUserID, level, model.NotificationTypeIssueEscalation,
 							"Issue 协助督促（已超期 "+formatDuration(stage.ThresholdHours)+"）",
@@ -513,8 +509,8 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 								issue.ID, task.ID, project.Name, task.MRTitle, task.MRAuthor, issue.Message))
 					}
 					// 收集 IMUserID 用于兜底（IM 链路不依赖 users.id）
-					if st.Member.IMUserID != "" {
-						imMentions = append(imMentions, fmt.Sprintf("<@%s>", st.Member.IMUserID))
+					if st.User.IMUserID != "" {
+						imMentions = append(imMentions, fmt.Sprintf("<@%s>", st.User.IMUserID))
 					}
 				}
 				// 最后发送一条 IM 兜底通知（包含所有 steward 的 @mention）
@@ -539,24 +535,19 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 				zap.String("category", issue.Category),
 				zap.String("language", project.Language))
 			if len(stewards) > 0 {
-				primaryUserID, err := s.getUserIDByMemberID(stewards[0].MemberID)
-				if err != nil {
-					zap.L().Error("escalation L3: failed to map primary steward to user id",
-						zap.Uint("member_id", stewards[0].MemberID), zap.Error(err))
-					// 不写入错误数据，保持原值
-				} else {
+				primaryUserID := stewards[0].UserID
+				if primaryUserID > 0 {
 					model.DB.Model(issue).UpdateColumn("current_owner_id", primaryUserID)
 					// 同步更新内存指针，确保后续归档通知能发给新责任人
 					issue.CurrentOwnerID = &primaryUserID
 				}
 				dur := formatDuration(stage.ThresholdHours)
 				for _, st := range stewards {
-					notifyUserID, err := s.getUserIDByMemberID(st.MemberID)
-					if err != nil {
+					notifyUserID := st.UserID
+					if notifyUserID == 0 {
 						zap.L().Warn("escalation L3: skip steward alert, no mapped user id",
-							zap.Uint("member_id", st.MemberID),
-							zap.String("gitlab_username", st.Member.GitlabUsername),
-							zap.Error(err))
+							zap.Uint("user_id", st.UserID),
+							zap.String("gitlab_username", st.User.GitlabUsername))
 						continue
 					}
 					s.collectAlert(notifyUserID, level, model.NotificationTypeIssueEscalation,
@@ -657,26 +648,10 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 	model.DB.Model(issue).Updates(map[string]interface{}{"escalation_level": maxLevel})
 }
 
-// getUserIDByMemberID 将 team_members.id 映射为 users.id
-// 匹配链路：team_members.id → team_members.gitlab_username → users.gitlab_username → users.id
-func (s *EscalationService) getUserIDByMemberID(memberID uint) (uint, error) {
-	var tm model.TeamMember
-	if err := model.DB.First(&tm, memberID).Error; err != nil {
-		return 0, fmt.Errorf("team_member not found id=%d: %w", memberID, err)
-	}
-	if tm.GitlabUsername == "" {
-		return 0, fmt.Errorf("team_member %d has empty gitlab_username", memberID)
-	}
-	var user model.User
-	if err := model.DB.Where("LOWER(gitlab_username) = LOWER(?)", tm.GitlabUsername).First(&user).Error; err != nil {
-		return 0, fmt.Errorf("user not found for gitlab_username=%s: %w", tm.GitlabUsername, err)
-	}
-	return user.ID, nil
-}
-
 // findStewards 查找项目指定维度的负责人（category → language → default）
 // ⚠️ 关键修复：每个 scope 查询必须使用独立的 db chain，不能复用同一个 *gorm.DB 变量，
 //    否则 GORM 的 Where 条件会叠加（如 scope_type='rc' AND scope_type='default'），导致 fallback 永远返回 0 行。
+// ⚠️ 返回结果已过滤掉 users.enabled=false 的记录，避免已禁用人员被分配 Issue 或收到通知。
 func (s *EscalationService) findStewards(projectID uint, category, language string) []model.ProjectResponsibility {
 	zap.L().Info("findStewards called",
 		zap.Uint("project_id", projectID),
@@ -686,54 +661,61 @@ func (s *EscalationService) findStewards(projectID uint, category, language stri
 	// 1. 按 category 匹配
 	if category != "" {
 		var catRes []model.ProjectResponsibility
-		if err := model.DB.Preload("Member").Where("project_id = ? AND scope_type = 'rule_category' AND scope_value = ?", projectID, category).
+		if err := model.DB.Preload("User").Where("project_id = ? AND scope_type = 'rule_category' AND scope_value = ?", projectID, category).
 			Order("priority ASC, created_at ASC").
 			Find(&catRes).Error; err == nil && len(catRes) > 0 {
-			zap.L().Info("findStewards: matched by category",
-				zap.Uint("project_id", projectID),
-				zap.String("category", category),
-				zap.Int("count", len(catRes)))
-			return catRes
+			if active := filterActiveResponsibilities(catRes); len(active) > 0 {
+				zap.L().Info("findStewards: matched by category",
+					zap.Uint("project_id", projectID),
+					zap.String("category", category),
+					zap.Int("count", len(active)))
+				return active
+			}
 		}
-		zap.L().Info("findStewards: no category match",
+		zap.L().Info("findStewards: no active category match",
 			zap.Uint("project_id", projectID),
 			zap.String("category", category))
 	}
 	// 2. 按 language 匹配
 	if language != "" {
 		var langRes []model.ProjectResponsibility
-		if err := model.DB.Preload("Member").Where("project_id = ? AND scope_type = 'language' AND scope_value = ?", projectID, language).
+		normalizedLang := normalizeLanguage(language)
+		if err := model.DB.Preload("User").Where("project_id = ? AND scope_type = 'language' AND scope_value = ?", projectID, normalizedLang).
 			Order("priority ASC, created_at ASC").
 			Find(&langRes).Error; err == nil && len(langRes) > 0 {
-			zap.L().Info("findStewards: matched by language",
-				zap.Uint("project_id", projectID),
-				zap.String("language", language),
-				zap.Int("count", len(langRes)))
-			return langRes
+			if active := filterActiveResponsibilities(langRes); len(active) > 0 {
+				zap.L().Info("findStewards: matched by language",
+					zap.Uint("project_id", projectID),
+					zap.String("language", normalizedLang),
+					zap.Int("count", len(active)))
+				return active
+			}
 		}
-		zap.L().Info("findStewards: no language match",
+		zap.L().Info("findStewards: no active language match",
 			zap.Uint("project_id", projectID),
-			zap.String("language", language))
+			zap.String("language", normalizedLang))
 	}
 	// 3. fallback 到 default
 	var defRes []model.ProjectResponsibility
-	if err := model.DB.Preload("Member").Where("project_id = ? AND scope_type = 'default'", projectID).
+	if err := model.DB.Preload("User").Where("project_id = ? AND scope_type = 'default' AND scope_value = ''", projectID).
 		Order("priority ASC, created_at ASC").
 		Find(&defRes).Error; err != nil {
 		zap.L().Error("findStewards fallback query failed", zap.Error(err))
 	}
+	active := filterActiveResponsibilities(defRes)
 	zap.L().Info("findStewards: fallback result",
 		zap.Uint("project_id", projectID),
-		zap.Int("count", len(defRes)))
-	return defRes
+		zap.Int("total", len(defRes)),
+		zap.Int("active", len(active)))
+	return active
 }
 
 // buildStewardMentions 从 ProjectResponsibility 构建 @ 列表
 func buildStewardMentions(stewards []model.ProjectResponsibility) []string {
 	var mentions []string
 	for _, st := range stewards {
-		if st.Member.IMUserID != "" {
-			mentions = append(mentions, fmt.Sprintf("<@%s>", st.Member.IMUserID))
+		if st.User.IMUserID != "" {
+			mentions = append(mentions, fmt.Sprintf("<@%s>", st.User.IMUserID))
 		}
 	}
 	return mentions
@@ -741,24 +723,10 @@ func buildStewardMentions(stewards []model.ProjectResponsibility) []string {
 
 // buildAdminMentions 从 User 列表构建 @ 列表
 func (s *EscalationService) buildAdminMentions(admins []model.User) []string {
-	var gitlabUsernames []string
-	for _, admin := range admins {
-		if admin.GitlabUsername != "" {
-			gitlabUsernames = append(gitlabUsernames, admin.GitlabUsername)
-		} else if admin.LoginType == "local" {
-			// 本地用户在 team_members 中以虚拟 __local_<user_id> 注册
-			gitlabUsernames = append(gitlabUsernames, fmt.Sprintf("__local_%d", admin.ID))
-		}
-	}
-	if len(gitlabUsernames) == 0 {
-		return nil
-	}
-	var members []model.TeamMember
-	model.DB.Where("gitlab_username IN ?", gitlabUsernames).Find(&members)
 	var mentions []string
-	for _, m := range members {
-		if m.IMUserID != "" {
-			mentions = append(mentions, fmt.Sprintf("<@%s>", m.IMUserID))
+	for _, admin := range admins {
+		if admin.IMUserID != "" {
+			mentions = append(mentions, fmt.Sprintf("<@%s>", admin.IMUserID))
 		}
 	}
 	return mentions
@@ -787,12 +755,8 @@ func (s *EscalationService) checkBatchAlerts() {
 		}
 		stewards := s.findStewards(r.ProjectID, "", "")
 		for _, st := range stewards {
-			notifyUserID, err := s.getUserIDByMemberID(st.MemberID)
-			if err != nil {
-				zap.L().Warn("checkBatchAlerts: skip steward alert, no mapped user id",
-					zap.Uint("member_id", st.MemberID),
-					zap.String("gitlab_username", st.Member.GitlabUsername),
-					zap.Error(err))
+			notifyUserID := st.UserID
+			if notifyUserID == 0 {
 				continue
 			}
 			s.notifSvc.SendInbox(notifyUserID, model.NotificationTypeBatchAlert,

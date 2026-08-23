@@ -145,6 +145,7 @@ func (s *TeamMemberService) Update(id uint, data map[string]interface{}) error {
 
 // Delete 删除人员（级联删除职责）
 func (s *TeamMemberService) Delete(id uint) error {
+	model.DB.Where("member_id = ?", id).Delete(&model.ProjectResponsibility{})
 	return model.DB.Delete(&model.TeamMember{}, id).Error
 }
 
@@ -166,7 +167,7 @@ func (s *TeamMemberService) GetGitUsers() ([]string, error) {
 // ListResponsibilitiesByMember 列出某人的项目职责
 func (s *TeamMemberService) ListResponsibilitiesByMember(memberID uint) ([]model.ProjectResponsibility, error) {
 	var list []model.ProjectResponsibility
-	if err := model.DB.Preload("Project").
+	if err := model.DB.Preload("User").Preload("Project").
 		Where("member_id = ?", memberID).
 		Order("project_id, scope_type, priority").
 		Find(&list).Error; err != nil {
@@ -175,16 +176,16 @@ func (s *TeamMemberService) ListResponsibilitiesByMember(memberID uint) ([]model
 	return list, nil
 }
 
-// ListResponsibilitiesByProject 列出某项目的所有职责分配
+// ListResponsibilitiesByProject 列出某项目的所有职责分配（过滤已禁用用户）
 func (s *TeamMemberService) ListResponsibilitiesByProject(projectID uint) ([]model.ProjectResponsibility, error) {
 	var list []model.ProjectResponsibility
-	if err := model.DB.Preload("Member").Preload("Project").
+	if err := model.DB.Preload("User").Preload("Project").
 		Where("project_id = ?", projectID).
 		Order("scope_type, priority, created_at").
 		Find(&list).Error; err != nil {
 		return nil, err
 	}
-	return list, nil
+	return filterActiveResponsibilities(list), nil
 }
 
 // AddResponsibility 为人员添加项目职责
@@ -221,8 +222,18 @@ func (s *TeamMemberService) AddResponsibility(memberID uint, data map[string]int
 		scopeValue = normalizeLanguage(scopeValue)
 	}
 
+	// 查找 member 对应的 user_id（通过 gitlab_username 或 username 关联 users 表）
+	var linkedUser model.User
+	if err := model.DB.Where("gitlab_username = ? OR username = ?", member.GitlabUsername, member.Username).First(&linkedUser).Error; err != nil {
+		zap.L().Warn("AddResponsibility: no matching user found for member",
+			zap.Uint("member_id", memberID),
+			zap.String("gitlab_username", member.GitlabUsername),
+			zap.String("username", member.Username))
+	}
+
 	resp := model.ProjectResponsibility{
-		MemberID:       memberID,
+		MemberID:       &memberID,
+		UserID:         linkedUser.ID,
 		ProjectID:      projectID,
 		ScopeType:      scopeType,
 		ScopeValue:     scopeValue,
@@ -265,42 +276,56 @@ func (s *TeamMemberService) DeleteResponsibility(rid uint) error {
 
 // FindStewards 查找项目指定维度的负责人（category → language → default）
 // 用于升级通知和服务层查找，返回的 view 已包含 im_user_id
+// ⚠️ 每个 scope 查询必须使用独立的 db chain，不能复用同一个 *gorm.DB 变量，
+//    否则 GORM 的 Where 条件会叠加。
+// ⚠️ 返回结果已过滤掉 users.enabled=false 的记录，确保已禁用人员不会被分配 Issue。
 func (s *TeamMemberService) FindStewards(projectID uint, category, language string) ([]model.ProjectResponsibility, error) {
-	var responsibilities []model.ProjectResponsibility
-	db := model.DB.Preload("Member").Where("project_id = ?", projectID)
-
 	// 1. 按 category 匹配
 	if category != "" {
-		if err := db.Where("scope_type = 'rule_category' AND scope_value = ?", category).
+		var responsibilities []model.ProjectResponsibility
+		if err := model.DB.Preload("User").Where("project_id = ? AND scope_type = 'rule_category' AND scope_value = ?", projectID, category).
 			Order("priority ASC, created_at ASC").
 			Find(&responsibilities).Error; err != nil {
 			return nil, err
 		}
-		if len(responsibilities) > 0 {
-			return responsibilities, nil
+		if active := filterActiveResponsibilities(responsibilities); len(active) > 0 {
+			return active, nil
 		}
 	}
 
 	// 2. 按 language 匹配
 	if language != "" {
+		var responsibilities []model.ProjectResponsibility
 		normalizedLang := normalizeLanguage(language)
-		if err := db.Where("scope_type = 'language' AND scope_value = ?", normalizedLang).
+		if err := model.DB.Preload("User").Where("project_id = ? AND scope_type = 'language' AND scope_value = ?", projectID, normalizedLang).
 			Order("priority ASC, created_at ASC").
 			Find(&responsibilities).Error; err != nil {
 			return nil, err
 		}
-		if len(responsibilities) > 0 {
-			return responsibilities, nil
+		if active := filterActiveResponsibilities(responsibilities); len(active) > 0 {
+			return active, nil
 		}
 	}
 
 	// 3. fallback 到 default
-	if err := db.Where("scope_type = 'default' AND scope_value = ''").
+	var responsibilities []model.ProjectResponsibility
+	if err := model.DB.Preload("User").Where("project_id = ? AND scope_type = 'default' AND scope_value = ''", projectID).
 		Order("priority ASC, created_at ASC").
 		Find(&responsibilities).Error; err != nil {
 		return nil, err
 	}
-	return responsibilities, nil
+	return filterActiveResponsibilities(responsibilities), nil
+}
+
+// filterActiveResponsibilities 过滤掉关联用户已禁用的职责记录
+func filterActiveResponsibilities(list []model.ProjectResponsibility) []model.ProjectResponsibility {
+	var active []model.ProjectResponsibility
+	for _, r := range list {
+		if r.User.Enabled {
+			active = append(active, r)
+		}
+	}
+	return active
 }
 
 // normalizeLanguage 标准化语言名称，处理常见别名
@@ -330,4 +355,69 @@ func normalizeLanguage(lang string) string {
 		return normalized
 	}
 	return lang
+}
+
+// ListResponsibilitiesByUser 列出某用户（user_id）的项目职责
+func (s *TeamMemberService) ListResponsibilitiesByUser(userID uint) ([]model.ProjectResponsibility, error) {
+	var list []model.ProjectResponsibility
+	if err := model.DB.Preload("Project").Preload("User").
+		Where("user_id = ?", userID).
+		Order("project_id, scope_type, priority").
+		Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// AddResponsibilityByUser 为用户添加项目职责（基于 user_id）
+func (s *TeamMemberService) AddResponsibilityByUser(userID uint, data map[string]interface{}) (*model.ProjectResponsibility, error) {
+	var user model.User
+	if err := model.DB.First(&user, userID).Error; err != nil {
+		return nil, fmt.Errorf("user not found: %w", err)
+	}
+
+	projectIDFloat, _ := data["project_id"].(float64)
+	projectID := uint(projectIDFloat)
+	scopeType, _ := data["scope_type"].(string)
+	scopeValue, _ := data["scope_value"].(string)
+	priorityFloat, _ := data["priority"].(float64)
+	priority := int(priorityFloat)
+
+	if projectID == 0 {
+		return nil, fmt.Errorf("project_id is required")
+	}
+	if scopeType == "" {
+		scopeType = "default"
+	}
+	if scopeType != "default" && scopeValue == "" {
+		return nil, fmt.Errorf("scope_value is required for non-default scope_type")
+	}
+	if scopeType == "default" {
+		scopeValue = ""
+	}
+	if scopeType == "language" && scopeValue != "" {
+		scopeValue = normalizeLanguage(scopeValue)
+	}
+
+	// 检查是否已存在相同维度的职责（避免唯一索引冲突）
+	var existing model.ProjectResponsibility
+	if err := model.DB.Where("user_id = ? AND project_id = ? AND scope_type = ? AND scope_value = ?",
+		userID, projectID, scopeType, scopeValue).First(&existing).Error; err == nil {
+		return nil, fmt.Errorf("该用户在此项目已存在相同类型的职责（当前优先级:%d），如需调整请先删除或编辑现有职责", existing.Priority)
+	}
+
+	resp := model.ProjectResponsibility{
+		UserID:         userID,
+		ProjectID:      projectID,
+		ScopeType:      scopeType,
+		ScopeValue:     scopeValue,
+		Priority:       priority,
+		NotifyChannels: "[]",
+	}
+	if err := model.DB.Create(&resp).Error; err != nil {
+		return nil, err
+	}
+
+	model.DB.Preload("User").Preload("Project").First(&resp, resp.ID)
+	return &resp, nil
 }

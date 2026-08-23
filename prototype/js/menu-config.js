@@ -71,7 +71,6 @@ const MENU_CONFIG = [
         children: [
             { id: 'notifiers', name: '企业微信',     href: 'notifiers.html',       icon: 'fa-comment' },
             { id: 'mail',      name: '邮件',         href: 'mail.html',            icon: 'fa-envelope' },
-            { id: 'staff-management', name: '人员管理', href: 'staff-management.html', icon: 'fa-users' },
             { id: 'notification-rules', name: '通知规则', href: 'notification-rules.html', icon: 'fa-gear' },
             { id: 'settings-holiday', name: '节假日管理',  href: 'holiday-management.html', icon: 'fa-calendar-day' },
             { id: 'report',    name: '报告管理',     href: 'report.html',          icon: 'fa-file-alt' },

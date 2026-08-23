@@ -445,6 +445,9 @@ type User struct {
 	GitlabUserID   *uint64   `gorm:"index" json:"gitlab_user_id"`
 	GitlabUsername string    `gorm:"size:100" json:"gitlab_username"`
 	GitlabEmail    string    `gorm:"size:255" json:"gitlab_email"`
+	IMPlatform     string    `gorm:"size:32" json:"im_platform"`
+	IMUserID       string    `gorm:"size:128" json:"im_user_id"`
+	Enabled        bool      `gorm:"default:true" json:"enabled"`
 	AvatarURL      string    `gorm:"size:512" json:"avatar_url"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`

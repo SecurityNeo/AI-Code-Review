@@ -118,20 +118,31 @@ type ResponsibilityView struct {
 }
 
 func toResponsibilityView(r model.ProjectResponsibility) ResponsibilityView {
+	memberID := uint(0)
+	if r.MemberID != nil {
+		memberID = *r.MemberID
+	}
 	v := ResponsibilityView{
 		ID:         r.ID,
 		ProjectID:  r.ProjectID,
-		MemberID:   r.MemberID,
+		MemberID:   memberID,
 		ScopeType:  r.ScopeType,
 		ScopeValue: r.ScopeValue,
 		Priority:   r.Priority,
 		CreatedAt:  r.CreatedAt,
 	}
-	if r.Member.ID > 0 {
+	if r.Member != nil && r.Member.ID > 0 {
 		v.GitlabUsername = r.Member.GitlabUsername
 		v.DisplayName = r.Member.DisplayName
 		v.IMPlatform = r.Member.IMPlatform
 		v.IMUserID = r.Member.IMUserID
+	}
+	// toResponsibilityView falls back to the User association when Member is not preloaded.
+	if v.DisplayName == "" && r.User.ID > 0 {
+		v.GitlabUsername = r.User.GitlabUsername
+		v.DisplayName = r.User.DisplayName
+		v.IMPlatform = r.User.IMPlatform
+		v.IMUserID = r.User.IMUserID
 	}
 	if r.Project.ID > 0 {
 		v.ProjectName = r.Project.Name
@@ -140,6 +151,7 @@ func toResponsibilityView(r model.ProjectResponsibility) ResponsibilityView {
 }
 
 // ListResponsibilitiesByMember 列出某人的职责
+// Deprecated: 使用 ListResponsibilitiesByUser 替代。
 func (h *TeamMemberHandler) ListResponsibilitiesByMember(c *gin.Context) {
 	memberID, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 	list, err := service.NewTeamMemberService().ListResponsibilitiesByMember(uint(memberID))
@@ -170,6 +182,7 @@ func (h *TeamMemberHandler) ListResponsibilitiesByProject(c *gin.Context) {
 }
 
 // AddResponsibility 为人员添加职责
+// Deprecated: 使用 AddResponsibilityByUser 替代。
 func (h *TeamMemberHandler) AddResponsibility(c *gin.Context) {
 	memberID, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 	var data map[string]interface{}

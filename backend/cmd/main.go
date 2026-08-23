@@ -287,9 +287,6 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 	r.GET("/report.html", func(c *gin.Context) {
 		c.File(frontendPath + "/report.html")
 	})
-	r.GET("/staff-management.html", func(c *gin.Context) {
-		c.File(frontendPath + "/staff-management.html")
-	})
 	r.GET("/review-rules.html", func(c *gin.Context) {
 		c.File(frontendPath + "/review-rules.html")
 	})
@@ -621,6 +618,11 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 			users.PUT("/:id", userHandler.UpdateUser)
 			users.DELETE("/:id", userHandler.DeleteUser)
 			users.POST("/:id/reset-password", userHandler.ResetPassword)
+			// 用户项目职责（统一身份源）
+			users.GET("/:id/responsibilities", userHandler.GetUserResponsibilities)
+			users.POST("/:id/responsibilities", userHandler.AddUserResponsibility)
+			users.PUT("/responsibilities/:rid", userHandler.UpdateUserResponsibility)
+			users.DELETE("/responsibilities/:rid", userHandler.DeleteUserResponsibility)
 		}
 
 		// 规则孵化台
@@ -700,7 +702,7 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 			objStorage.PUT("/configs/:id", storageH.UpdateConfig)
 			objStorage.DELETE("/configs/:id", storageH.DeleteConfig)
 			objStorage.POST("/configs/test", storageH.TestConfigWithBody)
-		objStorage.POST("/configs/:id/test", storageH.TestConfig)
+			objStorage.POST("/configs/:id/test", storageH.TestConfig)
 			objStorage.POST("/configs/:id/set-default", storageH.SetDefault)
 		}
 

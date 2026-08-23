@@ -81,30 +81,13 @@ func (s *TaskService) CanViewTask(user model.User, task model.Task) bool {
 	if task.MRAuthor != "" && task.MRAuthor == user.GitlabUsername {
 		return true
 	}
-	// 检查用户是否是任务所属项目的负责人
-	var whereClauses []string
-	var whereArgs []interface{}
-	if user.GitlabUsername != "" {
-		whereClauses = append(whereClauses, "gitlab_username = ?")
-		whereArgs = append(whereArgs, user.GitlabUsername)
-	}
-	if user.Username != "" {
-		whereClauses = append(whereClauses, "username = ?")
-		whereArgs = append(whereArgs, user.Username)
-	}
-	if len(whereClauses) == 0 {
-		return false
-	}
-	var memberIDs []uint
-	model.DB.Model(&model.TeamMember{}).
-		Where(strings.Join(whereClauses, " OR "), whereArgs...).
-		Pluck("id", &memberIDs)
-	if len(memberIDs) == 0 {
+	// 检查用户是否是任务所属项目的负责人（直接使用 user's primary key）
+	if user.ID == 0 {
 		return false
 	}
 	var count int64
 	model.DB.Model(&model.ProjectResponsibility{}).
-		Where("project_id = ? AND member_id IN ?", task.ProjectID, memberIDs).
+		Where("project_id = ? AND user_id = ?", task.ProjectID, user.ID).
 		Count(&count)
 	return count > 0
 }
@@ -136,36 +119,17 @@ func (s *TaskService) List(user model.User, projectID uint, status string, start
 			args = append(args, user.Username)
 		}
 
-		// 2. 查找当前用户对应的 TeamMember ID
-		var whereClauses []string
-		var whereArgs []interface{}
-		if user.GitlabUsername != "" {
-			whereClauses = append(whereClauses, "gitlab_username = ?")
-			whereArgs = append(whereArgs, user.GitlabUsername)
-		}
-		if user.Username != "" {
-			whereClauses = append(whereClauses, "username = ?")
-			whereArgs = append(whereArgs, user.Username)
-		}
-
-		var memberIDs []uint
-		if len(whereClauses) > 0 {
-			model.DB.Model(&model.TeamMember{}).
-				Where(strings.Join(whereClauses, " OR "), whereArgs...).
-				Pluck("id", &memberIDs)
-		}
-
-		// 3. 查找这些 TeamMember 负责的项目
+		// 2. 查找当前用户负责的项目（直接使用 user 的 primary key）
 		var projectIDs []uint
-		if len(memberIDs) > 0 {
+		if user.ID > 0 {
 			model.DB.Model(&model.ProjectResponsibility{}).
 				Distinct("project_id").
-				Where("member_id IN ?", memberIDs).
+				Where("user_id = ?", user.ID).
 				Pluck("project_id", &projectIDs)
 		}
-
-		// 4. 添加负责项目的条件
-		if len(projectIDs) > 0 {
+			// 条件格式化保持原始格式
+		// 3. 添加负责项目的条件
+			if len(projectIDs) > 0 {
 			conditions = append(conditions, "project_id IN ?")
 			args = append(args, projectIDs)
 		}

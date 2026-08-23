@@ -68,9 +68,9 @@ func GetDelayedNotificationQueue() *DelayedNotificationQueue {
 func (q *DelayedNotificationQueue) Enqueue(task model.Task, stats IssueStats) {
 	// 尝试根据 MRAuthor 查找 DisplayName
 	devName := task.MRAuthor
-	var tm model.TeamMember
-	if err := model.DB.Where("gitlab_username = ? AND enabled = ?", task.MRAuthor, true).First(&tm).Error; err == nil && tm.DisplayName != "" {
-		devName = tm.DisplayName
+	var user model.User
+	if err := model.DB.Where("gitlab_username = ? AND enabled = ?", task.MRAuthor, true).First(&user).Error; err == nil && user.DisplayName != "" {
+		devName = user.DisplayName
 	}
 
 	payload := notifyPayload{

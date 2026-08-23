@@ -195,6 +195,8 @@ func (s *UserService) DeleteUser(id uint, currentUserID uint) error {
 	}
 	// 删除用户的 token
 	model.DB.Where("user_id = ?", id).Delete(&model.Token{})
+	// 删除用户的项目职责分配（确保人员退役后 no orphaned responsibilities）
+	model.DB.Where("user_id = ?", id).Delete(&model.ProjectResponsibility{})
 	return model.DB.Delete(&user).Error
 }
 
