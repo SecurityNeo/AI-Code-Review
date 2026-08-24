@@ -938,7 +938,8 @@ func BuildArbitrationPrompt(ctx *PromptContext) (string, *llm.ResponseFormat, er
 
 	sb.WriteString("## 输入数据说明\n")
 	sb.WriteString("- Agent 发现：位置精确、severity 可信、rule_code 可追踪\n")
-	sb.WriteString("- AI 评审发现：情境理解深、描述丰富、可能重复\n\n")
+	sb.WriteString("- AI 评审发现：情境理解深、描述丰富、可能重复\n")
+	sb.WriteString("- 【不可变】dimension_config 中的 weight 是固定值，输出时必须原样保留，不得篡改。\n\n")
 
 	sb.WriteString("## 去重规则\n")
 	sb.WriteString("1. 位置重叠：同一文件 + 行号差值 ≤ 3 行 → 视为同一位置\n")
@@ -1037,6 +1038,9 @@ func buildScoreRulesText(dsc DeductScoreConfig) string {
 	sb.WriteString("4. 计算总分（加权平均）：total_score = Σ(维度得分 × 维度权重) / 100\n")
 	sb.WriteString("   结果四舍五入到整数（0-100）。\n\n")
 	sb.WriteString("5. 权重为 0 的维度不参与总分计算，但仍返回 score 供参考。\n\n")
+	sb.WriteString("6. 【不可变规则】dimensions.*.weight 必须与输入 dimension_config 完全一致，不得修改、不得省略、不得全部置 0。\n")
+	sb.WriteString("7. 【空问题处理】若 Issues[] 为空且无 Agent findings，则各维度无扣分，维度得分应为 100，总分应为 100。\n")
+	sb.WriteString("   严禁将 batch_notes、recommendations、summary 等非 issue 内容捏造为 Issues[] 成员。\n\n")
 	sb.WriteString("【重要】total_score 必须与上述公式计算结果一致，不能随意填写。\n")
 	sb.WriteString("【重要】total_score 是顶层字段，与 dimensions 同级，绝对不能放在 dimensions 对象内部。\n")
 	sb.WriteString("错误示例：\"dimensions\": { \"security\": {...}, \"total_score\": 48 }\n")

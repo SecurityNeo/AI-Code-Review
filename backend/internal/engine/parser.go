@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -396,8 +397,8 @@ func defaultDeductScore(severity string) int {
 	}
 }
 
-// RecalculateTotalScore 从 Issue 扣分重新计算总分
-// 公式: total_score = Σ(max(0, 100 - 维度扣分总和) × 维度权重) / 100
+// RecalculateTotalScore 从 Issue 扣分重新计算总分（加权平均）
+// 公式: total_score = round( Σ(max(0, 100 - 维度扣分总和) × 维度权重) / Σ(维度权重) )
 func RecalculateTotalScore(result *llm.AIReviewResult) int {
 	// 按维度汇总扣分
 	dimDeductions := make(map[string]int)
@@ -406,17 +407,21 @@ func RecalculateTotalScore(result *llm.AIReviewResult) int {
 	}
 
 	// 加权计算
-	total := 0
+	var totalScore, totalWeight int
 	for code, dim := range result.Dimensions {
 		if dim.Weight <= 0 {
 			continue
 		}
 		deducted := dimDeductions[code]
 		score := max(0, 100-deducted)
-		total += score * dim.Weight
+		totalScore += score * dim.Weight
+		totalWeight += dim.Weight
 	}
 
-	return total / 100
+	if totalWeight == 0 {
+		return 100
+	}
+	return int(math.Round(float64(totalScore) / float64(totalWeight)))
 }
 
 func abs(a int) int {

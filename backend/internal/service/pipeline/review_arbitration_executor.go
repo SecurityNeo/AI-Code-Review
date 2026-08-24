@@ -334,7 +334,33 @@ func (e *ReviewArbitrationExecutor) callLLMWithStructuredPrompt(
 		}
 	}
 
+	// 【关键修复】LLM 偶发篡改维度权重（如全部置 0），导致总分异常为 0。
+	// 使用 promptCtx 中的原始权重覆盖 LLM 输出，并重新计算维度得分与总分。
+	if parsedResult != nil && len(promptCtx.DimensionWeights) > 0 {
+		parsedResult.Dimensions, parsedResult.TotalScore = recalcDimensionsWithOriginalWeights(
+			parsedResult.Issues, promptCtx.DimensionWeights, deductCfg,
+		)
+	}
+
 	return parsedResult, result.Content, nil
+}
+
+// recalcDimensionsWithOriginalWeights 使用原始维度权重重新计算得分（防御 LLM 篡改）
+func recalcDimensionsWithOriginalWeights(
+	issues []llm.AIReviewIssue,
+	dimWeights map[string]engine.DimensionWeight,
+	cfg engine.DeductScoreConfig,
+) (map[string]llm.Dimension, int) {
+	dims := calculateDimensionsLocally(issues, dimWeights, cfg)
+	score := calculateTotalScore(dims)
+
+	// 记录覆盖行为，便于审计
+	zap.L().Info("review_arbitration: dimensions recalculated with original weights",
+		zap.Int("issue_count", len(issues)),
+		zap.Int("total_score", score),
+	)
+
+	return dims, score
 }
 
 // localDeduplicationAndMerge 本地去重模式（不调用 LLM）
@@ -546,9 +572,24 @@ func (e *ReviewArbitrationExecutor) fallbackMerge(
 	return result
 }
 
-// isValidResult 校验结果是否有效
+// isValidResult 校验结果是否有效（含维度权重和保护）
 func isValidResult(result *llm.AIReviewResult) bool {
-	return result != nil && result.TotalScore >= 0 && result.TotalScore <= 100
+	if result == nil || result.TotalScore < 0 || result.TotalScore > 100 {
+		return false
+	}
+	// 校验维度权重和是否为 100（防止 LLM 篡改权重导致评分失真）
+	if len(result.Dimensions) >= 5 {
+		totalWeight := 0
+		for _, d := range result.Dimensions {
+			totalWeight += d.Weight
+		}
+		if totalWeight != 100 {
+			zap.L().Warn("review_arbitration: LLM output dimension weights invalid, trigger fallback",
+				zap.Int("total_weight", totalWeight))
+			return false
+		}
+	}
+	return true
 }
 
 // getStrFromCtxOutput 安全地从 StageContext Output 读取字符串
