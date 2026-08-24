@@ -11,6 +11,8 @@ import (
 
 	"github.com/ai-optimizer/backend/config"
 	"github.com/ai-optimizer/backend/internal/handler"
+	mcppkg "github.com/ai-optimizer/backend/internal/mcp"
+	mcptools "github.com/ai-optimizer/backend/internal/mcp/tools"
 	"github.com/ai-optimizer/backend/internal/middleware"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
@@ -330,6 +332,13 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 	})
 
 	api := r.Group("/api/v1")
+
+	// MCP Server 初始化并挂载 JSON-RPC 端点（自带 API Key + IM 认证，不依赖 Auth() 中间件）
+	mcpServer := mcppkg.NewServer()
+	mcptools.RegisterAllTools(mcpServer)
+	api.POST("/mcp", func(c *gin.Context) {
+		mcpServer.AuthMiddleware()(http.HandlerFunc(mcpServer.HandleMCP)).ServeHTTP(c.Writer, c.Request)
+	})
 
 	// 用户认证（无需认证）
 	userHandler := handler.NewUserHandler()
@@ -696,6 +705,15 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 			report.DELETE("/logs/:id", h.DeleteLog)
 			report.GET("/logs/:id/html", h.GetReportLogHTML)
 		}
+
+		// MCP 密钥与调用日志管理
+		mcpKeyH := handler.NewMCPKeyHandler()
+		adminOnly.GET("/mcp-keys", mcpKeyH.ListKeys)
+		adminOnly.POST("/mcp-keys", mcpKeyH.CreateKey)
+		adminOnly.PUT("/mcp-keys/:id", mcpKeyH.UpdateKey)
+		adminOnly.DELETE("/mcp-keys/:id", mcpKeyH.DeleteKey)
+		adminOnly.GET("/mcp-logs", mcpKeyH.ListLogs)
+
 		// 对象存储配置
 		storageH := handler.NewObjectStorageHandler()
 		objStorage := adminOnly.Group("/object-storage")
