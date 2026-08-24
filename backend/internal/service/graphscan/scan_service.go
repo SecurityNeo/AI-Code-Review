@@ -1,6 +1,7 @@
 package graphscan
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -27,7 +28,7 @@ type ScanService struct {
 	storage       graph.GraphStorage
 	cache         *graph.GraphCache
 	logger        *zap.Logger
-	isRunning     map[uint64]bool
+	runningTasks  map[uint64]context.CancelFunc
 	mu            sync.Mutex
 	repoMgr       *pipeline.RepoManager
 	overviewCache map[uint64]overviewCacheEntry
@@ -52,7 +53,7 @@ func NewScanService(db *gorm.DB, workspace string) *ScanService {
 		storage:       graph.NewSQLiteGraphStorage(workspace),
 		cache:         graph.NewGraphCache(ttl),
 		logger:        zap.L(),
-		isRunning:     make(map[uint64]bool),
+		runningTasks:  make(map[uint64]context.CancelFunc),
 		repoMgr:       pipeline.GetRepoManager(),
 		overviewCache: make(map[uint64]overviewCacheEntry),
 	}
@@ -102,21 +103,28 @@ func (s *ScanService) TriggerScan(projectID uint64, branch string, opts ...ScanO
 		return nil, fmt.Errorf("create scan task failed: %w", err)
 	}
 
-	go s.runScan(task.ID, projectID, branch)
+	ctx, cancel := context.WithCancel(context.Background())
+	s.mu.Lock()
+	s.runningTasks[projectID] = cancel
+	s.mu.Unlock()
+
+	go s.runScan(ctx, task.ID, projectID, branch)
 
 	return task, nil
 }
 
 // runScan 执行扫描（后台goroutine）
-func (s *ScanService) runScan(taskID uint64, projectID uint64, branch string) {
-	s.mu.Lock()
-	s.isRunning[projectID] = true
-	s.mu.Unlock()
+func (s *ScanService) runScan(ctx context.Context, taskID uint64, projectID uint64, branch string) {
 	defer func() {
 		s.mu.Lock()
-		delete(s.isRunning, projectID)
+		delete(s.runningTasks, projectID)
 		s.mu.Unlock()
 	}()
+
+	if ctx.Err() != nil {
+		s.cancelTask(taskID, projectID, "cancelled before start")
+		return
+	}
 
 	now := time.Now()
 	s.db.Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
@@ -146,7 +154,15 @@ func (s *ScanService) runScan(taskID uint64, projectID uint64, branch string) {
 	startTime := time.Now()
 
 		err = filepath.Walk(repoDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+		if err != nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if info.IsDir() {
 			return nil
 		}
 		if strings.Contains(path, "vendor/") || strings.Contains(path, "node_modules/") ||
@@ -191,10 +207,21 @@ func (s *ScanService) runScan(taskID uint64, projectID uint64, branch string) {
 	})
 
 	if err != nil {
+		if ctx.Err() == context.Canceled {
+			s.logger.Info("scan cancelled during walk", zap.Uint64("project_id", projectID))
+			s.cancelTask(taskID, projectID, "cancelled by user")
+			return
+		}
 		s.logger.Error("walk repo failed", zap.Error(err))
 	}
 
 	durationMs := int(time.Since(startTime).Milliseconds())
+
+	if ctx.Err() != nil {
+		s.logger.Info("scan cancelled before graph build", zap.Uint64("project_id", projectID))
+		s.cancelTask(taskID, projectID, "cancelled by user")
+		return
+	}
 
 	sg := graph.NewSymbolGraph(s.storage, s.cache, s.logger, s.workspace)
 	var activeAdapters []graph.ASTAdapter
@@ -310,6 +337,43 @@ func (s *ScanService) failTask(taskID uint64, projectID uint64, message string) 
 		"graph_scan_status": "failed",
 		"graph_scan_error":  message,
 	})
+}
+
+func (s *ScanService) cancelTask(taskID uint64, projectID uint64, message string) {
+	now := time.Now()
+	s.db.Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
+		"status":        "cancelled",
+		"error_message": message,
+		"completed_at":  now,
+	})
+	s.db.Model(&model.Project{}).Where("id = ? AND graph_scan_status = ?", projectID, "running").Updates(map[string]interface{}{
+		"graph_scan_status": "none",
+		"graph_scan_error":  message,
+	})
+}
+
+// CancelScan 取消指定项目的正在运行的扫描任务
+func (s *ScanService) CancelScan(projectID uint64, taskID uint64) error {
+	var task model.GraphScanTask
+	if err := s.db.Where("id = ? AND project_id = ?", taskID, projectID).First(&task).Error; err != nil {
+		return fmt.Errorf("task not found: %w", err)
+	}
+	if task.Status != "running" && task.Status != "pending" {
+		return fmt.Errorf("task status is %s, cannot cancel", task.Status)
+	}
+
+	s.mu.Lock()
+	cancel, ok := s.runningTasks[projectID]
+	s.mu.Unlock()
+	if ok && cancel != nil {
+		cancel()
+	}
+
+	// 对于 pending 状态的任务（尚未启动 goroutine），直接更新状态
+	if task.Status == "pending" {
+		s.cancelTask(taskID, projectID, "cancelled by user")
+	}
+	return nil
 }
 
 // GetScanStatus 获取扫描状态

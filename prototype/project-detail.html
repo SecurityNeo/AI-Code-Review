@@ -374,11 +374,12 @@
                                 <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500">状态</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">耗时</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">触发时间</th>
+                                <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500">操作</th>
                             </tr>
                         </thead>
                         <tbody id="graphHistoryBody" class="divide-y divide-gray-100">
                             <tr>
-                                <td colspan="7" class="px-4 py-8 text-center text-gray-500">加载中...</td>
+                                <td colspan="8" class="px-4 py-8 text-center text-gray-500">加载中...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -599,7 +600,7 @@
 
         const tbody = document.getElementById('graphHistoryBody');
         if (!tbody) return;
-        tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">加载中...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-500">加载中...</td></tr>';
         try {
             const res = await apiFetch(`${API_BASE}/projects/${getProjectId()}/graph/build-history?page=${page}&page_size=${pageSize}`);
             if (!res.ok) throw new Error('加载失败');
@@ -609,7 +610,7 @@
         } catch (e) {
             const tr = document.createElement('tr');
             const td = document.createElement('td');
-            td.colSpan = 7;
+            td.colSpan = 8;
             td.className = 'px-4 py-8 text-center text-red-500';
             td.textContent = '加载失败: ' + (e.message || '');
             tr.appendChild(td);
@@ -622,7 +623,7 @@
         const tbody = document.getElementById('graphHistoryBody');
         document.getElementById('graphHistoryInfo').textContent = `共 ${total} 条记录`;
         if (!items || items.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">暂无构建历史</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-500">暂无构建历史</td></tr>';
             renderGraphHistoryPagination(page, pageSize, total);
             return;
         }
@@ -631,7 +632,8 @@
             pending: { text: '排队中', class: 'text-blue-600' },
             running: { text: '构建中', class: 'text-blue-600' },
             completed: { text: '成功', class: 'text-green-600' },
-            failed: { text: '失败', class: 'text-red-600' }
+            failed: { text: '失败', class: 'text-red-600' },
+            cancelled: { text: '已取消', class: 'text-gray-500' }
         };
         const triggerMap = {
             manual: '手动构建',
@@ -646,6 +648,10 @@
             if (item.trigger_type === 'mr_merge' && item.mr_iid > 0) {
                 mrInfo = `<div class="text-xs">!${item.mr_iid} ${escapeHtml((item.mr_title || '').substring(0, 30))}</div>`;
             }
+            const canCancel = (item.status === 'running' || item.status === 'pending') && isAdmin();
+            const cancelBtn = canCancel
+                ? `<button onclick="cancelGraphScan(${item.id})" class="px-2 py-0.5 text-xs text-red-600 border border-red-200 rounded hover:bg-red-50">中断</button>`
+                : '-';
             return `<tr class="hover:bg-gray-50">
                 <td class="px-4 py-3 text-sm">
                     <span class="px-2 py-0.5 rounded text-xs ${item.trigger_type === 'manual' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}">${escapeHtml(trigger)}</span>
@@ -656,10 +662,28 @@
                 <td class="px-4 py-3 text-sm text-center ${st.class}">${escapeHtml(st.text)}</td>
                 <td class="px-4 py-3 text-sm text-gray-600">${duration}</td>
                 <td class="px-4 py-3 text-sm text-gray-500">${formatDate(item.created_at)}</td>
+                <td class="px-4 py-3 text-sm text-center">${cancelBtn}</td>
             </tr>`;
         }).join('');
 
         renderGraphHistoryPagination(page, pageSize, total);
+    }
+
+    async function cancelGraphScan(taskId) {
+        if (!confirm('确定要中断该构建任务吗？')) return;
+        try {
+            const res = await apiFetch(`${API_BASE}/projects/${getProjectId()}/graph/scan-tasks/${taskId}/cancel`, {
+                method: 'POST'
+            });
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error(data.error || '中断失败');
+            }
+            showToast('构建任务已中断', 'success');
+            loadGraphBuildHistory();
+        } catch (e) {
+            showToast('中断失败: ' + e.message, 'error');
+        }
     }
 
     function renderGraphHistoryPagination(page, pageSize, total) {

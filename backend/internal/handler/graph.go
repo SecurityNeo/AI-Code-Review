@@ -88,6 +88,7 @@ func (h *GraphHandler) RegisterRoutes(common, adminOnly *gin.RouterGroup) {
 		writeGraph.POST("/build", h.HandleBuildGraph)
 		writeGraph.POST("/refresh", h.HandleRefreshGraph)
 		writeGraph.PATCH("/config", h.HandleUpdateGraphConfig)
+		writeGraph.POST("/scan-tasks/:tid/cancel", h.HandleCancelGraphScan)
 	}
 }
 
@@ -376,6 +377,26 @@ func (h *GraphHandler) HandleGraphSecurity(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, security)
+}
+
+// HandleCancelGraphScan 取消指定的扫描任务
+func (h *GraphHandler) HandleCancelGraphScan(c *gin.Context) {
+	projectID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project_id"})
+		return
+	}
+	taskID, err := strconv.ParseUint(c.Param("tid"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid task_id"})
+		return
+	}
+
+	if err := h.scanService.CancelScan(projectID, taskID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "cancelled"})
 }
 
 // HandleBuildHistory 获取代码地图构建历史
