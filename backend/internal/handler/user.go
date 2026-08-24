@@ -389,11 +389,19 @@ func (h *UserHandler) UpdateUserResponsibility(c *gin.Context) {
 		return
 	}
 
+	// 查询项目名称用于返回提示
+	var resp model.ProjectResponsibility
+	model.DB.Preload("Project").First(&resp, uint(rid))
+	projectName := ""
+	if resp.Project.ID > 0 {
+		projectName = resp.Project.Name
+	}
+
 	currentUserID, exists := c.Get("user_id")
 	if exists {
 		model.RecordOpLog("更新用户职责", fmt.Sprintf("职责ID:%d", rid), 0, currentUserID.(uint), "success", "", c.ClientIP())
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "updated"})
+	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("项目%s责任人已更新", projectName)})
 }
 
 // DeleteUserResponsibility 删除用户的项目职责（基于 user_id）。

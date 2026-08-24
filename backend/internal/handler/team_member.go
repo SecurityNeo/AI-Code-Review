@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -213,7 +214,14 @@ func (h *TeamMemberHandler) UpdateResponsibility(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "updated"})
+	// 查询项目名称用于返回提示
+	var resp model.ProjectResponsibility
+	model.DB.Preload("Project").First(&resp, uint(rid))
+	projectName := ""
+	if resp.Project.ID > 0 {
+		projectName = resp.Project.Name
+	}
+	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("项目%s责任人已更新", projectName)})
 }
 
 // DeleteResponsibility 删除职责
