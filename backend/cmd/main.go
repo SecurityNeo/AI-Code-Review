@@ -336,9 +336,12 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 	// MCP Server 初始化并挂载 JSON-RPC 端点（自带 API Key + IM 认证，不依赖 Auth() 中间件）
 	mcpServer := mcppkg.NewServer()
 	mcptools.RegisterAllTools(mcpServer)
-	api.POST("/mcp", func(c *gin.Context) {
+	mcpHandler := func(c *gin.Context) {
 		mcpServer.AuthMiddleware()(http.HandlerFunc(mcpServer.HandleMCP)).ServeHTTP(c.Writer, c.Request)
-	})
+	}
+	api.POST("/mcp", mcpHandler)   // 旧路径兼容
+	api.POST("/mcp/v1", mcpHandler) // 外部 MCP 客户端使用此路径
+	api.HEAD("/mcp/v1", func(c *gin.Context) { c.Status(200) }) // 健康探测
 
 	// 用户认证（无需认证）
 	userHandler := handler.NewUserHandler()
