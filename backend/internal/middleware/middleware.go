@@ -8,6 +8,10 @@ import (
 	"go.uber.org/zap"
 )
 
+var skipLogPaths = map[string]bool{
+	"/api/v1/notifications/unread-count": true,
+}
+
 func Logger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
@@ -15,6 +19,10 @@ func Logger() gin.HandlerFunc {
 		raw := c.Request.URL.RawQuery
 
 		c.Next()
+
+		if skipLogPaths[path] {
+			return
+		}
 
 		latency := time.Since(start)
 		clientIP := c.ClientIP()

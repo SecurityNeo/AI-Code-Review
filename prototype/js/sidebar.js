@@ -371,7 +371,7 @@
         injectGlobalBell();
         refreshNotificationBadge();
 
-        // 启动通知徽标轮询（每 60 秒）
-        setInterval(refreshNotificationBadge, 60000);
+        // 启动通知徽标轮询（每 5 分钟，降低日志和服务器压力）
+        setInterval(refreshNotificationBadge, 300000);
     });
 })();
