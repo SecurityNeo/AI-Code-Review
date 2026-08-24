@@ -445,6 +445,11 @@
                 <p class="text-sm text-gray-500 leading-relaxed">
                     系统将扫描项目全量代码并解析 AST 结构，<br>此过程可能需要几分钟，请确认是否继续？
                 </p>
+                <div class="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 inline-block">
+                    <span class="text-xs text-amber-700 font-medium">
+                        <i class="fas fa-code-branch mr-1"></i>代码主线分支：<span id="buildGraphBranchName" class="font-bold">main</span>
+                    </span>
+                </div>
             </div>
             <div class="px-6 py-4 border-t flex justify-center gap-3">
                 <button onclick="hideModal('buildGraphConfirmModal')" class="px-5 py-2 border rounded-lg text-sm hover:bg-gray-50 text-gray-600">取消</button>
@@ -605,7 +610,7 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                             ? `<a href="code-map.html?project_id=${p.id}" target="_blank" class="text-indigo-600 hover:text-indigo-700 text-sm mr-2" title="查看代码地图">代码地图</a>`
                             : `<span class="text-gray-300 text-sm mr-2 cursor-not-allowed" title="未构建代码地图">代码地图</span>`
                         }
-                        ${isAdmin() ? `<button onclick="buildGraph(${p.id})" class="text-emerald-600 hover:text-emerald-700 text-sm mr-2" title="构建代码地图">构建地图</button>` : ''}
+                        ${isAdmin() ? `<button onclick="buildGraph(${p.id}, '${p.graph_base_branch || 'main'}')" class="text-emerald-600 hover:text-emerald-700 text-sm mr-2" title="构建代码地图">构建地图</button>` : ''}
                         ${isAdmin() ? `<button onclick="deleteProject(${p.id})" class="text-red-600 hover:text-red-700 text-sm">删除</button>` : ''}
                     </td>
                 </tr>
@@ -836,8 +841,9 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
         }
 
         let pendingBuildProjectId = null;
-        function buildGraph(projectId) {
+        function buildGraph(projectId, branch) {
             pendingBuildProjectId = projectId;
+            document.getElementById('buildGraphBranchName').textContent = branch || 'main';
             showModal('buildGraphConfirmModal');
         }
         document.getElementById('buildGraphConfirmBtn').addEventListener('click', async function() {
