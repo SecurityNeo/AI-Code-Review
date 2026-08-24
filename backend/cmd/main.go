@@ -308,6 +308,10 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 	r.StaticFile("/project-dashboard.html", frontendPath+"/project-dashboard.html")
 	r.StaticFile("/holiday-management.html", frontendPath+"/holiday-management.html")
 
+	// MCP (AI 助手) 相关页面路由
+	r.StaticFile("/mcp-keys.html", frontendPath+"/mcp-keys.html")
+	r.StaticFile("/mcp-logs.html", frontendPath+"/mcp-logs.html")
+
 	r.GET("/vulnerability-db.html", func(c *gin.Context) {
 		c.File(frontendPath + "/vulnerability-db.html")
 	})
