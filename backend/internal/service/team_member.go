@@ -231,6 +231,11 @@ func (s *TeamMemberService) AddResponsibility(memberID uint, data map[string]int
 			zap.String("username", member.Username))
 	}
 
+	// 检查首要责任人唯一性（priority <= 1 时）
+	if err := checkPrimaryStewardConflict(projectID, scopeType, scopeValue, priority, 0); err != nil {
+		return nil, err
+	}
+
 	resp := model.ProjectResponsibility{
 		MemberID:       &memberID,
 		UserID:         linkedUser.ID,
@@ -250,6 +255,12 @@ func (s *TeamMemberService) AddResponsibility(memberID uint, data map[string]int
 
 // UpdateResponsibility 更新职责
 func (s *TeamMemberService) UpdateResponsibility(rid uint, data map[string]interface{}) error {
+	// 1. 查询当前记录以确定最终维度
+	var current model.ProjectResponsibility
+	if err := model.DB.First(&current, rid).Error; err != nil {
+		return fmt.Errorf("responsibility not found: %w", err)
+	}
+
 	updates := make(map[string]interface{})
 
 	if v, ok := data["scope_type"].(string); ok && v != "" {
@@ -264,6 +275,26 @@ func (s *TeamMemberService) UpdateResponsibility(rid uint, data map[string]inter
 
 	if len(updates) == 0 {
 		return fmt.Errorf("no fields to update")
+	}
+
+	// 2. 确定更新后的最终值（用于首要责任人冲突检查）
+	finalProjectID := current.ProjectID
+	finalScopeType := current.ScopeType
+	finalScopeValue := current.ScopeValue
+	finalPriority := current.Priority
+	if v, ok := updates["priority"].(int); ok {
+		finalPriority = v
+	}
+	if v, ok := updates["scope_type"].(string); ok {
+		finalScopeType = v
+	}
+	if v, ok := updates["scope_value"].(string); ok {
+		finalScopeValue = v
+	}
+
+	// 3. 检查首要责任人唯一性
+	if err := checkPrimaryStewardConflict(finalProjectID, finalScopeType, finalScopeValue, finalPriority, rid); err != nil {
+		return err
 	}
 
 	return model.DB.Model(&model.ProjectResponsibility{}).Where("id = ?", rid).Updates(updates).Error
@@ -357,6 +388,23 @@ func normalizeLanguage(lang string) string {
 	return lang
 }
 
+// checkPrimaryStewardConflict 检查同一项目同一维度下是否已存在首要责任人（priority <= 1）
+// 业务规则：一个项目同一维度只能有一个首要责任人
+func checkPrimaryStewardConflict(projectID uint, scopeType, scopeValue string, priority int, excludeRID uint) error {
+	if priority > 1 {
+		return nil // 仅首要责任人需要唯一性校验
+	}
+	var existing model.ProjectResponsibility
+	query := model.DB.Where("project_id = ? AND scope_type = ? AND scope_value = ? AND priority <= 1", projectID, scopeType, scopeValue)
+	if excludeRID > 0 {
+		query = query.Where("id != ?", excludeRID)
+	}
+	if err := query.First(&existing).Error; err == nil {
+		return fmt.Errorf("该项目该维度已存在首要责任人（用户ID:%d），一个项目同一维度只能有一个首要责任人", existing.UserID)
+	}
+	return nil
+}
+
 // ListResponsibilitiesByUser 列出某用户（user_id）的项目职责
 func (s *TeamMemberService) ListResponsibilitiesByUser(userID uint) ([]model.ProjectResponsibility, error) {
 	var list []model.ProjectResponsibility
@@ -404,6 +452,11 @@ func (s *TeamMemberService) AddResponsibilityByUser(userID uint, data map[string
 	if err := model.DB.Where("user_id = ? AND project_id = ? AND scope_type = ? AND scope_value = ?",
 		userID, projectID, scopeType, scopeValue).First(&existing).Error; err == nil {
 		return nil, fmt.Errorf("该用户在此项目已存在相同类型的职责（当前优先级:%d），如需调整请先删除或编辑现有职责", existing.Priority)
+	}
+
+	// 检查首要责任人唯一性（priority <= 1 时，同一项目同一维度只能有一个首要）
+	if err := checkPrimaryStewardConflict(projectID, scopeType, scopeValue, priority, 0); err != nil {
+		return nil, err
 	}
 
 	resp := model.ProjectResponsibility{
