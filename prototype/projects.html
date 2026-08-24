@@ -561,8 +561,8 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             tbody.innerHTML = projects.map(p => {
                 // 代码地图状态判断
                 const graphBuilt = p.graph_scan_status === 'completed' && p.graph_built_at;
-                const graphStatusText = graphBuilt ? '已构建' : (p.graph_scan_status === 'running' ? '构建中' : '未构建');
-                const graphStatusClass = graphBuilt ? 'text-green-600' : (p.graph_scan_status === 'running' ? 'text-blue-600' : 'text-gray-400');
+                const graphStatusText = graphBuilt ? '已构建' : (p.graph_scan_status === 'running' ? '构建中' : (p.graph_scan_status === 'failed' ? '构建失败' : '未构建'));
+                const graphStatusClass = graphBuilt ? 'text-green-600' : (p.graph_scan_status === 'running' ? 'text-blue-600' : (p.graph_scan_status === 'failed' ? 'text-red-600' : 'text-gray-400'));
 
                 return `
                 <tr class="hover:bg-gray-50">
