@@ -193,6 +193,11 @@ func (s *LLMService) tryChain(ctx context.Context, taskID *uint, responseFormat 
 		if callErr == nil {
 			callErr = errors.New("LLM returned empty choices")
 		}
+		// 【优化】context 取消/超时不应继续尝试备用链路，直接返回
+		if isContextCanceledErr(callErr) {
+			zap.L().Warn("主模型调用被取消/超时，终止主备链路", zap.Error(callErr))
+			return nil, nil, callErr
+		}
 		attempts = append(attempts, ModelAttempt{
 			Role: "主模型", ModelID: primary.ID, Model: primary.ModelID, Err: callErr,
 		})
@@ -220,6 +225,11 @@ func (s *LLMService) tryChain(ctx context.Context, taskID *uint, responseFormat 
 		if callErr == nil {
 			callErr = errors.New("LLM returned empty choices")
 		}
+		// 【优化】context 取消/超时不应继续尝试备用链路，直接返回
+		if isContextCanceledErr(callErr) {
+			zap.L().Warn("备用模型调用被取消/超时，终止主备链路", zap.Error(callErr))
+			return nil, nil, callErr
+		}
 		attempts = append(attempts, ModelAttempt{
 			Role: fmt.Sprintf("备用[%d]", i+1), ModelID: b.ID, Model: b.ModelID, Err: callErr,
 		})
@@ -234,6 +244,14 @@ func (s *LLMService) tryChain(ctx context.Context, taskID *uint, responseFormat 
 		return nil, nil, errors.New("未配置任何活跃的大模型（无主模型也无可用备用）")
 	}
 	return nil, nil, &ChainError{Attempts: attempts}
+}
+
+// isContextCanceledErr 判断错误是否由 context 取消或超时导致
+func isContextCanceledErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // callLLMAPI 实际发起 HTTP 调用（内部辅助函数）

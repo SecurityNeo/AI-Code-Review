@@ -823,10 +823,20 @@ async function loadTaskTokenUsage(force) {
         if (calls.length === 0) {
             tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray-400 py-8">该任务无 token 用量记录</td></tr>';
         } else {
-            tbody.innerHTML = calls.map(c => `
+            function formatModelWithProvider(modelName, provider) {
+            const name = escapeHtml(modelName || '-');
+            const prov = escapeHtml(provider || '');
+            if (!prov || prov === '-') {
+                return `<span class="text-gray-700" title="${name}">${truncate(name, 28)}</span>`;
+            }
+            return `<span class="text-gray-700" title="${name} (${prov})">
+                <span class="text-gray-500 text-xs mr-1">[${prov}]</span>${truncate(name, 24)}
+            </span>`;
+        }
+        tbody.innerHTML = calls.map(c => `
                 <tr class="text-sm">
                     <td class="font-mono text-gray-600">${formatTime(c.created_at)}</td>
-                    <td><span class="text-gray-700" title="${escapeHtml(c.model_name || '-')}">${escapeHtml(truncate(c.model_name, 28))}</span></td>
+                    <td>${formatModelWithProvider(c.model_name, c.provider)}</td>
                     <td>${renderCallerBadge(c.caller)}</td>
                     <td style="text-align:right;" class="font-mono">
                         <span class="text-blue-600" title="输入">${formatNumber(c.prompt_tokens)}</span>

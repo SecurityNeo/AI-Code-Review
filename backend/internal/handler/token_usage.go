@@ -528,6 +528,7 @@ func (h *TokenUsageHandler) GetByTask(c *gin.Context) {
 	type call struct {
 		ID               uint      `json:"id"`
 		ModelName        string    `json:"model_name"`
+		Provider         string    `json:"provider"`
 		Caller           string    `json:"caller"`
 		CallType         string    `json:"call_type"`
 		PromptTokens     int       `json:"prompt_tokens"`
@@ -545,7 +546,7 @@ func (h *TokenUsageHandler) GetByTask(c *gin.Context) {
 	if err := base.Order("l.created_at DESC, l.id DESC").
 		Limit(pageSize).
 		Offset(offset).
-		Select(`l.id, l.model_name, l.caller, l.call_type,
+		Select(`l.id, l.model_name, l.provider, l.caller, l.call_type,
 			l.prompt_tokens, l.completion_tokens, l.total_tokens,
 			l.duration_ms, l.status, l.error_msg, l.created_at`).
 		Scan(&calls).Error; err != nil {
