@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"regexp"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -112,7 +113,7 @@ func (e *ASTExtractor) Extract(files []map[string]interface{}) *ASTContext {
 			e.extractJava(path, diff, ctx)
 		case "python":
 			e.extractPython(path, diff, ctx)
-		case "frontend", "javascript", "typescript":
+		case "frontend", "javascript", "typescript", "vue":
 			e.extractJavaScript(path, diff, ctx)
 		default:
 			e.extractGeneric(path, diff, ctx)
@@ -570,7 +571,7 @@ func (e *ASTExtractor) ExtractFull(fileContents map[string]string) *ASTContext {
 			e.extractJavaFull(path, content, ctx)
 		case "python":
 			e.extractPythonFull(path, content, ctx)
-		case "frontend", "javascript", "typescript":
+		case "frontend", "javascript", "typescript", "vue":
 			e.extractJavaScriptFull(path, content, ctx)
 		default:
 			e.extractGenericFull(path, content, ctx)
@@ -588,6 +589,23 @@ func (e *ASTExtractor) ExtractSingle(path, content string) *ASTContext {
 	single := make(map[string]string)
 	single[path] = content
 	return e.ExtractFull(single)
+}
+
+// extractorCache 按语言缓存 ASTExtractor 实例，避免 parseASTSimple 等高频调用
+// 场景下重复编译正则表达式和初始化开销。
+var extractorCache sync.Map // key: string (language), value: *ASTExtractor
+
+// getCachedExtractor 获取指定语言的 ASTExtractor，如果不存在则创建并缓存。
+func getCachedExtractor(lang string) *ASTExtractor {
+	if v, ok := extractorCache.Load(lang); ok {
+		return v.(*ASTExtractor)
+	}
+	extractor := NewASTExtractor(lang)
+	actual, loaded := extractorCache.LoadOrStore(lang, extractor)
+	if loaded {
+		return actual.(*ASTExtractor)
+	}
+	return extractor
 }
 
 // ========== Go 语言：完整文件 AST 提取 ==========

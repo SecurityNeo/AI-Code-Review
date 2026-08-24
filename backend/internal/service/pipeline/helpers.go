@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -64,4 +65,36 @@ func getStageLLMEnhanceTimeout(stageCode string) time.Duration {
 		}
 	}
 	return def
+}
+
+// detectLanguageFromPath 根据单个文件扩展名检测编程语言，用于 parseASTSimple
+// 等需要根据文件路径自动选择语言解析器的场景。
+func detectLanguageFromPath(filePath string) string {
+	if filePath == "" {
+		return "unknown"
+	}
+	ext := strings.ToLower(filepath.Ext(filePath))
+	switch ext {
+	case ".go":
+		return "golang"
+	case ".java":
+		return "java"
+	case ".py":
+		return "python"
+	case ".js", ".jsx":
+		return "javascript"
+	case ".ts", ".tsx":
+		return "typescript"
+	case ".vue":
+		// Vue SFC 复用 JavaScript/TypeScript 解析器
+		return "javascript"
+	case ".php":
+		return "php"
+	case ".rb":
+		return "ruby"
+	case ".cpp", ".cc", ".cxx", ".c++", ".h", ".hpp":
+		return "cpp"
+	default:
+		return "unknown"
+	}
 }

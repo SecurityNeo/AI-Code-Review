@@ -594,7 +594,7 @@ func (e *ImpactAnalysisExecutor) analyzeFunctionSignatureChanges(astCtx *ASTCont
 	var findings []engine.ImpactFinding
 
 	for _, fn := range astCtx.Functions {
-		if !isExportedSymbol(fn.Name) {
+		if !fn.IsExported {
 			continue
 		}
 
@@ -648,7 +648,7 @@ func (e *ImpactAnalysisExecutor) analyzeStructChanges(astCtx *ASTContext, crossF
 	var findings []engine.ImpactFinding
 
 	for _, st := range astCtx.Structs {
-		if !isExportedSymbol(st.Name) {
+		if !st.IsExported {
 			continue
 		}
 
@@ -730,15 +730,6 @@ func (e *ImpactAnalysisExecutor) analyzeConfigFiles(ctx StageContext) []engine.I
 	}
 
 	return findings
-}
-
-func isExportedSymbol(name string) bool {
-	if name == "" {
-		return false
-	}
-	// Go: 大写开头；简化处理
-	first := name[0]
-	return first >= 'A' && first <= 'Z'
 }
 
 func hasSignatureChangeIndicators(fn FunctionSignature) bool {
@@ -934,31 +925,14 @@ func getBaselineFileContent(repoPath, filePath string) string {
 }
 
 // parseASTSimple 对单文件内容做简化的 AST 解析，返回仅包含函数和结构体的 ASTContext。
-// 这是基线对比的辅助函数，不需要完整的 Tree-sitter 解析。
+// 函数根据 filePath 的扩展名自动嗅探语言，并使用对应语言的 ASTExtractor 的
+// ExtractSingle（完整文件提取模式），因为传入的 content 是 git show 获取的
+// 完整文件内容而非 diff。
 func parseASTSimple(content, filePath string) *ASTContext {
-	ctx := &ASTContext{
-		Language:   "golang",
-		Functions:  make([]FunctionSignature, 0),
-		Structs:    make([]TypeSignature, 0),
-		Interfaces: make([]TypeSignature, 0),
-	}
-	// 使用包级缓存的 ASTExtractor，避免每次调用都重新初始化
-	goExtractorOnce.Do(func() {
-		goExtractor = NewASTExtractor("golang")
-	})
-	files := []map[string]interface{}{
-		{"path": filePath, "diff": content},
-	}
-	astCtx := goExtractor.Extract(files)
-	if astCtx != nil {
-		return astCtx
-	}
-	return ctx
+	lang := detectLanguageFromPath(filePath)
+	extractor := getCachedExtractor(lang)
+	return extractor.ExtractSingle(filePath, content)
 }
-
-// goExtractorOnce / goExtractor 用于 parseASTSimple 的 ASTExtractor 单例缓存。
-var goExtractorOnce sync.Once
-var goExtractor *ASTExtractor
 
 // compareStructFields 对比两组字段列表，返回差异描述。
 func compareStructFields(before, after []string) string {
