@@ -324,6 +324,11 @@ func autoMigrate() error {
 		}
 	}
 
+	// MCP 集成相关表
+	if err := DB.AutoMigrate(&MCPAPIKey{}, &MCPCallLog{}); err != nil {
+		return err
+	}
+
 	// 初始化 Pipeline 阶段定义
 	initPipelineStages()
 
