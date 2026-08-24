@@ -389,13 +389,14 @@ func normalizeLanguage(lang string) string {
 }
 
 // checkPrimaryStewardConflict 检查同一项目同一维度下是否已存在首要责任人（priority <= 1）
-// 业务规则：一个项目同一维度只能有一个首要责任人
+// 已禁用的用户的职责记录不参与竞争，确保禁用的首要责任人不会阻塞新的配置。
 func checkPrimaryStewardConflict(projectID uint, scopeType, scopeValue string, priority int, excludeRID uint) error {
 	if priority > 1 {
 		return nil // 仅首要责任人需要唯一性校验
 	}
 	var existing model.ProjectResponsibility
-	query := model.DB.Where("project_id = ? AND scope_type = ? AND scope_value = ? AND priority <= 1", projectID, scopeType, scopeValue)
+	query := model.DB.Where("project_id = ? AND scope_type = ? AND scope_value = ? AND priority <= 1 AND user_id IN (SELECT id FROM users WHERE enabled = ?)",
+		projectID, scopeType, scopeValue, true)
 	if excludeRID > 0 {
 		query = query.Where("id != ?", excludeRID)
 	}
