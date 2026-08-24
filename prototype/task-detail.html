@@ -3230,7 +3230,6 @@ function renderCodeUnderstandingDetail(json) {
     html += `<div class="mb-4 flex items-center gap-2 flex-wrap">
         <span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium border ${sc.cls}">${sc.label}</span>
         ${mc ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${mc.cls}">${mc.label}</span>` : ''}
-        ${graphAvailable ? '<span class="inline-flex items-center gap-1 text-[10px] text-emerald-600" title="知识图谱可用"><i class="fas fa-project-diagram"></i>图谱可用</span>' : '<span class="inline-flex items-center gap-1 text-[10px] text-gray-400" title="仅 AST 分析"><i class="fas fa-code"></i>AST Only</span>'}
         ${json.duration_ms ? `<span class="text-xs text-gray-400 font-mono">${Math.round(json.duration_ms/1000)}s</span>` : ''}
     </div>`;
 
