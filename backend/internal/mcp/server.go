@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -150,7 +151,11 @@ func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	case "tools/list":
 		result = s.listTools()
 	case "tools/call":
-		result, toolName, err = s.callTool(r.Context(), authCtx, req.Params)
+		var fullAuthCtx *AuthContext
+		result, toolName, fullAuthCtx, err = s.callTool(r.Context(), authCtx, req.Params)
+		if fullAuthCtx != nil {
+			authCtx = fullAuthCtx
+		}
 	case "ping":
 		// MCP keepalive ping，返回空对象
 		result = map[string]interface{}{}
@@ -187,9 +192,14 @@ func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 
 // listTools 列出所有可用 Tools（tools/list 不根据 Scope 过滤，让智能体发现全部能力）
 func (s *Server) listTools() map[string]interface{} {
+	var names []string
+	for name := range s.tools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
 	var available []Tool
-	for _, tool := range s.tools {
-		available = append(available, tool)
+	for _, name := range names {
+		available = append(available, s.tools[name])
 	}
 	return map[string]interface{}{
 		"tools": available,
@@ -211,30 +221,34 @@ func (s *Server) ToolNames() []string {
 }
 
 // callTool 调用 Tool
-func (s *Server) callTool(ctx context.Context, baseAuthCtx *AuthContext, params json.RawMessage) (interface{}, string, error) {
+func (s *Server) callTool(ctx context.Context, baseAuthCtx *AuthContext, params json.RawMessage) (interface{}, string, *AuthContext, error) {
+	if baseAuthCtx == nil || baseAuthCtx.APIKey == nil {
+		return nil, "", nil, fmt.Errorf("invalid authentication context")
+	}
+
 	var call struct {
 		Name      string                 `json:"name"`
 		Arguments map[string]interface{} `json:"arguments"`
 	}
 	if err := json.Unmarshal(params, &call); err != nil {
-		return nil, "", fmt.Errorf("invalid tool call params: %w", err)
+		return nil, "", nil, fmt.Errorf("invalid tool call params: %w", err)
 	}
 
 	// 1. 从 arguments 中提取身份认证信息
 	imProvider, ok1 := call.Arguments["x_im_provider"].(string)
 	imUserID, ok2 := call.Arguments["x_im_user_id"].(string)
 	if !ok1 || imProvider == "" || !ok2 || imUserID == "" {
-		return nil, call.Name, fmt.Errorf("缺少必填参数 'x_im_provider' 和 'x_im_user_id'，请在 arguments 中提供 IM 供应商和用户ID")
+		return nil, call.Name, nil, fmt.Errorf("缺少必填参数 'x_im_provider' 和 'x_im_user_id'，请在 arguments 中提供 IM 供应商和用户ID")
 	}
-	if imProvider != "wecom" {
-		return nil, call.Name, fmt.Errorf("不支持的 IM 供应商 '%s'，当前仅支持 'wecom'", imProvider)
+	if imProvider != IMPlatformWeCom {
+		return nil, call.Name, nil, fmt.Errorf("不支持的 IM 供应商 '%s'，当前仅支持 '%s'", imProvider, IMPlatformWeCom)
 	}
 
 	// 2. 查询用户（统一身份源）
 	var user model.User
 	if err := model.DB.Where("im_platform = ? AND im_user_id = ? AND enabled = ?",
 		imProvider, imUserID, true).First(&user).Error; err != nil {
-		return nil, call.Name, fmt.Errorf("用户未绑定，请联系管理员在用户管理中绑定（平台: %s, 用户: %s）", imProvider, imUserID)
+		return nil, call.Name, nil, fmt.Errorf("用户未绑定，请联系管理员在用户管理中绑定（平台: %s, 用户: %s）", imProvider, imUserID)
 	}
 
 	// 3. 构造完整 AuthContext
@@ -251,12 +265,12 @@ func (s *Server) callTool(ctx context.Context, baseAuthCtx *AuthContext, params 
 
 	handler, ok := s.handlers[call.Name]
 	if !ok {
-		return nil, call.Name, fmt.Errorf("tool not found: %s", call.Name)
+		return nil, call.Name, fullAuthCtx, fmt.Errorf("tool not found: %s", call.Name)
 	}
 
 	// 4. 权限检查
 	if !s.hasToolPermission(fullAuthCtx, call.Name) {
-		return nil, call.Name, fmt.Errorf("permission denied for tool: %s", call.Name)
+		return nil, call.Name, fullAuthCtx, fmt.Errorf("permission denied for tool: %s", call.Name)
 	}
 
 	// 5. 从 arguments 中剥离身份字段，避免传递给业务 handler
@@ -269,7 +283,7 @@ func (s *Server) callTool(ctx context.Context, baseAuthCtx *AuthContext, params 
 
 	result, err := handler(ctx, fullAuthCtx, cleanArgs)
 	if err != nil {
-		return nil, call.Name, err
+		return nil, call.Name, fullAuthCtx, err
 	}
 	return map[string]interface{}{
 		"content": []map[string]interface{}{
@@ -278,27 +292,27 @@ func (s *Server) callTool(ctx context.Context, baseAuthCtx *AuthContext, params 
 				"text": toJSONString(result),
 			},
 		},
-	}, call.Name, nil
+	}, call.Name, fullAuthCtx, nil
 }
 
 // hasToolPermission 检查用户是否有权限使用 Tool
 func (s *Server) hasToolPermission(authCtx *AuthContext, toolName string) bool {
 	// 根据 Tool 名称映射到 Scope
 	scopeMap := map[string]string{
-		"list_tasks":                "tasks:read",
-		"get_task":                  "tasks:read",
-		"get_task_pipeline":         "tasks:read",
-		"get_mr_review":             "tasks:read",
-		"retry_task":                "tasks:write",
-		"stop_task":                 "tasks:write",
-		"list_merge_requests":       "merge_requests:read",
-		"get_merge_request_detail":  "merge_requests:read",
-		"get_workbench":             "workbench:read",
-		"get_dashboard_stats":       "dashboard:read",
-		"get_token_usage":           "dashboard:read",
-		"list_projects":             "projects:read",
-		"list_notifications":        "notifications:read",
-		"mark_all_read":             "notifications:write",
+		"list_tasks":               "tasks:read",
+		"get_task":                 "tasks:read",
+		"get_task_pipeline":        "tasks:read",
+		"get_mr_review":            "tasks:read",
+		"retry_task":               "tasks:write",
+		"stop_task":                "tasks:write",
+		"list_merge_requests":      "merge_requests:read",
+		"get_merge_request_detail": "merge_requests:read",
+		"get_workbench":            "workbench:read",
+		"get_dashboard_stats":      "dashboard:read",
+		"get_token_usage":          "dashboard:read",
+		"list_projects":            "projects:read",
+		"list_notifications":       "notifications:read",
+		"mark_all_read":            "notifications:write",
 	}
 
 	requiredScope, ok := scopeMap[toolName]

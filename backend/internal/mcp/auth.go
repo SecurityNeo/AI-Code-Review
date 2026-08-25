@@ -11,19 +11,20 @@ import (
 )
 
 const (
-	HeaderAPIKey = "X-API-Key"
+	HeaderAPIKey    = "X-API-Key"
+	IMPlatformWeCom = "wecom"
 )
 
 // AuthContext MCP 认证后的上下文信息
 type AuthContext struct {
-	APIKey       *model.MCPAPIKey
-	User         *model.User  // 统一身份源（替换原 TeamMember）
-	UserID       uint         // 对应 users 表 ID
-	IMUserID     string
-	IMProvider   string
-	Scopes       []string
-	IsAdmin      bool
-	ClientIP     string
+	APIKey     *model.MCPAPIKey
+	User       *model.User // 统一身份源（替换原 TeamMember）
+	UserID     uint        // 对应 users 表 ID
+	IMUserID   string
+	IMProvider string
+	Scopes     []string
+	IsAdmin    bool
+	ClientIP   string
 }
 
 // HasScope 检查是否有指定 Scope

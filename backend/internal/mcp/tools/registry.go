@@ -43,7 +43,7 @@ func RegisterAllTools(server interface {
 
 // ---------------------- Schemas ----------------------
 
-var identityProps = `"x_im_provider": {"type": "string", "description": "IM platform code, currently only 'wecom'", "enum": ["wecom"]},
+var identityProps = `"x_im_provider": {"type": "string", "description": "IM platform code, currently only '` + mcp.IMPlatformWeCom + `'", "enum": ["` + mcp.IMPlatformWeCom + `"]},
 		"x_im_user_id": {"type": "string", "description": "IM platform UserID (e.g. WeCom UserID)"}`
 
 var listTasksSchema = json.RawMessage(`{
