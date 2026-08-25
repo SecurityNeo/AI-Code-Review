@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script src="js/theme.js?v=1"></script>
+    <style>html{background-color:#1e293b;}</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP 能力中心 - CodeGuard</title>
+    <script src="js/auth.js?v=7"></script>
+    <script src="js/menu-config.js?v=7"></script>
+    <script src="js/sidebar.js?v=6"></script>
+    <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="css/theme.css?v=1">
+    <script src="/static/js/tailwindcss.min.js"></script>
+    <style>
+        :root { --bg-page:#f8fafc; --card-bg:#fff; --text-primary:#1e293b; --text-secondary:#475569; --border-color:#e2e8f0; --accent:#3b82f6; --accent-hover:#2563eb; --success:#10b981; --danger:#ef4444; --warning:#f59e0b; }
+        .page-container { padding:1.25rem 1.75rem; }
+        .page-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.75rem; }
+        .page-title { font-size:1.1rem; font-weight:700; }
+        .btn-primary { display:inline-flex; align-items:center; gap:0.4rem; background:var(--accent); color:#fff; padding:0.45rem 0.875rem; border-radius:0.5rem; font-size:0.8125rem; font-weight:500; border:none; cursor:pointer; }
+        .btn-primary:hover { background:var(--accent-hover); }
+        .btn-outline { display:inline-flex; align-items:center; gap:0.4rem; background:#fff; color:var(--text-secondary); padding:0.45rem 0.875rem; border-radius:0.5rem; font-size:0.8125rem; font-weight:500; border:1px solid var(--border-color); cursor:pointer; }
+        .btn-outline:hover { background:#f8fafc; color:var(--text-primary); }
+        .badge { display:inline-flex; align-items:center; gap:0.25rem; padding:0.15rem 0.5rem; border-radius:999px; font-size:0.75rem; font-weight:500; }
+        .badge-blue { background:#dbeafe; color:#1e40af; }
+        .badge-amber { background:#fef3c7; color:#92400e; }
+        .badge-green { background:#dcfce7; color:#166534; }
+        .badge-gray { background:#f1f5f9; color:#475569; }
+        .badge-red { background:#fee2e2; color:#991b1b; }
+
+        /* 能力卡片 */
+        .capability-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:1rem; }
+        .capability-card { background:var(--card-bg); border:1px solid var(--border-color); border-radius:0.625rem; padding:1rem; transition:box-shadow 0.2s, transform 0.2s; cursor:pointer; }
+        .capability-card:hover { box-shadow:0 4px 12px rgba(0,0,0,0.08); transform:translateY(-1px); }
+        .capability-card .card-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:0.5rem; }
+        .capability-card .card-icon { width:2rem; height:2rem; border-radius:0.5rem; display:flex; align-items:center; justify-content:center; font-size:0.875rem; color:#fff; }
+        .capability-card .card-title { font-size:0.9375rem; font-weight:600; color:var(--text-primary); margin-bottom:0.25rem; }
+        .capability-card .card-desc { font-size:0.8125rem; color:var(--text-secondary); line-height:1.4; }
+        .capability-card .card-tags { display:flex; flex-wrap:wrap; gap:0.375rem; margin-top:0.5rem; }
+        .capability-card .card-footer { display:flex; gap:0.5rem; margin-top:0.75rem; padding-top:0.75rem; border-top:1px solid #f1f5f9; }
+        .capability-card .btn-small { padding:0.25rem 0.5rem; border-radius:0.375rem; font-size:0.75rem; font-weight:500; border:1px solid var(--border-color); background:#fff; color:var(--text-secondary); cursor:pointer; }
+        .capability-card .btn-small:hover { background:#f8fafc; color:var(--accent); border-color:var(--accent); }
+
+        /* 分类Tab */
+        .category-tabs { display:flex; gap:0.5rem; margin-bottom:1rem; flex-wrap:wrap; }
+        .category-tab { padding:0.4rem 0.875rem; border-radius:0.5rem; font-size:0.8125rem; font-weight:500; border:1px solid var(--border-color); background:#fff; color:var(--text-secondary); cursor:pointer; transition:all 0.15s; }
+        .category-tab:hover { background:#f8fafc; }
+        .category-tab.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+
+        /* 场景速查表 */
+        .scenario-section { background:var(--card-bg); border:1px solid var(--border-color); border-radius:0.625rem; margin-top:1.5rem; overflow:hidden; }
+        .scenario-header { padding:0.875rem 1rem; font-size:0.9375rem; font-weight:600; border-bottom:1px solid var(--border-color); display:flex; align-items:center; gap:0.5rem; }
+        .scenario-row { display:grid; grid-template-columns:1fr 1fr; gap:0; border-bottom:1px solid #f1f5f9; }
+        .scenario-row:last-child { border-bottom:none; }
+        .scenario-cell { padding:0.75rem 1rem; font-size:0.8125rem; }
+        .scenario-cell-left { background:#f8fafc; border-right:1px solid #f1f5f9; }
+        .scenario-cell-right { background:#fff; }
+        .scenario-cell .cell-label { font-size:0.6875rem; font-weight:600; color:#94a3b8; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:0.25rem; }
+        .scenario-cell .bubble { display:inline-block; background:#fff; border:1px solid var(--border-color); padding:0.25rem 0.625rem; border-radius:0.375rem; margin:0.15rem 0.15rem 0 0; font-size:0.75rem; color:var(--text-secondary); }
+        .scenario-cell .tool-tag { display:inline-flex; align-items:center; gap:0.25rem; background:#eff6ff; color:#1e40af; padding:0.2rem 0.5rem; border-radius:0.375rem; font-size:0.75rem; font-weight:500; margin:0.15rem 0.15rem 0 0; }
+        .scenario-cell .warning-tag { display:inline-flex; align-items:center; gap:0.25rem; background:#fffbeb; color:#92400e; padding:0.2rem 0.5rem; border-radius:0.375rem; font-size:0.75rem; }
+
+        /* 配置向导 */
+        .wizard-section { background:var(--card-bg); border:1px solid var(--border-color); border-radius:0.625rem; margin-top:1.5rem; padding:1rem; }
+        .wizard-steps { display:flex; align-items:center; gap:0.5rem; margin-bottom:1rem; }
+        .wizard-step { display:flex; align-items:center; gap:0.375rem; font-size:0.8125rem; }
+        .wizard-step .step-num { width:1.5rem; height:1.5rem; border-radius:50%; background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:center; font-size:0.6875rem; font-weight:600; }
+        .wizard-step .step-num.inactive { background:#e2e8f0; color:#64748b; }
+        .wizard-step .step-label { font-weight:500; color:var(--text-primary); }
+        .wizard-step .step-label.inactive { color:#94a3b8; }
+        .client-buttons { display:flex; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.75rem; }
+        .client-btn { padding:0.4rem 0.75rem; border-radius:0.5rem; font-size:0.8125rem; font-weight:500; border:1px solid var(--border-color); background:#fff; color:var(--text-secondary); cursor:pointer; }
+        .client-btn.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+        .client-btn:hover:not(.active) { background:#f8fafc; }
+        .code-block { background:#0f172a; color:#e2e8f0; padding:0.875rem; border-radius:0.5rem; font-family:monospace; font-size:0.8125rem; line-height:1.6; overflow-x:auto; white-space:pre-wrap; word-break:break-all; }
+
+        /* 常用开场白 */
+        .quickstart-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:0.75rem; margin-top:0.75rem; }
+        .quickstart-card { background:#f8fafc; border:1px solid var(--border-color); border-radius:0.5rem; padding:0.75rem; }
+        .quickstart-card .qs-icon { font-size:1.25rem; margin-bottom:0.25rem; }
+        .quickstart-card .qs-title { font-size:0.8125rem; font-weight:600; color:var(--text-primary); margin-bottom:0.25rem; }
+        .quickstart-card .qs-phrase { font-size:0.75rem; color:var(--text-secondary); background:#fff; padding:0.375rem 0.5rem; border-radius:0.375rem; border:1px solid #e2e8f0; margin-bottom:0.375rem; cursor:pointer; }
+        .quickstart-card .qs-phrase:hover { border-color:var(--accent); }
+        .quickstart-card .qs-tools { font-size:0.6875rem; color:#94a3b8; }
+
+        /* 状态检测器 */
+        .status-indicator { display:inline-flex; align-items:center; gap:0.375rem; padding:0.35rem 0.75rem; border-radius:0.5rem; font-size:0.8125rem; font-weight:500; }
+        .status-ok { background:#dcfce7; color:#166534; }
+        .status-error { background:#fee2e2; color:#991b1b; }
+        .status-unknown { background:#f1f5f9; color:#64748b; }
+        .status-checking { background:#dbeafe; color:#1e40af; }
+
+        /* 详情面板 */
+        .detail-panel { display:none; margin-top:0.75rem; padding:0.75rem; background:#f8fafc; border-radius:0.5rem; }
+        .detail-panel.open { display:block; }
+        .param-table { width:100%; font-size:0.75rem; border-collapse:collapse; }
+        .param-table th { text-align:left; padding:0.35rem 0.5rem; color:#64748b; font-weight:600; border-bottom:1px solid #e2e8f0; }
+        .param-table td { padding:0.35rem 0.5rem; color:var(--text-secondary); border-bottom:1px solid #f1f5f9; }
+
+        /* 响应式 */
+        @media (max-width: 1023px) {
+            .scenario-row { grid-template-columns:1fr; }
+            .scenario-cell-left { border-right:none; border-bottom:1px solid #f1f5f9; }
+        }
+        @media (max-width: 639px) {
+            .capability-grid { grid-template-columns:1fr; }
+            .quickstart-grid { grid-template-columns:1fr; }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans">
+
+<div id="page-transition" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#1e293b;z-index:99999;transition:opacity .25s ease;"></div>
+<script>
+(function(){
+  function hide(){var el=document.getElementById('page-transition');if(el){el.style.opacity='0';setTimeout(function(){el.remove();},250);}}
+  if(document.readyState==='complete'){hide();}else{window.addEventListener('load',hide);}
+})();
+</script>
+
+<div class="flex h-screen">
+    <aside id="sidebar" class="w-64 bg-slate-900 text-white flex-shrink-0 flex flex-col">
+        <nav style="padding:20px; text-align:center; color:#94a3b8; font-size:13px;">加载中...</nav>
+    </aside>
+    <main class="flex-1 overflow-y-auto">
+        <div class="page-container">
+            <!-- 页面头部 -->
+            <div class="page-header">
+                <div>
+                    <div class="page-title"><i class="fas fa-robot text-blue-600 mr-2"></i>MCP 能力中心</div>
+                    <div style="font-size:0.8125rem; color:#64748b; margin-top:0.15rem;">CodeGuard 通过标准 MCP 协议为第三方智能体提供 15 个可调用的代码评审能力</div>
+                </div>
+                <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+                    <span id="mcpStatus" class="status-indicator status-unknown">
+                        <i class="fas fa-circle" style="font-size:0.375rem;"></i>
+                        <span>未检测</span>
+                    </span>
+                    <button class="btn-outline" onclick="checkMCPStatus()">
+                        <i class="fas fa-stethoscope"></i>检测状态
+                    </button>
+                    <a href="mcp-keys.html" class="btn-outline" style="text-decoration:none;">
+                        <i class="fas fa-key"></i>密钥管理
+                    </a>
+                    <a href="mcp-diagnose.html" class="btn-outline" style="text-decoration:none;">
+                        <i class="fas fa-wrench"></i>诊断工具
+                    </a>
+                </div>
+            </div>
+
+            <!-- 分类过滤栏 -->
+            <div class="category-tabs" id="categoryTabs">
+                <button class="category-tab active" data-category="all" onclick="filterCategory('all')">全部 <span id="count-all">15</span></button>
+                <button class="category-tab" data-category="query" onclick="filterCategory('query')">查询类 <span id="count-query">9</span></button>
+                <button class="category-tab" data-category="write" onclick="filterCategory('write')">操作类 <span id="count-write">3</span></button>
+                <button class="category-tab" data-category="stats" onclick="filterCategory('stats')">统计类 <span id="count-stats">3</span></button>
+            </div>
+
+            <!-- 能力卡片网格 -->
+            <div class="capability-grid" id="capabilityGrid"></div>
+
+            <!-- 场景速查表 -->
+            <div class="scenario-section">
+                <div class="scenario-header">
+                    <i class="fas fa-comments text-blue-500"></i>
+                    场景速查表 — "用户说..." 对应 "平台调用..."
+                </div>
+                <div id="scenarioBody"></div>
+            </div>
+
+            <!-- 快速配置向导 -->
+            <div class="wizard-section">
+                <div class="scenario-header" style="margin:-1rem -1rem 1rem -1rem; border-radius:0.625rem 0.625rem 0 0;">
+                    <i class="fas fa-plug text-green-500"></i>
+                    快速配置向导（3 步连接到客户端）
+                </div>
+                <div class="wizard-steps">
+                    <div class="wizard-step">
+                        <span class="step-num">1</span>
+                        <span class="step-label">选择 API Key</span>
+                    </div>
+                    <i class="fas fa-chevron-right" style="font-size:0.625rem; color:#cbd5e1;"></i>
+                    <div class="wizard-step">
+                        <span class="step-num">2</span>
+                        <span class="step-label">选择客户端</span>
+                    </div>
+                    <i class="fas fa-chevron-right" style="font-size:0.625rem; color:#cbd5e1;"></i>
+                    <div class="wizard-step">
+                        <span class="step-num">3</span>
+                        <span class="step-label">复制配置</span>
+                    </div>
+                </div>
+                <div style="margin-bottom:0.75rem;">
+                    <label style="font-size:0.8125rem; font-weight:500; color:var(--text-primary); display:block; margin-bottom:0.35rem;">选择客户端：</label>
+                    <div class="client-buttons" id="clientButtons"></div>
+                </div>
+                <div style="margin-bottom:0.75rem;">
+                    <label style="font-size:0.8125rem; font-weight:500; color:var(--text-primary); display:block; margin-bottom:0.35rem;">配置代码（已自动填充当前地址）：</label>
+                    <div class="code-block" id="configCode"></div>
+                </div>
+                <div style="display:flex; gap:0.5rem;">
+                    <button class="btn-primary" onclick="copyConfig()">
+                        <i class="fas fa-copy"></i>一键复制
+                    </button>
+                    <button class="btn-outline" onclick="downloadConfig()">
+                        <i class="fas fa-download"></i>下载 mcp-config.json
+                    </button>
+                </div>
+            </div>
+
+            <!-- 常用开场白 -->
+            <div class="wizard-section" style="margin-top:1.5rem;">
+                <div class="scenario-header" style="margin:-1rem -1rem 0.75rem -1rem; border-radius:0.625rem 0.625rem 0 0;">
+                    <i class="fas fa-fire text-orange-500"></i>
+                    常用开场白（点击复制，粘贴到群聊或客户端中使用）
+                </div>
+                <div class="quickstart-grid" id="quickstartGrid"></div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script>
+// ========== 能力数据 ==========
+const MCP_TOOLS = [
+    { toolName:'list_tasks', displayName:'任务列表查询', description:'查询代码评审任务列表，支持按状态和项目过滤。获取 task_id 的入口。', category:'query', icon:'fa-list', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'分页',c:'badge-gray'},{t:'需认证',c:'badge-gray'}], params:[{n:'status',t:'string',r:false,d:'running|pending|failed|success|stopped'},{n:'project_id',t:'integer',r:false},{n:'mine',t:'boolean',r:false,d:'true'},{n:'limit',t:'integer',r:false,d:'5'}], phrases:['看看我最近的评审任务','列出所有失败的任务','项目 12 最近有哪些 MR 在评审'] },
+    { toolName:'get_task', displayName:'任务详情查询', description:'获取单个评审任务的完整详情（含 MR 信息、评审得分、Issue 数量、使用模型）。', category:'query', icon:'fa-file-alt', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'}], params:[{n:'task_id',t:'integer',r:true}], phrases:['任务 2084 怎么样了','这个评审的得分是多少'], requires:['task_id'] },
+    { toolName:'get_task_pipeline', displayName:'Pipeline 详情查询', description:'查询任务 Pipeline 各阶段执行详情，用于定位"卡在哪一步"或"为什么失败"。', category:'query', icon:'fa-project-diagram', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'}], params:[{n:'task_id',t:'integer',r:true}], phrases:['任务 2084 卡在哪一步','Pipeline 执行到哪了'], requires:['task_id'] },
+    { toolName:'get_mr_review', displayName:'MR 评审结果查询', description:'获取指定任务的 AI 代码评审结果（Issue 列表）。支持按 severity 和 category 过滤。', category:'query', icon:'fa-code', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'},{t:'可过滤',c:'badge-gray'}], params:[{n:'task_id',t:'integer',r:true},{n:'severity',t:'string',r:false,d:'critical|high|medium|low'},{n:'category',t:'string',r:false,d:'security|performance|style|...'}], phrases:['任务 2084 有什么安全问题','找出所有 critical 的 issue'], requires:['task_id'] },
+    { toolName:'get_issue_detail', displayName:'Issue 详情查询', description:'获取单个 Issue 的完整详情（含代码上下文、详细描述、修复方案）。', category:'query', icon:'fa-search-plus', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'}], params:[{n:'issue_id',t:'integer',r:true}], phrases:['第 3 个 issue 具体是什么','issue 42 的修复建议'], requires:['issue_id'] },
+    { toolName:'list_merge_requests', displayName:'MR 列表查询', description:'查询已触发过 AI 评审的 MR 列表。支持按状态和项目过滤。', category:'query', icon:'fa-code-branch', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'分页',c:'badge-gray'},{t:'需认证',c:'badge-gray'}], params:[{n:'project_id',t:'integer',r:false},{n:'status',t:'string',r:false}], phrases:['看看最近的 MR','有哪些 MR 在评审'] },
+    { toolName:'get_merge_request_detail', displayName:'MR 详情查询', description:'获取指定 MR 的评审详情和对应任务信息。', category:'query', icon:'fa-info-circle', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'}], params:[{n:'project_id',t:'integer',r:true},{n:'mr_iid',t:'integer',r:true}], phrases:['MR !42 评审结果如何','这个 MR 有什么问题'] },
+    { toolName:'list_notifications', displayName:'通知列表查询', description:'查看站内通知列表（评审完成、升级提醒等）。支持 unread/all 过滤。', category:'query', icon:'fa-bell', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'分页',c:'badge-gray'},{t:'需认证',c:'badge-gray'}], params:[{n:'filter',t:'string',r:false,d:'unread|all'}], phrases:['有没有新通知','未读通知有哪些'] },
+    { toolName:'list_projects', displayName:'项目列表查询', description:'查询已接入 AI 代码评审的项目列表。默认只返回我有任务的项目。', category:'query', icon:'fa-folder-open', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'分页',c:'badge-gray'},{t:'需认证',c:'badge-gray'}], params:[{n:'limit',t:'integer',r:false,d:'20'}], phrases:['有哪些项目在用评审','看看所有项目'] },
+    { toolName:'retry_task', displayName:'任务重试', description:'为失败或已停止的任务创建重试任务，重新触发完整 AI 评审。', category:'write', icon:'fa-redo', color:'#f59e0b', tags:[{t:'可写',c:'badge-amber'},{t:'需认证',c:'badge-gray'},{t:'需审批',c:'badge-red'}], params:[{n:'task_id',t:'integer',r:true}], phrases:['重试任务 2084','重新评审一下','再跑一次'], dangerous:true, requires:['task_id'] },
+    { toolName:'stop_task', displayName:'任务停止', description:'停止正在运行或排队中的评审任务（当前阶段完成后终止）。', category:'write', icon:'fa-stop-circle', color:'#f59e0b', tags:[{t:'可写',c:'badge-amber'},{t:'需认证',c:'badge-gray'},{t:'需审批',c:'badge-red'}], params:[{n:'task_id',t:'integer',r:true}], phrases:['停掉任务 2084','取消评审','停止正在跑的任务'], dangerous:true, requires:['task_id'] },
+    { toolName:'mark_all_read', displayName:'标记全部已读', description:'一键将当前用户所有未读通知标记为已读。', category:'write', icon:'fa-check-double', color:'#f59e0b', tags:[{t:'可写',c:'badge-amber'},{t:'需认证',c:'badge-gray'}], params:[], phrases:['全部标记为已读','清除所有通知'], dangerous:true },
+    { toolName:'get_workbench', displayName:'工作台数据查询', description:'获取个人工作台数据，包含待处理 Issue 统计（按严重程度分档）、超时预警。', category:'stats', icon:'fa-desktop', color:'#10b981', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'}], params:[{n:'admin_view',t:'boolean',r:false,d:'false'}], phrases:['我的待办','有哪些问题需要处理','超时预警'] },
+    { toolName:'get_dashboard_stats', displayName:'大盘统计查询', description:'获取代码评审大盘统计（任务量、成功率、失败率、Top 项目）。支持 today/week/month。', category:'stats', icon:'fa-chart-bar', color:'#10b981', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'}], params:[{n:'period',t:'string',r:false,d:'today|week|month'}], phrases:['这周评审了多少 MR','成功率多少','团队评审负载如何'] },
+    { toolName:'get_token_usage', displayName:'Token 用量查询', description:'查看 AI 评审 Token 消耗和成本（按天汇总）。支持 day/project/model 分组。', category:'stats', icon:'fa-coins', color:'#10b981', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'}], params:[{n:'group_by',t:'string',r:false,d:'day|project|model'}], phrases:['Token 花了多少','AI 调用成本','模型 usage'] }
+];
+
+// ========== 场景映射数据 ==========
+const SCENARIOS = [
+    { intent:'查询最近的评审任务', says:['看看我最近的评审任务','我有哪些任务在跑','列出我的任务'], tool:'list_tasks', params:'mine=true, limit=5', result:'返回任务列表，含 MR 标题、状态、评审得分' },
+    { intent:'查询失败的任务', says:['有哪些任务失败了','失败的评审有哪些','找出需要重试的任务'], tool:'list_tasks', params:'status=failed, mine=true', result:'只返回 failed 任务，附失败原因摘要' },
+    { intent:'查看任务详情', says:['任务 2084 怎么样了','这个评审卡在哪一步','为什么失败了'], tool:'get_task + get_task_pipeline', params:'task_id=xxx', result:'返回任务详情、Pipeline 各阶段状态、失败定位' },
+    { intent:'审查安全问题', says:['找出所有高危安全问题','这个 MR 有什么安全隐患','critical 的 issue 有哪些'], tool:'get_mr_review', params:'severity=critical, category=security', result:'返回 critical/high security Issue 列表' },
+    { intent:'查看评审大盘', says:['这周评审了多少 MR','成功率多少','Token 花了多少'], tool:'get_dashboard_stats + get_token_usage', params:'period=week', result:'返回本周任务量、成功率、Token 消耗' },
+    { intent:'查看工作台待办', says:['我的待办','有哪些问题需要处理','超时预警'], tool:'get_workbench', params:'—', result:'返回按严重程度分档的待处理 Issue 统计' },
+    { intent:'重试失败的任务', says:['重试任务 2084','重新评审一下','再跑一次'], tool:'retry_task', params:'task_id=xxx', result:'创建新的重试任务，保留原配置', warning:'任务状态须为 failed/stopped' },
+    { intent:'停止运行的任务', says:['停掉任务 2084','取消评审','停止正在跑的任务'], tool:'stop_task', params:'task_id=xxx', result:'当前阶段完成后终止任务', warning:'任务状态须为 running/pending' },
+    { intent:'查看通知', says:['有没有新通知','未读通知有哪些','全部标记为已读'], tool:'list_notifications / mark_all_read', params:'filter=unread', result:'返回通知列表或清除未读' },
+    { intent:'查看 MR 列表', says:['看看最近的 MR','有哪些 MR 在评审','MR !42 评审结果如何'], tool:'list_merge_requests / get_merge_request_detail', params:'—', result:'返回 MR 列表或单个 MR 详情' }
+];
+
+// ========== 常用开场白 ==========
+const QUICKSTARTS = [
+    { icon:'💬', title:'查任务', phrases:['看看我最近的评审任务','列出所有失败的任务'], tools:['list_tasks'] },
+    { icon:'📊', title:'看大盘', phrases:['这周评审了多少 MR，成功率多少','Token 花了多少'], tools:['get_dashboard_stats'] },
+    { icon:'🔍', title:'审代码', phrases:['任务 2084 有什么安全问题','找出所有 critical 的 issue'], tools:['get_mr_review'] },
+    { icon:'⚡', title:'操作任务', phrases:['重试任务 2084','停止正在跑的任务'], tools:['retry_task','stop_task'], warning:'操作类 Tool，请确认后再执行' },
+    { icon:'🔔', title:'看通知', phrases:['有没有新通知','全部标记为已读'], tools:['list_notifications'] }
+];
+
+// ========== 客户端配置模板 ==========
+const CLIENT_TEMPLATES = {
+    cursor: {
+        name:'Cursor', generate: (host,key) => JSON.stringify({ mcpServers:{ codeguard:{ url:`${host}/mcp/v1`, headers:{ 'X-API-Key':key } } } }, null, 2)
+    },
+    claude: {
+        name:'Claude Desktop', generate: (host,key) => JSON.stringify({ mcpServers:{ codeguard:{ command:'npx', args:['-y','@modelcontextprotocol/server-http'], env:{ URL:`${host}/mcp/v1`, HEADERS:JSON.stringify({'X-API-Key':key}) } } } }, null, 2)
+    },
+    cline: {
+        name:'Cline (VS Code)', generate: (host,key) => JSON.stringify({ 'cline.mcpServers':{ codeguard:{ url:`${host}/mcp/v1`, headers:{ 'X-API-Key':key } } } }, null, 2)
+    },
+    other: {
+        name:'其他客户端', generate: (host,key) => `URL: ${host}/mcp/v1\nHeaders:\n  X-API-Key: ${key}\nContent-Type: application/json`
+    }
+};
+
+let activeClient = 'cursor';
+let apiKeyList = [];
+
+// ========== 渲染能力卡片 ==========
+function renderCards(category) {
+    const grid = document.getElementById('capabilityGrid');
+    const tools = category === 'all' ? MCP_TOOLS : MCP_TOOLS.filter(t => t.category === category);
+    grid.innerHTML = tools.map(tool => `
+        <div class="capability-card" data-tool="${tool.toolName}" data-category="${tool.category}">
+            <div class="card-header">
+                <div style="display:flex; align-items:center; gap:0.5rem;">
+                    <div class="card-icon" style="background:${tool.color};">
+                        <i class="fas ${tool.icon}"></i>
+                    </div>
+                    <div>
+                        <div class="card-title">${tool.toolName}</div>
+                        <div style="font-size:0.75rem; color:#64748b;">${tool.displayName}</div>
+                    </div>
+                </div>
+                ${tool.dangerous ? '<span class="badge badge-amber"><i class="fas fa-exclamation-triangle" style="font-size:0.625rem;"></i>可写</span>' : '<span class="badge badge-blue">只读</span>'}
+            </div>
+            <div class="card-desc">${tool.description}</div>
+            <div class="card-tags">
+                ${tool.tags.map(tag => `<span class="badge ${tag.c}">${tag.t}</span>`).join('')}
+            </div>
+            <div class="card-footer">
+                <button class="btn-small" onclick="toggleDetail(this, '${tool.toolName}')">
+                    <i class="fas fa-chevron-down"></i> 查看参数
+                </button>
+                ${tool.phrases.slice(0,2).map(p => `<span class="bubble" style="font-size:0.75rem; color:#64748b; background:#f8fafc; padding:0.2rem 0.4rem; border-radius:0.25rem;">"${p}"</span>`).join('')}
+            </div>
+            <div class="detail-panel" id="detail-${tool.toolName}">
+                <div style="font-size:0.8125rem; font-weight:600; margin-bottom:0.5rem;">参数说明</div>
+                <table class="param-table">
+                    <thead><tr><th>参数</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
+                    <tbody>
+                        ${tool.params.map(p => `<tr><td>${p.n}</td><td>${p.t}</td><td>${p.r ? '<span style="color:#ef4444;">是</span>' : '否'}</td><td>${p.d || '—'}</td></tr>`).join('') || '<tr><td colspan="4" style="color:#94a3b8;">无参数</td></tr>'}
+                    </tbody>
+                </table>
+                ${tool.requires ? `<div style="margin-top:0.5rem; font-size:0.75rem; color:#92400e; background:#fffbeb; padding:0.375rem 0.5rem; border-radius:0.375rem;"><i class="fas fa-info-circle"></i> 前置条件: 需要 ${tool.requires.join(', ')}</div>` : ''}
+                ${tool.warning ? `<div style="margin-top:0.5rem; font-size:0.75rem; color:#92400e; background:#fffbeb; padding:0.375rem 0.5rem; border-radius:0.375rem;"><i class="fas fa-exclamation-triangle"></i> ${tool.warning}</div>` : ''}
+            </div>
+        </div>
+    `).join('');
+}
+
+function toggleDetail(btn, toolName) {
+    const panel = document.getElementById('detail-' + toolName);
+    const isOpen = panel.classList.contains('open');
+    panel.classList.toggle('open');
+    btn.innerHTML = isOpen ? '<i class="fas fa-chevron-down"></i> 查看参数' : '<i class="fas fa-chevron-up"></i> 收起参数';
+}
+
+function filterCategory(category) {
+    document.querySelectorAll('.category-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.category === category);
+    });
+    renderCards(category);
+}
+
+// ========== 渲染场景速查表 ==========
+function renderScenarios() {
+    const body = document.getElementById('scenarioBody');
+    body.innerHTML = SCENARIOS.map(s => `
+        <div class="scenario-row">
+            <div class="scenario-cell scenario-cell-left">
+                <div class="cell-label">用户说...</div>
+                ${s.says.map(phrase => `<span class="bubble">"${phrase}"</span>`).join('')}
+            </div>
+            <div class="scenario-cell scenario-cell-right">
+                <div class="cell-label">平台调用...</div>
+                <div style="margin-bottom:0.25rem;">
+                    <span class="tool-tag"><i class="fas fa-cog" style="font-size:0.625rem;"></i> ${s.tool}</span>
+                    ${s.params !== '—' ? `<span style="font-size:0.75rem; color:#64748b; margin-left:0.25rem;">参数: ${s.params}</span>` : ''}
+                </div>
+                <div style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.25rem;">结果: ${s.result}</div>
+                ${s.warning ? `<span class="warning-tag"><i class="fas fa-exclamation-triangle" style="font-size:0.625rem;"></i> ${s.warning}</span>` : ''}
+            </div>
+        </div>
+    `).join('');
+}
+
+// ========== 渲染客户端配置 ==========
+function renderClientButtons() {
+    const container = document.getElementById('clientButtons');
+    container.innerHTML = Object.entries(CLIENT_TEMPLATES).map(([key, tmpl]) => `
+        <button class="client-btn ${key === activeClient ? 'active' : ''}" data-client="${key}" onclick="selectClient('${key}')">${tmpl.name}</button>
+    `).join('');
+}
+
+function selectClient(client) {
+    activeClient = client;
+    renderClientButtons();
+    updateConfigDisplay();
+}
+
+function updateConfigDisplay() {
+    const host = window.location.origin;
+    const key = apiKeyList.length > 0 ? apiKeyList[0].key_prefix + '***' : 'sk-cg-your-key-here';
+    const tmpl = CLIENT_TEMPLATES[activeClient];
+    document.getElementById('configCode').textContent = tmpl.generate(host, key);
+}
+
+function copyConfig() {
+    const code = document.getElementById('configCode').textContent;
+    navigator.clipboard.writeText(code).then(() => {
+        showToast('配置已复制到剪贴板', 'success');
+    }).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = code;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('配置已复制到剪贴板', 'success');
+    });
+}
+
+function downloadConfig() {
+    const code = document.getElementById('configCode').textContent;
+    const blob = new Blob([code], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'mcp-config.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+// ========== 渲染常用开场白 ==========
+function renderQuickstarts() {
+    const grid = document.getElementById('quickstartGrid');
+    grid.innerHTML = QUICKSTARTS.map(qs => `
+        <div class="quickstart-card">
+            <div class="qs-icon">${qs.icon}</div>
+            <div class="qs-title">${qs.title}</div>
+            ${qs.phrases.map(p => `<div class="qs-phrase" onclick="copyPhrase(this, '${p.replace(/'/g, "\\'")}')">${p}</div>`).join('')}
+            <div class="qs-tools">涉及: ${qs.tools.join(', ')}</div>
+            ${qs.warning ? `<div style="font-size:0.6875rem; color:#92400e; margin-top:0.25rem;"><i class="fas fa-exclamation-triangle"></i> ${qs.warning}</div>` : ''}
+        </div>
+    `).join('');
+}
+
+function copyPhrase(el, text) {
+    navigator.clipboard.writeText(text).then(() => {
+        const original = el.textContent;
+        el.textContent = '✅ 已复制';
+        el.style.borderColor = '#10b981';
+        setTimeout(() => { el.textContent = original; el.style.borderColor = '#e2e8f0'; }, 2000);
+    });
+}
+
+// ========== 状态检测 ==========
+async function checkMCPStatus() {
+    const statusEl = document.getElementById('mcpStatus');
+    statusEl.className = 'status-indicator status-checking';
+    statusEl.innerHTML = '<i class="fas fa-circle" style="font-size:0.375rem;"></i><span>检测中...</span>';
+
+    try {
+        const resp = await fetch('/mcp/v1/tools/list', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: AbortSignal.timeout(5000)
+        });
+        if (resp.ok) {
+            const data = await resp.json();
+            const count = data.tools?.length || 0;
+            if (count > 0) {
+                statusEl.className = 'status-indicator status-ok';
+                statusEl.innerHTML = `<i class="fas fa-circle" style="font-size:0.375rem;"></i><span>服务正常（${count} 个能力）</span>`;
+            } else {
+                statusEl.className = 'status-indicator status-error';
+                statusEl.innerHTML = '<i class="fas fa-circle" style="font-size:0.375rem;"></i><span>服务异常（Tool 列表为空）</span>';
+            }
+        } else {
+            statusEl.className = 'status-indicator status-error';
+            statusEl.innerHTML = `<i class="fas fa-circle" style="font-size:0.375rem;"></i><span>服务异常（HTTP ${resp.status}）</span>`;
+        }
+    } catch (e) {
+        statusEl.className = 'status-indicator status-error';
+        statusEl.innerHTML = '<i class="fas fa-circle" style="font-size:0.375rem;"></i><span>未检测到服务端</span>';
+    }
+}
+
+// ========== 加载用户 Key ==========
+async function loadApiKeys() {
+    try {
+        const resp = await apiFetch('/api/v1/mcp-keys?page_size=5');
+        if (resp.data && resp.data.list) {
+            apiKeyList = resp.data.list.filter(k => k.status === 'active');
+            updateConfigDisplay();
+        }
+    } catch (e) {
+        // 静默处理，使用占位 Key
+    }
+}
+
+function showToast(message, type) {
+    const colors = { success: 'background:#10b981;', error: 'background:#ef4444;', info: 'background:#3b82f6;' };
+    const toast = document.createElement('div');
+    toast.style.cssText = `position:fixed;top:1rem;right:1rem;${colors[type] || colors.info} color:#fff;padding:0.75rem 1.25rem;border-radius:0.5rem;font-size:0.875rem;font-weight:500;box-shadow:0 4px 6px rgba(0,0,0,0.1);z-index:9999;transition:opacity 0.3s ease;`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 3000);
+}
+
+// ========== 初始化 ==========
+renderCards('all');
+renderScenarios();
+renderClientButtons();
+renderQuickstarts();
+loadApiKeys();
+
+// 页面加载时自动检测一次（延迟执行，避免阻塞）
+setTimeout(checkMCPStatus, 800);
+</script>
+
+</body>
+</html>
