@@ -313,6 +313,8 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 	// MCP (AI 助手) 相关页面路由
 	r.StaticFile("/mcp-keys.html", frontendPath+"/mcp-keys.html")
 	r.StaticFile("/mcp-logs.html", frontendPath+"/mcp-logs.html")
+	r.StaticFile("/mcp-capabilities.html", frontendPath+"/mcp-capabilities.html")
+	r.StaticFile("/mcp-diagnose.html", frontendPath+"/mcp-diagnose.html")
 
 	r.GET("/vulnerability-db.html", func(c *gin.Context) {
 		c.File(frontendPath + "/vulnerability-db.html")
@@ -717,7 +719,8 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		adminOnly.PUT("/mcp-keys/:id", mcpKeyH.UpdateKey)
 		adminOnly.DELETE("/mcp-keys/:id", mcpKeyH.DeleteKey)
 		adminOnly.GET("/mcp-logs", mcpKeyH.ListLogs)
-		adminOnly.POST("/mcp/diagnose", mcpKeyH.Diagnose)
+		// MCP 诊断：普通认证用户也可用（诊断自己的连接）
+		common.POST("/mcp/diagnose", mcpKeyH.Diagnose)
 
 		// 对象存储配置
 		storageH := handler.NewObjectStorageHandler()
