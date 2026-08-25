@@ -866,6 +866,11 @@ func (e *BatchReviewFrameExecutor) Execute(ctx StageContext) error {
 	if plan.BatchCount == 1 {
 		batchResult, modelID, inTk, outTk, modelName, err := e.executeBatchCollection(ctx, plan.Batches[0], promptCtx, task)
 		if err != nil {
+			ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
+				"plan":        plan,
+				"error":       err.Error(),
+				"batch_count": plan.BatchCount,
+			})
 			return err
 		}
 		actualModelID = modelID

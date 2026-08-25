@@ -606,6 +606,7 @@ func groupRulesByCategory(rules []model.ReviewRule) map[string][]model.ReviewRul
 func categoryDisplay(category string) string {
 	m := map[string]string{
 		"security":        "安全性",
+		"code_quality":    "代码质量",
 		"performance":     "性能",
 		"readability":     "可读性",
 		"maintainability": "可维护性",
@@ -748,10 +749,7 @@ func BuildFullStructuredPrompt(ctx *PromptContext) (string, *llm.ResponseFormat)
 	return sb.String(), responseFormat
 }
 
-// BuildBatchCollectionPrompt 构建分批评审收集 Prompt（分批场景用）
-// 输出：含规则 + diff，但 JSON Schema 只要求 issues[] 和 recommendations[]，不计算总分
-// batchFiles 必须使用 SmartSplitIntoBatches 截断后的文件 map，确保单文件不超过可用 token 配额
-// BuildBatchCollectionPrompt 构建分批评审收集 Prompt（分批场景用）
+// BuildBatchCollectionPrompt 构建评审收集 Prompt（单批/多批统一使用）
 // 输出：含规则 + diff，但 JSON Schema 只要求 issues[] 和 recommendations[]，不计算总分
 // batchFiles 必须使用 SmartSplitIntoBatches 截断后的文件 map，确保单文件不超过可用 token 配额
 // isLastBatch 控制是否在最后一批注入通用信息（Agent findings、commit、MR标题、依赖漏洞），避免每批重复
@@ -785,7 +783,7 @@ func BuildBatchCollectionPrompt(ctx *PromptContext, batchIndex, totalBatches int
 	}
 
 	// 维度规则（仅展示有规则的维度，不影响分类维度全集）
-	sb.WriteString(buildRulesSection(ctx.Rules, ctx.DimensionWeights))
+	sb.WriteString(buildRulesSectionLite(ctx.Rules, ctx.DimensionWeights))
 
 	// code_understanding 每批都注入（内容由上游按批次文件过滤后传入）
 	if md, ok := ctx.AgentMarkdowns["code_understanding"]; ok && md != "" {
@@ -1064,7 +1062,46 @@ func buildDimensionDefinitionsSection(dimWeights map[string]DimensionWeight) str
 		sb.WriteString(fmt.Sprintf("- **%s** (`%s`)\n", label, cat))
 	}
 	sb.WriteString("\n")
-	sb.WriteString("【重要】请确保每条 issue 的 `category` 字段严格使用上表中的维度代码（如 `security`、`code_quality` 等），不得使用其他值。\n\n")
+	sb.WriteString("【重要】请确保每条 issue 的 `category` 字段严格使用上表中的维度代码（用英文反引号标注的 code），不得使用其他值。\n\n")
+	return sb.String()
+}
+
+// buildRulesSectionLite 构建轻量级规则章节（仅展示规则列表，不提及评分和权重）
+// 适用于分批评审等不需要模型计算分数的场景
+func buildRulesSectionLite(rules []model.ReviewRule, dimWeights map[string]DimensionWeight) string {
+	var sb strings.Builder
+	sb.WriteString("## 【评审规则列表】\n\n")
+	sb.WriteString("请重点检查以下规则对应的问题，若发现问题请归入对应的维度类别：\n\n")
+
+	selected, _ := SelectTopRules(rules, len(rules))
+	grouped := groupRulesByCategory(selected)
+
+	order := sortDimensions(dimWeights)
+	for _, cat := range order {
+		group, ok := grouped[cat]
+		if !ok || len(group) == 0 {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("### %s (`%s`)\n\n", categoryDisplay(cat), cat))
+		for _, rule := range group {
+			severityLabel := severityDisplay(rule.Severity)
+			sb.WriteString(fmt.Sprintf("#### `%s` | %s | **%s**\n\n", rule.Code, rule.Name, severityLabel))
+
+			promptText := strings.TrimSpace(rule.Prompt)
+			if promptText != "" {
+				hasStructure := strings.HasPrefix(promptText, "#") ||
+					strings.HasPrefix(promptText, "-") ||
+					strings.HasPrefix(promptText, "*") ||
+					listItemRe.MatchString(promptText)
+				if !hasStructure {
+					sb.WriteString("**检查要点：**\n")
+				}
+				sb.WriteString(promptText)
+				sb.WriteString("\n\n")
+			}
+		}
+	}
+	sb.WriteString("对于未在规则列表中的其他问题，也可以一并指出，此时 `rule_code` 填空字符串，但 `category` 必须严格使用上方维度代码。\n\n")
 	return sb.String()
 }
 

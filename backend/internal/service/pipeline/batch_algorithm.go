@@ -252,7 +252,6 @@ func BuildBatchContext(ctx StageContext) BatchContext {
 		template = v
 	}
 	// commits 和 MRTitle 在多批场景只在最后一批注入，不计入每批固定开销
-	// （单批场景由 executeSingleBatchStructured 自行处理）
 	if v, ok := ctx.GetInput("commits_text").(string); ok {
 		_ = v
 	}
