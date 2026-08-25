@@ -273,6 +273,10 @@
                         <div class="client" id="clientButtons"></div>
                         <div class="panel-label">MCP 配置</div>
                         <pre class="code" id="configCode"></pre>
+                        <div style="font-size: .6875rem; color: var(--text-3); margin-top: .375rem; line-height: 1.5;">
+                            <i class="fas fa-info-circle" style="margin-right:.2rem;"></i>
+                            请将 <code style="background:#f1f5f9;padding:.05rem .25rem;border-radius:.25rem;">X-IM-User-ID</code> 替换为你的企业微信/钉钉/飞书用户ID，用于权限校验和通知推送
+                        </div>
                         <div class="btn-row">
                             <button class="btn-primary" onclick="copyConfig()"><i class="fas fa-copy"></i>复制</button>
                             <button class="btn-outline" onclick="downloadConfig()"><i class="fas fa-download"></i>下载</button>
@@ -316,10 +320,14 @@ const MCP_TOOLS = [
 ];
 
 const CLIENT_TEMPLATES = {
-    cursor: { name:'Cursor', generate:(h,k)=>JSON.stringify({mcpServers:{codeguard:{url:h+'/mcp/v1',headers:{'X-API-Key':k}}}},null,2) },
-    claude: { name:'Claude Desktop', generate:(h,k)=>JSON.stringify({mcpServers:{codeguard:{command:'npx',args:['-y','@modelcontextprotocol/server-http'],env:{URL:h+'/mcp/v1',HEADERS:JSON.stringify({'X-API-Key':k})}}}},null,2) },
-    cline: { name:'Cline (VS Code)', generate:(h,k)=>JSON.stringify({'cline.mcpServers':{codeguard:{url:h+'/mcp/v1',headers:{'X-API-Key':k}}}},null,2) },
-    other: { name:'其他客户端', generate:(h,k)=>`URL: ${h}/mcp/v1\nHeaders:\n  X-API-Key: ${k}\nContent-Type: application/json` }
+    cursor: { name:'Cursor', generate:(h,k)=>JSON.stringify({mcpServers:{codeguard:{url:h+'/mcp/v1',headers:{'X-API-Key':k,'X-IM-User-ID':'your-im-user-id'}}}},null,2) },
+    claude: { name:'Claude Desktop', generate:(h,k)=>JSON.stringify({mcpServers:{codeguard:{command:'npx',args:['-y','@modelcontextprotocol/server-http'],env:{URL:h+'/mcp/v1',HEADERS:JSON.stringify({'X-API-Key':k,'X-IM-User-ID':'your-im-user-id'})}}}},null,2) },
+    cline: { name:'Cline (VS Code)', generate:(h,k)=>JSON.stringify({'cline.mcpServers':{codeguard:{url:h+'/mcp/v1',headers:{'X-API-Key':k,'X-IM-User-ID':'your-im-user-id'}}}},null,2) },
+    other: { name:'其他客户端', generate:(h,k)=>`URL: ${h}/mcp/v1
+Headers:
+  X-API-Key: ${k}
+  X-IM-User-ID: your-im-user-id    # 请替换为你的 IM 用户ID
+Content-Type: application/json` }
 };
 
 let activeClient='cursor', apiKeyList=[];
