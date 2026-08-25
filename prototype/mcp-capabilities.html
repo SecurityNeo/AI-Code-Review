@@ -14,506 +14,198 @@
     <script src="/static/js/tailwindcss.min.js"></script>
     <style>
         :root {
-            --bg-page: #f8fafc;
-            --card-bg: #fff;
-            --text-primary: #0f172a;
-            --text-secondary: #475569;
-            --text-muted: #64748b;
-            --border-color: #e2e8f0;
-            --accent: #4f46e5;
-            --accent-hover: #4338ca;
-            --accent-light: #eef2ff;
-            --success: #10b981;
-            --danger: #ef4444;
-            --warning: #f59e0b;
-            --query-color: #3b82f6;
-            --write-color: #f59e0b;
-            --stats-color: #10b981;
+            --bg: #f8fafc;
+            --card: #fff;
+            --text: #0f172a;
+            --text-2: #475569;
+            --text-3: #64748b;
+            --border: #e2e8f0;
+            --primary: #4f46e5;
+            --primary-hover: #4338ca;
         }
-        body { background: var(--bg-page); }
+        body { background: var(--bg); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
 
-        /* Page Layout */
-        .page-container {
-            padding: 1.5rem 2rem;
-            max-width: 1440px;
-            margin: 0 auto;
-        }
-        @media (max-width: 1023px) {
-            .page-container { padding: 1rem; }
-        }
+        /* Layout */
+        .container { padding: 1.5rem 2rem; max-width: 1440px; margin: 0 auto; }
+        @media (max-width: 1023px) { .container { padding: 1rem; } }
 
         /* Header */
-        .page-header {
-            margin-bottom: 1.5rem;
+        .header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem; }
+        .header h1 { font-size: 1.25rem; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: .5rem; margin: 0; }
+        .header p { margin: .25rem 0 0; font-size: .875rem; color: var(--text-3); }
+        .header-actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+        .header-actions a, .header-actions button {
+            display: inline-flex; align-items: center; gap: .375rem;
+            padding: .4rem .75rem; border-radius: .5rem; font-size: .8125rem; font-weight: 500;
+            color: var(--text-2); background: #fff; border: 1px solid var(--border);
+            text-decoration: none; cursor: pointer; transition: all .15s;
         }
-        .page-title {
-            font-size: 1.25rem;
-            font-weight: 700;
-            color: var(--text-primary);
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-        .page-subtitle {
-            font-size: 0.875rem;
-            color: var(--text-muted);
-            margin-top: 0.25rem;
-            line-height: 1.5;
-        }
+        .header-actions a:hover, .header-actions button:hover { background: #f8fafc; border-color: #cbd5e1; }
 
-        /* Stat Cards */
-        .stat-bar {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 0.75rem;
-            margin-bottom: 1.5rem;
-        }
-        .stat-card {
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 0.75rem;
-            padding: 1rem 1.25rem;
-            display: flex;
-            align-items: center;
-            gap: 0.875rem;
-            transition: box-shadow 0.2s, transform 0.15s;
-        }
-        .stat-card:hover {
-            box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-            transform: translateY(-1px);
-        }
-        .stat-icon {
-            width: 2.5rem;
-            height: 2.5rem;
-            border-radius: 0.625rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1rem;
-            flex-shrink: 0;
-        }
-        .stat-icon.query { background: #eff6ff; color: var(--query-color); }
-        .stat-icon.write { background: #fffbeb; color: var(--write-color); }
-        .stat-icon.stats { background: #ecfdf5; color: var(--stats-color); }
-        .stat-icon.total { background: var(--accent-light); color: var(--accent); }
-        .stat-label {
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            font-weight: 500;
-        }
-        .stat-value {
-            font-size: 1.25rem;
-            font-weight: 700;
-            color: var(--text-primary);
-            line-height: 1.2;
-        }
-
-        /* Two Column Layout */
-        .two-col { display: grid; grid-template-columns: 1fr 320px; gap: 1.5rem; }
-        @media (max-width: 1023px) {
-            .two-col { grid-template-columns: 1fr; }
-            .stat-bar { grid-template-columns: repeat(2, 1fr); }
-        }
-        @media (max-width: 639px) {
-            .stat-bar { grid-template-columns: repeat(1, 1fr); }
-        }
-
-        /* Category Tabs */
-        .category-tabs {
-            display: flex;
-            gap: 0.375rem;
-            margin-bottom: 1.25rem;
-            padding: 0.25rem;
-            background: #f1f5f9;
-            border-radius: 0.625rem;
-            width: fit-content;
-        }
-        .category-tab {
-            padding: 0.45rem 1rem;
-            border-radius: 0.5rem;
-            font-size: 0.8125rem;
-            font-weight: 500;
-            border: none;
-            background: transparent;
-            color: var(--text-muted);
-            cursor: pointer;
-            transition: all 0.15s;
-            white-space: nowrap;
-        }
-        .category-tab:hover { color: var(--text-primary); }
-        .category-tab.active {
-            background: var(--card-bg);
-            color: var(--text-primary);
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-        }
-
-        /* Capability Grid */
-        .capability-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 0.875rem;
-        }
-
-        /* Capability Card */
-        .capability-card {
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 0.75rem;
-            padding: 1.25rem;
-            transition: box-shadow 0.2s, transform 0.15s, border-color 0.15s;
-            cursor: default;
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-        }
-        .capability-card:hover {
-            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-            transform: translateY(-2px);
-            border-color: #cbd5e1;
-        }
-        .capability-card.query { border-left: 3px solid var(--query-color); }
-        .capability-card.write { border-left: 3px solid var(--write-color); }
-        .capability-card.stats { border-left: 3px solid var(--stats-color); }
-
-        .card-main {
-            display: flex;
-            align-items: flex-start;
-            gap: 0.875rem;
-        }
-        .card-icon-wrap {
-            width: 2.75rem;
-            height: 2.75rem;
-            border-radius: 0.75rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.125rem;
-            color: #fff;
-            flex-shrink: 0;
-        }
-        .card-title-wrap { flex: 1; min-width: 0; }
-        .card-title {
-            font-size: 0.9375rem;
-            font-weight: 600;
-            color: var(--text-primary);
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            justify-content: space-between;
-        }
-        .card-title-name { font-family: 'SF Mono', monospace; font-size: 0.8rem; color: var(--text-muted); }
-        .card-desc {
-            font-size: 0.8125rem;
-            color: var(--text-secondary);
-            line-height: 1.5;
-            margin-top: 0.25rem;
-        }
-        .badge-strip {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.375rem;
-            margin-top: 0.25rem;
-        }
-        .badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.25rem;
-            padding: 0.2rem 0.5rem;
-            border-radius: 999px;
-            font-size: 0.6875rem;
-            font-weight: 600;
-            letter-spacing: 0.02em;
-        }
-        .badge-blue { background: #eff6ff; color: #1e40af; }
-        .badge-amber { background: #fffbeb; color: #92400e; }
-        .badge-green { background: #ecfdf5; color: #166534; }
-        .badge-gray { background: #f1f5f9; color: #475569; }
-        .badge-red { background: #fee2e2; color: #991b1b; }
-
-        .card-footer {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-top: 0.5rem;
-            border-top: 1px solid #f1f5f9;
-        }
-        .btn-small {
-            padding: 0.3rem 0.625rem;
-            border-radius: 0.375rem;
-            font-size: 0.75rem;
-            font-weight: 500;
-            border: 1px solid var(--border-color);
-            background: #fff;
-            color: var(--text-muted);
-            cursor: pointer;
-            transition: all 0.15s;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.25rem;
-        }
-        .btn-small:hover {
-            background: #f8fafc;
-            color: var(--accent);
-            border-color: var(--accent);
-        }
-        .phrase-bubbles {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.25rem;
-        }
-        .phrase-bubble {
-            font-size: 0.6875rem;
-            color: var(--text-muted);
-            background: #f8fafc;
-            padding: 0.2rem 0.5rem;
-            border-radius: 0.375rem;
-            border: 1px solid #f1f5f9;
-            white-space: nowrap;
-        }
-
-        /* Detail Panel */
-        .detail-panel {
-            display: none;
-            margin-top: 0.75rem;
-            padding: 0.875rem;
-            background: #f8fafc;
-            border-radius: 0.5rem;
-            border: 1px solid #f1f5f9;
-        }
-        .detail-panel.open { display: block; }
-        .param-table { width: 100%; font-size: 0.75rem; border-collapse: collapse; }
-        .param-table th {
-            text-align: left;
-            padding: 0.4rem 0.5rem;
-            color: var(--text-muted);
-            font-weight: 600;
-            border-bottom: 1px solid #e2e8f0;
-            background: transparent;
-        }
-        .param-table td {
-            padding: 0.4rem 0.5rem;
-            color: var(--text-secondary);
-            border-bottom: 1px solid #f1f5f9;
-        }
-
-        /* Right Sidebar */
-        .sidebar-panel {
-            display: flex;
-            flex-direction: column;
-            gap: 1rem;
-        }
-        .panel-card {
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 0.75rem;
-            padding: 1.25rem;
-        }
-        .panel-title {
-            font-size: 0.875rem;
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-bottom: 0.875rem;
-            display: flex;
-            align-items: center;
-            gap: 0.375rem;
-        }
-        .panel-section-label {
-            font-size: 0.75rem;
-            font-weight: 600;
-            color: var(--text-muted);
-            margin-bottom: 0.375rem;
-            text-transform: uppercase;
-            letter-spacing: 0.03em;
-        }
-
-        /* Client Buttons */
-        .client-list {
-            display: flex;
-            flex-direction: column;
-            gap: 0.375rem;
-            margin-bottom: 0.75rem;
-        }
-        .client-item {
-            padding: 0.5rem 0.75rem;
-            border-radius: 0.5rem;
-            font-size: 0.8125rem;
-            font-weight: 500;
-            border: 1px solid var(--border-color);
-            background: #fff;
-            color: var(--text-secondary);
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            transition: all 0.15s;
-        }
-        .client-item:hover { background: #f8fafc; border-color: #cbd5e1; }
-        .client-item.active {
-            background: var(--accent-light);
-            color: var(--accent);
-            border-color: var(--accent);
-        }
-        .client-item .check { opacity: 0; font-size: 0.75rem; }
-        .client-item.active .check { opacity: 1; }
-
-        .code-block {
-            background: #0f172a;
-            color: #e2e8f0;
-            padding: 0.875rem;
-            border-radius: 0.5rem;
-            font-family: 'SF Mono', 'Consolas', monospace;
-            font-size: 0.75rem;
-            line-height: 1.6;
-            overflow-x: auto;
-            white-space: pre-wrap;
-            word-break: break-all;
-            max-height: 200px;
-            overflow-y: auto;
-        }
-
-        .btn-primary {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.4rem;
-            background: var(--accent);
-            color: #fff;
-            padding: 0.5rem 1rem;
-            border-radius: 0.5rem;
-            font-size: 0.8125rem;
-            font-weight: 500;
-            border: none;
-            cursor: pointer;
-            transition: background 0.15s;
-            width: 100%;
-        }
-        .btn-primary:hover { background: var(--accent-hover); }
-        .btn-outline {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.4rem;
-            background: #fff;
-            color: var(--text-secondary);
-            padding: 0.5rem 1rem;
-            border-radius: 0.5rem;
-            font-size: 0.8125rem;
-            font-weight: 500;
-            border: 1px solid var(--border-color);
-            cursor: pointer;
-            transition: all 0.15s;
-            width: 100%;
-        }
-        .btn-outline:hover { background: #f8fafc; color: var(--text-primary); }
-        .btn-row {
-            display: flex;
-            gap: 0.5rem;
-            margin-top: 0.75rem;
-        }
-        .btn-row .btn-primary, .btn-row .btn-outline { flex: 1; }
-
-        /* Quickstart Section */
-        .quickstart-list {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-        }
-        .quickstart-item {
-            background: #f8fafc;
-            border: 1px solid #f1f5f9;
-            border-radius: 0.5rem;
-            padding: 0.625rem 0.75rem;
-            cursor: pointer;
-            transition: all 0.15s;
-        }
-        .quickstart-item:hover {
-            border-color: #cbd5e1;
-            background: #fff;
-        }
-        .quickstart-item .qs-text {
-            font-size: 0.8125rem;
-            color: var(--text-secondary);
-            display: flex;
-            align-items: center;
-            gap: 0.375rem;
-        }
-        .quickstart-item .qs-tool {
-            font-size: 0.6875rem;
-            color: var(--text-muted);
-            margin-top: 0.125rem;
-            font-family: 'SF Mono', monospace;
-        }
-
-        /* Status */
-        .status-indicator {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.375rem;
-            padding: 0.35rem 0.75rem;
-            border-radius: 0.5rem;
-            font-size: 0.8125rem;
-            font-weight: 500;
+        .status-badge {
+            display: inline-flex; align-items: center; gap: .375rem;
+            padding: .35rem .75rem; border-radius: .5rem; font-size: .8125rem; font-weight: 500;
         }
         .status-ok { background: #ecfdf5; color: #166534; }
-        .status-error { background: #fee2e2; color: #991b1b; }
-        .status-unknown { background: #f1f5f9; color: #64748b; }
-        .status-checking { background: #eff6ff; color: #1e40af; }
+        .status-err { background: #fee2e2; color: #991b1b; }
+        .status-check { background: #eff6ff; color: #1e40af; }
+        .status-idle { background: #f1f5f9; color: var(--text-3); }
 
-        /* Top Actions */
-        .top-actions {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            flex-wrap: wrap;
-        }
-        .action-link {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.375rem;
-            padding: 0.4rem 0.75rem;
-            border-radius: 0.5rem;
-            font-size: 0.8125rem;
-            font-weight: 500;
-            color: var(--text-secondary);
-            background: #fff;
-            border: 1px solid var(--border-color);
-            text-decoration: none;
-            transition: all 0.15s;
-        }
-        .action-link:hover { background: #f8fafc; color: var(--text-primary); border-color: #cbd5e1; }
+        /* Stats */
+        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem; margin-bottom: 1.5rem; }
+        .stat { background: var(--card); border: 1px solid var(--border); border-radius: .75rem; padding: 1rem; display: flex; align-items: center; gap: .75rem; }
+        .stat-icon { width: 2.25rem; height: 2.25rem; border-radius: .625rem; display: flex; align-items: center; justify-content: center; font-size: .875rem; }
+        .stat-label { font-size: .75rem; color: var(--text-3); font-weight: 500; }
+        .stat-num { font-size: 1.25rem; font-weight: 700; color: var(--text); }
 
-        /* Warning Box */
-        .warning-box {
-            background: #fffbeb;
-            border: 1px solid #fde68a;
-            border-radius: 0.5rem;
-            padding: 0.5rem 0.75rem;
-            font-size: 0.75rem;
-            color: #92400e;
-            margin-top: 0.5rem;
-            display: flex;
-            align-items: flex-start;
-            gap: 0.375rem;
+        /* Two columns */
+        .cols { display: grid; grid-template-columns: 1fr 340px; gap: 1.5rem; }
+        @media (max-width: 1023px) {
+            .cols { grid-template-columns: 1fr; }
+            .stats { grid-template-columns: repeat(2, 1fr); }
         }
+        @media (max-width: 639px) {
+            .stats { grid-template-columns: 1fr; }
+        }
+
+        /* Tabs */
+        .tabs { display: flex; gap: .25rem; margin-bottom: 1.25rem; padding: .25rem; background: #f1f5f9; border-radius: .625rem; width: fit-content; }
+        .tab { padding: .4rem .875rem; border-radius: .5rem; font-size: .8125rem; font-weight: 500; border: none; background: transparent; color: var(--text-3); cursor: pointer; transition: all .15s; }
+        .tab:hover { color: var(--text); }
+        .tab.active { background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+
+        /* Cards */
+        .grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: .75rem; }
+        @media (max-width: 639px) { .grid-cards { grid-template-columns: 1fr; } }
+
+        .card {
+            background: var(--card); border: 1px solid var(--border); border-radius: .75rem;
+            padding: 1rem; transition: box-shadow .2s, border-color .15s; cursor: pointer; position: relative;
+        }
+        .card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.06); border-color: #cbd5e1; }
+
+        .card-top { display: flex; align-items: flex-start; gap: .625rem; }
+        .card-icon {
+            width: 2rem; height: 2rem; border-radius: .5rem; display: flex; align-items: center; justify-content: center;
+            font-size: .875rem; color: #fff; flex-shrink: 0;
+        }
+        .card-head { flex: 1; min-width: 0; }
+        .card-title { font-size: .875rem; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: .4rem; justify-content: space-between; }
+        .card-name { font-family: ui-monospace, 'SF Mono', monospace; font-size: .75rem; color: var(--text-3); font-weight: 400; }
+        .card-body { font-size: .8125rem; color: var(--text-2); margin-top: .375rem; line-height: 1.5; }
+        .card-tags { display: flex; flex-wrap: wrap; gap: .375rem; margin-top: .5rem; }
+        .tag {
+            font-size: .6875rem; font-weight: 600; padding: .15rem .5rem; border-radius: 999px; letter-spacing: .01em;
+        }
+        .tag-blue { background: #eff6ff; color: #1e40af; }
+        .tag-amber { background: #fffbeb; color: #92400e; }
+        .tag-red { background: #fee2e2; color: #991b1b; }
+        .tag-gray { background: #f1f5f9; color: var(--text-2); }
+
+        /* Sidebar */
+        .sidebar { display: flex; flex-direction: column; gap: .875rem; }
+        .panel {
+            background: var(--card); border: 1px solid var(--border); border-radius: .75rem; padding: 1rem;
+        }
+        .panel-h { font-size: .875rem; font-weight: 600; color: var(--text); margin-bottom: .75rem; display: flex; align-items: center; gap: .375rem; }
+        .panel-label { font-size: .75rem; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .03em; margin-bottom: .375rem; }
+
+        .client { display: flex; flex-direction: column; gap: .25rem; margin-bottom: .625rem; }
+        .client-btn {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: .45rem .625rem; border-radius: .5rem; font-size: .8125rem; font-weight: 500;
+            border: 1px solid var(--border); background: #fff; color: var(--text-2); cursor: pointer; transition: all .15s;
+        }
+        .client-btn:hover { background: #f8fafc; }
+        .client-btn.active { background: #eef2ff; color: var(--primary); border-color: var(--primary); }
+        .client-btn .check { opacity: 0; font-size: .75rem; }
+        .client-btn.active .check { opacity: 1; }
+
+        pre.code {
+            background: #0f172a; color: #e2e8f0; padding: .75rem; border-radius: .5rem;
+            font-family: ui-monospace, 'SF Mono', Consolas, monospace; font-size: .75rem; line-height: 1.6;
+            overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow-y: auto;
+        }
+        .btn-row { display: flex; gap: .5rem; margin-top: .625rem; }
+        .btn-row button { flex: 1; }
+        .btn-primary {
+            display: flex; align-items: center; justify-content: center; gap: .375rem;
+            padding: .5rem; border-radius: .5rem; font-size: .8125rem; font-weight: 500;
+            background: var(--primary); color: #fff; border: none; cursor: pointer; transition: background .15s;
+        }
+        .btn-primary:hover { background: var(--primary-hover); }
+        .btn-outline {
+            display: flex; align-items: center; justify-content: center; gap: .375rem;
+            padding: .5rem; border-radius: .5rem; font-size: .8125rem; font-weight: 500;
+            background: #fff; color: var(--text-2); border: 1px solid var(--border); cursor: pointer;
+        }
+        .btn-outline:hover { background: #f8fafc; }
+
+        /* Quickstart */
+        .qs { display: flex; flex-direction: column; gap: .375rem; }
+        .qs-item {
+            background: #f8fafc; border: 1px solid #f1f5f9; border-radius: .5rem;
+            padding: .5rem .625rem; cursor: pointer; transition: all .15s;
+        }
+        .qs-item:hover { border-color: #cbd5e1; background: #fff; }
+        .qs-top { display: flex; align-items: center; gap: .5rem; font-size: .8125rem; }
+        .qs-top i { font-size: .75rem; color: var(--primary); }
+        .qs-top strong { color: var(--text); min-width: 3.25rem; }
+        .qs-top span { color: var(--text-2); }
+        .qs-bot { font-size: .6875rem; color: var(--text-3); margin-top: .125rem; font-family: ui-monospace, monospace; }
+
+        /* Modal */
+        .modal-overlay {
+            display: none; position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 9999;
+            align-items: center; justify-content: center; padding: 1rem;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal {
+            background: var(--card); border-radius: .75rem; border: 1px solid var(--border);
+            width: 100%; max-width: 600px; max-height: 85vh; overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,.2);
+        }
+        .modal-head {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 1rem 1.25rem; border-bottom: 1px solid var(--border);
+        }
+        .modal-title { font-size: 1rem; font-weight: 700; color: var(--text); }
+        .modal-close {
+            width: 1.75rem; height: 1.75rem; border-radius: .375rem; border: none;
+            background: #f1f5f9; color: var(--text-3); cursor: pointer; display: flex; align-items: center; justify-content: center;
+        }
+        .modal-close:hover { background: #e2e8f0; color: var(--text); }
+        .modal-body { padding: 1.25rem; }
+        .modal-section { margin-bottom: 1rem; }
+        .modal-section:last-child { margin-bottom: 0; }
+        .modal-label { font-size: .75rem; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .04em; margin-bottom: .375rem; }
+        .modal-desc { font-size: .875rem; color: var(--text-2); line-height: 1.6; }
+        .modal-table { width: 100%; font-size: .8125rem; border-collapse: collapse; }
+        .modal-table th { text-align: left; padding: .4rem .5rem; color: var(--text-3); font-weight: 600; border-bottom: 1px solid var(--border); }
+        .modal-table td { padding: .4rem .5rem; color: var(--text-2); border-bottom: 1px solid #f1f5f9; }
+        .modal-phrase {
+            display: inline-block; background: #f8fafc; border: 1px solid #e2e8f0;
+            padding: .375rem .625rem; border-radius: .375rem; font-size: .8125rem; color: var(--text-2);
+            margin: .125rem .25rem .125rem 0; cursor: default;
+        }
+        .modal-phrase:hover { border-color: #cbd5e1; background: #fff; }
+        .modal-warning {
+            background: #fffbeb; border: 1px solid #fde68a; border-radius: .5rem;
+            padding: .5rem .75rem; font-size: .8125rem; color: #92400e; display: flex; align-items: flex-start; gap: .375rem;
+        }
+        .modal-warning i { margin-top: .125rem; flex-shrink: 0; }
 
         /* Responsive */
         @media (max-width: 1023px) {
-            .capability-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
-        }
-        @media (max-width: 639px) {
-            .capability-grid { grid-template-columns: 1fr; }
-            .page-container { padding: 1rem; }
+            .grid-cards { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
         }
     </style>
 </head>
-<body class="bg-gray-50 font-sans">
+<body class="bg-gray-50">
 
 <div id="page-transition" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#f8fafc;z-index:99999;transition:opacity .25s ease;"></div>
 <script>
-(function(){
-  function hide(){var el=document.getElementById('page-transition');if(el){el.style.opacity='0';setTimeout(function(){el.remove();},250);}}
-  if(document.readyState==='complete'){hide();}else{window.addEventListener('load',hide);}
-})();
+(function(){function hide(){var el=document.getElementById('page-transition');if(el){el.style.opacity='0';setTimeout(function(){el.remove();},250);}}if(document.readyState==='complete'){hide();}else{window.addEventListener('load',hide);}})();
 </script>
 
 <div class="flex h-screen">
@@ -521,107 +213,69 @@
         <nav style="padding:20px; text-align:center; color:#94a3b8; font-size:13px;">加载中...</nav>
     </aside>
     <main class="flex-1 overflow-y-auto">
-        <div class="page-container">
+        <div class="container">
 
             <!-- Header -->
-            <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem;">
+            <div class="header">
                 <div>
-                    <div class="page-title">
-                        <i class="fas fa-robot text-indigo-600"></i>
-                        MCP 能力中心
-                    </div>
-                    <div class="page-subtitle">
-                        CodeGuard 通过标准 MCP 协议为智能体提供 <strong>15</strong> 个可调用的代码评审能力
-                    </div>
+                    <h1><i class="fas fa-robot text-indigo-600"></i>MCP 能力中心</h1>
+                    <p>CodeGuard 通过标准 MCP 协议为智能体提供 <strong>15</strong> 个可调用的代码评审能力</p>
                 </div>
-                <div class="top-actions">
-                    <span id="mcpStatus" class="status-indicator status-unknown">
-                        <i class="fas fa-circle" style="font-size:0.375rem;"></i>
-                        <span>未检测</span>
-                    </span>
-                    <button class="action-link" onclick="checkMCPStatus()">
-                        <i class="fas fa-stethoscope"></i>检测
-                    </button>
-                    <a href="mcp-diagnose.html" class="action-link">
-                        <i class="fas fa-wrench"></i>诊断
-                    </a>
-                    <a href="mcp-keys.html" class="action-link">
-                        <i class="fas fa-key"></i>密钥
-                    </a>
+                <div class="header-actions">
+                    <span id="mcpStatus" class="status-badge status-idle"><i class="fas fa-circle" style="font-size:.375rem;"></i><span>未检测</span></span>
+                    <button onclick="checkMCPStatus()"><i class="fas fa-stethoscope"></i>检测</button>
+                    <a href="mcp-diagnose.html"><i class="fas fa-wrench"></i>诊断</a>
+                    <a href="mcp-keys.html"><i class="fas fa-key"></i>密钥</a>
                 </div>
             </div>
 
-            <!-- Stat Bar -->
-            <div class="stat-bar">
-                <div class="stat-card">
-                    <div class="stat-icon total"><i class="fas fa-cubes"></i></div>
-                    <div>
-                        <div class="stat-label">能力总数</div>
-                        <div class="stat-value">15</div>
-                    </div>
+            <!-- Stats -->
+            <div class="stats">
+                <div class="stat">
+                    <div class="stat-icon" style="background:#eef2ff;color:var(--primary);"><i class="fas fa-cubes"></i></div>
+                    <div><div class="stat-label">能力总数</div><div class="stat-num">15</div></div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-icon query"><i class="fas fa-search"></i></div>
-                    <div>
-                        <div class="stat-label">查询类</div>
-                        <div class="stat-value">9</div>
-                    </div>
+                <div class="stat">
+                    <div class="stat-icon" style="background:#eff6ff;color:#3b82f6;"><i class="fas fa-search"></i></div>
+                    <div><div class="stat-label">查询类</div><div class="stat-num">9</div></div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-icon write"><i class="fas fa-edit"></i></div>
-                    <div>
-                        <div class="stat-label">操作类</div>
-                        <div class="stat-value">3</div>
-                    </div>
+                <div class="stat">
+                    <div class="stat-icon" style="background:#fffbeb;color:#f59e0b;"><i class="fas fa-edit"></i></div>
+                    <div><div class="stat-label">操作类</div><div class="stat-num">3</div></div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-icon stats"><i class="fas fa-chart-pie"></i></div>
-                    <div>
-                        <div class="stat-label">统计类</div>
-                        <div class="stat-value">3</div>
-                    </div>
+                <div class="stat">
+                    <div class="stat-icon" style="background:#ecfdf5;color:#10b981;"><i class="fas fa-chart-pie"></i></div>
+                    <div><div class="stat-label">统计类</div><div class="stat-num">3</div></div>
                 </div>
             </div>
 
-            <!-- Two Column Body -->
-            <div class="two-col">
-                <!-- Left: Capabilities -->
+            <!-- Body -->
+            <div class="cols">
                 <div>
-                    <!-- Category Filter -->
-                    <div class="category-tabs" id="categoryTabs">
-                        <button class="category-tab active" data-category="all" onclick="filterCategory('all')">全部</button>
-                        <button class="category-tab" data-category="query" onclick="filterCategory('query')">查询</button>
-                        <button class="category-tab" data-category="write" onclick="filterCategory('write')">操作</button>
-                        <button class="category-tab" data-category="stats" onclick="filterCategory('stats')">统计</button>
+                    <div class="tabs" id="categoryTabs">
+                        <button class="tab active" data-category="all" onclick="filterCategory('all')">全部</button>
+                        <button class="tab" data-category="query" onclick="filterCategory('query')">查询</button>
+                        <button class="tab" data-category="write" onclick="filterCategory('write')">操作</button>
+                        <button class="tab" data-category="stats" onclick="filterCategory('stats')">统计</button>
                     </div>
-
-                    <!-- Capability Grid -->
-                    <div class="capability-grid" id="capabilityGrid"></div>
+                    <div class="grid-cards" id="capabilityGrid"></div>
                 </div>
 
-                <!-- Right: Sidebar -->
-                <div class="sidebar-panel">
-                    <!-- Config Wizard -->
-                    <div class="panel-card">
-                        <div class="panel-title"><i class="fas fa-plug text-indigo-500"></i> 快速连接</div>
-                        <div class="panel-section-label">选择客户端</div>
-                        <div class="client-list" id="clientButtons"></div>
-                        <div class="panel-section-label">MCP 配置</div>
-                        <div class="code-block" id="configCode"></div>
+                <div class="sidebar">
+                    <div class="panel">
+                        <div class="panel-h"><i class="fas fa-plug text-indigo-500"></i>快速连接</div>
+                        <div class="panel-label">选择客户端</div>
+                        <div class="client" id="clientButtons"></div>
+                        <div class="panel-label">MCP 配置</div>
+                        <pre class="code" id="configCode"></pre>
                         <div class="btn-row">
-                            <button class="btn-primary" onclick="copyConfig()">
-                                <i class="fas fa-copy"></i>复制
-                            </button>
-                            <button class="btn-outline" onclick="downloadConfig()">
-                                <i class="fas fa-download"></i>下载
-                            </button>
+                            <button class="btn-primary" onclick="copyConfig()"><i class="fas fa-copy"></i>复制</button>
+                            <button class="btn-outline" onclick="downloadConfig()"><i class="fas fa-download"></i>下载</button>
                         </div>
                     </div>
-
-                    <!-- Quickstart -->
-                    <div class="panel-card">
-                        <div class="panel-title"><i class="fas fa-bolt text-amber-500"></i> 常用开场白</div>
-                        <div class="quickstart-list" id="quickstartList"></div>
+                    <div class="panel">
+                        <div class="panel-h"><i class="fas fa-bolt text-amber-500"></i>常用开场白</div>
+                        <div class="qs" id="quickstartList"></div>
                     </div>
                 </div>
             </div>
@@ -630,24 +284,34 @@
     </main>
 </div>
 
+<!-- Detail Modal -->
+<div class="modal-overlay" id="detailModal">
+    <div class="modal">
+        <div class="modal-head">
+            <div class="modal-title" id="modalTitle">工具详情</div>
+            <button class="modal-close" onclick="closeModal()"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body" id="modalBody"></div>
+    </div>
+</div>
+
 <script>
-// ========== Data ==========
 const MCP_TOOLS = [
-    { toolName:'list_tasks', displayName:'任务列表查询', description:'查询代码评审任务列表，支持按状态和项目过滤。获取 task_id 的入口。', category:'query', icon:'fa-list', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'分页',c:'badge-gray'},{t:'需认证',c:'badge-gray'}], params:[{n:'status',t:'string',r:false,d:'running|pending|failed|success|stopped'},{n:'project_id',t:'integer',r:false},{n:'mine',t:'boolean',r:false,d:'true'},{n:'limit',t:'integer',r:false,d:'5'}], phrases:['看看我最近的评审任务','列出所有失败的任务','项目 12 最近有哪些 MR 在评审'] },
-    { toolName:'get_task', displayName:'任务详情查询', description:'获取单个评审任务的完整详情（含 MR 信息、评审得分、Issue 数量、使用模型）。', category:'query', icon:'fa-file-alt', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'}], params:[{n:'task_id',t:'integer',r:true}], phrases:['任务 2084 怎么样了','这个评审的得分是多少'], requires:['task_id'] },
-    { toolName:'get_task_pipeline', displayName:'Pipeline 详情查询', description:'查询任务 Pipeline 各阶段执行详情，用于定位"卡在哪一步"或"为什么失败"。', category:'query', icon:'fa-project-diagram', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'}], params:[{n:'task_id',t:'integer',r:true}], phrases:['任务 2084 卡在哪一步','Pipeline 执行到哪了'], requires:['task_id'] },
-    { toolName:'get_mr_review', displayName:'MR 评审结果查询', description:'获取指定任务的 AI 代码评审结果（Issue 列表）。支持按 severity 和 category 过滤。', category:'query', icon:'fa-code', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'},{t:'可过滤',c:'badge-gray'}], params:[{n:'task_id',t:'integer',r:true},{n:'severity',t:'string',r:false,d:'critical|high|medium|low'},{n:'category',t:'string',r:false,d:'security|performance|style|...'}], phrases:['任务 2084 有什么安全问题','找出所有 critical 的 issue'], requires:['task_id'] },
-    { toolName:'get_issue_detail', displayName:'Issue 详情查询', description:'获取单个 Issue 的完整详情（含代码上下文、详细描述、修复方案）。', category:'query', icon:'fa-search-plus', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'}], params:[{n:'issue_id',t:'integer',r:true}], phrases:['第 3 个 issue 具体是什么','issue 42 的修复建议'], requires:['issue_id'] },
-    { toolName:'list_merge_requests', displayName:'MR 列表查询', description:'查询已触发过 AI 评审的 MR 列表。支持按状态和项目过滤。', category:'query', icon:'fa-code-branch', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'分页',c:'badge-gray'},{t:'需认证',c:'badge-gray'}], params:[{n:'project_id',t:'integer',r:false},{n:'status',t:'string',r:false}], phrases:['看看最近的 MR','有哪些 MR 在评审'] },
-    { toolName:'get_merge_request_detail', displayName:'MR 详情查询', description:'获取指定 MR 的评审详情和对应任务信息。', category:'query', icon:'fa-info-circle', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'}], params:[{n:'project_id',t:'integer',r:true},{n:'mr_iid',t:'integer',r:true}], phrases:['MR !42 评审结果如何','这个 MR 有什么问题'] },
-    { toolName:'list_notifications', displayName:'通知列表查询', description:'查看站内通知列表（评审完成、升级提醒等）。支持 unread/all 过滤。', category:'query', icon:'fa-bell', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'分页',c:'badge-gray'},{t:'需认证',c:'badge-gray'}], params:[{n:'filter',t:'string',r:false,d:'unread|all'}], phrases:['有没有新通知','未读通知有哪些'] },
-    { toolName:'list_projects', displayName:'项目列表查询', description:'查询已接入 AI 代码评审的项目列表。默认只返回我有任务的项目。', category:'query', icon:'fa-folder-open', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'分页',c:'badge-gray'},{t:'需认证',c:'badge-gray'}], params:[{n:'limit',t:'integer',r:false,d:'20'}], phrases:['有哪些项目在用评审','看看所有项目'] },
-    { toolName:'retry_task', displayName:'任务重试', description:'为失败或已停止的任务创建重试任务，重新触发完整 AI 评审。', category:'write', icon:'fa-redo', color:'#f59e0b', tags:[{t:'可写',c:'badge-amber'},{t:'需认证',c:'badge-gray'},{t:'需确认',c:'badge-red'}], params:[{n:'task_id',t:'integer',r:true}], phrases:['重试任务 2084','重新评审一下','再跑一次'], dangerous:true, requires:['task_id'] },
-    { toolName:'stop_task', displayName:'任务停止', description:'停止正在运行或排队中的评审任务（当前阶段完成后终止）。', category:'write', icon:'fa-stop-circle', color:'#f59e0b', tags:[{t:'可写',c:'badge-amber'},{t:'需认证',c:'badge-gray'},{t:'需确认',c:'badge-red'}], params:[{n:'task_id',t:'integer',r:true}], phrases:['停掉任务 2084','取消评审','停止正在跑的任务'], dangerous:true, requires:['task_id'] },
-    { toolName:'mark_all_read', displayName:'标记全部已读', description:'一键将当前用户所有未读通知标记为已读。', category:'write', icon:'fa-check-double', color:'#f59e0b', tags:[{t:'可写',c:'badge-amber'},{t:'需认证',c:'badge-gray'}], params:[], phrases:['全部标记为已读','清除所有通知'], dangerous:true },
-    { toolName:'get_workbench', displayName:'工作台数据查询', description:'获取个人工作台数据，包含待处理 Issue 统计（按严重程度分档）、超时预警。', category:'stats', icon:'fa-desktop', color:'#10b981', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'}], params:[{n:'admin_view',t:'boolean',r:false,d:'false'}], phrases:['我的待办','有哪些问题需要处理','超时预警'] },
-    { toolName:'get_dashboard_stats', displayName:'大盘统计查询', description:'获取代码评审大盘统计（任务量、成功率、失败率、Top 项目）。支持 today/week/month。', category:'stats', icon:'fa-chart-bar', color:'#10b981', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'}], params:[{n:'period',t:'string',r:false,d:'today|week|month'}], phrases:['这周评审了多少 MR','成功率多少','团队评审负载如何'] },
-    { toolName:'get_token_usage', displayName:'Token 用量查询', description:'查看 AI 评审 Token 消耗和成本（按天汇总）。支持 day/project/model 分组。', category:'stats', icon:'fa-coins', color:'#10b981', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'}], params:[{n:'group_by',t:'string',r:false,d:'day|project|model'}], phrases:['Token 花了多少','AI 调用成本','模型 usage'] }
+    { toolName:'list_tasks', displayName:'任务列表查询', desc:'查询代码评审任务列表，支持按状态和项目过滤。获取 task_id 的入口。', category:'query', icon:'fa-list', color:'#3b82f6', tags:['只读','分页','需认证'], params:[{n:'status',t:'string',r:false,d:'running|pending|failed|success|stopped'},{n:'project_id',t:'integer',r:false},{n:'mine',t:'boolean',r:false,d:'true'},{n:'limit',t:'integer',r:false,d:'5'}], phrases:['看看我最近的评审任务','列出所有失败的任务','项目 12 最近有哪些 MR 在评审'] },
+    { toolName:'get_task', displayName:'任务详情查询', desc:'获取单个评审任务的完整详情（含 MR 信息、评审得分、Issue 数量、使用模型）。', category:'query', icon:'fa-file-alt', color:'#3b82f6', tags:['只读','需认证'], params:[{n:'task_id',t:'integer',r:true}], phrases:['任务 2084 怎么样了','这个评审的得分是多少'], requires:['task_id'] },
+    { toolName:'get_task_pipeline', displayName:'Pipeline 详情查询', desc:'查询任务 Pipeline 各阶段执行详情，用于定位"卡在哪一步"或"为什么失败"。', category:'query', icon:'fa-project-diagram', color:'#3b82f6', tags:['只读','需认证'], params:[{n:'task_id',t:'integer',r:true}], phrases:['任务 2084 卡在哪一步','Pipeline 执行到哪了'], requires:['task_id'] },
+    { toolName:'get_mr_review', displayName:'MR 评审结果查询', desc:'获取指定任务的 AI 代码评审结果（Issue 列表）。支持按 severity 和 category 过滤。', category:'query', icon:'fa-code', color:'#3b82f6', tags:['只读','需认证','可过滤'], params:[{n:'task_id',t:'integer',r:true},{n:'severity',t:'string',r:false,d:'critical|high|medium|low'},{n:'category',t:'string',r:false,d:'security|performance|style|...'}], phrases:['任务 2084 有什么安全问题','找出所有 critical 的 issue'], requires:['task_id'] },
+    { toolName:'get_issue_detail', displayName:'Issue 详情查询', desc:'获取单个 Issue 的完整详情（含代码上下文、详细描述、修复方案）。', category:'query', icon:'fa-search-plus', color:'#3b82f6', tags:['只读','需认证'], params:[{n:'issue_id',t:'integer',r:true}], phrases:['第 3 个 issue 具体是什么','issue 42 的修复建议'], requires:['issue_id'] },
+    { toolName:'list_merge_requests', displayName:'MR 列表查询', desc:'查询已触发过 AI 评审的 MR 列表。支持按状态和项目过滤。', category:'query', icon:'fa-code-branch', color:'#3b82f6', tags:['只读','分页','需认证'], params:[{n:'project_id',t:'integer',r:false},{n:'status',t:'string',r:false}], phrases:['看看最近的 MR','有哪些 MR 在评审'] },
+    { toolName:'get_merge_request_detail', displayName:'MR 详情查询', desc:'获取指定 MR 的评审详情和对应任务信息。', category:'query', icon:'fa-info-circle', color:'#3b82f6', tags:['只读','需认证'], params:[{n:'project_id',t:'integer',r:true},{n:'mr_iid',t:'integer',r:true}], phrases:['MR !42 评审结果如何','这个 MR 有什么问题'] },
+    { toolName:'list_notifications', displayName:'通知列表查询', desc:'查看站内通知列表（评审完成、升级提醒等）。支持 unread/all 过滤。', category:'query', icon:'fa-bell', color:'#3b82f6', tags:['只读','分页','需认证'], params:[{n:'filter',t:'string',r:false,d:'unread|all'}], phrases:['有没有新通知','未读通知有哪些'] },
+    { toolName:'list_projects', displayName:'项目列表查询', desc:'查询已接入 AI 代码评审的项目列表。默认只返回我有任务的项目。', category:'query', icon:'fa-folder-open', color:'#3b82f6', tags:['只读','分页','需认证'], params:[{n:'limit',t:'integer',r:false,d:'20'}], phrases:['有哪些项目在用评审','看看所有项目'] },
+    { toolName:'retry_task', displayName:'任务重试', desc:'为失败或已停止的任务创建重试任务，重新触发完整 AI 评审。', category:'write', icon:'fa-redo', color:'#f59e0b', tags:['可写','需认证','需确认'], params:[{n:'task_id',t:'integer',r:true}], phrases:['重试任务 2084','重新评审一下','再跑一次'], dangerous:true, requires:['task_id'] },
+    { toolName:'stop_task', displayName:'任务停止', desc:'停止正在运行或排队中的评审任务（当前阶段完成后终止）。', category:'write', icon:'fa-stop-circle', color:'#f59e0b', tags:['可写','需认证','需确认'], params:[{n:'task_id',t:'integer',r:true}], phrases:['停掉任务 2084','取消评审','停止正在跑的任务'], dangerous:true, requires:['task_id'] },
+    { toolName:'mark_all_read', displayName:'标记全部已读', desc:'一键将当前用户所有未读通知标记为已读。', category:'write', icon:'fa-check-double', color:'#f59e0b', tags:['可写','需认证'], params:[], phrases:['全部标记为已读','清除所有通知'], dangerous:true },
+    { toolName:'get_workbench', displayName:'工作台数据查询', desc:'获取个人工作台数据，包含待处理 Issue 统计（按严重程度分档）、超时预警。', category:'stats', icon:'fa-desktop', color:'#10b981', tags:['只读','需认证'], params:[{n:'admin_view',t:'boolean',r:false,d:'false'}], phrases:['我的待办','有哪些问题需要处理','超时预警'] },
+    { toolName:'get_dashboard_stats', displayName:'大盘统计查询', desc:'获取代码评审大盘统计（任务量、成功率、失败率、Top 项目）。支持 today/week/month。', category:'stats', icon:'fa-chart-bar', color:'#10b981', tags:['只读','需认证'], params:[{n:'period',t:'string',r:false,d:'today|week|month'}], phrases:['这周评审了多少 MR','成功率多少','团队评审负载如何'] },
+    { toolName:'get_token_usage', displayName:'Token 用量查询', desc:'查看 AI 评审 Token 消耗和成本（按天汇总）。支持 day/project/model 分组。', category:'stats', icon:'fa-coins', color:'#10b981', tags:['只读','需认证'], params:[{n:'group_by',t:'string',r:false,d:'day|project|model'}], phrases:['Token 花了多少','AI 调用成本','模型 usage'] }
 ];
 
 const QUICKSTARTS = [
@@ -659,220 +323,164 @@ const QUICKSTARTS = [
 ];
 
 const CLIENT_TEMPLATES = {
-    cursor: {
-        name:'Cursor', generate: (host,key) => JSON.stringify({ mcpServers:{ codeguard:{ url:`${host}/mcp/v1`, headers:{ 'X-API-Key':key } } } }, null, 2)
-    },
-    claude: {
-        name:'Claude Desktop', generate: (host,key) => JSON.stringify({ mcpServers:{ codeguard:{ command:'npx', args:['-y','@modelcontextprotocol/server-http'], env:{ URL:`${host}/mcp/v1`, HEADERS:JSON.stringify({'X-API-Key':key}) } } } }, null, 2)
-    },
-    cline: {
-        name:'Cline (VS Code)', generate: (host,key) => JSON.stringify({ 'cline.mcpServers':{ codeguard:{ url:`${host}/mcp/v1`, headers:{ 'X-API-Key':key } } } }, null, 2)
-    },
-    other: {
-        name:'其他客户端', generate: (host,key) => `URL: ${host}/mcp/v1\nHeaders:\n  X-API-Key: ${key}\nContent-Type: application/json`
-    }
+    cursor: { name:'Cursor', generate:(h,k)=>JSON.stringify({mcpServers:{codeguard:{url:h+'/mcp/v1',headers:{'X-API-Key':k}}}},null,2) },
+    claude: { name:'Claude Desktop', generate:(h,k)=>JSON.stringify({mcpServers:{codeguard:{command:'npx',args:['-y','@modelcontextprotocol/server-http'],env:{URL:h+'/mcp/v1',HEADERS:JSON.stringify({'X-API-Key':k})}}}},null,2) },
+    cline: { name:'Cline (VS Code)', generate:(h,k)=>JSON.stringify({'cline.mcpServers':{codeguard:{url:h+'/mcp/v1',headers:{'X-API-Key':k}}}},null,2) },
+    other: { name:'其他客户端', generate:(h,k)=>`URL: ${h}/mcp/v1\nHeaders:\n  X-API-Key: ${k}\nContent-Type: application/json` }
 };
 
-let activeClient = 'cursor';
-let apiKeyList = [];
+let activeClient='cursor', apiKeyList=[];
 
-// ========== Render Cards ==========
+/* ---------- Render Cards ---------- */
 function renderCards(category) {
-    const grid = document.getElementById('capabilityGrid');
-    const tools = category === 'all' ? MCP_TOOLS : MCP_TOOLS.filter(t => t.category === category);
-    grid.innerHTML = tools.map(tool => `
-        <div class="capability-card ${tool.category}">
-            <div class="card-main">
-                <div class="card-icon-wrap" style="background:${tool.color};">
-                    <i class="fas ${tool.icon}"></i>
-                </div>
-                <div class="card-title-wrap">
+    const tools = category==='all' ? MCP_TOOLS : MCP_TOOLS.filter(t=>t.category===category);
+    document.getElementById('capabilityGrid').innerHTML = tools.map(t=>`
+        <div class="card" onclick="openDetail('${t.toolName}')">
+            <div class="card-top">
+                <div class="card-icon" style="background:${t.color};"><i class="fas ${t.icon}"></i></div>
+                <div class="card-head">
                     <div class="card-title">
-                        <span>${tool.displayName}</span>
-                        <span class="card-title-name">${tool.toolName}</span>
+                        <span>${t.displayName}</span>
+                        <span class="card-name">${t.toolName}</span>
                     </div>
-                    <div class="card-desc">${tool.description}</div>
+                    <div class="card-body">${t.desc}</div>
                 </div>
             </div>
-            <div class="badge-strip">
-                ${tool.tags.map(tag => `<span class="badge ${tag.c}">${tag.t}</span>`).join('')}
-            </div>
-            <div class="phrase-bubbles">
-                ${tool.phrases.slice(0,2).map(p => `<span class="phrase-bubble">"${p}"</span>`).join('')}
-            </div>
-            <div class="card-footer">
-                <button class="btn-small" onclick="toggleDetail(this, '${tool.toolName}')">
-                    <i class="fas fa-chevron-down"></i> 参数
-                </button>
-                ${tool.dangerous
-                    ? '<span class="badge badge-amber"><i class="fas fa-exclamation-triangle" style="font-size:0.625rem;"></i>可写</span>'
-                    : '<span class="badge badge-blue">只读</span>'
-                }
-            </div>
-            <div class="detail-panel" id="detail-${tool.toolName}">
-                <div style="font-size:0.8125rem; font-weight:600; margin-bottom:0.5rem; color:var(--text-primary);">参数说明</div>
-                <table class="param-table">
-                    <thead><tr><th>参数</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
-                    <tbody>
-                        ${tool.params.map(p => `<tr><td>${p.n}</td><td>${p.t}</td><td>${p.r ? '<span style="color:#ef4444;">是</span>' : '否'}</td><td>${p.d || '—'}</td></tr>`).join('') || '<tr><td colspan="4" style="color:#94a3b8;">无参数</td></tr>'}
-                    </tbody>
-                </table>
-                ${tool.requires ? `<div class="warning-box"><i class="fas fa-info-circle" style="margin-top:0.1rem; flex-shrink:0;"></i> 前置条件: 需要 ${tool.requires.join(', ')}</div>` : ''}
-                ${tool.warning ? `<div class="warning-box"><i class="fas fa-exclamation-triangle" style="margin-top:0.1rem; flex-shrink:0;"></i> ${tool.warning}</div>` : ''}
+            <div class="card-tags">
+                ${t.tags.map(tag=>`<span class="tag ${t.dangerous?'tag-amber':tag==='只读'?'tag-blue':'tag-gray'}">${tag}</span>`).join('')}
             </div>
         </div>
     `).join('');
 }
-
-function toggleDetail(btn, toolName) {
-    const panel = document.getElementById('detail-' + toolName);
-    const isOpen = panel.classList.contains('open');
-    panel.classList.toggle('open');
-    btn.innerHTML = isOpen ? '<i class="fas fa-chevron-down"></i> 参数' : '<i class="fas fa-chevron-up"></i> 收起';
+function filterCategory(cat) {
+    document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.category===cat));
+    renderCards(cat);
 }
 
-function filterCategory(category) {
-    document.querySelectorAll('.category-tab').forEach(tab => {
-        tab.classList.toggle('active', tab.dataset.category === category);
-    });
-    renderCards(category);
+/* ---------- Detail Modal ---------- */
+function openDetail(toolName) {
+    const t = MCP_TOOLS.find(x=>x.toolName===toolName);
+    if(!t) return;
+    document.getElementById('modalTitle').textContent = t.displayName;
+    document.getElementById('modalBody').innerHTML = `
+        <div class="modal-section">
+            <div class="modal-label">描述</div>
+            <div class="modal-desc">${t.desc}</div>
+        </div>
+        <div class="modal-section">
+            <div class="modal-label">参数</div>
+            ${t.params.length ? `
+            <table class="modal-table">
+                <thead><tr><th>参数</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
+                <tbody>${t.params.map(p=>`<tr><td>${p.n}</td><td>${p.t}</td><td>${p.r?'<span style="color:#ef4444">是</span>':'否'}</td><td>${p.d||'—'}</td></tr>`).join('')}</tbody>
+            </table>` : '<div style="font-size:.875rem;color:var(--text-3)">无参数</div>'}
+        </div>
+        ${t.requires ? `<div class="modal-section"><div class="modal-warning"><i class="fas fa-info-circle"></i>前置条件: 需要 ${t.requires.join(', ')}</div></div>` : ''}
+        ${t.warning ? `<div class="modal-section"><div class="modal-warning"><i class="fas fa-exclamation-triangle"></i>${t.warning}</div></div>` : ''}
+        <div class="modal-section">
+            <div class="modal-label">示例话术</div>
+            <div>${t.phrases.map(p=>`<span class="modal-phrase">${p}</span>`).join('')}</div>
+        </div>
+    `;
+    document.getElementById('detailModal').classList.add('open');
 }
+function closeModal() { document.getElementById('detailModal').classList.remove('open'); }
+document.getElementById('detailModal').addEventListener('click', function(e){
+    if(e.target===this) closeModal();
+});
+document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeModal(); });
 
-// ========== Clients ==========
-function renderClientButtons() {
-    const container = document.getElementById('clientButtons');
-    container.innerHTML = Object.entries(CLIENT_TEMPLATES).map(([key, tmpl]) => `
-        <button class="client-item ${key === activeClient ? 'active' : ''}" data-client="${key}" onclick="selectClient('${key}')">
-            <span>${tmpl.name}</span>
-            <i class="fas fa-check check"></i>
+/* ---------- Clients & Config ---------- */
+function renderClients() {
+    document.getElementById('clientButtons').innerHTML = Object.entries(CLIENT_TEMPLATES).map(([k, tmpl])=>`
+        <button class="client-btn ${k===activeClient?'active':''}" onclick="selectClient('${k}')">
+            <span>${tmpl.name}</span><i class="fas fa-check check"></i>
         </button>
     `).join('');
 }
-
-function selectClient(client) {
-    activeClient = client;
-    renderClientButtons();
-    updateConfigDisplay();
-}
-
+function selectClient(client) { activeClient=client; renderClients(); updateConfigDisplay(); }
 function updateConfigDisplay() {
     const host = window.location.origin;
-    const key = apiKeyList.length > 0 ? apiKeyList[0].key_prefix + '***' : 'sk-cg-your-key-here';
-    const tmpl = CLIENT_TEMPLATES[activeClient];
-    document.getElementById('configCode').textContent = tmpl.generate(host, key);
+    const key = apiKeyList.length ? apiKeyList[0].key_prefix+'***' : 'sk-cg-your-key-here';
+    document.getElementById('configCode').textContent = CLIENT_TEMPLATES[activeClient].generate(host, key);
 }
-
 function copyConfig() {
     const code = document.getElementById('configCode').textContent;
-    navigator.clipboard.writeText(code).then(() => {
-        showToast('配置已复制', 'success');
-    }).catch(() => {
-        const ta = document.createElement('textarea');
-        ta.value = code;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        showToast('配置已复制', 'success');
+    navigator.clipboard.writeText(code).then(()=>showToast('配置已复制','success')).catch(()=>{
+        const ta=document.createElement('textarea'); ta.value=code; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); showToast('配置已复制','success');
     });
 }
-
 function downloadConfig() {
-    const code = document.getElementById('configCode').textContent;
-    const blob = new Blob([code], { type: 'application/json' });
+    const blob = new Blob([document.getElementById('configCode').textContent], {type:'application/json'});
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'mcp-config.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const a = document.createElement('a'); a.href=url; a.download='mcp-config.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
-// ========== Quickstarts ==========
+/* ---------- Quickstarts ---------- */
 function renderQuickstarts() {
-    const container = document.getElementById('quickstartList');
-    container.innerHTML = QUICKSTARTS.map(qs => `
-        <div class="quickstart-item" onclick="copyQuickstart('${qs.title}')">
-            <div class="qs-text">
-                <i class="fas ${qs.icon} text-indigo-400" style="font-size:0.75rem;"></i>
-                <strong style="color:var(--text-primary); min-width:3.5rem;">${qs.title}</strong>
-                <span style="color:var(--text-muted);">${qs.phrases[0]}</span>
+    document.getElementById('quickstartList').innerHTML = QUICKSTARTS.map(qs=>`
+        <div class="qs-item" onclick="copyText('${qs.phrases[0].replace(/'/g,"\\'")}')">
+            <div class="qs-top">
+                <i class="fas ${qs.icon}"></i>
+                <strong>${qs.title}</strong>
+                <span>${qs.phrases[0]}</span>
             </div>
-            <div class="qs-tool">${qs.tools.join(', ')} ${qs.warning ? '· ' + qs.warning : ''}</div>
+            <div class="qs-bot">${qs.tools.join(', ')} ${qs.warning ? '· '+qs.warning : ''}</div>
         </div>
     `).join('');
 }
-
-function copyQuickstart(title) {
-    const qs = QUICKSTARTS.find(q => q.title === title);
-    if (!qs) return;
-    const text = qs.phrases[0];
-    navigator.clipboard.writeText(text).then(() => {
-        showToast('已复制: ' + text, 'success');
-    });
+function copyText(text) {
+    navigator.clipboard.writeText(text).then(()=>showToast('已复制: '+text,'success'));
 }
 
-// ========== Status ==========
+/* ---------- Status ---------- */
 async function checkMCPStatus() {
-    const statusEl = document.getElementById('mcpStatus');
-    statusEl.className = 'status-indicator status-checking';
-    statusEl.innerHTML = '<i class="fas fa-circle" style="font-size:0.375rem;"></i><span>检测中...</span>';
-
+    const el = document.getElementById('mcpStatus');
+    el.className = 'status-badge status-check';
+    el.innerHTML = '<i class="fas fa-circle" style="font-size:.375rem;"></i><span>检测中...</span>';
     try {
-        const resp = await fetch('/mcp/v1/tools/list', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            signal: AbortSignal.timeout(5000)
-        });
+        const resp = await fetch('/mcp/v1', { method: 'HEAD', signal: AbortSignal.timeout(5000) });
         if (resp.ok) {
-            const data = await resp.json();
-            const count = data.tools?.length || 0;
-            if (count > 0) {
-                statusEl.className = 'status-indicator status-ok';
-                statusEl.innerHTML = `<i class="fas fa-circle" style="font-size:0.375rem;"></i><span>正常 · ${count} Tools</span>`;
-            } else {
-                statusEl.className = 'status-indicator status-error';
-                statusEl.innerHTML = '<i class="fas fa-circle" style="font-size:0.375rem;"></i><span>异常（空列表）</span>';
-            }
+            el.className = 'status-badge status-ok';
+            el.innerHTML = '<i class="fas fa-circle" style="font-size:.375rem;"></i><span>服务正常</span>';
         } else {
-            statusEl.className = 'status-indicator status-error';
-            statusEl.innerHTML = `<i class="fas fa-circle" style="font-size:0.375rem;"></i><span>HTTP ${resp.status}</span>`;
+            el.className = 'status-badge status-err';
+            el.innerHTML = `<i class="fas fa-circle" style="font-size:.375rem;"></i><span>HTTP ${resp.status}</span>`;
         }
     } catch (e) {
-        statusEl.className = 'status-indicator status-error';
-        statusEl.innerHTML = '<i class="fas fa-circle" style="font-size:0.375rem;"></i><span>未连接</span>';
+        el.className = 'status-badge status-err';
+        el.innerHTML = '<i class="fas fa-circle" style="font-size:.375rem;"></i><span>未连接</span>';
     }
 }
 
-// ========== API Keys ==========
+/* ---------- API Keys ---------- */
 async function loadApiKeys() {
     try {
         const resp = await apiFetch('/api/v1/mcp-keys?page_size=5');
         if (resp.data && resp.data.list) {
-            apiKeyList = resp.data.list.filter(k => k.status === 'active');
+            apiKeyList = resp.data.list.filter(k=>k.status==='active');
             updateConfigDisplay();
         }
     } catch (e) {}
 }
 
-function showToast(message, type) {
-    const colors = { success: 'background:#10b981;', error: 'background:#ef4444;', info: 'background:#3b82f6;' };
-    const toast = document.createElement('div');
-    toast.style.cssText = `position:fixed;top:1rem;right:1rem;${colors[type] || colors.info} color:#fff;padding:0.625rem 1rem;border-radius:0.5rem;font-size:0.8125rem;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,0.12);z-index:9999;transition:opacity 0.3s ease;`;
-    toast.textContent = message;
-    document.body.appendChild(toast);
-    setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 2500);
+function showToast(msg, type) {
+    const colors = { success:'#10b981', error:'#ef4444', info:'#3b82f6' };
+    const t = document.createElement('div');
+    t.style.cssText = `position:fixed;top:1rem;right:1rem;background:${colors[type]};color:#fff;padding:.625rem 1rem;border-radius:.5rem;font-size:.8125rem;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,.12);z-index:9999;transition:opacity .3s`;
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(()=>{ t.style.opacity='0'; setTimeout(()=>t.remove(),300); }, 2500);
 }
 
-// ========== Init ==========
+/* ---------- Init ---------- */
 renderCards('all');
-renderClientButtons();
+renderClients();
 renderQuickstarts();
+updateConfigDisplay(); // FIX: ensure config is rendered on page load
 loadApiKeys();
-setTimeout(checkMCPStatus, 800);
+setTimeout(checkMCPStatus, 600);
 </script>
-
 </body>
 </html>
