@@ -199,6 +199,20 @@ func (s *Server) listTools(authCtx *AuthContext) map[string]interface{} {
 	}
 }
 
+// ToolCount 返回已注册的 Tool 总数（诊断工具使用）
+func (s *Server) ToolCount() int {
+	return len(s.tools)
+}
+
+// ToolNames 返回已注册的 Tool 名称列表（诊断工具使用）
+func (s *Server) ToolNames() []string {
+	names := make([]string, 0, len(s.tools))
+	for name := range s.tools {
+		names = append(names, name)
+	}
+	return names
+}
+
 // callTool 调用 Tool
 func (s *Server) callTool(ctx context.Context, authCtx *AuthContext, params json.RawMessage) (interface{}, string, error) {
 	var call struct {
