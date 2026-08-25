@@ -59,7 +59,7 @@
         .stat-num { font-size: 1.25rem; font-weight: 700; color: var(--text); }
 
         /* Two columns */
-        .cols { display: grid; grid-template-columns: 1fr 340px; gap: 1.5rem; }
+        .cols { display: grid; grid-template-columns: 1fr 300px; gap: 1.5rem; }
         @media (max-width: 1023px) {
             .cols { grid-template-columns: 1fr; }
             .stats { grid-template-columns: repeat(2, 1fr); }
@@ -141,18 +141,24 @@
         }
         .btn-outline:hover { background: #f8fafc; }
 
-        /* Quickstart */
-        .qs { display: flex; flex-direction: column; gap: .375rem; }
-        .qs-item {
-            background: #f8fafc; border: 1px solid #f1f5f9; border-radius: .5rem;
-            padding: .5rem .625rem; cursor: pointer; transition: all .15s;
+        /* Pagination */
+        .pagination {
+            display: flex; align-items: center; justify-content: center; gap: .375rem;
+            margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border);
         }
-        .qs-item:hover { border-color: #cbd5e1; background: #fff; }
-        .qs-top { display: flex; align-items: center; gap: .5rem; font-size: .8125rem; }
-        .qs-top i { font-size: .75rem; color: var(--primary); }
-        .qs-top strong { color: var(--text); min-width: 3.25rem; }
-        .qs-top span { color: var(--text-2); }
-        .qs-bot { font-size: .6875rem; color: var(--text-3); margin-top: .125rem; font-family: ui-monospace, monospace; }
+        .pagination-btn {
+            min-width: 2rem; height: 2rem; padding: 0 .5rem;
+            border-radius: .375rem; font-size: .8125rem; font-weight: 500;
+            border: 1px solid var(--border); background: #fff; color: var(--text-2);
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+            transition: all .15s;
+        }
+        .pagination-btn:hover:not(:disabled) { background: #f8fafc; border-color: #cbd5e1; }
+        .pagination-btn:disabled { opacity: .4; cursor: not-allowed; }
+        .pagination-btn.active {
+            background: var(--primary); color: #fff; border-color: var(--primary);
+        }
+        .pagination-info { font-size: .75rem; color: var(--text-3); margin-left: .5rem; }
 
         /* Modal */
         .modal-overlay {
@@ -259,6 +265,7 @@
                         <button class="tab" data-category="stats" onclick="filterCategory('stats')">统计</button>
                     </div>
                     <div class="grid-cards" id="capabilityGrid"></div>
+                    <div class="pagination" id="paginationBar"></div>
                 </div>
 
                 <div class="sidebar">
@@ -272,10 +279,6 @@
                             <button class="btn-primary" onclick="copyConfig()"><i class="fas fa-copy"></i>复制</button>
                             <button class="btn-outline" onclick="downloadConfig()"><i class="fas fa-download"></i>下载</button>
                         </div>
-                    </div>
-                    <div class="panel">
-                        <div class="panel-h"><i class="fas fa-bolt text-amber-500"></i>常用开场白</div>
-                        <div class="qs" id="quickstartList"></div>
                     </div>
                 </div>
             </div>
@@ -314,14 +317,6 @@ const MCP_TOOLS = [
     { toolName:'get_token_usage', displayName:'Token 用量查询', desc:'查看 AI 评审 Token 消耗和成本（按天汇总）。支持 day/project/model 分组。', category:'stats', icon:'fa-coins', color:'#10b981', tags:['只读','需认证'], params:[{n:'group_by',t:'string',r:false,d:'day|project|model'}], phrases:['Token 花了多少','AI 调用成本','模型 usage'] }
 ];
 
-const QUICKSTARTS = [
-    { icon:'fa-list', title:'查任务', phrases:['看看我最近的评审任务','列出所有失败的任务'], tools:['list_tasks'] },
-    { icon:'fa-chart-bar', title:'看大盘', phrases:['这周评审了多少 MR，成功率多少','Token 花了多少'], tools:['get_dashboard_stats'] },
-    { icon:'fa-search', title:'审代码', phrases:['任务 2084 有什么安全问题','找出所有 critical 的 issue'], tools:['get_mr_review'] },
-    { icon:'fa-redo', title:'操作任务', phrases:['重试任务 2084','停止正在跑的任务'], tools:['retry_task','stop_task'], warning:'操作类 Tool 请确认后执行' },
-    { icon:'fa-bell', title:'看通知', phrases:['有没有新通知','全部标记为已读'], tools:['list_notifications'] }
-];
-
 const CLIENT_TEMPLATES = {
     cursor: { name:'Cursor', generate:(h,k)=>JSON.stringify({mcpServers:{codeguard:{url:h+'/mcp/v1',headers:{'X-API-Key':k}}}},null,2) },
     claude: { name:'Claude Desktop', generate:(h,k)=>JSON.stringify({mcpServers:{codeguard:{command:'npx',args:['-y','@modelcontextprotocol/server-http'],env:{URL:h+'/mcp/v1',HEADERS:JSON.stringify({'X-API-Key':k})}}}},null,2) },
@@ -330,11 +325,19 @@ const CLIENT_TEMPLATES = {
 };
 
 let activeClient='cursor', apiKeyList=[];
+let currentCategory='all', currentPage=1;
+const PAGE_SIZE = 6;
 
 /* ---------- Render Cards ---------- */
 function renderCards(category) {
     const tools = category==='all' ? MCP_TOOLS : MCP_TOOLS.filter(t=>t.category===category);
-    document.getElementById('capabilityGrid').innerHTML = tools.map(t=>`
+    const total = tools.length;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    const page = Math.min(currentPage, totalPages);
+    const start = (page - 1) * PAGE_SIZE;
+    const pageTools = tools.slice(start, start + PAGE_SIZE);
+
+    document.getElementById('capabilityGrid').innerHTML = pageTools.map(t=>`
         <div class="card" onclick="openDetail('${t.toolName}')">
             <div class="card-top">
                 <div class="card-icon" style="background:${t.color};"><i class="fas ${t.icon}"></i></div>
@@ -351,10 +354,35 @@ function renderCards(category) {
             </div>
         </div>
     `).join('');
+
+    renderPagination(page, totalPages, total);
 }
 function filterCategory(cat) {
+    currentCategory = cat;
+    currentPage = 1;
     document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.category===cat));
     renderCards(cat);
+}
+function renderPagination(page, totalPages, total) {
+    const container = document.getElementById('paginationBar');
+    if (totalPages <= 1) { container.innerHTML = ''; return; }
+
+    let html = `
+        <button class="pagination-btn" onclick="goPage(${page-1})" ${page===1?'disabled':''}><i class="fas fa-chevron-left"></i></button>
+    `;
+    for (let i = 1; i <= totalPages; i++) {
+        html += `<button class="pagination-btn ${i===page?'active':''}" onclick="goPage(${i})">${i}</button>`;
+    }
+    html += `
+        <button class="pagination-btn" onclick="goPage(${page+1})" ${page===totalPages?'disabled':''}><i class="fas fa-chevron-right"></i></button>
+        <span class="pagination-info">${total} 条 · 第 ${page}/${totalPages} 页</span>
+    `;
+    container.innerHTML = html;
+}
+function goPage(p) {
+    currentPage = p;
+    renderCards(currentCategory);
+    document.getElementById('capabilityGrid').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 /* ---------- Detail Modal ---------- */
@@ -417,23 +445,6 @@ function downloadConfig() {
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
-/* ---------- Quickstarts ---------- */
-function renderQuickstarts() {
-    document.getElementById('quickstartList').innerHTML = QUICKSTARTS.map(qs=>`
-        <div class="qs-item" onclick="copyText('${qs.phrases[0].replace(/'/g,"\\'")}')">
-            <div class="qs-top">
-                <i class="fas ${qs.icon}"></i>
-                <strong>${qs.title}</strong>
-                <span>${qs.phrases[0]}</span>
-            </div>
-            <div class="qs-bot">${qs.tools.join(', ')} ${qs.warning ? '· '+qs.warning : ''}</div>
-        </div>
-    `).join('');
-}
-function copyText(text) {
-    navigator.clipboard.writeText(text).then(()=>showToast('已复制: '+text,'success'));
-}
-
 /* ---------- Status ---------- */
 async function checkMCPStatus() {
     const el = document.getElementById('mcpStatus');
@@ -477,8 +488,7 @@ function showToast(msg, type) {
 /* ---------- Init ---------- */
 renderCards('all');
 renderClients();
-renderQuickstarts();
-updateConfigDisplay(); // FIX: ensure config is rendered on page load
+updateConfigDisplay();
 loadApiKeys();
 setTimeout(checkMCPStatus, 600);
 </script>
