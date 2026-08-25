@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -74,8 +73,8 @@ func NewServer() *Server {
 		logChan:  make(chan *model.MCPCallLog, 100),
 		sessions: make(map[string]*mcpSession),
 	}
-	// 启动异步日志写入
-	go s.logWorker()
+	// 调用日志已禁用（logWorker 不再启动）
+	// go s.logWorker()
 	return s
 }
 
@@ -83,13 +82,10 @@ func NewServer() *Server {
 func (s *Server) RegisterTool(name, description string, schema json.RawMessage, handler ToolHandler) {
 	s.tools[name] = Tool{Name: name, Description: description, InputSchema: schema}
 	s.handlers[name] = handler
-	zap.L().Info("MCP tool registered", zap.String("tool", name))
 }
 
 // HandleMCP 处理 MCP POST 请求（JSON-RPC）
 func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
-
 	// 解析请求
 	var req MCPRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -113,7 +109,6 @@ func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	// 处理不同 Method
 	var result interface{}
 	var err error
-	var toolName string
 	isNotification := false
 
 	switch req.Method {
@@ -146,13 +141,12 @@ func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 		// 创建 session 并在响应头中返回 session ID（StreamableHTTP 要求）
 		sessionID := s.createSession(authCtx)
 		w.Header().Set("Mcp-Session-Id", sessionID)
-		zap.L().Info("MCP session created", zap.String("session_id", sessionID), zap.String("method", "initialize"))
 
 	case "tools/list":
 		result = s.listTools()
 	case "tools/call":
 		var fullAuthCtx *AuthContext
-		result, toolName, fullAuthCtx, err = s.callTool(r.Context(), authCtx, req.Params)
+		result, _, fullAuthCtx, err = s.callTool(r.Context(), authCtx, req.Params)
 		if fullAuthCtx != nil {
 			authCtx = fullAuthCtx
 		}
@@ -166,11 +160,13 @@ func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 		err = fmt.Errorf("unknown method: %s", req.Method)
 	}
 
-	// 记录调用日志（排除 ping 和 notifications 类保活/通知方法，减少噪声）
+	// 调用日志已禁用
+	/*
 	if req.Method != "ping" && !strings.HasPrefix(req.Method, "notifications/") {
 		duration := time.Since(start).Milliseconds()
 		go s.recordLog(authCtx, req.Method, toolName, req.Params, err, int(duration))
 	}
+	*/
 
 	if err != nil {
 		respondMCPError(w, req.ID, -32602, err.Error())
@@ -323,32 +319,9 @@ func (s *Server) hasToolPermission(authCtx *AuthContext, toolName string) bool {
 	return authCtx.HasScope(requiredScope)
 }
 
-// recordLog 异步记录调用日志
+// recordLog 异步记录调用日志（已禁用）
 func (s *Server) recordLog(authCtx *AuthContext, method, toolName string, params json.RawMessage, err error, durationMs int) {
-	status := "success"
-	errMsg := ""
-	if err != nil {
-		status = "error"
-		errMsg = err.Error()
-	}
-
-	log := &model.MCPCallLog{
-		APIKeyID:     authCtx.APIKey.ID,
-		APIKeyName:   authCtx.APIKey.Name,
-		IMUserID:     authCtx.IMUserID,
-		IMProvider:   authCtx.IMProvider,
-		TeamMemberID: 0, // team_members 已 deprecated，新代码使用 user_id
-		UserID:       authCtx.UserID,
-		Method:       method,
-		ToolName:     toolName,
-		Params:       string(params),
-		Status:       status,
-		ErrorMsg:     errMsg,
-		DurationMs:   int64(durationMs),
-		ClientIP:     authCtx.ClientIP,
-	}
-
-	s.logChan <- log
+	// 调用日志已禁用
 }
 
 // logWorker 异步批量写入日志
