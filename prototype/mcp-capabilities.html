@@ -225,13 +225,11 @@
             <div class="header">
                 <div>
                     <h1><i class="fas fa-robot text-indigo-600"></i>MCP 能力中心</h1>
-                    <p>CodeGuard 通过标准 MCP 协议为智能体提供 <strong>15</strong> 个可调用的代码评审能力</p>
+                    <p>通过标准 MCP 协议为智能体提供可调用的代码评审能力</p>
                 </div>
                 <div class="header-actions">
                     <span id="mcpStatus" class="status-badge status-idle"><i class="fas fa-circle" style="font-size:.375rem;"></i><span>未检测</span></span>
-                    <button onclick="checkMCPStatus()"><i class="fas fa-stethoscope"></i>检测</button>
-                    <a href="mcp-diagnose.html"><i class="fas fa-wrench"></i>诊断</a>
-                    <a href="mcp-keys.html"><i class="fas fa-key"></i>密钥</a>
+                    <a href="mcp-keys.html" class="action-link"><i class="fas fa-key"></i>密钥</a>
                 </div>
             </div>
 
@@ -326,7 +324,7 @@ const CLIENT_TEMPLATES = {
 
 let activeClient='cursor', apiKeyList=[];
 let currentCategory='all', currentPage=1;
-const PAGE_SIZE = 6;
+const PAGE_SIZE = 9;
 
 /* ---------- Render Cards ---------- */
 function renderCards(category) {
