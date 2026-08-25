@@ -89,11 +89,6 @@ func (s *Server) RegisterTool(name, description string, schema json.RawMessage, 
 func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
-	// 【诊断】记录所有原始请求头部，用于排查客户端（如 Hermes）是否自带用户ID
-	for k, v := range r.Header {
-		zap.L().Info("MCP request header", zap.String("header", k), zap.Strings("values", v))
-	}
-
 	// 解析请求
 	var req MCPRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
