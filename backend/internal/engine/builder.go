@@ -672,7 +672,8 @@ func ParseDeductScoreConfig(jsonStr string) (DeductScoreConfig, error) {
 // ==================== Pipeline 结构化评审 Prompt 构建器 ====================
 
 // BuildFullStructuredPrompt 构建完整的结构化评审 Prompt（单批场景用）
-// 输出：含 System 角色 + JSON Schema + 规则 + diff 的完整 Prompt，以及对应的 ResponseFormat
+// Deprecated: 单批场景已统一使用 BuildBatchCollectionPrompt，不再要求模型计算分数。
+// 保留实现以供紧急回滚，但不再被调用。
 func BuildFullStructuredPrompt(ctx *PromptContext) (string, *llm.ResponseFormat) {
 	var sb strings.Builder
 
@@ -773,9 +774,8 @@ func BuildBatchCollectionPrompt(ctx *PromptContext, batchIndex, totalBatches int
 	sb.WriteString("3. 不需要计算各维度得分和总分\n")
 	sb.WriteString("4. 后续会有汇总阶段统一裁决\n\n")
 
-	// 扣分规则（供参考）
-	sb.WriteString(buildScoreRulesText(ctx.DeductScoreConfig))
-	sb.WriteString("\n")
+	// 完整维度定义（用于正确分类 category，不展示权重和计分公式）
+	sb.WriteString(buildDimensionDefinitionsSection(ctx.DimensionWeights))
 
 	// 项目自定义说明
 	if ctx.CustomInstruction != "" {
@@ -784,7 +784,7 @@ func BuildBatchCollectionPrompt(ctx *PromptContext, batchIndex, totalBatches int
 		sb.WriteString("\n\n")
 	}
 
-	// 维度 + 权重 + 规则
+	// 维度规则（仅展示有规则的维度，不影响分类维度全集）
 	sb.WriteString(buildRulesSection(ctx.Rules, ctx.DimensionWeights))
 
 	// code_understanding 每批都注入（内容由上游按批次文件过滤后传入）
@@ -1045,6 +1045,26 @@ func buildScoreRulesText(dsc DeductScoreConfig) string {
 	sb.WriteString("【重要】total_score 是顶层字段，与 dimensions 同级，绝对不能放在 dimensions 对象内部。\n")
 	sb.WriteString("错误示例：\"dimensions\": { \"security\": {...}, \"total_score\": 48 }\n")
 	sb.WriteString("正确示例：\"dimensions\": { \"security\": {...} }, \"total_score\": 48\n")
+	return sb.String()
+}
+
+// buildDimensionDefinitionsSection 构建维度定义段落（仅用于 issue 分类，不展示权重值和计分公式）
+// 适用于分批评审等不需要模型计算分数的场景
+func buildDimensionDefinitionsSection(dimWeights map[string]DimensionWeight) string {
+	var sb strings.Builder
+	sb.WriteString("## 【问题分类维度】\n\n")
+	sb.WriteString("所有 issues 必须按以下维度之一进行分类。即使某维度在当前代码中没有发现问题，该维度仍然是合法的分类选项：\n\n")
+
+	order := sortDimensions(dimWeights)
+	for _, cat := range order {
+		if _, ok := dimWeights[cat]; !ok {
+			continue
+		}
+		label := categoryDisplay(cat)
+		sb.WriteString(fmt.Sprintf("- **%s** (`%s`)\n", label, cat))
+	}
+	sb.WriteString("\n")
+	sb.WriteString("【重要】请确保每条 issue 的 `category` 字段严格使用上表中的维度代码（如 `security`、`code_quality` 等），不得使用其他值。\n\n")
 	return sb.String()
 }
 

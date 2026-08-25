@@ -861,22 +861,29 @@ func (e *BatchReviewFrameExecutor) Execute(ctx StageContext) error {
 		promptCtx.AgentMarkdowns["code_understanding"] = r
 	}
 
-	// ==================== 场景 A：单批直接结构化评审 ====================
+	// ==================== 场景 A：单批轻量收集（与多批统一） ====================
 	var actualModelID uint
 	if plan.BatchCount == 1 {
-		parsedResult, modelID, err := e.executeSingleBatchStructured(ctx, plan.Batches[0], promptCtx, task)
+		batchResult, modelID, inTk, outTk, modelName, err := e.executeBatchCollection(ctx, plan.Batches[0], promptCtx, task)
 		if err != nil {
 			return err
 		}
 		actualModelID = modelID
-		// 【改造】单批结果也转为 batch_review_results 存储，供 review_arbitration 处理
-		batchResult := &llm.BatchReviewResult{
-			BatchNotes:      parsedResult.Summary,
-			Issues:          parsedResult.Issues,
-			Recommendations: parsedResult.Recommendations,
-		}
+
 		ctx.SetOutput("batch_review_results", []*llm.BatchReviewResult{batchResult})
 		ctx.SetOutput("model_id", actualModelID)
+
+		// 同步 token 用量到 selfExec
+		if selfExec := ctx.GetSelfExec(); selfExec != nil {
+			selfExec.InputTokens += inTk
+			selfExec.OutputTokens += outTk
+			if selfExec.ModelName == "" {
+				selfExec.ModelName = modelName
+			}
+			if selfExec.LLMModelID == nil {
+				selfExec.LLMModelID = &actualModelID
+			}
+		}
 
 		// 单批场景也需要更新批次进度和 output_snapshot，保证前端详情面板能正确显示批次进度
 		ctx.UpdateProgress(nil, 1, plan.BatchCount)
@@ -891,7 +898,6 @@ func (e *BatchReviewFrameExecutor) Execute(ctx StageContext) error {
 			outputSnap["model_name"] = selfExec.ModelName
 		}
 		ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, outputSnap)
-		// 【注意】不再直接组装报告，由 review_arbitration 阶段处理
 		return nil
 	}
 
@@ -1131,6 +1137,8 @@ func (e *BatchReviewFrameExecutor) executeBatchPlan(ctx StageContext, task *mode
 }
 
 // executeSingleBatchStructured 场景 A：单批完整结构化评审
+// Deprecated: 单批场景已统一使用 executeBatchCollection，不再要求模型计算分数。
+// 保留实现以供紧急回滚，但不再被调用。
 func (e *BatchReviewFrameExecutor) executeSingleBatchStructured(ctx StageContext, detail BatchDetail, promptCtx *engine.PromptContext, task *model.Task) (*llm.AIReviewResult, uint, error) {
 	exec := ctx.CreateChildExecution("batch_review_1", 1)
 	ctx.MarkRunning(exec)
