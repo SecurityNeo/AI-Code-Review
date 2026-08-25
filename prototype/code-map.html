@@ -12,6 +12,18 @@
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <script src="/static/js/tailwindcss.min.js"></script>
+    <script>
+      // Polyfill: Array.prototype.toReversed (ES2023) for Chrome < 110, Safari < 16, Firefox < 115
+      if (!Array.prototype.toReversed) {
+        Object.defineProperty(Array.prototype, 'toReversed', {
+          value: function() {
+            return this.slice().reverse();
+          },
+          writable: true,
+          configurable: true
+        });
+      }
+    </script>
     <script src="/static/js/vis-network.min.js"></script>
     <script src="/static/js/echarts.min.js"></script>
     <style>
