@@ -42,7 +42,7 @@ func (s *ProjectService) List(page, pageSize int, keyword, status, source string
 		Preload("Template").
 		Preload("Pool").
 		Preload("Model").
-		Order("updated_at DESC").
+		Order("created_at DESC").
 		Find(&projects).Error; err != nil {
 		return nil, 0, err
 	}
