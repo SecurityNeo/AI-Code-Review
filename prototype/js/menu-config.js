@@ -81,13 +81,15 @@ const MENU_CONFIG = [
     // 位置：通知管理之后，系统管理之前
     { id: 'notifications', name: '消息中心', href: 'notifications.html', icon: 'fa-inbox', role: ['admin', 'user'] },
 
-    // ========== MCP 集成（admin only）==========
+    // ========== MCP 集成（admin + user）==========
     {
         id: 'mcp-group',
         name: 'MCP 集成',
         icon: 'fa-microchip',
-        role: ['admin'],
+        role: ['admin', 'user'],
         children: [
+            { id: 'mcp-capabilities', name: '能力中心', href: 'mcp-capabilities.html', icon: 'fa-robot' },
+            { id: 'mcp-diagnose', name: '连接诊断', href: 'mcp-diagnose.html', icon: 'fa-stethoscope' },
             { id: 'mcp-keys', name: '密钥管理', href: 'mcp-keys.html', icon: 'fa-key' },
             { id: 'mcp-logs', name: '调用日志', href: 'mcp-logs.html', icon: 'fa-file-lines' },
         ]
