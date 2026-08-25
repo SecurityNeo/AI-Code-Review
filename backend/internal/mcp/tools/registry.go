@@ -43,9 +43,14 @@ func RegisterAllTools(server interface {
 
 // ---------------------- Schemas ----------------------
 
+var identityProps = `"x_im_provider": {"type": "string", "description": "IM platform code, currently only 'wecom'", "enum": ["wecom"]},
+		"x_im_user_id": {"type": "string", "description": "IM platform UserID (e.g. WeCom UserID)"}`
+
 var listTasksSchema = json.RawMessage(`{
 	"type": "object",
+	"required": ["x_im_provider", "x_im_user_id"],
 	"properties": {
+		` + identityProps + `,
 		"status": {"type": "string", "description": "running|pending|failed|success|stopped"},
 		"project_id": {"type": "integer"},
 		"author": {"type": "string"},
@@ -58,24 +63,27 @@ var listTasksSchema = json.RawMessage(`{
 
 var getTaskSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["task_id"],
+	"required": ["x_im_provider", "x_im_user_id", "task_id"],
 	"properties": {
+		` + identityProps + `,
 		"task_id": {"type": "integer", "description": "任务ID"}
 	}
 }`)
 
 var getTaskPipelineSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["task_id"],
+	"required": ["x_im_provider", "x_im_user_id", "task_id"],
 	"properties": {
+		` + identityProps + `,
 		"task_id": {"type": "integer"}
 	}
 }`)
 
 var getMRReviewSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["task_id"],
+	"required": ["x_im_provider", "x_im_user_id", "task_id"],
 	"properties": {
+		` + identityProps + `,
 		"task_id": {"type": "integer"},
 		"severity": {"type": "string", "description": "high|medium|low"},
 		"category": {"type": "string", "description": "security|performance|style|bug"},
@@ -85,31 +93,36 @@ var getMRReviewSchema = json.RawMessage(`{
 
 var getIssueDetailSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["issue_id"],
+	"required": ["x_im_provider", "x_im_user_id", "issue_id"],
 	"properties": {
+		` + identityProps + `,
 		"issue_id": {"type": "integer", "description": "Issue ID (可通过 get_mr_review 或 get_task 的返回结果中获取)"}
 	}
 }`)
 
 var retryTaskSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["task_id"],
+	"required": ["x_im_provider", "x_im_user_id", "task_id"],
 	"properties": {
+		` + identityProps + `,
 		"task_id": {"type": "integer"}
 	}
 }`)
 
 var stopTaskSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["task_id"],
+	"required": ["x_im_provider", "x_im_user_id", "task_id"],
 	"properties": {
+		` + identityProps + `,
 		"task_id": {"type": "integer"}
 	}
 }`)
 
 var listMRsSchema = json.RawMessage(`{
 	"type": "object",
+	"required": ["x_im_provider", "x_im_user_id"],
 	"properties": {
+		` + identityProps + `,
 		"project_id": {"type": "integer"},
 		"state": {"type": "string", "default": "opened"},
 		"author": {"type": "string"},
@@ -122,8 +135,9 @@ var listMRsSchema = json.RawMessage(`{
 
 var getMRDetailSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["project_id", "mr_iid"],
+	"required": ["x_im_provider", "x_im_user_id", "project_id", "mr_iid"],
 	"properties": {
+		` + identityProps + `,
 		"project_id": {"type": "integer"},
 		"mr_iid": {"type": "integer"}
 	}
@@ -131,14 +145,18 @@ var getMRDetailSchema = json.RawMessage(`{
 
 var getWorkbenchSchema = json.RawMessage(`{
 	"type": "object",
+	"required": ["x_im_provider", "x_im_user_id"],
 	"properties": {
+		` + identityProps + `,
 		"view": {"type": "string", "default": "developer", "description": "developer|admin"}
 	}
 }`)
 
 var getDashboardStatsSchema = json.RawMessage(`{
 	"type": "object",
+	"required": ["x_im_provider", "x_im_user_id"],
 	"properties": {
+		` + identityProps + `,
 		"time_range": {"type": "string", "default": "week", "description": "today|week|month"},
 		"mine": {"type": "boolean", "default": true},
 		"all": {"type": "boolean", "default": false}
@@ -147,7 +165,9 @@ var getDashboardStatsSchema = json.RawMessage(`{
 
 var getTokenUsageSchema = json.RawMessage(`{
 	"type": "object",
+	"required": ["x_im_provider", "x_im_user_id"],
 	"properties": {
+		` + identityProps + `,
 		"time_range": {"type": "string"},
 		"group_by": {"type": "string", "default": "day", "description": "day|project|model"}
 	}
@@ -155,7 +175,9 @@ var getTokenUsageSchema = json.RawMessage(`{
 
 var listProjectsSchema = json.RawMessage(`{
 	"type": "object",
+	"required": ["x_im_provider", "x_im_user_id"],
 	"properties": {
+		` + identityProps + `,
 		"mine": {"type": "boolean", "default": true},
 		"all": {"type": "boolean", "default": false},
 		"limit": {"type": "integer", "default": 10}
@@ -164,10 +186,18 @@ var listProjectsSchema = json.RawMessage(`{
 
 var listNotificationsSchema = json.RawMessage(`{
 	"type": "object",
+	"required": ["x_im_provider", "x_im_user_id"],
 	"properties": {
+		` + identityProps + `,
 		"status": {"type": "string", "default": "unread", "description": "unread|all"},
 		"limit": {"type": "integer", "default": 5}
 	}
 }`)
 
-var markAllReadSchema = json.RawMessage(`{"type": "object", "properties": {}}`)
+var markAllReadSchema = json.RawMessage(`{
+	"type": "object",
+	"required": ["x_im_provider", "x_im_user_id"],
+	"properties": {
+		` + identityProps + `
+	}
+}`)

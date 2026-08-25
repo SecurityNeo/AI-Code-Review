@@ -11,9 +11,7 @@ import (
 )
 
 const (
-	HeaderAPIKey     = "X-API-Key"
-	HeaderIMUserID   = "X-IM-User-ID"
-	HeaderIMProvider = "X-IM-Provider"
+	HeaderAPIKey = "X-API-Key"
 )
 
 // AuthContext MCP 认证后的上下文信息

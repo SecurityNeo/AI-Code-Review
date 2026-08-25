@@ -148,7 +148,7 @@ func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 		zap.L().Info("MCP session created", zap.String("session_id", sessionID), zap.String("method", "initialize"))
 
 	case "tools/list":
-		result = s.listTools(authCtx)
+		result = s.listTools()
 	case "tools/call":
 		result, toolName, err = s.callTool(r.Context(), authCtx, req.Params)
 	case "ping":
@@ -185,14 +185,11 @@ func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// listTools 列出可用 Tools（根据 Scope 过滤）
-func (s *Server) listTools(authCtx *AuthContext) map[string]interface{} {
+// listTools 列出所有可用 Tools（tools/list 不根据 Scope 过滤，让智能体发现全部能力）
+func (s *Server) listTools() map[string]interface{} {
 	var available []Tool
-	for name, tool := range s.tools {
-		// 检查用户是否有权限访问该 Tool
-		if s.hasToolPermission(authCtx, name) {
-			available = append(available, tool)
-		}
+	for _, tool := range s.tools {
+		available = append(available, tool)
 	}
 	return map[string]interface{}{
 		"tools": available,
@@ -214,7 +211,7 @@ func (s *Server) ToolNames() []string {
 }
 
 // callTool 调用 Tool
-func (s *Server) callTool(ctx context.Context, authCtx *AuthContext, params json.RawMessage) (interface{}, string, error) {
+func (s *Server) callTool(ctx context.Context, baseAuthCtx *AuthContext, params json.RawMessage) (interface{}, string, error) {
 	var call struct {
 		Name      string                 `json:"name"`
 		Arguments map[string]interface{} `json:"arguments"`
@@ -223,17 +220,54 @@ func (s *Server) callTool(ctx context.Context, authCtx *AuthContext, params json
 		return nil, "", fmt.Errorf("invalid tool call params: %w", err)
 	}
 
+	// 1. 从 arguments 中提取身份认证信息
+	imProvider, ok1 := call.Arguments["x_im_provider"].(string)
+	imUserID, ok2 := call.Arguments["x_im_user_id"].(string)
+	if !ok1 || imProvider == "" || !ok2 || imUserID == "" {
+		return nil, call.Name, fmt.Errorf("缺少必填参数 'x_im_provider' 和 'x_im_user_id'，请在 arguments 中提供 IM 供应商和用户ID")
+	}
+	if imProvider != "wecom" {
+		return nil, call.Name, fmt.Errorf("不支持的 IM 供应商 '%s'，当前仅支持 'wecom'", imProvider)
+	}
+
+	// 2. 查询用户（统一身份源）
+	var user model.User
+	if err := model.DB.Where("im_platform = ? AND im_user_id = ? AND enabled = ?",
+		imProvider, imUserID, true).First(&user).Error; err != nil {
+		return nil, call.Name, fmt.Errorf("用户未绑定，请联系管理员在用户管理中绑定（平台: %s, 用户: %s）", imProvider, imUserID)
+	}
+
+	// 3. 构造完整 AuthContext
+	fullAuthCtx := &AuthContext{
+		APIKey:     baseAuthCtx.APIKey,
+		User:       &user,
+		UserID:     user.ID,
+		IMUserID:   imUserID,
+		IMProvider: imProvider,
+		Scopes:     baseAuthCtx.Scopes,
+		IsAdmin:    user.Role == "admin",
+		ClientIP:   baseAuthCtx.ClientIP,
+	}
+
 	handler, ok := s.handlers[call.Name]
 	if !ok {
 		return nil, call.Name, fmt.Errorf("tool not found: %s", call.Name)
 	}
 
-	// 权限检查
-	if !s.hasToolPermission(authCtx, call.Name) {
+	// 4. 权限检查
+	if !s.hasToolPermission(fullAuthCtx, call.Name) {
 		return nil, call.Name, fmt.Errorf("permission denied for tool: %s", call.Name)
 	}
 
-	result, err := handler(ctx, authCtx, call.Arguments)
+	// 5. 从 arguments 中剥离身份字段，避免传递给业务 handler
+	cleanArgs := make(map[string]interface{})
+	for k, v := range call.Arguments {
+		if k != "x_im_provider" && k != "x_im_user_id" {
+			cleanArgs[k] = v
+		}
+	}
+
+	result, err := handler(ctx, fullAuthCtx, cleanArgs)
 	if err != nil {
 		return nil, call.Name, err
 	}
@@ -454,27 +488,6 @@ func (s *Server) AuthMiddleware() func(http.Handler) http.Handler {
 				}
 			}
 
-			// 2. IM User 认证（用户身份）
-			imUserID := r.Header.Get(HeaderIMUserID)
-			if imUserID == "" {
-				respondError(w, http.StatusForbidden, "FORBIDDEN", "缺少 IM 用户 ID")
-				return
-			}
-
-			imProvider := r.Header.Get(HeaderIMProvider)
-			if imProvider == "" {
-				imProvider = "wecom" // 默认企业微信
-			}
-
-			// 查询 User（统一身份源）
-			var user model.User
-			if err := model.DB.Where("im_platform = ? AND im_user_id = ? AND enabled = ?",
-				imProvider, imUserID, true).First(&user).Error; err != nil {
-				respondError(w, http.StatusForbidden, "FORBIDDEN",
-					fmt.Sprintf("用户未绑定 CodeGuard，请联系管理员在用户管理中绑定（平台: %s, 用户: %s）", imProvider, imUserID))
-				return
-			}
-
 			// 解析 Scopes
 			var scopes []string
 			if matchedKey.Scopes != "" {
@@ -486,15 +499,11 @@ func (s *Server) AuthMiddleware() func(http.Handler) http.Handler {
 			matchedKey.LastUsedAt = &now
 			model.DB.Save(matchedKey)
 
+			// 构造通道级认证上下文（不含用户身份，用户身份在 tools/call 时从 arguments 提取）
 			authCtx := &AuthContext{
-				APIKey:     matchedKey,
-				User:       &user,
-				UserID:     user.ID,
-				IMUserID:   imUserID,
-				IMProvider: imProvider,
-				Scopes:     scopes,
-				IsAdmin:    user.Role == "admin",
-				ClientIP:   getClientIP(r),
+				APIKey:   matchedKey,
+				Scopes:   scopes,
+				ClientIP: getClientIP(r),
 			}
 
 			// 将认证上下文放入 request context
