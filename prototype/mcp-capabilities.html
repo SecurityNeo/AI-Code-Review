@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <script src="js/theme.js?v=1"></script>
-    <style>html{background-color:#1e293b;}</style>
+    <style>html{background-color:#f8fafc;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MCP 能力中心 - CodeGuard</title>
@@ -13,104 +13,502 @@
     <link rel="stylesheet" href="css/theme.css?v=1">
     <script src="/static/js/tailwindcss.min.js"></script>
     <style>
-        :root { --bg-page:#f8fafc; --card-bg:#fff; --text-primary:#1e293b; --text-secondary:#475569; --border-color:#e2e8f0; --accent:#3b82f6; --accent-hover:#2563eb; --success:#10b981; --danger:#ef4444; --warning:#f59e0b; }
-        .page-container { padding:1.25rem 1.75rem; }
-        .page-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.75rem; }
-        .page-title { font-size:1.1rem; font-weight:700; }
-        .btn-primary { display:inline-flex; align-items:center; gap:0.4rem; background:var(--accent); color:#fff; padding:0.45rem 0.875rem; border-radius:0.5rem; font-size:0.8125rem; font-weight:500; border:none; cursor:pointer; }
-        .btn-primary:hover { background:var(--accent-hover); }
-        .btn-outline { display:inline-flex; align-items:center; gap:0.4rem; background:#fff; color:var(--text-secondary); padding:0.45rem 0.875rem; border-radius:0.5rem; font-size:0.8125rem; font-weight:500; border:1px solid var(--border-color); cursor:pointer; }
-        .btn-outline:hover { background:#f8fafc; color:var(--text-primary); }
-        .badge { display:inline-flex; align-items:center; gap:0.25rem; padding:0.15rem 0.5rem; border-radius:999px; font-size:0.75rem; font-weight:500; }
-        .badge-blue { background:#dbeafe; color:#1e40af; }
-        .badge-amber { background:#fef3c7; color:#92400e; }
-        .badge-green { background:#dcfce7; color:#166534; }
-        .badge-gray { background:#f1f5f9; color:#475569; }
-        .badge-red { background:#fee2e2; color:#991b1b; }
+        :root {
+            --bg-page: #f8fafc;
+            --card-bg: #fff;
+            --text-primary: #0f172a;
+            --text-secondary: #475569;
+            --text-muted: #64748b;
+            --border-color: #e2e8f0;
+            --accent: #4f46e5;
+            --accent-hover: #4338ca;
+            --accent-light: #eef2ff;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --query-color: #3b82f6;
+            --write-color: #f59e0b;
+            --stats-color: #10b981;
+        }
+        body { background: var(--bg-page); }
 
-        /* 能力卡片 */
-        .capability-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:1rem; }
-        .capability-card { background:var(--card-bg); border:1px solid var(--border-color); border-radius:0.625rem; padding:1rem; transition:box-shadow 0.2s, transform 0.2s; cursor:pointer; }
-        .capability-card:hover { box-shadow:0 4px 12px rgba(0,0,0,0.08); transform:translateY(-1px); }
-        .capability-card .card-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:0.5rem; }
-        .capability-card .card-icon { width:2rem; height:2rem; border-radius:0.5rem; display:flex; align-items:center; justify-content:center; font-size:0.875rem; color:#fff; }
-        .capability-card .card-title { font-size:0.9375rem; font-weight:600; color:var(--text-primary); margin-bottom:0.25rem; }
-        .capability-card .card-desc { font-size:0.8125rem; color:var(--text-secondary); line-height:1.4; }
-        .capability-card .card-tags { display:flex; flex-wrap:wrap; gap:0.375rem; margin-top:0.5rem; }
-        .capability-card .card-footer { display:flex; gap:0.5rem; margin-top:0.75rem; padding-top:0.75rem; border-top:1px solid #f1f5f9; }
-        .capability-card .btn-small { padding:0.25rem 0.5rem; border-radius:0.375rem; font-size:0.75rem; font-weight:500; border:1px solid var(--border-color); background:#fff; color:var(--text-secondary); cursor:pointer; }
-        .capability-card .btn-small:hover { background:#f8fafc; color:var(--accent); border-color:var(--accent); }
-
-        /* 分类Tab */
-        .category-tabs { display:flex; gap:0.5rem; margin-bottom:1rem; flex-wrap:wrap; }
-        .category-tab { padding:0.4rem 0.875rem; border-radius:0.5rem; font-size:0.8125rem; font-weight:500; border:1px solid var(--border-color); background:#fff; color:var(--text-secondary); cursor:pointer; transition:all 0.15s; }
-        .category-tab:hover { background:#f8fafc; }
-        .category-tab.active { background:var(--accent); color:#fff; border-color:var(--accent); }
-
-        /* 场景速查表 */
-        .scenario-section { background:var(--card-bg); border:1px solid var(--border-color); border-radius:0.625rem; margin-top:1.5rem; overflow:hidden; }
-        .scenario-header { padding:0.875rem 1rem; font-size:0.9375rem; font-weight:600; border-bottom:1px solid var(--border-color); display:flex; align-items:center; gap:0.5rem; }
-        .scenario-row { display:grid; grid-template-columns:1fr 1fr; gap:0; border-bottom:1px solid #f1f5f9; }
-        .scenario-row:last-child { border-bottom:none; }
-        .scenario-cell { padding:0.75rem 1rem; font-size:0.8125rem; }
-        .scenario-cell-left { background:#f8fafc; border-right:1px solid #f1f5f9; }
-        .scenario-cell-right { background:#fff; }
-        .scenario-cell .cell-label { font-size:0.6875rem; font-weight:600; color:#94a3b8; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:0.25rem; }
-        .scenario-cell .bubble { display:inline-block; background:#fff; border:1px solid var(--border-color); padding:0.25rem 0.625rem; border-radius:0.375rem; margin:0.15rem 0.15rem 0 0; font-size:0.75rem; color:var(--text-secondary); }
-        .scenario-cell .tool-tag { display:inline-flex; align-items:center; gap:0.25rem; background:#eff6ff; color:#1e40af; padding:0.2rem 0.5rem; border-radius:0.375rem; font-size:0.75rem; font-weight:500; margin:0.15rem 0.15rem 0 0; }
-        .scenario-cell .warning-tag { display:inline-flex; align-items:center; gap:0.25rem; background:#fffbeb; color:#92400e; padding:0.2rem 0.5rem; border-radius:0.375rem; font-size:0.75rem; }
-
-        /* 配置向导 */
-        .wizard-section { background:var(--card-bg); border:1px solid var(--border-color); border-radius:0.625rem; margin-top:1.5rem; padding:1rem; }
-        .wizard-steps { display:flex; align-items:center; gap:0.5rem; margin-bottom:1rem; }
-        .wizard-step { display:flex; align-items:center; gap:0.375rem; font-size:0.8125rem; }
-        .wizard-step .step-num { width:1.5rem; height:1.5rem; border-radius:50%; background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:center; font-size:0.6875rem; font-weight:600; }
-        .wizard-step .step-num.inactive { background:#e2e8f0; color:#64748b; }
-        .wizard-step .step-label { font-weight:500; color:var(--text-primary); }
-        .wizard-step .step-label.inactive { color:#94a3b8; }
-        .client-buttons { display:flex; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.75rem; }
-        .client-btn { padding:0.4rem 0.75rem; border-radius:0.5rem; font-size:0.8125rem; font-weight:500; border:1px solid var(--border-color); background:#fff; color:var(--text-secondary); cursor:pointer; }
-        .client-btn.active { background:var(--accent); color:#fff; border-color:var(--accent); }
-        .client-btn:hover:not(.active) { background:#f8fafc; }
-        .code-block { background:#0f172a; color:#e2e8f0; padding:0.875rem; border-radius:0.5rem; font-family:monospace; font-size:0.8125rem; line-height:1.6; overflow-x:auto; white-space:pre-wrap; word-break:break-all; }
-
-        /* 常用开场白 */
-        .quickstart-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:0.75rem; margin-top:0.75rem; }
-        .quickstart-card { background:#f8fafc; border:1px solid var(--border-color); border-radius:0.5rem; padding:0.75rem; }
-        .quickstart-card .qs-icon { font-size:1.25rem; margin-bottom:0.25rem; }
-        .quickstart-card .qs-title { font-size:0.8125rem; font-weight:600; color:var(--text-primary); margin-bottom:0.25rem; }
-        .quickstart-card .qs-phrase { font-size:0.75rem; color:var(--text-secondary); background:#fff; padding:0.375rem 0.5rem; border-radius:0.375rem; border:1px solid #e2e8f0; margin-bottom:0.375rem; cursor:pointer; }
-        .quickstart-card .qs-phrase:hover { border-color:var(--accent); }
-        .quickstart-card .qs-tools { font-size:0.6875rem; color:#94a3b8; }
-
-        /* 状态检测器 */
-        .status-indicator { display:inline-flex; align-items:center; gap:0.375rem; padding:0.35rem 0.75rem; border-radius:0.5rem; font-size:0.8125rem; font-weight:500; }
-        .status-ok { background:#dcfce7; color:#166534; }
-        .status-error { background:#fee2e2; color:#991b1b; }
-        .status-unknown { background:#f1f5f9; color:#64748b; }
-        .status-checking { background:#dbeafe; color:#1e40af; }
-
-        /* 详情面板 */
-        .detail-panel { display:none; margin-top:0.75rem; padding:0.75rem; background:#f8fafc; border-radius:0.5rem; }
-        .detail-panel.open { display:block; }
-        .param-table { width:100%; font-size:0.75rem; border-collapse:collapse; }
-        .param-table th { text-align:left; padding:0.35rem 0.5rem; color:#64748b; font-weight:600; border-bottom:1px solid #e2e8f0; }
-        .param-table td { padding:0.35rem 0.5rem; color:var(--text-secondary); border-bottom:1px solid #f1f5f9; }
-
-        /* 响应式 */
+        /* Page Layout */
+        .page-container {
+            padding: 1.5rem 2rem;
+            max-width: 1440px;
+            margin: 0 auto;
+        }
         @media (max-width: 1023px) {
-            .scenario-row { grid-template-columns:1fr; }
-            .scenario-cell-left { border-right:none; border-bottom:1px solid #f1f5f9; }
+            .page-container { padding: 1rem; }
+        }
+
+        /* Header */
+        .page-header {
+            margin-bottom: 1.5rem;
+        }
+        .page-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .page-subtitle {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+            line-height: 1.5;
+        }
+
+        /* Stat Cards */
+        .stat-bar {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+        .stat-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 0.75rem;
+            padding: 1rem 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.875rem;
+            transition: box-shadow 0.2s, transform 0.15s;
+        }
+        .stat-card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+            transform: translateY(-1px);
+        }
+        .stat-icon {
+            width: 2.5rem;
+            height: 2.5rem;
+            border-radius: 0.625rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+            flex-shrink: 0;
+        }
+        .stat-icon.query { background: #eff6ff; color: var(--query-color); }
+        .stat-icon.write { background: #fffbeb; color: var(--write-color); }
+        .stat-icon.stats { background: #ecfdf5; color: var(--stats-color); }
+        .stat-icon.total { background: var(--accent-light); color: var(--accent); }
+        .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+        .stat-value {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1.2;
+        }
+
+        /* Two Column Layout */
+        .two-col { display: grid; grid-template-columns: 1fr 320px; gap: 1.5rem; }
+        @media (max-width: 1023px) {
+            .two-col { grid-template-columns: 1fr; }
+            .stat-bar { grid-template-columns: repeat(2, 1fr); }
         }
         @media (max-width: 639px) {
-            .capability-grid { grid-template-columns:1fr; }
-            .quickstart-grid { grid-template-columns:1fr; }
+            .stat-bar { grid-template-columns: repeat(1, 1fr); }
+        }
+
+        /* Category Tabs */
+        .category-tabs {
+            display: flex;
+            gap: 0.375rem;
+            margin-bottom: 1.25rem;
+            padding: 0.25rem;
+            background: #f1f5f9;
+            border-radius: 0.625rem;
+            width: fit-content;
+        }
+        .category-tab {
+            padding: 0.45rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.8125rem;
+            font-weight: 500;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+        .category-tab:hover { color: var(--text-primary); }
+        .category-tab.active {
+            background: var(--card-bg);
+            color: var(--text-primary);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+
+        /* Capability Grid */
+        .capability-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 0.875rem;
+        }
+
+        /* Capability Card */
+        .capability-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 0.75rem;
+            padding: 1.25rem;
+            transition: box-shadow 0.2s, transform 0.15s, border-color 0.15s;
+            cursor: default;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .capability-card:hover {
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            transform: translateY(-2px);
+            border-color: #cbd5e1;
+        }
+        .capability-card.query { border-left: 3px solid var(--query-color); }
+        .capability-card.write { border-left: 3px solid var(--write-color); }
+        .capability-card.stats { border-left: 3px solid var(--stats-color); }
+
+        .card-main {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.875rem;
+        }
+        .card-icon-wrap {
+            width: 2.75rem;
+            height: 2.75rem;
+            border-radius: 0.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.125rem;
+            color: #fff;
+            flex-shrink: 0;
+        }
+        .card-title-wrap { flex: 1; min-width: 0; }
+        .card-title {
+            font-size: 0.9375rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            justify-content: space-between;
+        }
+        .card-title-name { font-family: 'SF Mono', monospace; font-size: 0.8rem; color: var(--text-muted); }
+        .card-desc {
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-top: 0.25rem;
+        }
+        .badge-strip {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.375rem;
+            margin-top: 0.25rem;
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.2rem 0.5rem;
+            border-radius: 999px;
+            font-size: 0.6875rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+        .badge-blue { background: #eff6ff; color: #1e40af; }
+        .badge-amber { background: #fffbeb; color: #92400e; }
+        .badge-green { background: #ecfdf5; color: #166534; }
+        .badge-gray { background: #f1f5f9; color: #475569; }
+        .badge-red { background: #fee2e2; color: #991b1b; }
+
+        .card-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-top: 0.5rem;
+            border-top: 1px solid #f1f5f9;
+        }
+        .btn-small {
+            padding: 0.3rem 0.625rem;
+            border-radius: 0.375rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+            border: 1px solid var(--border-color);
+            background: #fff;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.15s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        .btn-small:hover {
+            background: #f8fafc;
+            color: var(--accent);
+            border-color: var(--accent);
+        }
+        .phrase-bubbles {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.25rem;
+        }
+        .phrase-bubble {
+            font-size: 0.6875rem;
+            color: var(--text-muted);
+            background: #f8fafc;
+            padding: 0.2rem 0.5rem;
+            border-radius: 0.375rem;
+            border: 1px solid #f1f5f9;
+            white-space: nowrap;
+        }
+
+        /* Detail Panel */
+        .detail-panel {
+            display: none;
+            margin-top: 0.75rem;
+            padding: 0.875rem;
+            background: #f8fafc;
+            border-radius: 0.5rem;
+            border: 1px solid #f1f5f9;
+        }
+        .detail-panel.open { display: block; }
+        .param-table { width: 100%; font-size: 0.75rem; border-collapse: collapse; }
+        .param-table th {
+            text-align: left;
+            padding: 0.4rem 0.5rem;
+            color: var(--text-muted);
+            font-weight: 600;
+            border-bottom: 1px solid #e2e8f0;
+            background: transparent;
+        }
+        .param-table td {
+            padding: 0.4rem 0.5rem;
+            color: var(--text-secondary);
+            border-bottom: 1px solid #f1f5f9;
+        }
+
+        /* Right Sidebar */
+        .sidebar-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .panel-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 0.75rem;
+            padding: 1.25rem;
+        }
+        .panel-title {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.875rem;
+            display: flex;
+            align-items: center;
+            gap: 0.375rem;
+        }
+        .panel-section-label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 0.375rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        /* Client Buttons */
+        .client-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.375rem;
+            margin-bottom: 0.75rem;
+        }
+        .client-item {
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.5rem;
+            font-size: 0.8125rem;
+            font-weight: 500;
+            border: 1px solid var(--border-color);
+            background: #fff;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: all 0.15s;
+        }
+        .client-item:hover { background: #f8fafc; border-color: #cbd5e1; }
+        .client-item.active {
+            background: var(--accent-light);
+            color: var(--accent);
+            border-color: var(--accent);
+        }
+        .client-item .check { opacity: 0; font-size: 0.75rem; }
+        .client-item.active .check { opacity: 1; }
+
+        .code-block {
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 0.875rem;
+            border-radius: 0.5rem;
+            font-family: 'SF Mono', 'Consolas', monospace;
+            font-size: 0.75rem;
+            line-height: 1.6;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .btn-primary {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+            background: var(--accent);
+            color: #fff;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.8125rem;
+            font-weight: 500;
+            border: none;
+            cursor: pointer;
+            transition: background 0.15s;
+            width: 100%;
+        }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-outline {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+            background: #fff;
+            color: var(--text-secondary);
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.8125rem;
+            font-weight: 500;
+            border: 1px solid var(--border-color);
+            cursor: pointer;
+            transition: all 0.15s;
+            width: 100%;
+        }
+        .btn-outline:hover { background: #f8fafc; color: var(--text-primary); }
+        .btn-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+        .btn-row .btn-primary, .btn-row .btn-outline { flex: 1; }
+
+        /* Quickstart Section */
+        .quickstart-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .quickstart-item {
+            background: #f8fafc;
+            border: 1px solid #f1f5f9;
+            border-radius: 0.5rem;
+            padding: 0.625rem 0.75rem;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .quickstart-item:hover {
+            border-color: #cbd5e1;
+            background: #fff;
+        }
+        .quickstart-item .qs-text {
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 0.375rem;
+        }
+        .quickstart-item .qs-tool {
+            font-size: 0.6875rem;
+            color: var(--text-muted);
+            margin-top: 0.125rem;
+            font-family: 'SF Mono', monospace;
+        }
+
+        /* Status */
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.375rem;
+            padding: 0.35rem 0.75rem;
+            border-radius: 0.5rem;
+            font-size: 0.8125rem;
+            font-weight: 500;
+        }
+        .status-ok { background: #ecfdf5; color: #166534; }
+        .status-error { background: #fee2e2; color: #991b1b; }
+        .status-unknown { background: #f1f5f9; color: #64748b; }
+        .status-checking { background: #eff6ff; color: #1e40af; }
+
+        /* Top Actions */
+        .top-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .action-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.375rem;
+            padding: 0.4rem 0.75rem;
+            border-radius: 0.5rem;
+            font-size: 0.8125rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            background: #fff;
+            border: 1px solid var(--border-color);
+            text-decoration: none;
+            transition: all 0.15s;
+        }
+        .action-link:hover { background: #f8fafc; color: var(--text-primary); border-color: #cbd5e1; }
+
+        /* Warning Box */
+        .warning-box {
+            background: #fffbeb;
+            border: 1px solid #fde68a;
+            border-radius: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            font-size: 0.75rem;
+            color: #92400e;
+            margin-top: 0.5rem;
+            display: flex;
+            align-items: flex-start;
+            gap: 0.375rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 1023px) {
+            .capability-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+        }
+        @media (max-width: 639px) {
+            .capability-grid { grid-template-columns: 1fr; }
+            .page-container { padding: 1rem; }
         }
     </style>
 </head>
 <body class="bg-gray-50 font-sans">
 
-<div id="page-transition" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#1e293b;z-index:99999;transition:opacity .25s ease;"></div>
+<div id="page-transition" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#f8fafc;z-index:99999;transition:opacity .25s ease;"></div>
 <script>
 (function(){
   function hide(){var el=document.getElementById('page-transition');if(el){el.style.opacity='0';setTimeout(function(){el.remove();},250);}}
@@ -124,103 +522,116 @@
     </aside>
     <main class="flex-1 overflow-y-auto">
         <div class="page-container">
-            <!-- 页面头部 -->
-            <div class="page-header">
+
+            <!-- Header -->
+            <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem;">
                 <div>
-                    <div class="page-title"><i class="fas fa-robot text-blue-600 mr-2"></i>MCP 能力中心</div>
-                    <div style="font-size:0.8125rem; color:#64748b; margin-top:0.15rem;">CodeGuard 通过标准 MCP 协议为第三方智能体提供 15 个可调用的代码评审能力</div>
+                    <div class="page-title">
+                        <i class="fas fa-robot text-indigo-600"></i>
+                        MCP 能力中心
+                    </div>
+                    <div class="page-subtitle">
+                        CodeGuard 通过标准 MCP 协议为智能体提供 <strong>15</strong> 个可调用的代码评审能力
+                    </div>
                 </div>
-                <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+                <div class="top-actions">
                     <span id="mcpStatus" class="status-indicator status-unknown">
                         <i class="fas fa-circle" style="font-size:0.375rem;"></i>
                         <span>未检测</span>
                     </span>
-                    <button class="btn-outline" onclick="checkMCPStatus()">
-                        <i class="fas fa-stethoscope"></i>检测状态
+                    <button class="action-link" onclick="checkMCPStatus()">
+                        <i class="fas fa-stethoscope"></i>检测
                     </button>
-                    <a href="mcp-keys.html" class="btn-outline" style="text-decoration:none;">
-                        <i class="fas fa-key"></i>密钥管理
+                    <a href="mcp-diagnose.html" class="action-link">
+                        <i class="fas fa-wrench"></i>诊断
                     </a>
-                    <a href="mcp-diagnose.html" class="btn-outline" style="text-decoration:none;">
-                        <i class="fas fa-wrench"></i>诊断工具
+                    <a href="mcp-keys.html" class="action-link">
+                        <i class="fas fa-key"></i>密钥
                     </a>
                 </div>
             </div>
 
-            <!-- 分类过滤栏 -->
-            <div class="category-tabs" id="categoryTabs">
-                <button class="category-tab active" data-category="all" onclick="filterCategory('all')">全部 <span id="count-all">15</span></button>
-                <button class="category-tab" data-category="query" onclick="filterCategory('query')">查询类 <span id="count-query">9</span></button>
-                <button class="category-tab" data-category="write" onclick="filterCategory('write')">操作类 <span id="count-write">3</span></button>
-                <button class="category-tab" data-category="stats" onclick="filterCategory('stats')">统计类 <span id="count-stats">3</span></button>
-            </div>
-
-            <!-- 能力卡片网格 -->
-            <div class="capability-grid" id="capabilityGrid"></div>
-
-            <!-- 场景速查表 -->
-            <div class="scenario-section">
-                <div class="scenario-header">
-                    <i class="fas fa-comments text-blue-500"></i>
-                    场景速查表 — "用户说..." 对应 "平台调用..."
-                </div>
-                <div id="scenarioBody"></div>
-            </div>
-
-            <!-- 快速配置向导 -->
-            <div class="wizard-section">
-                <div class="scenario-header" style="margin:-1rem -1rem 1rem -1rem; border-radius:0.625rem 0.625rem 0 0;">
-                    <i class="fas fa-plug text-green-500"></i>
-                    快速配置向导（3 步连接到客户端）
-                </div>
-                <div class="wizard-steps">
-                    <div class="wizard-step">
-                        <span class="step-num">1</span>
-                        <span class="step-label">选择 API Key</span>
-                    </div>
-                    <i class="fas fa-chevron-right" style="font-size:0.625rem; color:#cbd5e1;"></i>
-                    <div class="wizard-step">
-                        <span class="step-num">2</span>
-                        <span class="step-label">选择客户端</span>
-                    </div>
-                    <i class="fas fa-chevron-right" style="font-size:0.625rem; color:#cbd5e1;"></i>
-                    <div class="wizard-step">
-                        <span class="step-num">3</span>
-                        <span class="step-label">复制配置</span>
+            <!-- Stat Bar -->
+            <div class="stat-bar">
+                <div class="stat-card">
+                    <div class="stat-icon total"><i class="fas fa-cubes"></i></div>
+                    <div>
+                        <div class="stat-label">能力总数</div>
+                        <div class="stat-value">15</div>
                     </div>
                 </div>
-                <div style="margin-bottom:0.75rem;">
-                    <label style="font-size:0.8125rem; font-weight:500; color:var(--text-primary); display:block; margin-bottom:0.35rem;">选择客户端：</label>
-                    <div class="client-buttons" id="clientButtons"></div>
+                <div class="stat-card">
+                    <div class="stat-icon query"><i class="fas fa-search"></i></div>
+                    <div>
+                        <div class="stat-label">查询类</div>
+                        <div class="stat-value">9</div>
+                    </div>
                 </div>
-                <div style="margin-bottom:0.75rem;">
-                    <label style="font-size:0.8125rem; font-weight:500; color:var(--text-primary); display:block; margin-bottom:0.35rem;">配置代码（已自动填充当前地址）：</label>
-                    <div class="code-block" id="configCode"></div>
+                <div class="stat-card">
+                    <div class="stat-icon write"><i class="fas fa-edit"></i></div>
+                    <div>
+                        <div class="stat-label">操作类</div>
+                        <div class="stat-value">3</div>
+                    </div>
                 </div>
-                <div style="display:flex; gap:0.5rem;">
-                    <button class="btn-primary" onclick="copyConfig()">
-                        <i class="fas fa-copy"></i>一键复制
-                    </button>
-                    <button class="btn-outline" onclick="downloadConfig()">
-                        <i class="fas fa-download"></i>下载 mcp-config.json
-                    </button>
+                <div class="stat-card">
+                    <div class="stat-icon stats"><i class="fas fa-chart-pie"></i></div>
+                    <div>
+                        <div class="stat-label">统计类</div>
+                        <div class="stat-value">3</div>
+                    </div>
                 </div>
             </div>
 
-            <!-- 常用开场白 -->
-            <div class="wizard-section" style="margin-top:1.5rem;">
-                <div class="scenario-header" style="margin:-1rem -1rem 0.75rem -1rem; border-radius:0.625rem 0.625rem 0 0;">
-                    <i class="fas fa-fire text-orange-500"></i>
-                    常用开场白（点击复制，粘贴到群聊或客户端中使用）
+            <!-- Two Column Body -->
+            <div class="two-col">
+                <!-- Left: Capabilities -->
+                <div>
+                    <!-- Category Filter -->
+                    <div class="category-tabs" id="categoryTabs">
+                        <button class="category-tab active" data-category="all" onclick="filterCategory('all')">全部</button>
+                        <button class="category-tab" data-category="query" onclick="filterCategory('query')">查询</button>
+                        <button class="category-tab" data-category="write" onclick="filterCategory('write')">操作</button>
+                        <button class="category-tab" data-category="stats" onclick="filterCategory('stats')">统计</button>
+                    </div>
+
+                    <!-- Capability Grid -->
+                    <div class="capability-grid" id="capabilityGrid"></div>
                 </div>
-                <div class="quickstart-grid" id="quickstartGrid"></div>
+
+                <!-- Right: Sidebar -->
+                <div class="sidebar-panel">
+                    <!-- Config Wizard -->
+                    <div class="panel-card">
+                        <div class="panel-title"><i class="fas fa-plug text-indigo-500"></i> 快速连接</div>
+                        <div class="panel-section-label">选择客户端</div>
+                        <div class="client-list" id="clientButtons"></div>
+                        <div class="panel-section-label">MCP 配置</div>
+                        <div class="code-block" id="configCode"></div>
+                        <div class="btn-row">
+                            <button class="btn-primary" onclick="copyConfig()">
+                                <i class="fas fa-copy"></i>复制
+                            </button>
+                            <button class="btn-outline" onclick="downloadConfig()">
+                                <i class="fas fa-download"></i>下载
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Quickstart -->
+                    <div class="panel-card">
+                        <div class="panel-title"><i class="fas fa-bolt text-amber-500"></i> 常用开场白</div>
+                        <div class="quickstart-list" id="quickstartList"></div>
+                    </div>
+                </div>
             </div>
+
         </div>
     </main>
 </div>
 
 <script>
-// ========== 能力数据 ==========
+// ========== Data ==========
 const MCP_TOOLS = [
     { toolName:'list_tasks', displayName:'任务列表查询', description:'查询代码评审任务列表，支持按状态和项目过滤。获取 task_id 的入口。', category:'query', icon:'fa-list', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'分页',c:'badge-gray'},{t:'需认证',c:'badge-gray'}], params:[{n:'status',t:'string',r:false,d:'running|pending|failed|success|stopped'},{n:'project_id',t:'integer',r:false},{n:'mine',t:'boolean',r:false,d:'true'},{n:'limit',t:'integer',r:false,d:'5'}], phrases:['看看我最近的评审任务','列出所有失败的任务','项目 12 最近有哪些 MR 在评审'] },
     { toolName:'get_task', displayName:'任务详情查询', description:'获取单个评审任务的完整详情（含 MR 信息、评审得分、Issue 数量、使用模型）。', category:'query', icon:'fa-file-alt', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'}], params:[{n:'task_id',t:'integer',r:true}], phrases:['任务 2084 怎么样了','这个评审的得分是多少'], requires:['task_id'] },
@@ -231,38 +642,22 @@ const MCP_TOOLS = [
     { toolName:'get_merge_request_detail', displayName:'MR 详情查询', description:'获取指定 MR 的评审详情和对应任务信息。', category:'query', icon:'fa-info-circle', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'}], params:[{n:'project_id',t:'integer',r:true},{n:'mr_iid',t:'integer',r:true}], phrases:['MR !42 评审结果如何','这个 MR 有什么问题'] },
     { toolName:'list_notifications', displayName:'通知列表查询', description:'查看站内通知列表（评审完成、升级提醒等）。支持 unread/all 过滤。', category:'query', icon:'fa-bell', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'分页',c:'badge-gray'},{t:'需认证',c:'badge-gray'}], params:[{n:'filter',t:'string',r:false,d:'unread|all'}], phrases:['有没有新通知','未读通知有哪些'] },
     { toolName:'list_projects', displayName:'项目列表查询', description:'查询已接入 AI 代码评审的项目列表。默认只返回我有任务的项目。', category:'query', icon:'fa-folder-open', color:'#3b82f6', tags:[{t:'只读',c:'badge-blue'},{t:'分页',c:'badge-gray'},{t:'需认证',c:'badge-gray'}], params:[{n:'limit',t:'integer',r:false,d:'20'}], phrases:['有哪些项目在用评审','看看所有项目'] },
-    { toolName:'retry_task', displayName:'任务重试', description:'为失败或已停止的任务创建重试任务，重新触发完整 AI 评审。', category:'write', icon:'fa-redo', color:'#f59e0b', tags:[{t:'可写',c:'badge-amber'},{t:'需认证',c:'badge-gray'},{t:'需审批',c:'badge-red'}], params:[{n:'task_id',t:'integer',r:true}], phrases:['重试任务 2084','重新评审一下','再跑一次'], dangerous:true, requires:['task_id'] },
-    { toolName:'stop_task', displayName:'任务停止', description:'停止正在运行或排队中的评审任务（当前阶段完成后终止）。', category:'write', icon:'fa-stop-circle', color:'#f59e0b', tags:[{t:'可写',c:'badge-amber'},{t:'需认证',c:'badge-gray'},{t:'需审批',c:'badge-red'}], params:[{n:'task_id',t:'integer',r:true}], phrases:['停掉任务 2084','取消评审','停止正在跑的任务'], dangerous:true, requires:['task_id'] },
+    { toolName:'retry_task', displayName:'任务重试', description:'为失败或已停止的任务创建重试任务，重新触发完整 AI 评审。', category:'write', icon:'fa-redo', color:'#f59e0b', tags:[{t:'可写',c:'badge-amber'},{t:'需认证',c:'badge-gray'},{t:'需确认',c:'badge-red'}], params:[{n:'task_id',t:'integer',r:true}], phrases:['重试任务 2084','重新评审一下','再跑一次'], dangerous:true, requires:['task_id'] },
+    { toolName:'stop_task', displayName:'任务停止', description:'停止正在运行或排队中的评审任务（当前阶段完成后终止）。', category:'write', icon:'fa-stop-circle', color:'#f59e0b', tags:[{t:'可写',c:'badge-amber'},{t:'需认证',c:'badge-gray'},{t:'需确认',c:'badge-red'}], params:[{n:'task_id',t:'integer',r:true}], phrases:['停掉任务 2084','取消评审','停止正在跑的任务'], dangerous:true, requires:['task_id'] },
     { toolName:'mark_all_read', displayName:'标记全部已读', description:'一键将当前用户所有未读通知标记为已读。', category:'write', icon:'fa-check-double', color:'#f59e0b', tags:[{t:'可写',c:'badge-amber'},{t:'需认证',c:'badge-gray'}], params:[], phrases:['全部标记为已读','清除所有通知'], dangerous:true },
     { toolName:'get_workbench', displayName:'工作台数据查询', description:'获取个人工作台数据，包含待处理 Issue 统计（按严重程度分档）、超时预警。', category:'stats', icon:'fa-desktop', color:'#10b981', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'}], params:[{n:'admin_view',t:'boolean',r:false,d:'false'}], phrases:['我的待办','有哪些问题需要处理','超时预警'] },
     { toolName:'get_dashboard_stats', displayName:'大盘统计查询', description:'获取代码评审大盘统计（任务量、成功率、失败率、Top 项目）。支持 today/week/month。', category:'stats', icon:'fa-chart-bar', color:'#10b981', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'}], params:[{n:'period',t:'string',r:false,d:'today|week|month'}], phrases:['这周评审了多少 MR','成功率多少','团队评审负载如何'] },
     { toolName:'get_token_usage', displayName:'Token 用量查询', description:'查看 AI 评审 Token 消耗和成本（按天汇总）。支持 day/project/model 分组。', category:'stats', icon:'fa-coins', color:'#10b981', tags:[{t:'只读',c:'badge-blue'},{t:'需认证',c:'badge-gray'}], params:[{n:'group_by',t:'string',r:false,d:'day|project|model'}], phrases:['Token 花了多少','AI 调用成本','模型 usage'] }
 ];
 
-// ========== 场景映射数据 ==========
-const SCENARIOS = [
-    { intent:'查询最近的评审任务', says:['看看我最近的评审任务','我有哪些任务在跑','列出我的任务'], tool:'list_tasks', params:'mine=true, limit=5', result:'返回任务列表，含 MR 标题、状态、评审得分' },
-    { intent:'查询失败的任务', says:['有哪些任务失败了','失败的评审有哪些','找出需要重试的任务'], tool:'list_tasks', params:'status=failed, mine=true', result:'只返回 failed 任务，附失败原因摘要' },
-    { intent:'查看任务详情', says:['任务 2084 怎么样了','这个评审卡在哪一步','为什么失败了'], tool:'get_task + get_task_pipeline', params:'task_id=xxx', result:'返回任务详情、Pipeline 各阶段状态、失败定位' },
-    { intent:'审查安全问题', says:['找出所有高危安全问题','这个 MR 有什么安全隐患','critical 的 issue 有哪些'], tool:'get_mr_review', params:'severity=critical, category=security', result:'返回 critical/high security Issue 列表' },
-    { intent:'查看评审大盘', says:['这周评审了多少 MR','成功率多少','Token 花了多少'], tool:'get_dashboard_stats + get_token_usage', params:'period=week', result:'返回本周任务量、成功率、Token 消耗' },
-    { intent:'查看工作台待办', says:['我的待办','有哪些问题需要处理','超时预警'], tool:'get_workbench', params:'—', result:'返回按严重程度分档的待处理 Issue 统计' },
-    { intent:'重试失败的任务', says:['重试任务 2084','重新评审一下','再跑一次'], tool:'retry_task', params:'task_id=xxx', result:'创建新的重试任务，保留原配置', warning:'任务状态须为 failed/stopped' },
-    { intent:'停止运行的任务', says:['停掉任务 2084','取消评审','停止正在跑的任务'], tool:'stop_task', params:'task_id=xxx', result:'当前阶段完成后终止任务', warning:'任务状态须为 running/pending' },
-    { intent:'查看通知', says:['有没有新通知','未读通知有哪些','全部标记为已读'], tool:'list_notifications / mark_all_read', params:'filter=unread', result:'返回通知列表或清除未读' },
-    { intent:'查看 MR 列表', says:['看看最近的 MR','有哪些 MR 在评审','MR !42 评审结果如何'], tool:'list_merge_requests / get_merge_request_detail', params:'—', result:'返回 MR 列表或单个 MR 详情' }
-];
-
-// ========== 常用开场白 ==========
 const QUICKSTARTS = [
-    { icon:'💬', title:'查任务', phrases:['看看我最近的评审任务','列出所有失败的任务'], tools:['list_tasks'] },
-    { icon:'📊', title:'看大盘', phrases:['这周评审了多少 MR，成功率多少','Token 花了多少'], tools:['get_dashboard_stats'] },
-    { icon:'🔍', title:'审代码', phrases:['任务 2084 有什么安全问题','找出所有 critical 的 issue'], tools:['get_mr_review'] },
-    { icon:'⚡', title:'操作任务', phrases:['重试任务 2084','停止正在跑的任务'], tools:['retry_task','stop_task'], warning:'操作类 Tool，请确认后再执行' },
-    { icon:'🔔', title:'看通知', phrases:['有没有新通知','全部标记为已读'], tools:['list_notifications'] }
+    { icon:'fa-list', title:'查任务', phrases:['看看我最近的评审任务','列出所有失败的任务'], tools:['list_tasks'] },
+    { icon:'fa-chart-bar', title:'看大盘', phrases:['这周评审了多少 MR，成功率多少','Token 花了多少'], tools:['get_dashboard_stats'] },
+    { icon:'fa-search', title:'审代码', phrases:['任务 2084 有什么安全问题','找出所有 critical 的 issue'], tools:['get_mr_review'] },
+    { icon:'fa-redo', title:'操作任务', phrases:['重试任务 2084','停止正在跑的任务'], tools:['retry_task','stop_task'], warning:'操作类 Tool 请确认后执行' },
+    { icon:'fa-bell', title:'看通知', phrases:['有没有新通知','全部标记为已读'], tools:['list_notifications'] }
 ];
 
-// ========== 客户端配置模板 ==========
 const CLIENT_TEMPLATES = {
     cursor: {
         name:'Cursor', generate: (host,key) => JSON.stringify({ mcpServers:{ codeguard:{ url:`${host}/mcp/v1`, headers:{ 'X-API-Key':key } } } }, null, 2)
@@ -281,44 +676,49 @@ const CLIENT_TEMPLATES = {
 let activeClient = 'cursor';
 let apiKeyList = [];
 
-// ========== 渲染能力卡片 ==========
+// ========== Render Cards ==========
 function renderCards(category) {
     const grid = document.getElementById('capabilityGrid');
     const tools = category === 'all' ? MCP_TOOLS : MCP_TOOLS.filter(t => t.category === category);
     grid.innerHTML = tools.map(tool => `
-        <div class="capability-card" data-tool="${tool.toolName}" data-category="${tool.category}">
-            <div class="card-header">
-                <div style="display:flex; align-items:center; gap:0.5rem;">
-                    <div class="card-icon" style="background:${tool.color};">
-                        <i class="fas ${tool.icon}"></i>
-                    </div>
-                    <div>
-                        <div class="card-title">${tool.toolName}</div>
-                        <div style="font-size:0.75rem; color:#64748b;">${tool.displayName}</div>
-                    </div>
+        <div class="capability-card ${tool.category}">
+            <div class="card-main">
+                <div class="card-icon-wrap" style="background:${tool.color};">
+                    <i class="fas ${tool.icon}"></i>
                 </div>
-                ${tool.dangerous ? '<span class="badge badge-amber"><i class="fas fa-exclamation-triangle" style="font-size:0.625rem;"></i>可写</span>' : '<span class="badge badge-blue">只读</span>'}
+                <div class="card-title-wrap">
+                    <div class="card-title">
+                        <span>${tool.displayName}</span>
+                        <span class="card-title-name">${tool.toolName}</span>
+                    </div>
+                    <div class="card-desc">${tool.description}</div>
+                </div>
             </div>
-            <div class="card-desc">${tool.description}</div>
-            <div class="card-tags">
+            <div class="badge-strip">
                 ${tool.tags.map(tag => `<span class="badge ${tag.c}">${tag.t}</span>`).join('')}
+            </div>
+            <div class="phrase-bubbles">
+                ${tool.phrases.slice(0,2).map(p => `<span class="phrase-bubble">"${p}"</span>`).join('')}
             </div>
             <div class="card-footer">
                 <button class="btn-small" onclick="toggleDetail(this, '${tool.toolName}')">
-                    <i class="fas fa-chevron-down"></i> 查看参数
+                    <i class="fas fa-chevron-down"></i> 参数
                 </button>
-                ${tool.phrases.slice(0,2).map(p => `<span class="bubble" style="font-size:0.75rem; color:#64748b; background:#f8fafc; padding:0.2rem 0.4rem; border-radius:0.25rem;">"${p}"</span>`).join('')}
+                ${tool.dangerous
+                    ? '<span class="badge badge-amber"><i class="fas fa-exclamation-triangle" style="font-size:0.625rem;"></i>可写</span>'
+                    : '<span class="badge badge-blue">只读</span>'
+                }
             </div>
             <div class="detail-panel" id="detail-${tool.toolName}">
-                <div style="font-size:0.8125rem; font-weight:600; margin-bottom:0.5rem;">参数说明</div>
+                <div style="font-size:0.8125rem; font-weight:600; margin-bottom:0.5rem; color:var(--text-primary);">参数说明</div>
                 <table class="param-table">
                     <thead><tr><th>参数</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
                     <tbody>
                         ${tool.params.map(p => `<tr><td>${p.n}</td><td>${p.t}</td><td>${p.r ? '<span style="color:#ef4444;">是</span>' : '否'}</td><td>${p.d || '—'}</td></tr>`).join('') || '<tr><td colspan="4" style="color:#94a3b8;">无参数</td></tr>'}
                     </tbody>
                 </table>
-                ${tool.requires ? `<div style="margin-top:0.5rem; font-size:0.75rem; color:#92400e; background:#fffbeb; padding:0.375rem 0.5rem; border-radius:0.375rem;"><i class="fas fa-info-circle"></i> 前置条件: 需要 ${tool.requires.join(', ')}</div>` : ''}
-                ${tool.warning ? `<div style="margin-top:0.5rem; font-size:0.75rem; color:#92400e; background:#fffbeb; padding:0.375rem 0.5rem; border-radius:0.375rem;"><i class="fas fa-exclamation-triangle"></i> ${tool.warning}</div>` : ''}
+                ${tool.requires ? `<div class="warning-box"><i class="fas fa-info-circle" style="margin-top:0.1rem; flex-shrink:0;"></i> 前置条件: 需要 ${tool.requires.join(', ')}</div>` : ''}
+                ${tool.warning ? `<div class="warning-box"><i class="fas fa-exclamation-triangle" style="margin-top:0.1rem; flex-shrink:0;"></i> ${tool.warning}</div>` : ''}
             </div>
         </div>
     `).join('');
@@ -328,7 +728,7 @@ function toggleDetail(btn, toolName) {
     const panel = document.getElementById('detail-' + toolName);
     const isOpen = panel.classList.contains('open');
     panel.classList.toggle('open');
-    btn.innerHTML = isOpen ? '<i class="fas fa-chevron-down"></i> 查看参数' : '<i class="fas fa-chevron-up"></i> 收起参数';
+    btn.innerHTML = isOpen ? '<i class="fas fa-chevron-down"></i> 参数' : '<i class="fas fa-chevron-up"></i> 收起';
 }
 
 function filterCategory(category) {
@@ -338,33 +738,14 @@ function filterCategory(category) {
     renderCards(category);
 }
 
-// ========== 渲染场景速查表 ==========
-function renderScenarios() {
-    const body = document.getElementById('scenarioBody');
-    body.innerHTML = SCENARIOS.map(s => `
-        <div class="scenario-row">
-            <div class="scenario-cell scenario-cell-left">
-                <div class="cell-label">用户说...</div>
-                ${s.says.map(phrase => `<span class="bubble">"${phrase}"</span>`).join('')}
-            </div>
-            <div class="scenario-cell scenario-cell-right">
-                <div class="cell-label">平台调用...</div>
-                <div style="margin-bottom:0.25rem;">
-                    <span class="tool-tag"><i class="fas fa-cog" style="font-size:0.625rem;"></i> ${s.tool}</span>
-                    ${s.params !== '—' ? `<span style="font-size:0.75rem; color:#64748b; margin-left:0.25rem;">参数: ${s.params}</span>` : ''}
-                </div>
-                <div style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.25rem;">结果: ${s.result}</div>
-                ${s.warning ? `<span class="warning-tag"><i class="fas fa-exclamation-triangle" style="font-size:0.625rem;"></i> ${s.warning}</span>` : ''}
-            </div>
-        </div>
-    `).join('');
-}
-
-// ========== 渲染客户端配置 ==========
+// ========== Clients ==========
 function renderClientButtons() {
     const container = document.getElementById('clientButtons');
     container.innerHTML = Object.entries(CLIENT_TEMPLATES).map(([key, tmpl]) => `
-        <button class="client-btn ${key === activeClient ? 'active' : ''}" data-client="${key}" onclick="selectClient('${key}')">${tmpl.name}</button>
+        <button class="client-item ${key === activeClient ? 'active' : ''}" data-client="${key}" onclick="selectClient('${key}')">
+            <span>${tmpl.name}</span>
+            <i class="fas fa-check check"></i>
+        </button>
     `).join('');
 }
 
@@ -384,7 +765,7 @@ function updateConfigDisplay() {
 function copyConfig() {
     const code = document.getElementById('configCode').textContent;
     navigator.clipboard.writeText(code).then(() => {
-        showToast('配置已复制到剪贴板', 'success');
+        showToast('配置已复制', 'success');
     }).catch(() => {
         const ta = document.createElement('textarea');
         ta.value = code;
@@ -392,7 +773,7 @@ function copyConfig() {
         ta.select();
         document.execCommand('copy');
         document.body.removeChild(ta);
-        showToast('配置已复制到剪贴板', 'success');
+        showToast('配置已复制', 'success');
     });
 }
 
@@ -409,30 +790,31 @@ function downloadConfig() {
     URL.revokeObjectURL(url);
 }
 
-// ========== 渲染常用开场白 ==========
+// ========== Quickstarts ==========
 function renderQuickstarts() {
-    const grid = document.getElementById('quickstartGrid');
-    grid.innerHTML = QUICKSTARTS.map(qs => `
-        <div class="quickstart-card">
-            <div class="qs-icon">${qs.icon}</div>
-            <div class="qs-title">${qs.title}</div>
-            ${qs.phrases.map(p => `<div class="qs-phrase" onclick="copyPhrase(this, '${p.replace(/'/g, "\\'")}')">${p}</div>`).join('')}
-            <div class="qs-tools">涉及: ${qs.tools.join(', ')}</div>
-            ${qs.warning ? `<div style="font-size:0.6875rem; color:#92400e; margin-top:0.25rem;"><i class="fas fa-exclamation-triangle"></i> ${qs.warning}</div>` : ''}
+    const container = document.getElementById('quickstartList');
+    container.innerHTML = QUICKSTARTS.map(qs => `
+        <div class="quickstart-item" onclick="copyQuickstart('${qs.title}')">
+            <div class="qs-text">
+                <i class="fas ${qs.icon} text-indigo-400" style="font-size:0.75rem;"></i>
+                <strong style="color:var(--text-primary); min-width:3.5rem;">${qs.title}</strong>
+                <span style="color:var(--text-muted);">${qs.phrases[0]}</span>
+            </div>
+            <div class="qs-tool">${qs.tools.join(', ')} ${qs.warning ? '· ' + qs.warning : ''}</div>
         </div>
     `).join('');
 }
 
-function copyPhrase(el, text) {
+function copyQuickstart(title) {
+    const qs = QUICKSTARTS.find(q => q.title === title);
+    if (!qs) return;
+    const text = qs.phrases[0];
     navigator.clipboard.writeText(text).then(() => {
-        const original = el.textContent;
-        el.textContent = '✅ 已复制';
-        el.style.borderColor = '#10b981';
-        setTimeout(() => { el.textContent = original; el.style.borderColor = '#e2e8f0'; }, 2000);
+        showToast('已复制: ' + text, 'success');
     });
 }
 
-// ========== 状态检测 ==========
+// ========== Status ==========
 async function checkMCPStatus() {
     const statusEl = document.getElementById('mcpStatus');
     statusEl.className = 'status-indicator status-checking';
@@ -449,22 +831,22 @@ async function checkMCPStatus() {
             const count = data.tools?.length || 0;
             if (count > 0) {
                 statusEl.className = 'status-indicator status-ok';
-                statusEl.innerHTML = `<i class="fas fa-circle" style="font-size:0.375rem;"></i><span>服务正常（${count} 个能力）</span>`;
+                statusEl.innerHTML = `<i class="fas fa-circle" style="font-size:0.375rem;"></i><span>正常 · ${count} Tools</span>`;
             } else {
                 statusEl.className = 'status-indicator status-error';
-                statusEl.innerHTML = '<i class="fas fa-circle" style="font-size:0.375rem;"></i><span>服务异常（Tool 列表为空）</span>';
+                statusEl.innerHTML = '<i class="fas fa-circle" style="font-size:0.375rem;"></i><span>异常（空列表）</span>';
             }
         } else {
             statusEl.className = 'status-indicator status-error';
-            statusEl.innerHTML = `<i class="fas fa-circle" style="font-size:0.375rem;"></i><span>服务异常（HTTP ${resp.status}）</span>`;
+            statusEl.innerHTML = `<i class="fas fa-circle" style="font-size:0.375rem;"></i><span>HTTP ${resp.status}</span>`;
         }
     } catch (e) {
         statusEl.className = 'status-indicator status-error';
-        statusEl.innerHTML = '<i class="fas fa-circle" style="font-size:0.375rem;"></i><span>未检测到服务端</span>';
+        statusEl.innerHTML = '<i class="fas fa-circle" style="font-size:0.375rem;"></i><span>未连接</span>';
     }
 }
 
-// ========== 加载用户 Key ==========
+// ========== API Keys ==========
 async function loadApiKeys() {
     try {
         const resp = await apiFetch('/api/v1/mcp-keys?page_size=5');
@@ -472,28 +854,23 @@ async function loadApiKeys() {
             apiKeyList = resp.data.list.filter(k => k.status === 'active');
             updateConfigDisplay();
         }
-    } catch (e) {
-        // 静默处理，使用占位 Key
-    }
+    } catch (e) {}
 }
 
 function showToast(message, type) {
     const colors = { success: 'background:#10b981;', error: 'background:#ef4444;', info: 'background:#3b82f6;' };
     const toast = document.createElement('div');
-    toast.style.cssText = `position:fixed;top:1rem;right:1rem;${colors[type] || colors.info} color:#fff;padding:0.75rem 1.25rem;border-radius:0.5rem;font-size:0.875rem;font-weight:500;box-shadow:0 4px 6px rgba(0,0,0,0.1);z-index:9999;transition:opacity 0.3s ease;`;
+    toast.style.cssText = `position:fixed;top:1rem;right:1rem;${colors[type] || colors.info} color:#fff;padding:0.625rem 1rem;border-radius:0.5rem;font-size:0.8125rem;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,0.12);z-index:9999;transition:opacity 0.3s ease;`;
     toast.textContent = message;
     document.body.appendChild(toast);
-    setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 3000);
+    setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 2500);
 }
 
-// ========== 初始化 ==========
+// ========== Init ==========
 renderCards('all');
-renderScenarios();
 renderClientButtons();
 renderQuickstarts();
 loadApiKeys();
-
-// 页面加载时自动检测一次（延迟执行，避免阻塞）
 setTimeout(checkMCPStatus, 800);
 </script>
 
