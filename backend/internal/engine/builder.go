@@ -375,7 +375,7 @@ func BuildReviewPrompt(ctx *PromptContext) string {
 	var sb strings.Builder
 
 	// 1. System 角色及输出约束
-	sb.WriteString("你是一名资深代码审查专家。请对以下代码变更进行严格审查。\n\n")
+	sb.WriteString("你是一名资深代码评审专家。请对以下代码变更进行严格评审。\n\n")
 	sb.WriteString("## 【重要】返回格式要求\n")
 	sb.WriteString("你的响应必须严格符合以下 JSON Schema，不要包含任何 Markdown 代码块标记（如 ```json）或额外解释文字。如果不涉及的评分维度，可以不包含在 dimensions 内。所有字段必须填写，issues 数组为空时填写 []，recommendations 为空时填写 []：\n")
 
@@ -678,7 +678,7 @@ func ParseDeductScoreConfig(jsonStr string) (DeductScoreConfig, error) {
 func BuildFullStructuredPrompt(ctx *PromptContext) (string, *llm.ResponseFormat) {
 	var sb strings.Builder
 
-	sb.WriteString("你是一名资深代码审查专家。请对以下代码变更进行严格审查。\n\n")
+	sb.WriteString("你是一名资深代码评审专家。请对以下代码变更进行严格评审。\n\n")
 	sb.WriteString("## 【重要】返回格式要求\n")
 	sb.WriteString("你的响应必须严格符合以下 JSON Schema，不要包含任何 Markdown 代码块标记（如 ```json）或额外解释文字。如果不涉及的评分维度，可以不包含在 dimensions 内。所有字段必须填写，issues 数组为空时填写 []，recommendations 为空时填写 []：\n")
 	schemaExample := buildSchemaExample(ctx.DimensionWeights)
@@ -756,7 +756,7 @@ func BuildFullStructuredPrompt(ctx *PromptContext) (string, *llm.ResponseFormat)
 func BuildBatchCollectionPrompt(ctx *PromptContext, batchIndex, totalBatches int, batchFiles []map[string]interface{}, isLastBatch bool) string {
 	var sb strings.Builder
 
-	sb.WriteString("你是一名资深代码审查专家。请对以下代码变更进行审查。\n\n")
+	sb.WriteString("你是一名资深代码评审专家。请对以下代码变更进行评审。\n\n")
 	sb.WriteString("## 【重要】返回格式要求\n")
 	sb.WriteString("你的响应必须严格符合以下 JSON Schema，不要包含任何 Markdown 代码块标记或额外解释文字：\n")
 	batchSchema := llm.GetBatchCollectionJSONSchema()
@@ -826,7 +826,7 @@ func BuildBatchCollectionPrompt(ctx *PromptContext, batchIndex, totalBatches int
 func BuildScoreArbitrationPrompt(ctx *PromptContext, batchResults []*llm.BatchReviewResult) (string, *llm.ResponseFormat) {
 	var sb strings.Builder
 
-	sb.WriteString("你是一名资深代码审查专家。请基于以下各批次发现的问题，生成最终的综合评审报告。\n\n")
+	sb.WriteString("你是一名资深代码评审专家。请基于以下各批次发现的问题，生成最终的综合评审报告。\n\n")
 	sb.WriteString("## 【重要】返回格式要求\n")
 	sb.WriteString("你的响应必须严格符合以下 JSON Schema，不要包含任何 Markdown 代码块标记或额外解释文字：\n")
 	schemaExample := buildSchemaExample(ctx.DimensionWeights)

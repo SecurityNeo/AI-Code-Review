@@ -892,6 +892,12 @@ func (e *BatchReviewFrameExecutor) Execute(ctx StageContext) error {
 
 		// 单批场景也需要更新批次进度和 output_snapshot，保证前端详情面板能正确显示批次进度
 		ctx.UpdateProgress(nil, 1, plan.BatchCount)
+		zap.L().Info("单批评审完成",
+			zap.Uint("task_id", task.ID),
+			zap.Int("issue_count", len(batchResult.Issues)),
+			zap.Int("input_tokens", inTk),
+			zap.Int("output_tokens", outTk),
+			zap.String("model_name", modelName))
 		outputSnap := map[string]interface{}{
 			"plan":        plan,
 			"batch_count": plan.BatchCount,
