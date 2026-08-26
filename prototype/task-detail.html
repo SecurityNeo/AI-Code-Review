@@ -4207,21 +4207,23 @@ function renderReviewArbitrationDetail(json) {
     // Prompt 输入（可折叠）
     const prompt = inp.prompt || '';
     if (prompt) {
+        const promptId = `arb-prompt-${json.execution_id || Date.now()}-${Math.random().toString(36).slice(2,6)}`;
         html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
         html += `<span>Prompt 输入</span>`;
-        html += `<span class="text-[10px] text-gray-400">${prompt.length} 字符</span>`;
+        html += `<div class="flex items-center gap-2"><span class="text-[10px] text-gray-400">${prompt.length} 字符</span><button onclick="copyTextById('${promptId}', this)" class="text-[10px] text-gray-400 hover:text-blue-600 border border-gray-200 rounded px-1.5 py-0.5 bg-white/80" title="复制内容"><i class="far fa-copy mr-0.5"></i>复制</button></div>`;
         html += `</div>`;
         html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden"><summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看 Prompt</summary>`;
-        html += `<pre class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[24rem] overflow-y-auto">${escapeHtml(prompt)}</pre>`;
+        html += `<pre id="${promptId}" class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[24rem] overflow-y-auto">${escapeHtml(prompt)}</pre>`;
         html += `</details></div>`;
     }
 
     // 大模型原始输出（JSON 格式）
     if (out.raw_llm_output || out.raw_content) {
         const raw = out.raw_llm_output || out.raw_content;
+        const rawId = `arb-raw-${json.execution_id || Date.now()}-${Math.random().toString(36).slice(2,6)}`;
         html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
         html += `<span>大模型原始输出 (JSON)</span>`;
-        html += `<span class="text-[10px] text-gray-400">${typeof raw === 'string' ? raw.length : JSON.stringify(raw).length} 字符</span>`;
+        html += `<div class="flex items-center gap-2"><span class="text-[10px] text-gray-400">${typeof raw === 'string' ? raw.length : JSON.stringify(raw).length} 字符</span><button onclick="copyTextById('${rawId}', this)" class="text-[10px] text-gray-400 hover:text-blue-600 border border-gray-200 rounded px-1.5 py-0.5 bg-white/80" title="复制内容"><i class="far fa-copy mr-0.5"></i>复制</button></div>`;
         html += `</div>`;
         html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden"><summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看原始 JSON 输出</summary>`;
         let jsonStr = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
@@ -4230,7 +4232,7 @@ function renderReviewArbitrationDetail(json) {
             const parsed = JSON.parse(jsonStr);
             jsonStr = JSON.stringify(parsed, null, 2);
         } catch (_) { /* 保持原样 */ }
-        html += `<pre class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[28rem] overflow-y-auto">${escapeHtml(jsonStr)}</pre>`;
+        html += `<pre id="${rawId}" class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[28rem] overflow-y-auto">${escapeHtml(jsonStr)}</pre>`;
         html += `</details></div>`;
     }
 
