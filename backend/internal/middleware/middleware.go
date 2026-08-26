@@ -10,6 +10,8 @@ import (
 
 var skipLogPaths = map[string]bool{
 	"/api/v1/notifications/unread-count": true,
+	"/mcp":    true,
+	"/mcp/v1": true,
 }
 
 func Logger() gin.HandlerFunc {
