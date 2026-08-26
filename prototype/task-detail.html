@@ -3049,7 +3049,7 @@ function renderImpactAnalysisDetail(json) {
     const findings = outSnap.findings || [];
     const findingCount = outSnap.finding_count !== undefined ? outSnap.finding_count : findings.length;
 
-    // 影响类型映射
+    // 影响类型映射（兼容后端 snake_case JSON tag）
     const impactTypeMap = {
         'breaking_change': { label: '破坏性变更', cls: 'bg-red-50 text-red-600 border-red-100' },
         'behavior_change': { label: '行为变更', cls: 'bg-orange-50 text-orange-600 border-orange-100' },
@@ -3073,17 +3073,25 @@ function renderImpactAnalysisDetail(json) {
     } else {
         html += `<div class="space-y-3">`;
         findings.forEach((f, idx) => {
-            const typeInfo = impactTypeMap[f.Type || f.type] || { label: f.Type || '未知', cls: 'bg-gray-50 text-gray-600 border-gray-200' };
-            const sevInfo  = severityMap[(f.Severity || f.severity || '').toLowerCase()];
-            const symbolName = escapeHtml(f.SymbolName || f.symbol_name || '未知符号');
-            const filePath   = escapeHtml(f.FilePath || f.file_path || '');
-            const changeDesc = formatListText(f.ChangeDesc || f.change_desc || '');
-            const suggestion = formatListText(f.Suggestion || f.suggestion || '');
-            const migrationSteps = formatListText(f.MigrationSteps || f.migration_steps || '');
-            const affectedFiles = (f.AffectedFiles || []).map(a => escapeHtml(a));
+            // 同时兼容 snake_case (Go json tag) 和 camelCase (JS 习惯)
+            const ftype      = f.type      || f.Type      || '';
+            const sev        = (f.severity  || f.Severity  || '').toLowerCase();
+            const symName    = f.symbol_name || f.SymbolName || '';
+            const fp         = f.file_path  || f.FilePath  || '';
+            const cDesc      = f.change_desc || f.ChangeDesc || '';
+            const sugg       = f.suggestion  || f.Suggestion  || '';
+            const migSteps   = f.migration_steps || f.MigrationSteps || '';
+            // affected_files 是 snake_case JSON tag，兼容两种写法
+            const affFiles   = f.affected_files || f.AffectedFiles || [];
 
-            // 卡片头部：标签 + 符号名/路径
+            const typeInfo = impactTypeMap[ftype] || { label: ftype || '未知', cls: 'bg-gray-50 text-gray-600 border-gray-200' };
+            const sevInfo  = severityMap[sev];
+            const hasBody  = cDesc || sugg || migSteps || (affFiles.length > 0);
+
+            // 卡片：头部始终可见，主体默认折叠
             html += `<div class="border rounded-lg overflow-hidden bg-white hover:shadow-sm transition-shadow">`;
+
+            // ── 头部（不可折叠）──
             html += `<div class="px-3 py-2 border-b border-gray-100 flex items-center gap-2">`;
             html += `<div class="shrink-0">`;
             html += `<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium border ${typeInfo.cls}">${typeInfo.label}</span>`;
@@ -3092,52 +3100,59 @@ function renderImpactAnalysisDetail(json) {
                 html += `<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium border ${sevInfo.cls}">${sevInfo.label}</span>`;
             }
             html += `<div class="flex-1 min-w-0 text-right">`;
-            html += `<div class="text-xs font-semibold text-gray-800 truncate" title="${symbolName}">${symbolName}</div>`;
-            if (filePath) html += `<div class="text-[10px] text-gray-400 truncate" title="${filePath}">${filePath}</div>`;
+            html += `<div class="text-xs font-semibold text-gray-800 truncate" title="${escapeHtml(symName)}">${escapeHtml(symName) || '<span class="text-gray-400 font-normal">未命名符号</span>'}</div>`;
+            if (fp) html += `<div class="text-[10px] text-gray-400 truncate" title="${escapeHtml(fp)}">${escapeHtml(fp)}</div>`;
             html += `</div></div>`;
 
-            // 卡片主体
-            html += `<div class="p-3 space-y-3">`;
+            // ── 主体（默认折叠）──
+            if (hasBody) {
+                const did = 'impact-d-' + idx + '-' + Math.random().toString(36).substr(2, 5);
+                html += `<details class="group" ${idx === 0 ? '' : ''}>`;
+                html += `<summary class="px-3 py-2 text-[11px] text-gray-500 cursor-pointer hover:bg-gray-50 select-none flex items-center justify-between border-t border-transparent group-open:border-gray-100">`;
+                html += `<span>查看详情</span>`;
+                html += `<i class="fas fa-chevron-down text-[10px] text-gray-300 transition-transform group-open:rotate-180"></i>`;
+                html += `</summary>`;
+                html += `<div class="p-3 space-y-3">`;
 
-            // 变更描述
-            if (changeDesc) {
-                html += `<div>`;
-                html += `<div class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">变更描述</div>`;
-                html += `<div class="text-[11px] text-gray-700 leading-relaxed whitespace-pre-wrap">${changeDesc}</div>`;
-                html += `</div>`;
-            }
+                // 变更描述
+                if (cDesc) {
+                    html += `<div>`;
+                    html += `<div class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">变更描述</div>`;
+                    html += `<div class="text-[11px] text-gray-700 leading-relaxed whitespace-pre-wrap">${formatListText(cDesc)}</div>`;
+                    html += `</div>`;
+                }
 
-            // 建议 + 迁移步骤（并排或单列）
-            if (suggestion || migrationSteps) {
-                const twoCol = suggestion && migrationSteps;
-                html += `<div class="grid gap-3 ${twoCol ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}">`;
-                if (suggestion) {
+                // 建议（单列）
+                if (sugg) {
                     html += `<div>`;
                     html += `<div class="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-1">建议</div>`;
-                    html += `<div class="text-[11px] text-gray-600 leading-relaxed whitespace-pre-wrap">${suggestion}</div>`;
+                    html += `<div class="text-[11px] text-gray-600 leading-relaxed whitespace-pre-wrap">${formatListText(sugg)}</div>`;
                     html += `</div>`;
                 }
-                if (migrationSteps) {
+
+                // 迁移步骤（单列）
+                if (migSteps) {
                     html += `<div>`;
                     html += `<div class="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider mb-1">迁移步骤</div>`;
-                    html += `<div class="text-[11px] text-emerald-700 leading-relaxed whitespace-pre-wrap">${migrationSteps}</div>`;
+                    html += `<div class="text-[11px] text-emerald-700 leading-relaxed whitespace-pre-wrap">${formatListText(migSteps)}</div>`;
                     html += `</div>`;
                 }
-                html += `</div>`;
+
+                // 受影响文件 chip
+                if (affFiles.length > 0) {
+                    html += `<div>`;
+                    html += `<div class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">受影响文件 (${affFiles.length})</div>`;
+                    html += `<div class="flex flex-wrap gap-1">`;
+                    affFiles.forEach(a => {
+                        html += `<span class="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-50 text-gray-600 text-[10px] border border-gray-200 truncate max-w-[12rem]">${escapeHtml(a)}</span>`;
+                    });
+                    html += `</div></div>`;
+                }
+
+                html += `</div></details>`;
             }
 
-            // 受影响文件 chip
-            if (affectedFiles.length > 0) {
-                html += `<div>`;
-                html += `<div class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">受影响文件 (${affectedFiles.length})</div>`;
-                html += `<div class="flex flex-wrap gap-1">`;
-                affectedFiles.forEach(fp => {
-                    html += `<span class="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-50 text-gray-600 text-[10px] border border-gray-200 truncate max-w-[12rem]">${fp}</span>`;
-                });
-                html += `</div></div>`;
-            }
-
-            html += `</div></div>`; // /card-body /card
+            html += `</div>`; // /card
         });
         html += `</div>`;
     }
