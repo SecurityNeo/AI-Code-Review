@@ -3049,13 +3049,18 @@ function renderImpactAnalysisDetail(json) {
     const findings = outSnap.findings || [];
     const findingCount = outSnap.finding_count !== undefined ? outSnap.finding_count : findings.length;
 
-    // 影响类型映射（兼容后端 snake_case JSON tag）
+    // 影响类型映射（兼容后端 snake_case JSON tag + LLM enrichment 返回值）
     const impactTypeMap = {
+        // 原始启发式分类
         'breaking_change': { label: '破坏性变更', cls: 'bg-red-50 text-red-600 border-red-100' },
         'behavior_change': { label: '行为变更', cls: 'bg-orange-50 text-orange-600 border-orange-100' },
         'schema_change':   { label: '结构变更', cls: 'bg-purple-50 text-purple-600 border-purple-100' },
         'config_change':   { label: '配置变更', cls: 'bg-blue-50 text-blue-600 border-blue-100' },
-        'migration':       { label: '迁移操作', cls: 'bg-emerald-50 text-emerald-600 border-emerald-100' }
+        'migration':       { label: '迁移操作', cls: 'bg-emerald-50 text-emerald-600 border-emerald-100' },
+        // LLM enrichment compatibility 返回值（后端用 compatibility 覆盖 type 的 workaround）
+        'breaking':              { label: '破坏性变更', cls: 'bg-red-50 text-red-600 border-red-100' },
+        'behavioral':            { label: '行为变更', cls: 'bg-orange-50 text-orange-600 border-orange-100' },
+        'backward_compatible':   { label: '兼容变更', cls: 'bg-green-50 text-green-600 border-green-100' }
     };
     // 严重级别映射
     const severityMap = {

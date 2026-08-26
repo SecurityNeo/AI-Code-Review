@@ -517,14 +517,17 @@ func (e *ImpactAnalysisExecutor) Execute(ctx StageContext) error {
 		enriched, err := enricher.EnrichImpactAnalysis(ctx, &task.ID, modelID, findings, callChains)
 		if err == nil && len(enriched) > 0 {
 			for i := range findings {
-				if note, ok := enriched[findings[i].SymbolName]; ok {
-					if note.MigrationSteps != "" {
-						findings[i].MigrationSteps = note.MigrationSteps
-					}
-					if note.Compatibility != "" {
-						findings[i].Type = note.Compatibility
-					}
+			if note, ok := enriched[findings[i].SymbolName]; ok {
+				if note.MigrationSteps != "" {
+					findings[i].MigrationSteps = note.MigrationSteps
 				}
+				if note.Compatibility != "" {
+					findings[i].Compatibility = note.Compatibility
+				}
+				// 【修复】不再用 compatibility 覆盖 type，两者语义不同：
+				// Type    = 启发式分类（breaking_change / schema_change / config_change / migration）
+				// Compatibility = LLM 语义判断（breaking / behavioral / backward_compatible）
+			}
 			}
 			ctx.SetOutput("impact_analysis_llm_enriched", true)
 		} else if err != nil {

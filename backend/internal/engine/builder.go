@@ -81,6 +81,10 @@ type ImpactFinding struct {
 
 	// 【新增】LLM enrichment 生成的迁移步骤（独立字段，避免与 Suggestion 混用）
 	MigrationSteps string `json:"migration_steps,omitempty"` // 迁移步骤
+
+	// 【新增】LLM enrichment 兼容性判断（breaking / behavioral / backward_compatible）
+	// 与 Type 区分：Type 是启发式分类，Compatibility 是 LLM 语义判断
+	Compatibility string `json:"compatibility,omitempty"`
 }
 
 // LicenseFinding 许可证检查单条结果
