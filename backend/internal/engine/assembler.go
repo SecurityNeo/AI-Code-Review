@@ -432,21 +432,7 @@ func AssembleFullMarkdownReport(
 	var sb strings.Builder
 	sb.WriteString(report)
 
-	// 步骤 2：追加安全发现独立区域（SecurityFindings）
-	if len(result.SecurityFindings) > 0 {
-		sb.WriteString("\n\n---\n\n### 🔒 安全发现（")
-		sb.WriteString(fmt.Sprintf("%d", len(result.SecurityFindings)))
-		sb.WriteString("）\n\n")
-		sb.WriteString("| 级别 | 类型 | 文件 | 行 | 标题 | 置信度 |\n")
-		sb.WriteString("|:---|:---|:---|:---:|:---|:---:|\n")
-		for _, f := range result.SecurityFindings {
-			confStr := fmt.Sprintf("%.0f%%", f.Confidence*100)
-			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %d | %s | %s |\n",
-				f.Severity, f.Category, f.File, f.LineStart, f.Title, confStr))
-		}
-	}
-
-	// 步骤 3：追加测试建议独立区域（TestingNotes）
+	// 步骤 2：追加测试建议独立区域（TestingNotes）
 	if len(result.TestingNotes) > 0 {
 		sb.WriteString("\n\n---\n\n### 🧪 测试建议（")
 		sb.WriteString(fmt.Sprintf("%d", len(result.TestingNotes)))
@@ -463,7 +449,7 @@ func AssembleFullMarkdownReport(
 		}
 	}
 
-	// 步骤 4：追加影响分析独立区域（ImpactNotes）
+	// 步骤 3：追加影响分析独立区域（ImpactNotes）
 	if len(result.ImpactNotes) > 0 {
 		sb.WriteString("\n\n---\n\n### 📊 变更影响分析（")
 		sb.WriteString(fmt.Sprintf("%d", len(result.ImpactNotes)))
@@ -483,7 +469,7 @@ func AssembleFullMarkdownReport(
 		}
 	}
 
-	// 步骤 5：追加总体建议
+	// 步骤 4：追加总体建议
 	if result.OverallSuggestion != "" {
 		sb.WriteString("\n\n---\n\n### 📋 综合建议\n\n")
 		sb.WriteString(result.OverallSuggestion)
