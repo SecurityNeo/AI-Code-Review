@@ -120,8 +120,9 @@ type PromptContext struct {
 	// 代码理解器产出（AST + 知识图谱 + 数据流分析）
 	CodeUnderstandingReport string `json:"code_understanding_report,omitempty"` // Prompt注入文本
 
-	// 【P2-7】代码图谱结构化数据（供 review_arbitration 精确去重和分类）
-	SymbolGraphData *SymbolGraphData `json:"symbol_graph_data,omitempty"`
+	// 【已移除】代码图谱结构化数据 previously used by review_arbitration; removed as current
+	// dedup rules (positional overlap + semantic similarity) do not consume it.
+	// SymbolGraphData *SymbolGraphData `json:"symbol_graph_data,omitempty"`
 
 	// 【新增】各智能体预渲染的 Markdown（直接拼接进 Prompt，避免重复渲染）
 	AgentMarkdowns map[string]string `json:"-"` // key: secret_scan/security_audit/test_suggestion/impact_analysis/dependency_scan/code_understanding
@@ -934,10 +935,24 @@ func BuildArbitrationPrompt(ctx *PromptContext) (string, *llm.ResponseFormat, er
 	sb.WriteString("4. 独立分类：将测试建议和影响分析放入独立数组，不混入 Issues[]\n")
 	sb.WriteString("5. 来源标记：在每条 issue 中标注来源（agent / llm / merged）\n\n")
 
-	sb.WriteString("## 输入数据说明\n")
-	sb.WriteString("- Agent 发现：位置精确、severity 可信、rule_code 可追踪\n")
-	sb.WriteString("- AI 评审发现：情境理解深、描述丰富、可能重复\n")
-	sb.WriteString("- 【不可变】dimension_config 中的 weight 是固定值，输出时必须原样保留，不得篡改。\n\n")
+	sb.WriteString("## 输入数据结构与处理要求\n\n")
+	sb.WriteString("输入 JSON 包含以下 4 个顶层字段，你应当按需读取：\n\n")
+	sb.WriteString("1. `agent_findings` — 规则引擎自动检出结果（Object）\n")
+	sb.WriteString("   - `secret_scan`：敏感信息扫描（数组），如密钥、密码泄露\n")
+	sb.WriteString("   - `security_audit`：静态安全审计（数组），如不安全的反序列化、SQL 注入\n")
+	sb.WriteString("   - `dependency_scan`：依赖漏洞扫描（数组），如 CVE、GHSA\n")
+	sb.WriteString("   - `test_suggestion`：测试覆盖建议（数组）\n")
+	sb.WriteString("   - `impact_analysis`：影响分析（数组），如 API 兼容性变更、Schema 变更\n")
+	sb.WriteString("   【处理要求】提取所有 Agent 发现参与去重和评分。Agent 的 location(file/line) 精确，severity 可信；\n")
+	sb.WriteString("   去重时优先保留 Agent 的 severity，description 和 suggestion 可补充 LLM 的更详细内容。\n\n")
+	sb.WriteString("2. `batch_results` — 分批评审阶段各批次的 LLM 评审输出（数组）\n")
+	sb.WriteString("   每个元素包含：`batch_notes`、`issues`、`recommendations`。\n")
+	sb.WriteString("   【处理要求】提取所有 `issues` 参与去重和评分；`batch_notes` 和 `recommendations` 仅用于理解上下文，\n")
+	sb.WriteString("   严禁将其内容捏造为 Issues[] 成员。\n\n")
+	sb.WriteString("3. `dimension_config` — 评分维度及权重映射（Object）\n")
+	sb.WriteString("   每个维度包含 `code` 和 `weight`。权重是固定值，输出时必须原样保留，不得修改、不得省略、不得全部置 0。\n\n")
+	sb.WriteString("4. `deduct_score_config` — 扣分规则（Object）\n")
+	sb.WriteString("   每个 severity 对应固定扣分数，用于计算各维度得分。\n\n")
 
 	sb.WriteString("## 去重规则\n")
 	sb.WriteString("1. 位置重叠：同一文件 + 行号差值 ≤ 3 行 → 视为同一位置\n")
@@ -949,14 +964,13 @@ func BuildArbitrationPrompt(ctx *PromptContext) (string, *llm.ResponseFormat, er
 	sb.WriteString(buildScoreRulesText(ctx.DeductScoreConfig))
 	sb.WriteString("\n")
 
-	// 3. 评分规则
-	sb.WriteString("## 评分规则\n")
-	sb.WriteString("1. 安全维度：Issues[] 中 category = security 的问题 + Agent SecurityFindings 共同计入\n")
-	sb.WriteString("2. 代码质量维度：Issues[] 中 category = code_quality 的问题计入\n")
-	sb.WriteString("3. 性能维度：Issues[] 中 category = performance 的问题计入\n")
-	sb.WriteString("4. 每个 Issue 的 deduct_score = DeductScoreConfig[severity]（来自项目 AI 评审模板）\n")
-	sb.WriteString("5. 维度得分 = max(0, 100 - Σ(该维度所有问题扣分))\n")
-	sb.WriteString("6. 总分 = Σ(维度得分 × 维度权重) / 100\n\n")
+	// 3. 维度归类说明（评分公式已在上文【总分计算规则】中完整定义，此处仅说明 category 到维度的映射）
+	sb.WriteString("## 维度归类说明\n\n")
+	sb.WriteString("issues 按 `category` 字段归入对应维度，用于计算维度得分：\n")
+	sb.WriteString("- `security` → 安全维度：Issues[] 中 category=security 的问题 + Agent SecurityFindings 共同计入\n")
+	sb.WriteString("- `code_quality` → 代码质量维度：Issues[] 中 category=code_quality 的问题计入\n")
+	sb.WriteString("- `performance` → 性能维度：Issues[] 中 category=performance 的问题计入\n\n")
+	sb.WriteString("（维度得分与总分的完整计算规则见上文【总分计算规则】）\n\n")
 
 	// 4. 独立输出规则
 	sb.WriteString("## 独立输出规则（强制执行）\n")
@@ -982,18 +996,16 @@ func BuildArbitrationPrompt(ctx *PromptContext) (string, *llm.ResponseFormat, er
 	}
 
 	type arbitrationInputData struct {
-		AgentFindings     json.RawMessage         `json:"agent_findings,omitempty"`
-		BatchResults      json.RawMessage         `json:"batch_results"`
-		DimensionConfig   json.RawMessage         `json:"dimension_config"`
-		DeductScoreConfig json.RawMessage         `json:"deduct_score_config"`
-		SymbolGraph       *SymbolGraphData `json:"symbol_graph,omitempty"`
+		AgentFindings     json.RawMessage `json:"agent_findings,omitempty"`
+		BatchResults      json.RawMessage `json:"batch_results"`
+		DimensionConfig   json.RawMessage `json:"dimension_config"`
+		DeductScoreConfig json.RawMessage `json:"deduct_score_config"`
 	}
 	userData := arbitrationInputData{
 		AgentFindings:     agentJSON,
 		BatchResults:      batchJSON,
 		DimensionConfig:   dimJSON,
 		DeductScoreConfig: dscJSON,
-		SymbolGraph:       ctx.SymbolGraphData,
 	}
 	userJSON, err := json.MarshalIndent(userData, "", "  ")
 	if err != nil {

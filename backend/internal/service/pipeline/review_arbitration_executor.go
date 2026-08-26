@@ -81,88 +81,23 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 		}
 	}
 
-	// 5. 从 code_understanding_structured 提取 SymbolGraphData（供 Arbitration 精确去重）
-	var symbolGraphData *engine.SymbolGraphData
-	if codeReport, ok := ctx.GetOutput("code_understanding_structured").(*CodeUnderstandingReport); ok && codeReport != nil && codeReport.GraphData != nil {
-		g := codeReport.GraphData
-		if len(g.Nodes) > 0 || len(g.Relations) > 0 {
-			symbolGraphData = &engine.SymbolGraphData{}
-			// 只提取变更相关节点（文件路径匹配当前变更集）避免 Token 过多
-			changedSet := make(map[string]bool)
-			for _, f := range codeReport.FileList {
-				changedSet[f] = true
-			}
-			// 补充 SecurityAudit 和 ImpactFindings 涉及的文件（可能包含不在 FileList 中的下游文件）
-			for _, ep := range agentData.SecurityAudit {
-				changedSet[ep.FilePath] = true
-			}
-			for _, ep := range agentData.ImpactFindings {
-				changedSet[ep.FilePath] = true
-			}
-			nodeCount := 0
-			const maxArbNodes = 100
-			for _, node := range g.Nodes {
-				if file, _ := node["file"].(string); file != "" && changedSet[file] {
-					var sgn engine.SymbolGraphNode
-					if id, _ := node["id"].(string); id != "" {
-						sgn.ID = id
-					}
-					if name, _ := node["name"].(string); name != "" {
-						sgn.Name = name
-					}
-					if typ, _ := node["type"].(string); typ != "" {
-						sgn.Type = typ
-					}
-					if file, _ := node["file"].(string); file != "" {
-						sgn.File = file
-					}
-					symbolGraphData.Nodes = append(symbolGraphData.Nodes, sgn)
-					nodeCount++
-					if nodeCount >= maxArbNodes {
-						break
-					}
-				}
-			}
-			// 关系：只包含已选节点之间的关系
-			nodeIDSet := make(map[string]bool)
-			for _, n := range symbolGraphData.Nodes {
-				nodeIDSet[n.ID] = true
-			}
-			relCount := 0
-			const maxArbRels = 100
-			for _, rel := range g.Relations {
-				from, _ := rel["from"].(string)
-				to, _ := rel["to"].(string)
-				relType, _ := rel["type"].(string)
-				if nodeIDSet[from] && nodeIDSet[to] {
-					symbolGraphData.Relations = append(symbolGraphData.Relations, engine.SymbolGraphRelation{
-						From: from,
-						To:   to,
-						Type: relType,
-					})
-					relCount++
-					if relCount >= maxArbRels {
-						break
-					}
-				}
-			}
-		}
-	}
+	// 【已移除】SymbolGraphData 提取逻辑：review_arbitration 当前的去重规则
+	//（位置重叠 + 语义相似）不消费符号图谱数据，移除以减少 Prompt Token 消耗。
 
-	// 6. 组装 PromptContext（用于 Builder 构建结构化 Prompt）
+	// 5. 组装 PromptContext（用于 Builder 构建结构化 Prompt）
 	promptCtx := &engine.PromptContext{
-		SecretScanFindings:      agentData.SecretScan,
-		SecurityAuditFindings:   agentData.SecurityAudit,
-		TestSuggestions:         agentData.TestSuggestions,
-		ImpactFindings:          agentData.ImpactFindings,
-		DependencyVulns:         depVulns,
-		BatchReviewResults:      batchResults,
-		DimensionWeights:        dimWeights,
-		DeductScoreConfig:       deductCfg,
-		SymbolGraphData:         symbolGraphData,
+		SecretScanFindings:    agentData.SecretScan,
+		SecurityAuditFindings: agentData.SecurityAudit,
+		TestSuggestions:       agentData.TestSuggestions,
+		ImpactFindings:        agentData.ImpactFindings,
+		DependencyVulns:       depVulns,
+		BatchReviewResults:    batchResults,
+		DimensionWeights:      dimWeights,
+		DeductScoreConfig:     deductCfg,
+		// SymbolGraphData removed — not consumed by current dedup rules
 	}
 
-	// 5. 构建结构化 Prompt
+	// 6. 构建结构化 Prompt
 	userPrompt, responseFormat, err := engine.BuildArbitrationPrompt(promptCtx)
 	if err != nil {
 		return fmt.Errorf("构建裁决 Prompt 失败: %w", err)
