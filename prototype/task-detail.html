@@ -2922,22 +2922,23 @@ function renderGenericDetail(json) {
         // LLM Prompt（git_clone、dependency_scan、trigger_check 不展示）
         if (stageCode !== 'git_clone' && stageCode !== 'dependency_scan' && stageCode !== 'trigger_check') {
             const prompt = json.output_snapshot.llm_prompt || '';
-            html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
-            html += `<span>LLM Prompt</span>`;
-            if (prompt) html += `<span class="text-[10px] text-gray-400">${prompt.length} 字符</span>`;
-            html += `</div>`;
             if (prompt) {
                 const pid = 'prompt-' + Math.random().toString(36).substr(2, 8);
+                html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
+                html += `<span>LLM Prompt</span>`;
+                html += `<div class="flex items-center gap-2"><span class="text-[10px] text-gray-400">${prompt.length} 字符</span><button onclick="copyTextById('${pid}', this)" class="text-[10px] text-gray-400 hover:text-blue-600 border border-gray-200 rounded px-1.5 py-0.5 bg-white/80" title="复制内容"><i class="far fa-copy mr-0.5"></i>复制</button></div>`;
+                html += `</div>`;
                 html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">`;
                 html += `<summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看 LLM Prompt</summary>`;
-                html += `<div class="relative group">`;
-                html += `<button onclick="copyTextById('${pid}', this)" class="absolute top-1.5 right-1.5 z-10 bg-white/90 border border-gray-200 rounded px-2 py-0.5 text-[10px] text-gray-400 hover:text-blue-600 hover:border-blue-300 shadow-sm" title="复制内容"><i class="far fa-copy mr-0.5"></i>复制</button>`;
                 html += `<pre id="${pid}" class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[24rem] overflow-y-auto">${escapeHtml(prompt)}</pre>`;
-                html += `</div></details>`;
+                html += `</details></div>`;
             } else {
+                html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
+                html += `<span>LLM Prompt</span>`;
+                html += `</div>`;
                 html += `<div class="bg-gray-50 rounded-lg border border-gray-200 p-3 text-[11px] text-gray-400 italic">未生成 LLM Prompt（未触发 LLM 验证/增强）</div>`;
+                html += `</div>`;
             }
-            html += `</div>`;
         }
 
         // 大模型原始输出（JSON）（可折叠 + 可复制）
@@ -2946,16 +2947,14 @@ function renderGenericDetail(json) {
             const rid = 'raw-' + Math.random().toString(36).substr(2, 8);
             html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
             html += `<span>大模型原始输出（JSON）</span>`;
-            html += `<span class="text-[10px] text-gray-400">${typeof raw === 'string' ? raw.length : JSON.stringify(raw).length} 字符</span>`;
+            html += `<div class="flex items-center gap-2"><span class="text-[10px] text-gray-400">${typeof raw === 'string' ? raw.length : JSON.stringify(raw).length} 字符</span><button onclick="copyTextById('${rid}', this)" class="text-[10px] text-gray-400 hover:text-blue-600 border border-gray-200 rounded px-1.5 py-0.5 bg-white/80" title="复制内容"><i class="far fa-copy mr-0.5"></i>复制</button></div>`;
             html += `</div>`;
             html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">`;
             html += `<summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看原始 JSON 输出</summary>`;
-            html += `<div class="relative group">`;
-            html += `<button onclick="copyTextById('${rid}', this)" class="absolute top-1.5 right-1.5 z-10 bg-white/90 border border-gray-200 rounded px-2 py-0.5 text-[10px] text-gray-400 hover:text-blue-600 hover:border-blue-300 shadow-sm" title="复制内容"><i class="far fa-copy mr-0.5"></i>复制</button>`;
             let jsonStr = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
             try { const parsed = JSON.parse(jsonStr); jsonStr = JSON.stringify(parsed, null, 2); } catch (_) {}
             html += `<pre id="${rid}" class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[28rem] overflow-y-auto">${escapeHtml(jsonStr)}</pre>`;
-            html += `</div></details></div>`;
+            html += `</details></div>`;
         }
 
         // 注入 Prompt 预览（git_clone 和 trigger_check 不展示）
@@ -3082,36 +3081,38 @@ function renderImpactAnalysisDetail(json) {
 
     // LLM Prompt
     const prompt = outSnap.llm_prompt || '';
-    html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
-    html += `<span>LLM Prompt</span>`;
-    if (prompt) html += `<span class="text-[10px] text-gray-400">${prompt.length} 字符</span>`;
-    html += `</div>`;
     if (prompt) {
         const pid = 'prompt-impact-' + Math.random().toString(36).substr(2, 8);
+        html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
+        html += `<span>LLM Prompt</span>`;
+        html += `<div class="flex items-center gap-2"><span class="text-[10px] text-gray-400">${prompt.length} 字符</span><button onclick="copyTextById('${pid}', this)" class="text-[10px] text-gray-400 hover:text-blue-600 border border-gray-200 rounded px-1.5 py-0.5 bg-white/80" title="复制内容"><i class="far fa-copy mr-0.5"></i>复制</button></div>`;
+        html += `</div>`;
         html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">`;
         html += `<summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看 LLM Prompt</summary>`;
-        html += `<div class="relative group">`;
-        html += `<button onclick="copyTextById('${pid}', this)" class="absolute top-1.5 right-1.5 z-10 bg-white/90 border border-gray-200 rounded px-2 py-0.5 text-[10px] text-gray-400 hover:text-blue-600 hover:border-blue-300 shadow-sm" title="复制"><i class="far fa-copy mr-0.5"></i>复制</button>`;
         html += `<pre id="${pid}" class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[24rem] overflow-y-auto">${escapeHtml(prompt)}</pre>`;
-        html += `</div></details>`;
+        html += `</details></div>`;
     } else {
+        html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
+        html += `<span>LLM Prompt</span>`;
+        html += `</div>`;
         html += `<div class="bg-gray-50 rounded-lg border border-gray-200 p-3 text-[11px] text-gray-400 italic">未生成 LLM Prompt（未触发 LLM 验证/增强）</div>`;
+        html += `</div>`;
     }
-    html += `</div>`;
 
     // Raw Output
     const raw = outSnap.llm_raw_output;
     if (raw) {
         const rid = 'raw-impact-' + Math.random().toString(36).substr(2, 8);
-        html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5">大模型原始输出</div>`;
+        html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-1.5 flex items-center justify-between">`;
+        html += `<span>大模型原始输出</span>`;
+        html += `<div class="flex items-center gap-2"><span class="text-[10px] text-gray-400">${typeof raw === 'string' ? raw.length : JSON.stringify(raw).length} 字符</span><button onclick="copyTextById('${rid}', this)" class="text-[10px] text-gray-400 hover:text-blue-600 border border-gray-200 rounded px-1.5 py-0.5 bg-white/80" title="复制内容"><i class="far fa-copy mr-0.5"></i>复制</button></div>`;
+        html += `</div>`;
         html += `<details class="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">`;
         html += `<summary class="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100 select-none">展开查看 JSON</summary>`;
-        html += `<div class="relative group">`;
-        html += `<button onclick="copyTextById('${rid}', this)" class="absolute top-1.5 right-1.5 z-10 bg-white/90 border border-gray-200 rounded px-2 py-0.5 text-[10px] text-gray-400 hover:text-blue-600 hover:border-blue-300 shadow-sm" title="复制"><i class="far fa-copy mr-0.5"></i>复制</button>`;
         let jsonStr = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
         try { const parsed = JSON.parse(jsonStr); jsonStr = JSON.stringify(parsed, null, 2); } catch (_) {}
         html += `<pre id="${rid}" class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[28rem] overflow-y-auto">${escapeHtml(jsonStr)}</pre>`;
-        html += `</div></details></div>`;
+        html += `</details></div>`;
     }
 
     return html;
@@ -3131,7 +3132,7 @@ function renderCopyablePre(text, type) {
     const id = 'copy-' + Math.random().toString(36).substr(2, 8);
     const langClass = type === 'json' ? 'language-json' : '';
     return `<div class="relative group">
-        <button onclick="copyTextById('${id}', this)" class="absolute top-1.5 right-1.5 z-10 bg-white/90 border border-gray-200 rounded px-2 py-0.5 text-[10px] text-gray-400 hover:text-blue-600 hover:border-blue-300 shadow-sm opacity-0 group-hover:opacity-100 transition-all" title="复制内容">
+        <button onclick="copyTextById('${id}', this)" class="absolute top-1.5 right-1.5 z-10 text-[10px] text-gray-400 hover:text-blue-600 border border-gray-200 rounded px-1.5 py-0.5 bg-white/80 opacity-0 group-hover:opacity-100 transition-all" title="复制内容">
             <i class="far fa-copy mr-0.5"></i>复制
         </button>
         <pre id="${id}" class="bg-gray-50 border rounded p-2 pr-14 text-[11px] overflow-auto max-h-64 leading-tight ${langClass}">${escapeHtml(text)}</pre>
@@ -3142,7 +3143,7 @@ function renderCopyableMarkdown(markdownText, maxHeight) {
     const id = 'copy-md-' + Math.random().toString(36).substr(2, 8);
     const html = typeof marked !== 'undefined' ? marked.parse(markdownText) : escapeHtml(markdownText);
     return `<div class="relative group">
-        <button onclick="copyTextById('${id}', this)" class="absolute top-1.5 right-1.5 z-10 bg-white/90 border border-gray-200 rounded px-2 py-0.5 text-[10px] text-gray-400 hover:text-blue-600 hover:border-blue-300 shadow-sm opacity-0 group-hover:opacity-100 transition-all" title="复制内容">
+        <button onclick="copyTextById('${id}', this)" class="absolute top-1.5 right-1.5 z-10 text-[10px] text-gray-400 hover:text-blue-600 border border-gray-200 rounded px-1.5 py-0.5 bg-white/80 opacity-0 group-hover:opacity-100 transition-all" title="复制内容">
             <i class="far fa-copy mr-0.5"></i>复制
         </button>
         <div id="${id}" class="copyable-markdown bg-gray-50 p-2 rounded border text-[11px] overflow-auto leading-relaxed markdown-body" style="max-height:${maxHeight || '24rem'}">${html}</div>
