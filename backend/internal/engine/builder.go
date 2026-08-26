@@ -120,41 +120,12 @@ type PromptContext struct {
 	// 代码理解器产出（AST + 知识图谱 + 数据流分析）
 	CodeUnderstandingReport string `json:"code_understanding_report,omitempty"` // Prompt注入文本
 
-	// 【已移除】代码图谱结构化数据 previously used by review_arbitration; removed as current
-	// dedup rules (positional overlap + semantic similarity) do not consume it.
-	// SymbolGraphData *SymbolGraphData `json:"symbol_graph_data,omitempty"`
-
 	// 【新增】各智能体预渲染的 Markdown（直接拼接进 Prompt，避免重复渲染）
 	AgentMarkdowns map[string]string `json:"-"` // key: secret_scan/security_audit/test_suggestion/impact_analysis/dependency_scan/code_understanding
 
 	// 【新增】review_arbitration 阶段使用的聚合数据
 	BatchReviewResults []*llm.BatchReviewResult `json:"batch_review_results,omitempty"` // batch_review 输出结果
 	DimensionCodes     []string                 `json:"dimension_codes,omitempty"`      // 维度代码列表（用于 GetReviewJSONSchema）
-}
-
-// SymbolGraphData 代码图谱结构化数据（供 Arbitration 精确去重和分类）
-type SymbolGraphData struct {
-	Nodes     []SymbolGraphNode     `json:"nodes,omitempty"`
-	Relations []SymbolGraphRelation `json:"relations,omitempty"`
-}
-
-// SymbolGraphNode 图谱节点序列化
-type SymbolGraphNode struct {
-	ID         string                 `json:"id"`
-	Type       string                 `json:"type"`
-	Name       string                 `json:"name"`
-	File       string                 `json:"file,omitempty"`
-	Package    string                 `json:"package,omitempty"`
-	Signature  string                 `json:"signature,omitempty"`
-	IsExported bool                   `json:"is_exported,omitempty"`
-	Properties map[string]interface{} `json:"properties,omitempty"`
-}
-
-// SymbolGraphRelation 图谱关系序列化
-type SymbolGraphRelation struct {
-	From string `json:"from"`
-	To   string `json:"to"`
-	Type string `json:"type"`
 }
 
 // TestSuggestionItem 测试建议条目（PromptContext 使用）

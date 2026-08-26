@@ -81,10 +81,7 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 		}
 	}
 
-	// 【已移除】SymbolGraphData 提取逻辑：review_arbitration 当前的去重规则
-	//（位置重叠 + 语义相似）不消费符号图谱数据，移除以减少 Prompt Token 消耗。
-
-	// 5. 组装 PromptContext（用于 Builder 构建结构化 Prompt）
+	// 组装 PromptContext（用于 Builder 构建结构化 Prompt）
 	promptCtx := &engine.PromptContext{
 		SecretScanFindings:    agentData.SecretScan,
 		SecurityAuditFindings: agentData.SecurityAudit,
@@ -94,7 +91,6 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 		BatchReviewResults:    batchResults,
 		DimensionWeights:      dimWeights,
 		DeductScoreConfig:     deductCfg,
-		// SymbolGraphData removed — not consumed by current dedup rules
 	}
 
 	// 6. 构建结构化 Prompt
