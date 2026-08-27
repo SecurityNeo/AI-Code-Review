@@ -1292,7 +1292,7 @@ function previewTemplate() {
                     <td class="px-4 py-3"><span class="${u.role === 'admin' ? 'bg-purple-50 text-purple-600' : 'bg-gray-50 text-gray-600'} px-2 py-0.5 rounded text-xs">${roleMap[u.role] || u.role}</span></td>
                     <td class="px-4 py-3"><span class="bg-blue-50 text-blue-600 px-2 py-0.5 rounded text-xs">${loginTypeMap[u.login_type] || u.login_type}</span></td>
                     <td class="px-4 py-3">
-                        ${imLabel ? `<div class="flex flex-col gap-0.5"><span class="bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded text-[10px] w-fit">${escapeHtml(imLabel)}</span><span class="text-[10px] text-gray-400 font-mono">${escapeHtml(u.im_user_id || '')}</span></div>` : '<span class="text-gray-300 text-xs">-</span>'}
+                        ${imLabel ? `<div class="inline-flex items-center gap-1.5"><span class="shrink-0 bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded text-[10px] border border-indigo-100">${escapeHtml(imLabel)}</span><span class="text-xs text-gray-600 font-mono">${escapeHtml(u.im_user_id || '')}</span></div>` : '<span class="text-gray-300 text-xs">-</span>'}
                     </td>
                     <td class="px-4 py-3"><span class="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-xs font-mono">${u.responsibility_count !== undefined ? u.responsibility_count : '-'}</span></td>
                     <td class="px-4 py-3"><span class="${u.enabled === false ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'} px-2 py-0.5 rounded text-xs">${u.enabled === false ? '禁用' : '启用'}</span></td>
