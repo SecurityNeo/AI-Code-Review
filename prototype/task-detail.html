@@ -3049,6 +3049,26 @@ function renderImpactAnalysisDetail(json) {
     const findings = outSnap.findings || [];
     const findingCount = outSnap.finding_count !== undefined ? outSnap.finding_count : findings.length;
 
+    // 规整化项目路径：去掉仓库克隆根目录前缀
+    function normalizeProjectPath(rawPath) {
+        if (!rawPath) return '';
+        // 匹配 /data/codeguard/repos/{project_id}/{username}/... 格式
+        const repoPrefixPattern = /^\/data\/codeguard\/repos\/[^\/]+\/[^\/]+\//;
+        if (repoPrefixPattern.test(rawPath)) {
+            return rawPath.replace(repoPrefixPattern, '');
+        }
+        // 兜底：如果路径包含 /repos/，尝试提取相对路径
+        const reposIndex = rawPath.indexOf('/repos/');
+        if (reposIndex !== -1) {
+            const afterRepos = rawPath.substring(reposIndex + 7);
+            const parts = afterRepos.split('/');
+            if (parts.length >= 3) {
+                return parts.slice(2).join('/');
+            }
+        }
+        return rawPath;
+    }
+
     // 影响类型映射（兼容后端 snake_case JSON tag + LLM enrichment 返回值）
     const impactTypeMap = {
         // 原始启发式分类
@@ -3143,13 +3163,22 @@ function renderImpactAnalysisDetail(json) {
                     html += `</div>`;
                 }
 
-                // 受影响文件 chip
+                // 受影响文件列表
                 if (affFiles.length > 0) {
                     html += `<div>`;
                     html += `<div class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">受影响文件 (${affFiles.length})</div>`;
-                    html += `<div class="flex flex-wrap gap-1">`;
+                    html += `<div class="space-y-1">`;
                     affFiles.forEach(a => {
-                        html += `<span class="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-50 text-gray-600 text-[10px] border border-gray-200 truncate max-w-[12rem]">${escapeHtml(a)}</span>`;
+                        const normalized = normalizeProjectPath(a);
+                        const lastSlash = normalized.lastIndexOf('/');
+                        const dir = lastSlash > 0 ? normalized.substring(0, lastSlash + 1) : '';
+                        const file = lastSlash > 0 ? normalized.substring(lastSlash + 1) : normalized;
+                        html += `<div class="flex items-center gap-1 text-[11px] group" title="${escapeHtml(normalized)}">`;
+                        if (dir) {
+                            html += `<span class="text-gray-400 truncate">${escapeHtml(dir)}</span>`;
+                        }
+                        html += `<span class="font-medium text-gray-700 shrink-0">${escapeHtml(file)}</span>`;
+                        html += `</div>`;
                     });
                     html += `</div></div>`;
                 }
