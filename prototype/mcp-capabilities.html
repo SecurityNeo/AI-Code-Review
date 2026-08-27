@@ -233,7 +233,7 @@ let MCP_TOOLS = [];
 
 async function loadMCPTools() {
     try {
-        const resp = await apiFetch('/api/v1/mcp-tools');
+        const resp = await apiFetch('/api/v1/mcp-tools?page_size=100');
         const json = await resp.json();
         if (json.data && Array.isArray(json.data)) {
             MCP_TOOLS = json.data.map(t => {
