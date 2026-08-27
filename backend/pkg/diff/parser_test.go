@@ -411,3 +411,82 @@ func TestParse_ParserWarnings(t *testing.T) {
 	p := NewParser()
 	_ = p.Warnings() // 不应 panic
 }
+
+func TestParse_HunkCountMismatch(t *testing.T) {
+	// 构造一个 hunk 声明 count 与实际不符的 diff
+	raw := `diff --git a/a.go b/a.go
+--- a/a.go
++++ b/a.go
+@@ -1,3 +1,4 @@
+ line1
++add
+`
+	p := NewParser()
+	files, err := p.Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	// 解析完成，检查是否有警告
+	if len(p.Warnings()) == 0 {
+		t.Error("expected warnings for hunk count mismatch")
+	}
+}
+
+func TestParse_MalformedHunkHeader(t *testing.T) {
+	raw := `diff --git a/a.go b/a.go
+--- a/a.go
++++ b/a.go
+@@ bad header @@
+ line1
+`
+	p := NewParser()
+	files, err := p.Parse(raw)
+	if err == nil {
+		t.Fatal("expected error for malformed hunk header")
+	}
+	if files != nil {
+		t.Error("expected nil files on error")
+	}
+}
+
+func TestParse_OnlyWhitespace(t *testing.T) {
+	raw := "   \n\n\n   \t\n"
+	p := NewParser()
+	files, err := p.Parse(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("expected 0 files for whitespace-only input, got %d", len(files))
+	}
+}
+
+func TestParse_EmptyHunk(t *testing.T) {
+	// hunk header 声明 0 行
+	raw := `diff --git a/a.go b/a.go
+--- a/a.go
++++ b/a.go
+@@ -1,0 +0,0 @@
+@@ -2,1 +2,2 @@
+ line1
++add
+`
+	p := NewParser()
+	files, err := p.Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	if len(files[0].Hunks) != 2 {
+		t.Fatalf("expected 2 hunks, got %d", len(files[0].Hunks))
+	}
+	// 第一个 hunk 应该只有 header（0 行内容）
+	if len(files[0].Hunks[0].Lines) != 1 {
+		t.Errorf("expected first hunk to have 1 line (header only), got %d", len(files[0].Hunks[0].Lines))
+	}
+}

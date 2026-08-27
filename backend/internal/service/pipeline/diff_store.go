@@ -127,6 +127,9 @@ func (ds *DiffStore) StoreDiff(ctx context.Context, task *model.Task, rawDiff st
 	}
 
 	// 3. 写入数据库
+	if model.DB == nil {
+		return nil, fmt.Errorf("model.DB is nil, cannot persist mr_diff_meta")
+	}
 	if err := model.DB.Create(meta).Error; err != nil {
 		return nil, fmt.Errorf("create mr_diff_meta failed: %w", err)
 	}

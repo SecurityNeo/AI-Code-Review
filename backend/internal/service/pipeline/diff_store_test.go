@@ -59,6 +59,25 @@ func TestDiffStoreStoreDiff_EmptyDiff(t *testing.T) {
 	}
 }
 
+func TestDiffStoreStoreDiff_NilParsedFiles(t *testing.T) {
+	if model.DB == nil {
+		t.Skip("model.DB not initialized, skipping DB-dependent test")
+	}
+	mock := &mockStorage{}
+	ds := NewDiffStore(DefaultDiffStoreConfig, mock)
+	task := &model.Task{ID: 1, ProjectID: 1, MRMergeID: 1}
+	meta, err := ds.StoreDiff(context.Background(), task, "diff text here", nil)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if meta == nil {
+		t.Fatal("expected meta to be created even with nil parsedFiles")
+	}
+	if meta.LineMapJSON != "" {
+		t.Logf("LineMapJSON was populated despite nil parsedFiles: %s", meta.LineMapJSON)
+	}
+}
+
 func TestDiffStoreStoreDiff_Disabled(t *testing.T) {
 	ds := NewDiffStore(DiffStoreConfig{Enabled: false}, nil)
 	task := &model.Task{ID: 1, ProjectID: 1, MRMergeID: 1}

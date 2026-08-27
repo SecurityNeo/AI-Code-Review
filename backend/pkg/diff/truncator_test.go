@@ -245,3 +245,74 @@ func TestTruncationType(t *testing.T) {
 		t.Error("NoChangeTruncator should return a copy, not original slice")
 	}
 }
+
+func TestSubtreeTruncator_EmptyHunk(t *testing.T) {
+	// 只有 header，没有内容的 hunk
+	lines := []string{
+		"@@ -1,0 +0,0 @@",
+	}
+	h := makeHunk(lines)
+	tr := NewSubtreeTruncator(SubtreeConfig{})
+	result := tr.Truncate(h)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 line (header only), got %d", len(result))
+	}
+	if result[0].Type != LineTypeHunkHeader {
+		t.Error("expected header line")
+	}
+}
+
+func TestSubtreeTruncator_AllContext(t *testing.T) {
+	// 全是 context 行，没有变更
+	lines := []string{
+		"@@ -1,6 +1,6 @@",
+		" c1",
+		" c2",
+		" c3",
+		" c4",
+		" c5",
+		" c6",
+	}
+	h := makeHunk(lines)
+	tr := NewSubtreeTruncator(SubtreeConfig{})
+	result := tr.Truncate(h)
+	if len(result) == 0 {
+		t.Fatal("truncate returned empty")
+	}
+	if result[0].Type != LineTypeHunkHeader {
+		t.Error("first should be header")
+	}
+	// 没有变更时保留 header + 首尾各 2 行 = 5 行
+	if len(result) != 5 {
+		t.Errorf("expected 5 lines, got %d", len(result))
+	}
+}
+
+func TestMiddleTruncator_EmptyHunk(t *testing.T) {
+	lines := []string{
+		"@@ -1,0 +0,0 @@",
+	}
+	h := makeHunk(lines)
+	tr := NewMiddleTruncator(MiddleConfig{MaxLinesPerHunk: 10})
+	result := tr.Truncate(h)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 line, got %d", len(result))
+	}
+}
+
+func TestMiddleTruncator_MaxLinesZero(t *testing.T) {
+	// MaxLinesPerHunk=0 时应直接返回全部（视为未配置）
+	lines := []string{
+		"@@ -1,20 +1,20 @@",
+		" c1", " c2", " c3", " c4", " c5",
+		"-del",
+		"+add",
+		" c6", " c7", " c8", " c9", " c10",
+	}
+	h := makeHunk(lines)
+	tr := NewMiddleTruncator(MiddleConfig{MaxLinesPerHunk: 0})
+	result := tr.Truncate(h)
+	if len(result) != len(h.Lines) {
+		t.Errorf("MaxLinesPerHunk=0 should return all lines, expected %d got %d", len(h.Lines), len(result))
+	}
+}

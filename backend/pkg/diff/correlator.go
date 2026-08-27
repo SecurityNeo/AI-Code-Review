@@ -58,8 +58,9 @@ func (lc *LineCorrelator) CorrectIssue(filePath string, startLine, endLine int, 
 		return result
 	}
 
-	if snippet == "" {
-		result.Message = "模型未返回 code snippet，直接信任模型行号"
+	cleanSnippet := strings.TrimSpace(snippet)
+	if cleanSnippet == "" {
+		result.Message = "模型未返回有效 code snippet（空或纯空白），直接信任模型行号"
 		result.MatchType = MatchTypeNotAvailable
 		result.Confidence = 0.0
 		return result

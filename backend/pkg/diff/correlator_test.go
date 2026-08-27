@@ -109,6 +109,28 @@ func TestLineCorrelator_FuzzyMatchLowConfidence(t *testing.T) {
 	}
 }
 
+func TestLineCorrelator_WhitespaceOnlySnippet(t *testing.T) {
+	file := makeSimpleParsedFile()
+	lc := NewLineCorrelator(map[string]*ParsedDiffFile{
+		"calc.go": file,
+	})
+
+	// snippet 全是空白字符
+	result := lc.CorrectIssue("calc.go", 10, 12, "   \n\t   ")
+	// 空白 snippet TrimSpace 后为空，无法精确/模糊匹配
+	if result.NewStart != 10 || result.NewEnd != 12 {
+		t.Errorf("whitespace-only snippet should not change line numbers, got %d-%d", result.NewStart, result.NewEnd)
+	}
+}
+
+func TestLineCorrelator_EmptyFileMap(t *testing.T) {
+	lc := NewLineCorrelator(nil)
+	result := lc.CorrectIssue("any.go", 1, 2, "some code")
+	if result.NewStart != 1 || result.NewEnd != 2 {
+		t.Error("nil fileMap should keep original line numbers")
+	}
+}
+
 func TestLevenshteinDistance(t *testing.T) {
 	tests := []struct {
 		a, b string
