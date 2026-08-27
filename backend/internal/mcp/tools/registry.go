@@ -17,6 +17,13 @@ func RegisterAllTools(server interface {
 	server.RegisterTool("get_mr_review", "获取指定任务的 AI 代码评审结果（Issue 列表）。当用户问'这个 MR 有什么问题''帮我 review 一下''找出安全隐患'时使用。支持按 severity 和 category 过滤。需要 task_id。", getMRReviewSchema, handleGetMRReview)
 	// Issue 查询
 	server.RegisterTool("get_issue_detail", "获取单个 Issue 的完整详情（含代码上下文、详细描述、修复方案）。当用户追问'第 N 个问题具体是什么'时使用。需要 issue_id。", getIssueDetailSchema, handleGetIssueDetail)
+	server.RegisterTool("list_pending_issues", "查询当前用户的待处理 Issue 列表（pending / pending_inherited）。当用户问'我有什么待处理的问题''我的待办'时使用。返回结果包含 index 编号，后续用户可能用'第 N 个'引用。", listPendingIssuesSchema, handleListPendingIssues)
+	server.RegisterTool("list_historical_issues", "查询当前用户已处理的历史 Issue（resolved / false_positive / ignored / auto_archived）。当用户问'我之前处理过哪些问题'时使用。支持按状态过滤。", listHistoricalIssuesSchema, handleListHistoricalIssues)
+
+	// Issue 操作
+	server.RegisterTool("resolve_issue", "将单个待处理 Issue 标记为已处理（resolved）。当用户说'这个我修好了''第 N 个已处理'时使用。需要 issue_id，可选择填写 comment 说明。", resolveIssueSchema, handleResolveIssue)
+	server.RegisterTool("reject_issue", "将单个待处理 Issue 标记为误报（false_positive）。当用户说'这是误报''第 N 个是误报'时使用。需要 issue_id 和 reason（必填，说明误报原因）。", rejectIssueSchema, handleRejectIssue)
+	server.RegisterTool("ignore_issue", "将单个待处理 Issue 标记为忽略（ignored）。当用户说'先忽略这个''暂时不处理'时使用。需要 issue_id 和 reason（必填，说明忽略原因）。", ignoreIssueSchema, handleIgnoreIssue)
 
 	// 任务操作
 	server.RegisterTool("retry_task", "为失败或已停止的任务创建重试任务，重新触发完整 AI 评审。当用户说'重试那个失败的'时使用。仅允许 failed/stopped 状态。需要 task_id。", retryTaskSchema, handleRetryTask)
@@ -199,5 +206,56 @@ var markAllReadSchema = json.RawMessage(`{
 	"required": ["x_im_provider", "x_im_user_id"],
 	"properties": {
 		` + identityProps + `
+	}
+}`)
+
+// ---------------------- Issue Schemas ----------------------
+
+var listPendingIssuesSchema = json.RawMessage(`{
+	"type": "object",
+	"required": ["x_im_provider", "x_im_user_id"],
+	"properties": {
+		` + identityProps + `,
+		"limit": {"type": "integer", "default": 20, "description": "返回数量上限，最大 50"}
+	}
+}`)
+
+var listHistoricalIssuesSchema = json.RawMessage(`{
+	"type": "object",
+	"required": ["x_im_provider", "x_im_user_id"],
+	"properties": {
+		` + identityProps + `,
+		"status": {"type": "string", "description": "resolved|false_positive|ignored|auto_archived，为空返回全部"},
+		"limit": {"type": "integer", "default": 20, "description": "返回数量上限，最大 50"}
+	}
+}`)
+
+var resolveIssueSchema = json.RawMessage(`{
+	"type": "object",
+	"required": ["x_im_provider", "x_im_user_id", "issue_id"],
+	"properties": {
+		` + identityProps + `,
+		"issue_id": {"type": "integer", "description": "Issue ID"},
+		"comment": {"type": "string", "description": "处理备注（可选）"}
+	}
+}`)
+
+var rejectIssueSchema = json.RawMessage(`{
+	"type": "object",
+	"required": ["x_im_provider", "x_im_user_id", "issue_id", "reason"],
+	"properties": {
+		` + identityProps + `,
+		"issue_id": {"type": "integer", "description": "Issue ID"},
+		"reason": {"type": "string", "description": "误报原因（必填）"}
+	}
+}`)
+
+var ignoreIssueSchema = json.RawMessage(`{
+	"type": "object",
+	"required": ["x_im_provider", "x_im_user_id", "issue_id", "reason"],
+	"properties": {
+		` + identityProps + `,
+		"issue_id": {"type": "integer", "description": "Issue ID"},
+		"reason": {"type": "string", "description": "忽略原因（必填）"}
 	}
 }`)

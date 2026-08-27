@@ -74,6 +74,7 @@ func (h *MCPKeyHandler) CreateKey(c *gin.Context) {
 	// 验证 scopes
 	validScopes := map[string]bool{
 		"tasks:read": true, "tasks:write": true,
+		"issues:read": true, "issues:write": true,
 		"merge_requests:read": true,
 		"workbench:read": true,
 		"dashboard:read": true,

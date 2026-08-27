@@ -170,6 +170,7 @@ func handleGetMRReview(ctx context.Context, authCtx *mcp.AuthContext, args map[s
 	items := make([]map[string]interface{}, 0, len(issues))
 	for _, issue := range issues {
 		items = append(items, map[string]interface{}{
+			"issue_id":    issue.ID,
 			"category":    issue.Category,
 			"severity":    issue.Severity,
 			"file_path":   issue.File,
