@@ -713,6 +713,7 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		// MCP 密钥与调用日志管理
 		mcpKeyH := handler.NewMCPKeyHandler()
 		adminOnly.GET("/mcp-keys", mcpKeyH.ListKeys)
+		adminOnly.GET("/mcp-keys/:id", mcpKeyH.GetKey)
 		adminOnly.POST("/mcp-keys", mcpKeyH.CreateKey)
 		adminOnly.PUT("/mcp-keys/:id", mcpKeyH.UpdateKey)
 		adminOnly.DELETE("/mcp-keys/:id", mcpKeyH.DeleteKey)

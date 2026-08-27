@@ -78,6 +78,17 @@ func (h *MCPKeyHandler) ListKeys(c *gin.Context) {
 	})
 }
 
+// GetKey 获取单个 MCP API Key 详情
+func (h *MCPKeyHandler) GetKey(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var key model.MCPAPIKey
+	if err := model.DB.First(&key, id).Error; err != nil {
+		c.JSON(404, gin.H{"error": "key not found"})
+		return
+	}
+	c.JSON(200, gin.H{"data": key})
+}
+
 // CreateKey 创建新的 MCP API Key
 func (h *MCPKeyHandler) CreateKey(c *gin.Context) {
 	var req struct {

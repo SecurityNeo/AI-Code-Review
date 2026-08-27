@@ -237,6 +237,19 @@
     </div>
 </div>
 
+<!-- 密钥详情弹窗 -->
+<div class="modal-overlay" id="detailModal">
+    <div class="modal" style="width:520px;">
+        <div class="modal-header">
+            <div style="font-weight:600;"><i class="fas fa-eye text-blue-500 mr-2"></i>密钥详情</div>
+            <button class="btn-text" onclick="closeDetailModal()">关闭</button>
+        </div>
+        <div class="modal-body" id="detailBody" style="font-size:0.875rem; color:var(--text-secondary);">
+            <!-- 动态填充 -->
+        </div>
+    </div>
+</div>
+
 <script>
 const API_BASE = '/api/v1';
 let currentPage = 1;
@@ -303,6 +316,7 @@ async function loadKeys() {
                         <td>${k.rate_limit} req/min</td>
                         <td style="font-size:0.8125rem;">${lastUsed}</td>
                         <td>
+                            <button class="btn-text" onclick="viewKeyDetail(${k.id})">详情</button>
                             <button class="btn-text" onclick="openKeyModal('edit', ${k.id})">编辑</button>
                             <button class="btn-text" onclick="toggleKey(${k.id}, '${k.status === 'active' ? 'disabled' : 'active'}')">${k.status === 'active' ? '禁用' : '启用'}</button>
                             <button class="btn-text-danger" onclick="deleteKey(${k.id}, '${escapeHtml(k.name)}')">删除</button>
@@ -478,6 +492,69 @@ async function saveKey() {
     } catch (err) {
         alert((keyModalMode === 'create' ? '创建' : '保存') + '失败: ' + err.message);
     }
+}
+
+async function viewKeyDetail(id) {
+    try {
+        const res = await apiFetch(`${API_BASE}/mcp-keys/${id}`);
+        const json = await res.json();
+        const k = json.data;
+        if (!k) { alert('密钥不存在'); return; }
+
+        let scopes = [];
+        try { scopes = JSON.parse(k.scopes || '[]'); } catch(e) {}
+        const scopeLabels = scopes.map(s => {
+            const found = AVAILABLE_SCOPES.find(a => a.value === s);
+            return found ? found.label : s;
+        });
+
+        const statusText = k.status === 'active'
+            ? '<span class="badge badge-success">启用</span>'
+            : '<span class="badge badge-danger">禁用</span>';
+
+        const fmt = (t) => t ? new Date(t).toLocaleString('zh-CN') : '<span style="color:#94a3b8;">-</span>';
+
+        document.getElementById('detailBody').innerHTML = `
+            <div style="display:grid; grid-template-columns:100px 1fr; gap:0.75rem 1rem; line-height:1.6;">
+                <div style="color:#94a3b8; font-size:0.8125rem;">名称</div>
+                <div style="font-weight:500; color:var(--text-primary);">${escapeHtml(k.name)}</div>
+
+                <div style="color:#94a3b8; font-size:0.8125rem;">前缀</div>
+                <div><code style="background:#f1f5f9; padding:0.15rem 0.4rem; border-radius:0.25rem; font-size:0.8125rem;">${escapeHtml(k.prefix)}</code></div>
+
+                <div style="color:#94a3b8; font-size:0.8125rem;">权限范围</div>
+                <div>${scopeLabels.map(l => `<span class="badge badge-gray" style="margin-right:0.25rem; margin-bottom:0.25rem;">${escapeHtml(l)}</span>`).join('')}</div>
+
+                <div style="color:#94a3b8; font-size:0.8125rem;">IP 白名单</div>
+                <div>${k.ip_whitelist ? escapeHtml(k.ip_whitelist) : '<span style="color:#94a3b8;">不限制</span>'}</div>
+
+                <div style="color:#94a3b8; font-size:0.8125rem;">速率限制</div>
+                <div>${k.rate_limit || 100} req/min</div>
+
+                <div style="color:#94a3b8; font-size:0.8125rem;">状态</div>
+                <div>${statusText}</div>
+
+                <div style="color:#94a3b8; font-size:0.8125rem;">创建时间</div>
+                <div>${fmt(k.created_at)}</div>
+
+                <div style="color:#94a3b8; font-size:0.8125rem;">更新时间</div>
+                <div>${fmt(k.updated_at)}</div>
+
+                <div style="color:#94a3b8; font-size:0.8125rem;">最近使用</div>
+                <div>${fmt(k.last_used_at)}</div>
+
+                <div style="color:#94a3b8; font-size:0.8125rem;">过期时间</div>
+                <div>${k.expires_at ? fmt(k.expires_at) : '<span style="color:#94a3b8;">永不过期</span>'}</div>
+            </div>
+        `;
+        document.getElementById('detailModal').classList.add('active');
+    } catch (err) {
+        alert('获取详情失败: ' + err.message);
+    }
+}
+
+function closeDetailModal() {
+    document.getElementById('detailModal').classList.remove('active');
 }
 
 function copyKey() {
