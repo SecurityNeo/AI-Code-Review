@@ -116,7 +116,7 @@
                             <input type="text" id="searchInput" placeholder="搜索密钥名称..." oninput="debounceLoad()">
                         </div>
                         <div style="margin-left:auto; display:flex; gap:0.5rem; align-items:center;">
-                            <button class="btn-primary" onclick="openCreateModal()">
+                            <button class="btn-primary" onclick="openKeyModal('create')">
                                 <i class="fas fa-plus"></i>新增接入密钥
                             </button>
                             <button onclick="loadKeys()" class="px-3 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200 transition">
@@ -206,7 +206,7 @@
             </div>
             <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.5rem;">
                 <button class="btn-text" onclick="closeCreateModal()">取消</button>
-                <button class="btn-primary" onclick="createKey()">创建并显示密钥</button>
+                <button class="btn-primary" onclick="saveKey()">创建并显示密钥</button>
             </div>
         </div>
     </div>
@@ -246,6 +246,8 @@ let debounceTimer = null;
 const AVAILABLE_SCOPES = [
     { value: 'tasks:read', label: '任务查询' },
     { value: 'tasks:write', label: '任务操作（重试/停止）' },
+    { value: 'issues:read', label: 'Issue 查询' },
+    { value: 'issues:write', label: 'Issue 治理（处理/驳回/忽略）' },
     { value: 'merge_requests:read', label: 'MR 查询' },
     { value: 'workbench:read', label: '工作台查询' },
     { value: 'dashboard:read', label: '大盘统计查询' },
@@ -296,11 +298,12 @@ async function loadKeys() {
                     <tr>
                         <td style="font-weight:500; color:var(--text-primary);">${escapeHtml(k.name)}</td>
                         <td><code style="background:#f1f5f9; padding:0.15rem 0.4rem; border-radius:0.25rem; font-size:0.8125rem;">${escapeHtml(k.prefix)}...</code></td>
-                        <td><span class="badge badge-gray">${scopes.length} 个</span></td>
+                        <td><span class="badge badge-gray" title="${escapeHtml(scopes.join(', '))}">${scopes.length} 个</span></td>
                         <td>${statusBadge}</td>
                         <td>${k.rate_limit} req/min</td>
                         <td style="font-size:0.8125rem;">${lastUsed}</td>
                         <td>
+                            <button class="btn-text" onclick="openKeyModal('edit', ${k.id})">编辑</button>
                             <button class="btn-text" onclick="toggleKey(${k.id}, '${k.status === 'active' ? 'disabled' : 'active'}')">${k.status === 'active' ? '禁用' : '启用'}</button>
                             <button class="btn-text-danger" onclick="deleteKey(${k.id}, '${escapeHtml(k.name)}')">删除</button>
                         </td>
@@ -309,6 +312,7 @@ async function loadKeys() {
             }).join('');
         }
         renderPagination(total, currentPage);
+        window.keysCache = keys;
         mcpKeyList = keys.filter(k => k.status === 'active');
         updateConfigDisplay();
     } catch (err) {
@@ -380,11 +384,57 @@ function changePageSize() {
 function goPage(p) { if (p < 1) return; currentPage = p; loadKeys(); }
 function debounceLoad() { clearTimeout(debounceTimer); debounceTimer = setTimeout(loadKeys, 300); }
 
-function openCreateModal() { document.getElementById('createModal').classList.add('active'); initScopesGrid(); }
-function closeCreateModal() { document.getElementById('createModal').classList.remove('active'); }
+let keyModalMode = 'create';
+let editingKeyId = null;
+
+function openKeyModal(mode, keyId) {
+    keyModalMode = mode;
+    editingKeyId = (mode === 'edit') ? keyId : null;
+
+    // 重置表单
+    document.getElementById('keyName').value = '';
+    document.getElementById('ipWhitelist').value = '';
+    document.getElementById('rateLimit').value = '100';
+    document.getElementById('expiresAt').value = '';
+    initScopesGrid();
+
+    const titleEl = document.querySelector('#createModal .modal-header div');
+    const btnEl = document.querySelector('#createModal .btn-primary');
+
+    if (mode === 'edit') {
+        const key = (window.keysCache || []).find(k => k.id === keyId);
+        if (!key) { alert('密钥数据未加载，请刷新后重试'); return; }
+        titleEl.textContent = '编辑 MCP 接入密钥';
+        btnEl.textContent = '保存修改';
+
+        document.getElementById('keyName').value = key.name || '';
+        document.getElementById('ipWhitelist').value = key.ip_whitelist || '';
+        document.getElementById('rateLimit').value = key.rate_limit || 100;
+        if (key.expires_at) {
+            const d = new Date(key.expires_at);
+            document.getElementById('expiresAt').value = d.toISOString().split('T')[0];
+        }
+        let scopes = [];
+        try { scopes = JSON.parse(key.scopes || '[]'); } catch(e) {}
+        document.querySelectorAll('input[name="scope"]').forEach(cb => {
+            cb.checked = scopes.includes(cb.value);
+        });
+    } else {
+        titleEl.textContent = '新增 MCP 接入密钥';
+        btnEl.textContent = '创建并显示密钥';
+    }
+
+    document.getElementById('createModal').classList.add('active');
+}
+
+function closeCreateModal() {
+    document.getElementById('createModal').classList.remove('active');
+    keyModalMode = 'create';
+    editingKeyId = null;
+}
 function closeShowKeyModal() { document.getElementById('showKeyModal').classList.remove('active'); }
 
-async function createKey() {
+async function saveKey() {
     const name = document.getElementById('keyName').value.trim();
     if (!name) { alert('请输入密钥名称'); return; }
     const scopes = Array.from(document.querySelectorAll('input[name="scope"]:checked')).map(cb => cb.value);
@@ -395,22 +445,38 @@ async function createKey() {
     const expiresAt = document.getElementById('expiresAt').value || null;
 
     try {
-        const res = await apiFetch(`${API_BASE}/mcp-keys`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, scopes, ip_whitelist: ipWhitelist, rate_limit: rateLimit, expires_at: expiresAt })
-        });
-        const json = await res.json();
-        if (json.data && json.data.full_key) {
-            document.getElementById('fullKeyDisplay').textContent = json.data.full_key;
-            closeCreateModal();
-            document.getElementById('showKeyModal').classList.add('active');
-            loadKeys();
+        if (keyModalMode === 'create') {
+            const res = await apiFetch(`${API_BASE}/mcp-keys`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, scopes, ip_whitelist: ipWhitelist, rate_limit: rateLimit, expires_at: expiresAt })
+            });
+            const json = await res.json();
+            if (json.data && json.data.full_key) {
+                document.getElementById('fullKeyDisplay').textContent = json.data.full_key;
+                closeCreateModal();
+                document.getElementById('showKeyModal').classList.add('active');
+                loadKeys();
+            } else {
+                alert('创建失败: ' + (json.error || '未知错误'));
+            }
         } else {
-            alert('创建失败: ' + (json.error || '未知错误'));
+            const res = await apiFetch(`${API_BASE}/mcp-keys/${editingKeyId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, scopes, ip_whitelist: ipWhitelist, rate_limit: rateLimit, expires_at: expiresAt })
+            });
+            const json = await res.json();
+            if (json.message === 'updated') {
+                showToast('修改已保存', 'success');
+                closeCreateModal();
+                loadKeys();
+            } else {
+                alert('保存失败: ' + (json.error || '未知错误'));
+            }
         }
     } catch (err) {
-        alert('创建失败: ' + err.message);
+        alert((keyModalMode === 'create' ? '创建' : '保存') + '失败: ' + err.message);
     }
 }
 

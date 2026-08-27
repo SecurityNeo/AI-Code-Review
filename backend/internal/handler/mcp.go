@@ -4,6 +4,7 @@ import (
 	crand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,27 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 )
+
+var validMCPScopes = map[string]bool{
+	"tasks:read": true, "tasks:write": true,
+	"issues:read": true, "issues:write": true,
+	"merge_requests:read": true,
+	"workbench:read":      true,
+	"dashboard:read":      true,
+	"projects:read":       true,
+	"notifications:read":  true, "notifications:write": true,
+	"team:read": true,
+	"admin:*":   true,
+}
+
+func validateScopes(scopes []string) error {
+	for _, s := range scopes {
+		if !validMCPScopes[s] {
+			return fmt.Errorf("无效的权限范围: %s", s)
+		}
+	}
+	return nil
+}
 
 type MCPKeyHandler struct{}
 
@@ -71,23 +93,9 @@ func (h *MCPKeyHandler) CreateKey(c *gin.Context) {
 		return
 	}
 
-	// 验证 scopes
-	validScopes := map[string]bool{
-		"tasks:read": true, "tasks:write": true,
-		"issues:read": true, "issues:write": true,
-		"merge_requests:read": true,
-		"workbench:read": true,
-		"dashboard:read": true,
-		"projects:read": true,
-		"notifications:read": true, "notifications:write": true,
-		"team:read": true,
-		"admin:*": true,
-	}
-	for _, s := range req.Scopes {
-		if !validScopes[s] {
-			c.JSON(400, gin.H{"error": "invalid scope: " + s})
-			return
-		}
+	if err := validateScopes(req.Scopes); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
 	}
 
 	// 生成密钥
@@ -133,12 +141,12 @@ func (h *MCPKeyHandler) CreateKey(c *gin.Context) {
 
 	c.JSON(200, gin.H{
 		"data": gin.H{
-			"id":       key.ID,
-			"name":     key.Name,
-			"prefix":   key.Prefix,
-			"scopes":   req.Scopes,
-			"full_key": fullKey, // 仅创建时返回一次
-			"status":   key.Status,
+			"id":         key.ID,
+			"name":       key.Name,
+			"prefix":     key.Prefix,
+			"scopes":     req.Scopes,
+			"full_key":   fullKey, // 仅创建时返回一次
+			"status":     key.Status,
 			"expires_at": key.ExpiresAt,
 		},
 	})
@@ -172,6 +180,10 @@ func (h *MCPKeyHandler) UpdateKey(c *gin.Context) {
 		key.Name = req.Name
 	}
 	if len(req.Scopes) > 0 {
+		if err := validateScopes(req.Scopes); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
 		scopesJSON, _ := json.Marshal(req.Scopes)
 		key.Scopes = string(scopesJSON)
 	}
@@ -273,10 +285,23 @@ func generateRandomString(length int) string {
 	return hex.EncodeToString(b)[:length]
 }
 
-// ListMCPTools 返回 MCP 能力中心所有工具元数据
+// ListMCPTools 返回 MCP 能力中心工具元数据（支持分页）
 func ListMCPTools(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "15"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 15
+	}
+
+	var total int64
+	model.DB.Model(&model.MCPTool{}).Count(&total)
+
 	var tools []model.MCPTool
-	if err := model.DB.Order("sort_order ASC").Find(&tools).Error; err != nil {
+	offset := (page - 1) * pageSize
+	if err := model.DB.Order("sort_order ASC").Limit(pageSize).Offset(offset).Find(&tools).Error; err != nil {
 		zap.L().Error("list mcp tools failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -301,7 +326,9 @@ func ListMCPTools(c *gin.Context) {
 	}
 
 	c.JSON(200, gin.H{
-		"data":  items,
-		"total": len(items),
+		"data":      items,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
 	})
 }

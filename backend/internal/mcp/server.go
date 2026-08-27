@@ -162,10 +162,10 @@ func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 
 	// 调用日志已禁用
 	/*
-	if req.Method != "ping" && !strings.HasPrefix(req.Method, "notifications/") {
-		duration := time.Since(start).Milliseconds()
-		go s.recordLog(authCtx, req.Method, toolName, req.Params, err, int(duration))
-	}
+		if req.Method != "ping" && !strings.HasPrefix(req.Method, "notifications/") {
+			duration := time.Since(start).Milliseconds()
+			go s.recordLog(authCtx, req.Method, toolName, req.Params, err, int(duration))
+		}
 	*/
 
 	if err != nil {
@@ -293,28 +293,33 @@ func (s *Server) callTool(ctx context.Context, baseAuthCtx *AuthContext, params 
 
 // hasToolPermission 检查用户是否有权限使用 Tool
 func (s *Server) hasToolPermission(authCtx *AuthContext, toolName string) bool {
+	// admin:* 为超级管理员权限，可调用所有 Tool
+	if authCtx.HasScope("admin:*") {
+		return true
+	}
+
 	// 根据 Tool 名称映射到 Scope
 	scopeMap := map[string]string{
-		"list_tasks":                "tasks:read",
-		"get_task":                  "tasks:read",
-		"get_task_pipeline":         "tasks:read",
-		"get_mr_review":             "tasks:read",
-		"get_issue_detail":          "issues:read",
-		"list_pending_issues":       "issues:read",
-		"list_historical_issues":    "issues:read",
-		"resolve_issue":             "issues:write",
-		"reject_issue":              "issues:write",
-		"ignore_issue":              "issues:write",
-		"retry_task":                "tasks:write",
-		"stop_task":                 "tasks:write",
-		"list_merge_requests":       "merge_requests:read",
-		"get_merge_request_detail":  "merge_requests:read",
-		"get_workbench":             "workbench:read",
-		"get_dashboard_stats":       "dashboard:read",
-		"get_token_usage":           "dashboard:read",
-		"list_projects":             "projects:read",
-		"list_notifications":        "notifications:read",
-		"mark_all_read":             "notifications:write",
+		"list_tasks":               "tasks:read",
+		"get_task":                 "tasks:read",
+		"get_task_pipeline":        "tasks:read",
+		"get_mr_review":            "tasks:read",
+		"get_issue_detail":         "issues:read",
+		"list_pending_issues":      "issues:read",
+		"list_historical_issues":   "issues:read",
+		"resolve_issue":            "issues:write",
+		"reject_issue":             "issues:write",
+		"ignore_issue":             "issues:write",
+		"retry_task":               "tasks:write",
+		"stop_task":                "tasks:write",
+		"list_merge_requests":      "merge_requests:read",
+		"get_merge_request_detail": "merge_requests:read",
+		"get_workbench":            "workbench:read",
+		"get_dashboard_stats":      "dashboard:read",
+		"get_token_usage":          "dashboard:read",
+		"list_projects":            "projects:read",
+		"list_notifications":       "notifications:read",
+		"mark_all_read":            "notifications:write",
 	}
 
 	requiredScope, ok := scopeMap[toolName]
