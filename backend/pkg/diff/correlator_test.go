@@ -150,6 +150,18 @@ func TestLevenshteinDistance(t *testing.T) {
 	}
 }
 
+func TestLevenshteinDistance_MaxLength(t *testing.T) {
+	// 构造两个超长字符串（超过 maxSnippetLen=200）
+	a := strings.Repeat("x", 500)
+	b := strings.Repeat("y", 500)
+	// 截断后距离应为 200（所有字符都不同）
+	got := levenshteinDistance(a, b)
+	if got != 200 {
+		t.Errorf("levenshteinDistance for 500-char strings = %d, want 200", got)
+	}
+	// 确保函数不会 panic 或超时
+}
+
 func TestBatchCorrect(t *testing.T) {
 	file := makeSimpleParsedFile()
 	lc := NewLineCorrelator(map[string]*ParsedDiffFile{

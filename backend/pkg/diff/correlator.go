@@ -162,8 +162,17 @@ func (lc *LineCorrelator) findFuzzy(file *ParsedDiffFile, snippet string) *DiffL
 	return &file.Lines[bestLine]
 }
 
-// levenshteinDistance 计算两个字符串的编辑距离
+// maxSnippetLen 模糊匹配时截断的最大长度，防止超长单行导致 O(n²) 性能问题
+const maxSnippetLen = 200
+
+// levenshteinDistance 计算两个字符串的编辑距离（输入会被截断到 maxSnippetLen）
 func levenshteinDistance(a, b string) int {
+	if len(a) > maxSnippetLen {
+		a = a[:maxSnippetLen]
+	}
+	if len(b) > maxSnippetLen {
+		b = b[:maxSnippetLen]
+	}
 	la := len(a)
 	lb := len(b)
 	if la == 0 {

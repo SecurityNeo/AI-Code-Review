@@ -22,9 +22,8 @@ type SubtreeConfig struct {
 
 // MiddleConfig MiddleTruncator 配置
 type MiddleConfig struct {
-	MaxLinesPerHunk     int // 每个 hunk 最多保留行数
-	ContextLinesAround  int // 变更行前后保留的 context 行数
-	Sep                 string
+	MaxLinesPerHunk    int // 每个 hunk 最多保留行数
+	ContextLinesAround int // 变更行前后保留的 context 行数
 }
 
 // HunkTruncator 接口
