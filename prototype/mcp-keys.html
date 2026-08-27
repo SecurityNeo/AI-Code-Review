@@ -27,6 +27,12 @@
         .badge-success { background:#dcfce7; color:#166534; }
         .badge-danger { background:#fee2e2; color:#991b1b; }
         .badge-gray { background:#f1f5f9; color:#475569; }
+        .badge-outline { background:#fff; border:1px solid #e2e8f0; color:#475569; }
+        .badge-blue { background:#eff6ff; color:#1e40af; }
+        .badge-purple { background:#f3e8ff; color:#6b21a8; }
+        .badge-green { background:#dcfce7; color:#166534; }
+        .badge-amber { background:#fffbeb; color:#92400e; }
+        .badge-red { background:#fee2e2; color:#991b1b; }
         .toolbar { display:flex; align-items:center; gap:0.625rem; margin-bottom:1rem; background:var(--card-bg); padding:0.5rem 0.75rem; border-radius:0.625rem; border:1px solid var(--border-color); }
         .search-box { position:relative; flex:1; max-width:360px; }
         .search-box input { width:100%; padding:0.45rem 2.5rem; border:1px solid var(--border-color); border-radius:0.5rem; font-size:0.875rem; background:#f8fafc; outline:none; }
@@ -239,12 +245,14 @@
 
 <!-- 密钥详情弹窗 -->
 <div class="modal-overlay" id="detailModal">
-    <div class="modal" style="width:520px;">
+    <div class="modal" style="width:580px;">
         <div class="modal-header">
-            <div style="font-weight:600;"><i class="fas fa-eye text-blue-500 mr-2"></i>密钥详情</div>
+            <div style="font-weight:600; display:flex; align-items:center; gap:0.5rem;">
+                <i class="fas fa-shield-alt text-blue-500"></i> 密钥详情
+            </div>
             <button class="btn-text" onclick="closeDetailModal()">关闭</button>
         </div>
-        <div class="modal-body" id="detailBody" style="font-size:0.875rem; color:var(--text-secondary);">
+        <div class="modal-body" id="detailBody">
             <!-- 动态填充 -->
         </div>
     </div>
@@ -308,15 +316,14 @@ async function loadKeys() {
                     ? new Date(k.last_used_at).toLocaleString('zh-CN')
                     : '<span style="color:#94a3b8;">从未使用</span>';
                 return `
-                    <tr>
+                    <tr style="cursor:pointer;" onclick="viewKeyDetail(${k.id})">
                         <td style="font-weight:500; color:var(--text-primary);">${escapeHtml(k.name)}</td>
                         <td><code style="background:#f1f5f9; padding:0.15rem 0.4rem; border-radius:0.25rem; font-size:0.8125rem;">${escapeHtml(k.prefix)}...</code></td>
                         <td><span class="badge badge-gray" title="${escapeHtml(scopes.join(', '))}">${scopes.length} 个</span></td>
                         <td>${statusBadge}</td>
                         <td>${k.rate_limit} req/min</td>
                         <td style="font-size:0.8125rem;">${lastUsed}</td>
-                        <td>
-                            <button class="btn-text" onclick="viewKeyDetail(${k.id})">详情</button>
+                        <td onclick="event.stopPropagation()">
                             <button class="btn-text" onclick="openKeyModal('edit', ${k.id})">编辑</button>
                             <button class="btn-text" onclick="toggleKey(${k.id}, '${k.status === 'active' ? 'disabled' : 'active'}')">${k.status === 'active' ? '禁用' : '启用'}</button>
                             <button class="btn-text-danger" onclick="deleteKey(${k.id}, '${escapeHtml(k.name)}')">删除</button>
@@ -503,48 +510,91 @@ async function viewKeyDetail(id) {
 
         let scopes = [];
         try { scopes = JSON.parse(k.scopes || '[]'); } catch(e) {}
+
+        const scopeColorMap = {
+            'tasks:read': 'blue', 'tasks:write': 'blue',
+            'issues:read': 'purple', 'issues:write': 'purple',
+            'merge_requests:read': 'blue',
+            'workbench:read': 'blue',
+            'dashboard:read': 'green',
+            'projects:read': 'green',
+            'notifications:read': 'amber', 'notifications:write': 'amber',
+            'team:read': 'gray',
+            'admin:*': 'red',
+        };
+
         const scopeLabels = scopes.map(s => {
             const found = AVAILABLE_SCOPES.find(a => a.value === s);
-            return found ? found.label : s;
+            return { label: found ? found.label : s, color: scopeColorMap[s] || 'gray' };
         });
 
-        const statusText = k.status === 'active'
-            ? '<span class="badge badge-success">启用</span>'
-            : '<span class="badge badge-danger">禁用</span>';
+        const isActive = k.status === 'active';
+        const statusIcon = isActive ? '<i class="fas fa-check-circle" style="font-size:0.65rem;"></i>' : '<i class="fas fa-ban" style="font-size:0.65rem;"></i>';
+        const statusClass = isActive ? 'badge-success' : 'badge-danger';
 
-        const fmt = (t) => t ? new Date(t).toLocaleString('zh-CN') : '<span style="color:#94a3b8;">-</span>';
+        const fmtDate = (t) => t ? new Date(t).toLocaleString('zh-CN') : '—';
 
         document.getElementById('detailBody').innerHTML = `
-            <div style="display:grid; grid-template-columns:100px 1fr; gap:0.75rem 1rem; line-height:1.6;">
-                <div style="color:#94a3b8; font-size:0.8125rem;">名称</div>
-                <div style="font-weight:500; color:var(--text-primary);">${escapeHtml(k.name)}</div>
+            <!-- 头部：图标 + 名称 + 状态 -->
+            <div style="display:flex; align-items:center; gap:1rem; margin-bottom:1.5rem;">
+                <div style="width:3.25rem; height:3.25rem; border-radius:0.75rem; background:linear-gradient(135deg, #3b82f6, #6366f1); display:flex; align-items:center; justify-content:center; color:#fff; font-size:1.25rem; flex-shrink:0;">
+                    <i class="fas fa-key"></i>
+                </div>
+                <div style="flex:1; min-width:0;">
+                    <div style="font-size:1.05rem; font-weight:700; color:var(--text-primary);">${escapeHtml(k.name)}</div>
+                    <div style="margin-top:0.35rem; display:flex; align-items:center; gap:0.5rem;">
+                        <span class="badge ${statusClass}">${statusIcon} ${isActive ? '启用' : '禁用'}</span>
+                        <span style="font-size:0.75rem; color:#94a3b8;">ID: ${k.id}</span>
+                    </div>
+                </div>
+            </div>
 
-                <div style="color:#94a3b8; font-size:0.8125rem;">前缀</div>
-                <div><code style="background:#f1f5f9; padding:0.15rem 0.4rem; border-radius:0.25rem; font-size:0.8125rem;">${escapeHtml(k.prefix)}</code></div>
+            <!-- 密钥前缀 -->
+            <div style="background:#0f172a; color:#e2e8f0; padding:0.875rem 1rem; border-radius:0.625rem; margin-bottom:1.5rem; display:flex; align-items:center; justify-content:space-between;">
+                <div style="display:flex; align-items:center; gap:0.625rem;">
+                    <i class="fas fa-fingerprint" style="color:#64748b; font-size:0.875rem;"></i>
+                    <code style="font-family:ui-monospace, 'SF Mono', monospace; font-size:0.9375rem; color:#fff;">${escapeHtml(k.prefix)}***</code>
+                </div>
+                <span style="font-size:0.6875rem; color:#64748b; text-transform:uppercase; letter-spacing:0.04em;">密钥前缀</span>
+            </div>
 
-                <div style="color:#94a3b8; font-size:0.8125rem;">权限范围</div>
-                <div>${scopeLabels.map(l => `<span class="badge badge-gray" style="margin-right:0.25rem; margin-bottom:0.25rem;">${escapeHtml(l)}</span>`).join('')}</div>
+            <!-- 权限范围 -->
+            <div style="margin-bottom:1.5rem;">
+                <div style="color:#64748b; font-size:0.75rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:0.625rem;">权限范围</div>
+                <div style="display:flex; flex-wrap:wrap; gap:0.375rem;">
+                    ${scopeLabels.length > 0
+                        ? scopeLabels.map(s => `<span class="badge badge-${s.color}" style="font-size:0.75rem;">${escapeHtml(s.label)}</span>`).join('')
+                        : '<span style="color:#94a3b8; font-size:0.8125rem;">未配置任何权限</span>'
+                    }
+                </div>
+            </div>
 
-                <div style="color:#94a3b8; font-size:0.8125rem;">IP 白名单</div>
-                <div>${k.ip_whitelist ? escapeHtml(k.ip_whitelist) : '<span style="color:#94a3b8;">不限制</span>'}</div>
-
-                <div style="color:#94a3b8; font-size:0.8125rem;">速率限制</div>
-                <div>${k.rate_limit || 100} req/min</div>
-
-                <div style="color:#94a3b8; font-size:0.8125rem;">状态</div>
-                <div>${statusText}</div>
-
-                <div style="color:#94a3b8; font-size:0.8125rem;">创建时间</div>
-                <div>${fmt(k.created_at)}</div>
-
-                <div style="color:#94a3b8; font-size:0.8125rem;">更新时间</div>
-                <div>${fmt(k.updated_at)}</div>
-
-                <div style="color:#94a3b8; font-size:0.8125rem;">最近使用</div>
-                <div>${fmt(k.last_used_at)}</div>
-
-                <div style="color:#94a3b8; font-size:0.8125rem;">过期时间</div>
-                <div>${k.expires_at ? fmt(k.expires_at) : '<span style="color:#94a3b8;">永不过期</span>'}</div>
+            <!-- 信息卡片网格 -->
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem;">
+                <div style="background:#f8fafc; border:1px solid var(--border-color); border-radius:0.5rem; padding:0.875rem 1rem;">
+                    <div style="color:#94a3b8; font-size:0.75rem; font-weight:500; margin-bottom:0.25rem;">速率限制</div>
+                    <div style="font-size:1rem; font-weight:600; color:var(--text-primary);">${k.rate_limit || 100} <span style="font-size:0.75rem; font-weight:400; color:#94a3b8;">req/min</span></div>
+                </div>
+                <div style="background:#f8fafc; border:1px solid var(--border-color); border-radius:0.5rem; padding:0.875rem 1rem;">
+                    <div style="color:#94a3b8; font-size:0.75rem; font-weight:500; margin-bottom:0.25rem;">IP 白名单</div>
+                    <div style="font-size:0.875rem; font-weight:500; color:var(--text-primary);">${k.ip_whitelist ? escapeHtml(k.ip_whitelist) : '<span style="color:#94a3b8;">不限制</span>'}</div>
+                </div>
+                <div style="background:#f8fafc; border:1px solid var(--border-color); border-radius:0.5rem; padding:0.875rem 1rem;">
+                    <div style="color:#94a3b8; font-size:0.75rem; font-weight:500; margin-bottom:0.25rem;">创建时间</div>
+                    <div style="font-size:0.8125rem; font-weight:500; color:var(--text-primary);">${fmtDate(k.created_at)}</div>
+                </div>
+                <div style="background:#f8fafc; border:1px solid var(--border-color); border-radius:0.5rem; padding:0.875rem 1rem;">
+                    <div style="color:#94a3b8; font-size:0.75rem; font-weight:500; margin-bottom:0.25rem;">更新时间</div>
+                    <div style="font-size:0.8125rem; font-weight:500; color:var(--text-primary);">${fmtDate(k.updated_at)}</div>
+                </div>
+                <div style="background:#f8fafc; border:1px solid var(--border-color); border-radius:0.5rem; padding:0.875rem 1rem;">
+                    <div style="color:#94a3b8; font-size:0.75rem; font-weight:500; margin-bottom:0.25rem;">最近使用</div>
+                    <div style="font-size:0.8125rem; font-weight:500; color:var(--text-primary);">${fmtDate(k.last_used_at)}</div>
+                </div>
+                <div style="background:#f8fafc; border:1px solid var(--border-color); border-radius:0.5rem; padding:0.875rem 1rem;">
+                    <div style="color:#94a3b8; font-size:0.75rem; font-weight:500; margin-bottom:0.25rem;">过期时间</div>
+                    <div style="font-size:0.8125rem; font-weight:500; color:var(--text-primary);">${k.expires_at ? fmtDate(k.expires_at) : '<span style="color:#94a3b8;">永不过期</span>'}</div>
+                </div>
             </div>
         `;
         document.getElementById('detailModal').classList.add('active');
