@@ -221,4 +221,27 @@ func TestTruncationType(t *testing.T) {
 	if mt.Type() != TruncationTypeMiddle {
 		t.Error("MiddleTruncator type mismatch")
 	}
+
+	nt := NewNoChangeTruncator()
+	if nt.Type() != TruncationTypeNoChange {
+		t.Error("NoChangeTruncator type mismatch")
+	}
+
+	// NoChangeTruncator 应返回原始 hunk 的完整副本
+	lines := []string{
+		"@@ -1,3 +1,4 @@",
+		" line1",
+		"+add",
+		" line2",
+	}
+	h := makeHunk(lines)
+	result := nt.Truncate(h)
+	if len(result) != len(h.Lines) {
+		t.Errorf("NoChangeTruncator should return all %d lines, got %d", len(h.Lines), len(result))
+	}
+	// 验证返回的是副本（修改 result 不应影响原始 hunk）
+	result[0].Raw = "modified"
+	if h.Lines[0].Raw == "modified" {
+		t.Error("NoChangeTruncator should return a copy, not original slice")
+	}
 }

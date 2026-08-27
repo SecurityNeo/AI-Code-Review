@@ -51,7 +51,8 @@ func (s *SubtreeTruncator) Type() TruncationType { return TruncationTypeSubtree 
 // Truncate 保留变更行及其直接上下文，省略远离变更的 context
 func (s *SubtreeTruncator) Truncate(hunk Hunk) []DiffLine {
 	// 找到 hunk 中所有变更行（addition/deletion）的索引
-	var changeIndices []int
+	// 粗略估计变更行不超过总行数的 1/3，避免频繁扩容
+	changeIndices := make([]int, 0, len(hunk.Lines)/3)
 	for i, line := range hunk.Lines {
 		if line.Type == LineTypeAddition || line.Type == LineTypeDeletion {
 			changeIndices = append(changeIndices, i)
@@ -100,6 +101,22 @@ func (s *SubtreeTruncator) keepHeaderAndEnds(hunk Hunk, n int) []DiffLine {
 	result = append(result, hunk.Lines[1:min(1+n, len(hunk.Lines))]...)
 	endStart := max(1, len(hunk.Lines)-n)
 	result = append(result, hunk.Lines[endStart:]...)
+	return result
+}
+
+// NoChangeTruncator 不做截断的截断器（恒等变换）
+type NoChangeTruncator struct{}
+
+// NewNoChangeTruncator 创建恒等截断器
+func NewNoChangeTruncator() *NoChangeTruncator { return &NoChangeTruncator{} }
+
+// Type implements HunkTruncator
+func (n *NoChangeTruncator) Type() TruncationType { return TruncationTypeNoChange }
+
+// Truncate 直接返回原始 hunk 的所有行（不做任何截断）
+func (n *NoChangeTruncator) Truncate(hunk Hunk) []DiffLine {
+	result := make([]DiffLine, len(hunk.Lines))
+	copy(result, hunk.Lines)
 	return result
 }
 
