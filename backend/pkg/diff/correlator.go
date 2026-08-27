@@ -80,9 +80,16 @@ func (lc *LineCorrelator) CorrectIssue(filePath string, startLine, endLine int, 
 	// 次选：使用 fuzzy 匹配（编辑距离）
 	fuzzyLine := lc.findFuzzy(file, snippet)
 	if fuzzyLine != nil {
-		dist := levenshteinDistance(snippet, fuzzyLine.Raw)
-		maxLen := max(len(snippet), len(fuzzyLine.Raw))
-		confidence := 1.0 - float64(dist)/float64(maxLen)
+		cleanSnippet := strings.TrimSpace(snippet)
+		cleanMatched := stripDiffPrefix(fuzzyLine.Raw, fuzzyLine.Type)
+		dist := levenshteinDistance(cleanSnippet, cleanMatched)
+		maxLen := max(len(cleanSnippet), len(cleanMatched))
+		var confidence float64
+		if maxLen == 0 {
+			confidence = 0 // 两边都是空字符串，认为无意义匹配
+		} else {
+			confidence = 1.0 - float64(dist)/float64(maxLen)
+		}
 		result.NewStart = fuzzyLine.DiffOffset
 		result.NewEnd = fuzzyLine.DiffOffset
 		result.MatchType = MatchTypeFuzzy

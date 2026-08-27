@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/pkg/diff"
@@ -48,6 +49,13 @@ func NewDiffStore(cfg DiffStoreConfig, storage ObjectStorage) *DiffStore {
 func (ds *DiffStore) StoreDiff(ctx context.Context, task *model.Task, rawDiff string, parsedFiles []*diff.ParsedDiffFile) (*model.MRDiffMeta, error) {
 	if !ds.config.Enabled {
 		zap.L().Info("diff store disabled, skip storing raw diff")
+		return nil, nil
+	}
+	if task == nil {
+		return nil, fmt.Errorf("task is nil")
+	}
+	if len(strings.TrimSpace(rawDiff)) == 0 {
+		zap.L().Info("raw diff is empty, skip storing", zap.Uint("task_id", task.ID))
 		return nil, nil
 	}
 

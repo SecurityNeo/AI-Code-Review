@@ -135,7 +135,8 @@ func (m *MiddleTruncator) Type() TruncationType { return TruncationTypeMiddle }
 
 // Truncate 保留 hunk 中间最多 MaxLinesPerHunk 行，省略多余的首尾 context
 func (m *MiddleTruncator) Truncate(hunk Hunk) []DiffLine {
-	if len(hunk.Lines) <= m.config.MaxLinesPerHunk+m.config.ContextLinesAround*2+1 {
+	// 未配置或 hunk 已足够小，直接返回完整副本
+	if m.config.MaxLinesPerHunk <= 0 || len(hunk.Lines) <= m.config.MaxLinesPerHunk {
 		return append([]DiffLine(nil), hunk.Lines...)
 	}
 
