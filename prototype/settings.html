@@ -461,6 +461,7 @@
                                     <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">显示名</th>
                                     <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">角色</th>
                                     <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">登录类型</th>
+                                    <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">IM信息</th>
                                     <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">职责</th>
                                     <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">状态</th>
                                     <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">创建时间</th>
@@ -1276,30 +1277,36 @@ function previewTemplate() {
         function renderUsers(users) {
             const tbody = document.getElementById('usersBody');
             if (users.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-500">暂无数据</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" class="px-4 py-8 text-center text-gray-500">暂无数据</td></tr>';
                 return;
             }
             const roleMap = { admin: '管理员', user: '普通用户' };
             const loginTypeMap = { local: '本地', gitlab: 'GitLab' };
-            tbody.innerHTML = users.map(u => `
+            const imPlatformMap = { wecom: '企业微信' };
+            tbody.innerHTML = users.map(u => {
+                const imLabel = imPlatformMap[u.im_platform] || u.im_platform || '';
+                return `
                 <tr class="hover:bg-gray-50">
                     <td class="px-4 py-3 font-medium">${escapeHtml(u.username)}</td>
                     <td class="px-4 py-3 text-gray-600">${escapeHtml(u.display_name || '-')}</td>
                     <td class="px-4 py-3"><span class="${u.role === 'admin' ? 'bg-purple-50 text-purple-600' : 'bg-gray-50 text-gray-600'} px-2 py-0.5 rounded text-xs">${roleMap[u.role] || u.role}</span></td>
                     <td class="px-4 py-3"><span class="bg-blue-50 text-blue-600 px-2 py-0.5 rounded text-xs">${loginTypeMap[u.login_type] || u.login_type}</span></td>
+                    <td class="px-4 py-3">
+                        ${imLabel ? `<div class="flex flex-col gap-0.5"><span class="bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded text-[10px] w-fit">${escapeHtml(imLabel)}</span><span class="text-[10px] text-gray-400 font-mono">${escapeHtml(u.im_user_id || '')}</span></div>` : '<span class="text-gray-300 text-xs">-</span>'}
+                    </td>
                     <td class="px-4 py-3"><span class="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-xs font-mono">${u.responsibility_count !== undefined ? u.responsibility_count : '-'}</span></td>
                     <td class="px-4 py-3"><span class="${u.enabled === false ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'} px-2 py-0.5 rounded text-xs">${u.enabled === false ? '禁用' : '启用'}</span></td>
                     <td class="px-4 py-3 text-gray-500">${formatDate(u.created_at)}</td>
                     <td class="px-4 py-3">
                         <div class="flex items-center gap-3">
-                            <button onclick="openEditUserModal(${u.id}, '${escapeHtml(u.display_name || '')}', '${u.role}')" class="text-blue-600 hover:text-blue-800 text-xs font-medium" title="编辑">编辑</button>
+                            <button onclick="openEditUserModal(${u.id}, '${escapeHtml(u.display_name || '')}', '${u.role}', '${escapeHtml(u.im_platform || '')}', '${escapeHtml(u.im_user_id || '')}')" class="text-blue-600 hover:text-blue-800 text-xs font-medium" title="编辑">编辑</button>
                             <button onclick="openDutyDrawer(${u.id}, '${escapeHtml(u.display_name || u.username)}', '${escapeHtml(u.username)}', '${u.role}', '${escapeHtml(u.im_platform || '')}', '${escapeHtml(u.im_user_id || '')}')" class="text-teal-600 hover:text-teal-800 text-xs font-medium" title="职责">职责</button>
                             ${u.login_type !== 'gitlab' ? `<button onclick="openResetPasswordModal(${u.id}, '${escapeHtml(u.username)}')" class="text-orange-600 hover:text-orange-800 text-xs font-medium" title="重置密码">重置密码</button>` : ''}
                             ${u.role !== 'admin' ? `<button onclick="deleteUser(${u.id}, '${escapeHtml(u.username)}')" class="text-red-600 hover:text-red-800 text-xs font-medium" title="删除">删除</button>` : ''}
                         </div>
                     </td>
-                </tr>
-            `).join('');
+                </tr>`;
+            }).join('');
         }
 
         function updateUsersPagination() {
@@ -1404,6 +1411,17 @@ function previewTemplate() {
                                 <option value="admin">管理员</option>
                             </select>
                         </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">IM 平台</label>
+                            <select id="newUserIMPlatform" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                <option value="">无</option>
+                                <option value="wecom">企业微信</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">IM 用户 ID</label>
+                            <input type="text" id="newUserIMUserId" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="例如：ZhangSan">
+                        </div>
                     </div>
                     <div class="px-6 py-4 border-t flex justify-end gap-3">
                         <button onclick="document.getElementById('userModal').remove()" class="px-4 py-2 border rounded-lg text-sm text-gray-700 hover:bg-gray-50">取消</button>
@@ -1419,6 +1437,8 @@ function previewTemplate() {
             const password = document.getElementById('newUserPassword').value;
             const passwordConfirm = document.getElementById('newUserPasswordConfirm').value;
             const role = document.getElementById('newUserRole').value;
+            const imPlatform = document.getElementById('newUserIMPlatform').value;
+            const imUserId = document.getElementById('newUserIMUserId').value.trim();
             if (!username || !password) { showToast('用户名和密码不能为空', 'error'); return; }
             if (password.length < 6) { showToast('密码至少6位', 'error'); return; }
             if (password !== passwordConfirm) { showToast('两次输入的密码不一致', 'error'); return; }
@@ -1426,7 +1446,7 @@ function previewTemplate() {
                 const res = await apiFetch(`${API_BASE}/users`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, display_name: displayName, password, role })
+                    body: JSON.stringify({ username, display_name: displayName, password, role, im_platform: imPlatform, im_user_id: imUserId })
                 });
                 const result = await res.json();
                 if (!res.ok) { showToast(result.error || '创建失败', 'error'); return; }
@@ -1436,7 +1456,7 @@ function previewTemplate() {
             } catch (e) { showToast('创建失败: ' + e.message, 'error'); }
         }
 
-        function openEditUserModal(id, displayName, role) {
+        function openEditUserModal(id, displayName, role, imPlatform, imUserId) {
             const modal = document.createElement('div');
             modal.id = 'editUserModal';
             modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
@@ -1458,6 +1478,17 @@ function previewTemplate() {
                                 <option value="admin" ${role === 'admin' ? 'selected' : ''}>管理员</option>
                             </select>
                         </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">IM 平台</label>
+                            <select id="editUserIMPlatform" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                <option value="">无</option>
+                                <option value="wecom" ${imPlatform === 'wecom' ? 'selected' : ''}>企业微信</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">IM 用户 ID</label>
+                            <input type="text" id="editUserIMUserId" value="${escapeHtml(imUserId || '')}" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="例如：ZhangSan">
+                        </div>
                     </div>
                     <div class="px-6 py-4 border-t flex justify-end gap-3">
                         <button onclick="document.getElementById('editUserModal').remove()" class="px-4 py-2 border rounded-lg text-sm text-gray-700 hover:bg-gray-50">取消</button>
@@ -1470,11 +1501,13 @@ function previewTemplate() {
         async function submitEditUser(id) {
             const displayName = document.getElementById('editUserDisplayName').value.trim();
             const role = document.getElementById('editUserRole').value;
+            const imPlatform = document.getElementById('editUserIMPlatform').value;
+            const imUserId = document.getElementById('editUserIMUserId').value.trim();
             try {
                 const res = await apiFetch(`${API_BASE}/users/${id}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ display_name: displayName, role })
+                    body: JSON.stringify({ display_name: displayName, role, im_platform: imPlatform, im_user_id: imUserId })
                 });
                 const result = await res.json();
                 if (!res.ok) { showToast(result.error || '更新失败', 'error'); return; }

@@ -202,13 +202,15 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		DisplayName string `json:"display_name"`
 		Password    string `json:"password" binding:"required,min=6"`
 		Role        string `json:"role" binding:"required,oneof=admin user"`
+		IMPlatform  string `json:"im_platform"`
+		IMUserID    string `json:"im_user_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请提供用户名、密码（至少6位）和角色(admin/user)"})
 		return
 	}
 
-	user, err := h.service.CreateUser(req.Username, req.DisplayName, req.Password, req.Role)
+	user, err := h.service.CreateUser(req.Username, req.DisplayName, req.Password, req.Role, req.IMPlatform, req.IMUserID)
 	if err != nil {
 		zap.L().Error("create user failed", zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -239,13 +241,15 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 	var req struct {
 		DisplayName string `json:"display_name"`
 		Role        string `json:"role" binding:"omitempty,oneof=admin user"`
+		IMPlatform  string `json:"im_platform"`
+		IMUserID    string `json:"im_user_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	if err := h.service.UpdateUser(uint(id), req.DisplayName, req.Role); err != nil {
+	if err := h.service.UpdateUser(uint(id), req.DisplayName, req.Role, req.IMPlatform, req.IMUserID); err != nil {
 		zap.L().Error("update user failed", zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

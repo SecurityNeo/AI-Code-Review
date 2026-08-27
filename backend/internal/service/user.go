@@ -128,7 +128,7 @@ func (s *UserService) ListUsers(keyword, role, loginType string, page, pageSize 
 }
 
 // CreateUser 创建本地用户（管理员操作）
-func (s *UserService) CreateUser(username, displayName, password, role string) (*model.User, error) {
+func (s *UserService) CreateUser(username, displayName, password, role, imPlatform, imUserID string) (*model.User, error) {
 	if username == "" || password == "" {
 		return nil, fmt.Errorf("用户名和密码不能为空")
 	}
@@ -152,6 +152,8 @@ func (s *UserService) CreateUser(username, displayName, password, role string) (
 		Password:    hashedPassword,
 		Role:        role,
 		LoginType:   "local",
+		IMPlatform:  imPlatform,
+		IMUserID:    imUserID,
 	}
 	if err := model.DB.Create(&user).Error; err != nil {
 		return nil, fmt.Errorf("create user failed: %w", err)
@@ -160,7 +162,7 @@ func (s *UserService) CreateUser(username, displayName, password, role string) (
 }
 
 // UpdateUser 更新用户信息（管理员操作）
-func (s *UserService) UpdateUser(id uint, displayName, role string) error {
+func (s *UserService) UpdateUser(id uint, displayName, role, imPlatform, imUserID string) error {
 	var user model.User
 	if err := model.DB.First(&user, id).Error; err != nil {
 		return fmt.Errorf("用户不存在")
@@ -175,6 +177,9 @@ func (s *UserService) UpdateUser(id uint, displayName, role string) error {
 		}
 		updates["role"] = role
 	}
+	// IM 信息允许显式置空，因此不检查空字符串
+	updates["im_platform"] = imPlatform
+	updates["im_user_id"] = imUserID
 	if len(updates) == 0 {
 		return nil
 	}
