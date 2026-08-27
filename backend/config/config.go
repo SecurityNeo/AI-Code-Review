@@ -35,6 +35,17 @@ type Config struct {
 	GitlabOAuthClientSecret   string `yaml:"gitlab_oauth_client_secret"`
 	GitlabOAuthRedirectURI    string `yaml:"gitlab_oauth_redirect_uri"`
 	GitlabOAuthAutoCreateUser bool   `yaml:"gitlab_oauth_auto_create_user"`
+
+	// Diff Line Map 配置
+	DiffLineMap DiffLineMapConfig `yaml:"diff_line_map"`
+}
+
+// DiffLineMapConfig diff 行号映射系统配置
+type DiffLineMapConfig struct {
+	Enabled           bool `yaml:"enabled"`             // 是否启用系统
+	InjectLineNumbers bool `yaml:"inject_line_numbers"` // 是否注入 [new|old] 行号前缀
+	UseCorrelator     bool `yaml:"use_correlator"`      // 是否启用后端校正
+	StoreDiffRefs     bool `yaml:"store_diff_refs"`     // 是否存储 diff_refs
 }
 
 func Load() *Config {
@@ -66,6 +77,14 @@ func Load() *Config {
 		GitlabOAuthClientSecret:   getEnv("GITLAB_OAUTH_CLIENT_SECRET", ""),
 		GitlabOAuthRedirectURI:    getEnv("GITLAB_OAUTH_REDIRECT_URI", ""),
 		GitlabOAuthAutoCreateUser: getEnvBool("GITLAB_OAUTH_AUTO_CREATE_USER", true),
+
+		// Diff Line Map（默认关闭，需显式开启）
+		DiffLineMap: DiffLineMapConfig{
+			Enabled:           getEnvBool("DIFF_LINE_MAP_ENABLED", false),
+			InjectLineNumbers: getEnvBool("DIFF_LINE_MAP_INJECT", false),
+			UseCorrelator:     getEnvBool("DIFF_LINE_MAP_CORRELATOR", false),
+			StoreDiffRefs:     getEnvBool("DIFF_LINE_MAP_STORE_DIFF_REFS", false),
+		},
 	}
 	return cfg
 }
