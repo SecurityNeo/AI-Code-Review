@@ -185,6 +185,7 @@ func autoMigrate() error {
 		&ProjectReviewConfig{},
 		&ReviewIssue{},
 		&TaskReviewRule{},
+		&MRDiffMeta{}, // Diff line-map 索引表
 	); err != nil {
 		return err
 	}
