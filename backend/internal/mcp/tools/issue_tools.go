@@ -42,15 +42,17 @@ func handleListPendingIssues(ctx context.Context, authCtx *mcp.AuthContext, args
 		Limit(limit).
 		Find(&issues)
 
+	// 批量查询 Task 和 Project，避免 N+1
+	taskMap, projectMap := buildTaskProjectMaps(issues)
+
 	items := make([]map[string]interface{}, 0, len(issues))
 	for i, issue := range issues {
 		projectName, mrTitle := "", ""
-		var task model.Task
-		if model.DB.Select("project_id, mr_title").First(&task, issue.TaskID).Error == nil {
-			var p model.Project
-			model.DB.Select("name").First(&p, task.ProjectID)
-			projectName = p.Name
+		if task, ok := taskMap[issue.TaskID]; ok {
 			mrTitle = task.MRTitle
+			if proj, ok2 := projectMap[task.ProjectID]; ok2 {
+				projectName = proj.Name
+			}
 		}
 		items = append(items, map[string]interface{}{
 			"index":        i + 1,
@@ -63,7 +65,7 @@ func handleListPendingIssues(ctx context.Context, authCtx *mcp.AuthContext, args
 			"suggestion":   truncateString(issue.Suggestion, 200),
 			"project_name": projectName,
 			"mr_title":     mrTitle,
-			"days_pending": daysSince(issue.OriginalCreatedAt),
+			"days_pending": daysSincePtr(issue.OriginalCreatedAt),
 		})
 	}
 
@@ -112,9 +114,10 @@ func handleListHistoricalIssues(ctx context.Context, authCtx *mcp.AuthContext, a
 				break
 			}
 		}
-		if found {
-			query = query.Where("status = ?", statusFilter)
+		if !found {
+			return nil, fmt.Errorf("invalid status filter: %s, allowed: resolved|false_positive|ignored|auto_archived", statusFilter)
 		}
+		query = query.Where("status = ?", statusFilter)
 	}
 
 	var total int64
@@ -150,7 +153,10 @@ func handleListHistoricalIssues(ctx context.Context, authCtx *mcp.AuthContext, a
 }
 
 func handleResolveIssue(ctx context.Context, authCtx *mcp.AuthContext, args map[string]interface{}) (interface{}, error) {
-	issueID := uint(args["issue_id"].(float64))
+	issueID, err := parseIssueID(args)
+	if err != nil {
+		return nil, err
+	}
 	userID := authCtx.UserID
 
 	var issue model.ReviewIssue
@@ -158,22 +164,9 @@ func handleResolveIssue(ctx context.Context, authCtx *mcp.AuthContext, args map[
 		return nil, fmt.Errorf("issue not found: %d", issueID)
 	}
 
-	if issue.OwnerID == nil || *issue.OwnerID != userID {
-		return map[string]interface{}{
-			"success":    false,
-			"issue_id":   issueID,
-			"error_code": "permission_denied",
-			"message":    "当前用户不是该 Issue 的创建者，无法处理。仅 Issue 创建者可执行 resolve/reject/ignore 操作。",
-		}, nil
-	}
-
-	if issue.Status != model.IssueStatusPending && issue.Status != model.IssueStatusPendingInherited {
-		return map[string]interface{}{
-			"success":    false,
-			"issue_id":   issueID,
-			"error_code": "invalid_status",
-			"message":    fmt.Sprintf("Issue 当前状态为 %s，只有 pending/pending_inherited 状态可被处理", issue.Status),
-		}, nil
+	if forbid, ok := checkIssueActionable(&issue, userID); !ok {
+		forbid["issue_id"] = issueID
+		return forbid, nil
 	}
 
 	now := time.Now()
@@ -203,7 +196,10 @@ func handleResolveIssue(ctx context.Context, authCtx *mcp.AuthContext, args map[
 }
 
 func handleRejectIssue(ctx context.Context, authCtx *mcp.AuthContext, args map[string]interface{}) (interface{}, error) {
-	issueID := uint(args["issue_id"].(float64))
+	issueID, err := parseIssueID(args)
+	if err != nil {
+		return nil, err
+	}
 	userID := authCtx.UserID
 
 	reason, _ := args["reason"].(string)
@@ -216,22 +212,9 @@ func handleRejectIssue(ctx context.Context, authCtx *mcp.AuthContext, args map[s
 		return nil, fmt.Errorf("issue not found: %d", issueID)
 	}
 
-	if issue.OwnerID == nil || *issue.OwnerID != userID {
-		return map[string]interface{}{
-			"success":    false,
-			"issue_id":   issueID,
-			"error_code": "permission_denied",
-			"message":    "当前用户不是该 Issue 的创建者，无法处理。仅 Issue 创建者可执行 resolve/reject/ignore 操作。",
-		}, nil
-	}
-
-	if issue.Status != model.IssueStatusPending && issue.Status != model.IssueStatusPendingInherited {
-		return map[string]interface{}{
-			"success":    false,
-			"issue_id":   issueID,
-			"error_code": "invalid_status",
-			"message":    fmt.Sprintf("Issue 当前状态为 %s，只有 pending/pending_inherited 状态可被处理", issue.Status),
-		}, nil
+	if forbid, ok := checkIssueActionable(&issue, userID); !ok {
+		forbid["issue_id"] = issueID
+		return forbid, nil
 	}
 
 	now := time.Now()
@@ -258,7 +241,10 @@ func handleRejectIssue(ctx context.Context, authCtx *mcp.AuthContext, args map[s
 }
 
 func handleIgnoreIssue(ctx context.Context, authCtx *mcp.AuthContext, args map[string]interface{}) (interface{}, error) {
-	issueID := uint(args["issue_id"].(float64))
+	issueID, err := parseIssueID(args)
+	if err != nil {
+		return nil, err
+	}
 	userID := authCtx.UserID
 
 	reason, _ := args["reason"].(string)
@@ -271,22 +257,9 @@ func handleIgnoreIssue(ctx context.Context, authCtx *mcp.AuthContext, args map[s
 		return nil, fmt.Errorf("issue not found: %d", issueID)
 	}
 
-	if issue.OwnerID == nil || *issue.OwnerID != userID {
-		return map[string]interface{}{
-			"success":    false,
-			"issue_id":   issueID,
-			"error_code": "permission_denied",
-			"message":    "当前用户不是该 Issue 的创建者，无法处理。仅 Issue 创建者可执行 resolve/reject/ignore 操作。",
-		}, nil
-	}
-
-	if issue.Status != model.IssueStatusPending && issue.Status != model.IssueStatusPendingInherited {
-		return map[string]interface{}{
-			"success":    false,
-			"issue_id":   issueID,
-			"error_code": "invalid_status",
-			"message":    fmt.Sprintf("Issue 当前状态为 %s，只有 pending/pending_inherited 状态可被处理", issue.Status),
-		}, nil
+	if forbid, ok := checkIssueActionable(&issue, userID); !ok {
+		forbid["issue_id"] = issueID
+		return forbid, nil
 	}
 
 	now := time.Now()
@@ -314,6 +287,76 @@ func handleIgnoreIssue(ctx context.Context, authCtx *mcp.AuthContext, args map[s
 
 // ---------------------- Helpers ----------------------
 
+// checkIssueActionable 检查 Issue 是否允许当前用户执行 resolve/reject/ignore
+func checkIssueActionable(issue *model.ReviewIssue, userID uint) (map[string]interface{}, bool) {
+	if issue.OwnerID == nil || *issue.OwnerID != userID {
+		return map[string]interface{}{
+			"success":    false,
+			"error_code": "permission_denied",
+			"message":    "当前用户不是该 Issue 的创建者，无法处理。仅 Issue 创建者可执行 resolve/reject/ignore 操作。",
+		}, false
+	}
+	if issue.Status != model.IssueStatusPending && issue.Status != model.IssueStatusPendingInherited {
+		return map[string]interface{}{
+			"success":    false,
+			"error_code": "invalid_status",
+			"message":    fmt.Sprintf("Issue 当前状态为 %s，只有 pending/pending_inherited 状态可被处理", issue.Status),
+		}, false
+	}
+	return nil, true
+}
+
+// parseIssueID 安全解析 arguments 中的 issue_id
+func parseIssueID(args map[string]interface{}) (uint, error) {
+	raw, ok := args["issue_id"]
+	if !ok {
+		return 0, fmt.Errorf("issue_id is required")
+	}
+	v, ok := raw.(float64)
+	if !ok {
+		return 0, fmt.Errorf("issue_id must be a number, got %T", raw)
+	}
+	return uint(v), nil
+}
+
+// buildTaskProjectMaps 根据 Issue 列表批量查询 Task 和 Project，返回映射表
+func buildTaskProjectMaps(issues []model.ReviewIssue) (map[uint]model.Task, map[uint]model.Project) {
+	taskIDs := make([]uint, 0, len(issues))
+	for _, issue := range issues {
+		taskIDs = append(taskIDs, issue.TaskID)
+	}
+
+	taskMap := make(map[uint]model.Task)
+	projectMap := make(map[uint]model.Project)
+
+	if len(taskIDs) == 0 {
+		return taskMap, projectMap
+	}
+
+	var tasks []model.Task
+	model.DB.Select("id", "project_id", "mr_title").
+		Where("id IN ?", taskIDs).
+		Find(&tasks)
+
+	projectIDs := make([]uint, 0, len(tasks))
+	for _, task := range tasks {
+		taskMap[task.ID] = task
+		projectIDs = append(projectIDs, task.ProjectID)
+	}
+
+	if len(projectIDs) > 0 {
+		var projects []model.Project
+		model.DB.Select("id", "name").
+			Where("id IN ?", projectIDs).
+			Find(&projects)
+		for _, proj := range projects {
+			projectMap[proj.ID] = proj
+		}
+	}
+
+	return taskMap, projectMap
+}
+
 func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
@@ -325,9 +368,13 @@ func truncateString(s string, maxLen int) string {
 	return string(runes[:maxLen]) + "..."
 }
 
-func daysSince(t *time.Time) int {
+func daysSincePtr(t *time.Time) int {
 	if t == nil || t.IsZero() {
 		return 0
 	}
-	return int(time.Since(*t).Hours() / 24)
+	d := int(time.Since(*t).Hours() / 24)
+	if d < 0 {
+		return 0
+	}
+	return d
 }
