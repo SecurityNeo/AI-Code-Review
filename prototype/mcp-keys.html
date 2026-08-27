@@ -52,6 +52,37 @@
         .pagination button { padding:0.35rem 0.75rem; border:1px solid var(--border-color); border-radius:0.375rem; background:#fff; font-size:0.8125rem; cursor:pointer; }
         .pagination button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
         .pagination button:disabled { opacity:0.5; cursor:not-allowed; }
+        /* 快速连接面板 */
+        .cols-layout { display:grid; grid-template-columns:1fr 300px; gap:1.25rem; }
+        @media (max-width:1023px) { .cols-layout { grid-template-columns:1fr; } }
+        .connect-panel { background:#fff; border:1px solid var(--border-color); border-radius:0.625rem; padding:1rem; }
+        .connect-panel-h { font-size:0.875rem; font-weight:600; color:var(--text-primary); margin-bottom:0.75rem; display:flex; align-items:center; gap:0.375rem; }
+        .connect-panel-label { font-size:0.75rem; font-weight:600; color:#64748b; text-transform:uppercase; letter-spacing:0.03em; margin-bottom:0.375rem; }
+        .client-btn {
+            display:flex; justify-content:space-between; align-items:center;
+            padding:0.45rem 0.625rem; border-radius:0.5rem; font-size:0.8125rem; font-weight:500;
+            border:1px solid var(--border-color); background:#fff; color:#475569; cursor:pointer; transition:all .15s; margin-bottom:0.25rem; width:100%;
+        }
+        .client-btn:hover { background:#f8fafc; }
+        .client-btn.active { background:#eef2ff; color:#3b82f6; border-color:#3b82f6; }
+        .client-btn .check { opacity:0; font-size:0.75rem; }
+        .client-btn.active .check { opacity:1; }
+        .config-code {
+            background:#0f172a; color:#e2e8f0; padding:0.75rem; border-radius:0.5rem;
+            font-family:ui-monospace,'SF Mono',Consolas,monospace; font-size:0.75rem; line-height:1.6;
+            overflow-x:auto; white-space:pre-wrap; word-break:break-all; max-height:220px; overflow-y:auto;
+        }
+        .connect-btn-row { display:flex; gap:0.5rem; margin-top:0.625rem; }
+        .connect-btn-primary {
+            flex:1; display:flex; align-items:center; justify-content:center; gap:0.375rem;
+            padding:0.5rem; border-radius:0.5rem; font-size:0.8125rem; font-weight:500;
+            background:#3b82f6; color:#fff; border:none; cursor:pointer;
+        }
+        .connect-btn-outline {
+            flex:1; display:flex; align-items:center; justify-content:center; gap:0.375rem;
+            padding:0.5rem; border-radius:0.5rem; font-size:0.8125rem; font-weight:500;
+            background:#fff; color:#475569; border:1px solid var(--border-color); cursor:pointer;
+        }
     </style>
 </head>
 <body class="bg-gray-50 font-sans">
@@ -77,49 +108,69 @@
                 </div>
             </div>
 
-            <div class="toolbar">
-                <div class="search-box">
-                    <i class="fas fa-search"></i>
-                    <input type="text" id="searchInput" placeholder="搜索密钥名称..." oninput="debounceLoad()">
-                </div>
-                <div style="margin-left:auto; display:flex; gap:0.5rem; align-items:center;">
-                    <button class="btn-primary" onclick="openCreateModal()">
-                        <i class="fas fa-plus"></i>新增接入密钥
-                    </button>
-                    <button onclick="loadKeys()" class="px-3 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200 transition">
-                        <i class="fas fa-redo mr-1"></i>刷新
-                    </button>
-                </div>
-            </div>
+            <div class="cols-layout">
+                <div class="main-content" style="min-width:0;">
+                    <div class="toolbar">
+                        <div class="search-box">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="searchInput" placeholder="搜索密钥名称..." oninput="debounceLoad()">
+                        </div>
+                        <div style="margin-left:auto; display:flex; gap:0.5rem; align-items:center;">
+                            <button class="btn-primary" onclick="openCreateModal()">
+                                <i class="fas fa-plus"></i>新增接入密钥
+                            </button>
+                            <button onclick="loadKeys()" class="px-3 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200 transition">
+                                <i class="fas fa-redo mr-1"></i>刷新
+                            </button>
+                        </div>
+                    </div>
 
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>名称</th>
-                        <th>前缀</th>
-                        <th>权限范围</th>
-                        <th>状态</th>
-                        <th>速率限制</th>
-                        <th>最近使用</th>
-                        <th>操作</th>
-                    </tr>
-                </thead>
-                <tbody id="keyTableBody">
-                    <tr><td colspan="7" style="text-align:center; padding:2rem; color:#94a3b8;">加载中...</td></tr>
-                </tbody>
-            </table>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>名称</th>
+                                <th>前缀</th>
+                                <th>权限范围</th>
+                                <th>状态</th>
+                                <th>速率限制</th>
+                                <th>最近使用</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="keyTableBody">
+                            <tr><td colspan="7" style="text-align:center; padding:2rem; color:#94a3b8;">加载中...</td></tr>
+                        </tbody>
+                    </table>
 
-            <!-- 分页区域（参考项目列表页风格） -->
-            <div class="px-6 py-4 border-t flex items-center justify-between" style="background:var(--card-bg); border:1px solid var(--border-color); border-top:none; border-radius:0 0 0.625rem 0.625rem;">
-                <span id="totalCount" class="text-sm text-gray-500">共 0 条记录</span>
-                <div class="flex items-center gap-4">
-                    <select id="pageSizeSelect" onchange="changePageSize()" class="px-2 py-1 border rounded text-sm">
-                        <option value="10">10条/页</option>
-                        <option value="20" selected>20条/页</option>
-                        <option value="50">50条/页</option>
-                    </select>
-                    <div id="pagination" class="flex gap-2"></div>
+                    <!-- 分页区域 -->
+                    <div class="px-6 py-4 border-t flex items-center justify-between" style="background:var(--card-bg); border:1px solid var(--border-color); border-top:none; border-radius:0 0 0.625rem 0.625rem;">
+                        <span id="totalCount" class="text-sm text-gray-500">共 0 条记录</span>
+                        <div class="flex items-center gap-4">
+                            <select id="pageSizeSelect" onchange="changePageSize()" class="px-2 py-1 border rounded text-sm">
+                                <option value="10">10条/页</option>
+                                <option value="20" selected>20条/页</option>
+                                <option value="50">50条/页</option>
+                            </select>
+                            <div id="pagination" class="flex gap-2"></div>
+                        </div>
+                    </div>
                 </div>
+
+                <aside class="connect-panel">
+                    <div class="connect-panel-h"><i class="fas fa-plug text-blue-500"></i>快速连接</div>
+                    <div class="connect-panel-label">选择客户端</div>
+                    <div id="clientButtons"></div>
+                    <div class="connect-panel-label">MCP 配置</div>
+                    <pre class="config-code" id="configCode"></pre>
+                    <div style="font-size:0.6875rem; color:#64748b; margin-top:0.375rem; line-height:1.5;">
+                        <i class="fas fa-info-circle" style="margin-right:0.2rem;"></i>
+                        API Key 用于通道认证；调用每个 Tool 时请在 <code style="background:#f1f5f9;padding:0.05rem 0.25rem;border-radius:0.25rem;">arguments</code> 中传入 <code style="background:#f1f5f9;padding:0.05rem 0.25rem;border-radius:0.25rem;">x_im_provider</code>（如 <code style="background:#f1f5f9;padding:0.05rem 0.25rem;border-radius:0.25rem;">wecom</code>）和 <code style="background:#f1f5f9;padding:0.05rem 0.25rem;border-radius:0.25rem;">x_im_user_id</code> 完成用户身份校验
+                    </div>
+                    <div class="connect-btn-row">
+                        <button class="connect-btn-primary" onclick="copyConfig()"><i class="fas fa-copy"></i>复制</button>
+                        <button class="connect-btn-outline" onclick="downloadConfig()"><i class="fas fa-download"></i>下载</button>
+                    </div>
+                </aside>
             </div>
         </div>
     </main>
@@ -258,6 +309,8 @@ async function loadKeys() {
             }).join('');
         }
         renderPagination(total, currentPage);
+        mcpKeyList = keys.filter(k => k.status === 'active');
+        updateConfigDisplay();
     } catch (err) {
         console.error('load keys failed', err);
         document.getElementById('keyTableBody').innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:#ef4444;">加载失败: ${err.message}</td></tr>`;
@@ -432,6 +485,44 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+/* ---------- MCP 快速连接 ---------- */
+const CLIENT_TEMPLATES = {
+    cursor: { name:'Cursor', generate:(h,k)=>JSON.stringify({mcpServers:{codeguard:{url:h+'/mcp/v1',headers:{'X-API-Key':k}}}},null,2) },
+    claude: { name:'Claude Desktop', generate:(h,k)=>JSON.stringify({mcpServers:{codeguard:{command:'npx',args:['-y','@modelcontextprotocol/server-http'],env:{URL:h+'/mcp/v1',HEADERS:JSON.stringify({'X-API-Key':k})}}}},null,2) },
+    cline: { name:'Cline (VS Code)', generate:(h,k)=>JSON.stringify({'cline.mcpServers':{codeguard:{url:h+'/mcp/v1',headers:{'X-API-Key':k}}}},null,2) },
+    other: { name:'其他客户端', generate:(h,k)=>`URL: ${h}/mcp/v1\nHeaders:\n  X-API-Key: ${k}\nContent-Type: application/json` }
+};
+let activeClient = 'cursor';
+let mcpKeyList = [];
+
+function renderClients() {
+    document.getElementById('clientButtons').innerHTML = Object.entries(CLIENT_TEMPLATES).map(([k, tmpl])=>`
+        <button class="client-btn ${k===activeClient?'active':''}" onclick="selectClient('${k}')">
+            <span>${tmpl.name}</span><i class="fas fa-check check"></i>
+        </button>
+    `).join('');
+}
+function selectClient(client) { activeClient=client; renderClients(); updateConfigDisplay(); }
+function updateConfigDisplay() {
+    const host = window.location.origin;
+    const key = mcpKeyList.length ? (mcpKeyList[0].prefix || mcpKeyList[0].key_prefix || '')+'***' : 'sk-cg-your-key-here';
+    document.getElementById('configCode').textContent = CLIENT_TEMPLATES[activeClient].generate(host, key);
+}
+function copyConfig() {
+    const code = document.getElementById('configCode').textContent;
+    navigator.clipboard.writeText(code).then(()=>showToast('配置已复制','success')).catch(()=>{
+        const ta=document.createElement('textarea'); ta.value=code; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); showToast('配置已复制','success');
+    });
+}
+function downloadConfig() {
+    const blob = new Blob([document.getElementById('configCode').textContent], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download='mcp-config.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+renderClients();
+updateConfigDisplay();
 loadKeys();
 </script>
 

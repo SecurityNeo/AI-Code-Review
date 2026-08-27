@@ -59,9 +59,7 @@
         .stat-num { font-size: 1.25rem; font-weight: 700; color: var(--text); }
 
         /* Two columns */
-        .cols { display: grid; grid-template-columns: 1fr 300px; gap: 1.5rem; }
         @media (max-width: 1023px) {
-            .cols { grid-template-columns: 1fr; }
             .stats { grid-template-columns: repeat(2, 1fr); }
         }
         @media (max-width: 639px) {
@@ -101,45 +99,6 @@
         .tag-amber { background: #fffbeb; color: #92400e; }
         .tag-red { background: #fee2e2; color: #991b1b; }
         .tag-gray { background: #f1f5f9; color: var(--text-2); }
-
-        /* Sidebar */
-        .sidebar { display: flex; flex-direction: column; gap: .875rem; }
-        .panel {
-            background: var(--card); border: 1px solid var(--border); border-radius: .75rem; padding: 1rem;
-        }
-        .panel-h { font-size: .875rem; font-weight: 600; color: var(--text); margin-bottom: .75rem; display: flex; align-items: center; gap: .375rem; }
-        .panel-label { font-size: .75rem; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .03em; margin-bottom: .375rem; }
-
-        .client { display: flex; flex-direction: column; gap: .25rem; margin-bottom: .625rem; }
-        .client-btn {
-            display: flex; justify-content: space-between; align-items: center;
-            padding: .45rem .625rem; border-radius: .5rem; font-size: .8125rem; font-weight: 500;
-            border: 1px solid var(--border); background: #fff; color: var(--text-2); cursor: pointer; transition: all .15s;
-        }
-        .client-btn:hover { background: #f8fafc; }
-        .client-btn.active { background: #eef2ff; color: var(--primary); border-color: var(--primary); }
-        .client-btn .check { opacity: 0; font-size: .75rem; }
-        .client-btn.active .check { opacity: 1; }
-
-        pre.code {
-            background: #0f172a; color: #e2e8f0; padding: .75rem; border-radius: .5rem;
-            font-family: ui-monospace, 'SF Mono', Consolas, monospace; font-size: .75rem; line-height: 1.6;
-            overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow-y: auto;
-        }
-        .btn-row { display: flex; gap: .5rem; margin-top: .625rem; }
-        .btn-row button { flex: 1; }
-        .btn-primary {
-            display: flex; align-items: center; justify-content: center; gap: .375rem;
-            padding: .5rem; border-radius: .5rem; font-size: .8125rem; font-weight: 500;
-            background: var(--primary); color: #fff; border: none; cursor: pointer; transition: background .15s;
-        }
-        .btn-primary:hover { background: var(--primary-hover); }
-        .btn-outline {
-            display: flex; align-items: center; justify-content: center; gap: .375rem;
-            padding: .5rem; border-radius: .5rem; font-size: .8125rem; font-weight: 500;
-            background: #fff; color: var(--text-2); border: 1px solid var(--border); cursor: pointer;
-        }
-        .btn-outline:hover { background: #f8fafc; }
 
         /* Pagination */
         .pagination {
@@ -229,7 +188,6 @@
                 </div>
                 <div class="header-actions">
                     <span id="mcpStatus" class="status-badge status-idle"><i class="fas fa-circle" style="font-size:.375rem;"></i><span>未检测</span></span>
-                    <a href="mcp-keys.html" class="action-link"><i class="fas fa-key"></i>密钥</a>
                 </div>
             </div>
 
@@ -254,36 +212,14 @@
             </div>
 
             <!-- Body -->
-            <div class="cols">
-                <div>
-                    <div class="tabs" id="categoryTabs">
-                        <button class="tab active" data-category="all" onclick="filterCategory('all')">全部</button>
-                        <button class="tab" data-category="query" onclick="filterCategory('query')">查询</button>
-                        <button class="tab" data-category="write" onclick="filterCategory('write')">操作</button>
-                        <button class="tab" data-category="stats" onclick="filterCategory('stats')">统计</button>
-                    </div>
-                    <div class="grid-cards" id="capabilityGrid"></div>
-                    <div class="pagination" id="paginationBar"></div>
-                </div>
-
-                <div class="sidebar">
-                    <div class="panel">
-                        <div class="panel-h"><i class="fas fa-plug text-indigo-500"></i>快速连接</div>
-                        <div class="panel-label">选择客户端</div>
-                        <div class="client" id="clientButtons"></div>
-                        <div class="panel-label">MCP 配置</div>
-                        <pre class="code" id="configCode"></pre>
-                        <div style="font-size: .6875rem; color: var(--text-3); margin-top: .375rem; line-height: 1.5;">
-                            <i class="fas fa-info-circle" style="margin-right:.2rem;"></i>
-                            API Key 用于通道认证；调用每个 Tool 时请在 <code style="background:#f1f5f9;padding:.05rem .25rem;border-radius:.25rem;">arguments</code> 中传入 <code style="background:#f1f5f9;padding:.05rem .25rem;border-radius:.25rem;">x_im_provider</code>（如 <code style="background:#f1f5f9;padding:.05rem .25rem;border-radius:.25rem;">wecom</code>）和 <code style="background:#f1f5f9;padding:.05rem .25rem;border-radius:.25rem;">x_im_user_id</code> 完成用户身份校验
-                        </div>
-                        <div class="btn-row">
-                            <button class="btn-primary" onclick="copyConfig()"><i class="fas fa-copy"></i>复制</button>
-                            <button class="btn-outline" onclick="downloadConfig()"><i class="fas fa-download"></i>下载</button>
-                        </div>
-                    </div>
-                </div>
+            <div class="tabs" id="categoryTabs">
+                <button class="tab active" data-category="all" onclick="filterCategory('all')">全部</button>
+                <button class="tab" data-category="query" onclick="filterCategory('query')">查询</button>
+                <button class="tab" data-category="write" onclick="filterCategory('write')">操作</button>
+                <button class="tab" data-category="stats" onclick="filterCategory('stats')">统计</button>
             </div>
+            <div class="grid-cards" id="capabilityGrid"></div>
+            <div class="pagination" id="paginationBar"></div>
 
         </div>
     </main>
@@ -319,17 +255,6 @@ const MCP_TOOLS = [
     { toolName:'get_token_usage', displayName:'Token 用量查询', desc:'查看 AI 评审 Token 消耗和成本（按天汇总）。支持 day/project/model 分组。', category:'stats', icon:'fa-coins', color:'#10b981', tags:['只读','需认证'], params:[{n:'group_by',t:'string',r:false,d:'day|project|model'}], phrases:['Token 花了多少','AI 调用成本','模型 usage'] }
 ];
 
-const CLIENT_TEMPLATES = {
-    cursor: { name:'Cursor', generate:(h,k)=>JSON.stringify({mcpServers:{codeguard:{url:h+'/mcp/v1',headers:{'X-API-Key':k}}}},null,2) },
-    claude: { name:'Claude Desktop', generate:(h,k)=>JSON.stringify({mcpServers:{codeguard:{command:'npx',args:['-y','@modelcontextprotocol/server-http'],env:{URL:h+'/mcp/v1',HEADERS:JSON.stringify({'X-API-Key':k})}}}},null,2) },
-    cline: { name:'Cline (VS Code)', generate:(h,k)=>JSON.stringify({'cline.mcpServers':{codeguard:{url:h+'/mcp/v1',headers:{'X-API-Key':k}}}},null,2) },
-    other: { name:'其他客户端', generate:(h,k)=>`URL: ${h}/mcp/v1
-Headers:
-  X-API-Key: ${k}
-Content-Type: application/json` }
-};
-
-let activeClient='cursor', apiKeyList=[];
 let currentCategory='all', currentPage=1;
 const PAGE_SIZE = 12;
 
@@ -423,33 +348,6 @@ document.getElementById('detailModal').addEventListener('click', function(e){
 });
 document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeModal(); });
 
-/* ---------- Clients & Config ---------- */
-function renderClients() {
-    document.getElementById('clientButtons').innerHTML = Object.entries(CLIENT_TEMPLATES).map(([k, tmpl])=>`
-        <button class="client-btn ${k===activeClient?'active':''}" onclick="selectClient('${k}')">
-            <span>${tmpl.name}</span><i class="fas fa-check check"></i>
-        </button>
-    `).join('');
-}
-function selectClient(client) { activeClient=client; renderClients(); updateConfigDisplay(); }
-function updateConfigDisplay() {
-    const host = window.location.origin;
-    const key = apiKeyList.length ? apiKeyList[0].key_prefix+'***' : 'sk-cg-your-key-here';
-    document.getElementById('configCode').textContent = CLIENT_TEMPLATES[activeClient].generate(host, key);
-}
-function copyConfig() {
-    const code = document.getElementById('configCode').textContent;
-    navigator.clipboard.writeText(code).then(()=>showToast('配置已复制','success')).catch(()=>{
-        const ta=document.createElement('textarea'); ta.value=code; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); showToast('配置已复制','success');
-    });
-}
-function downloadConfig() {
-    const blob = new Blob([document.getElementById('configCode').textContent], {type:'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href=url; a.download='mcp-config.json';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-}
-
 /* ---------- Status ---------- */
 async function checkMCPStatus() {
     const el = document.getElementById('mcpStatus');
@@ -470,31 +368,8 @@ async function checkMCPStatus() {
     }
 }
 
-/* ---------- API Keys ---------- */
-async function loadApiKeys() {
-    try {
-        const resp = await apiFetch('/api/v1/mcp-keys?page_size=5');
-        if (resp.data && resp.data.list) {
-            apiKeyList = resp.data.list.filter(k=>k.status==='active');
-            updateConfigDisplay();
-        }
-    } catch (e) {}
-}
-
-function showToast(msg, type) {
-    const colors = { success:'#10b981', error:'#ef4444', info:'#3b82f6' };
-    const t = document.createElement('div');
-    t.style.cssText = `position:fixed;top:1rem;right:1rem;background:${colors[type]};color:#fff;padding:.625rem 1rem;border-radius:.5rem;font-size:.8125rem;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,.12);z-index:9999;transition:opacity .3s`;
-    t.textContent = msg;
-    document.body.appendChild(t);
-    setTimeout(()=>{ t.style.opacity='0'; setTimeout(()=>t.remove(),300); }, 2500);
-}
-
 /* ---------- Init ---------- */
 renderCards('all');
-renderClients();
-updateConfigDisplay();
-loadApiKeys();
 setTimeout(checkMCPStatus, 600);
 </script>
 </body>
