@@ -22,7 +22,7 @@ type Parser struct {
 
 // NewParser 创建解析器
 func NewParser() *Parser {
-	return &Parser{}
+	return &Parser{warnings: make([]string, 0, 8)}
 }
 
 // Parse 解析完整的 unified diff 文本
@@ -196,6 +196,7 @@ func (p *Parser) readHunk(lines []string, headerLineNo int) (*Hunk, int, error) 
 		NewCount: newLines,
 		Context:  context,
 		HeaderAt: headerLineNo,
+		Lines:    make([]DiffLine, 0, oldLines+newLines+1),
 	}
 
 	// hunk header 行本身
