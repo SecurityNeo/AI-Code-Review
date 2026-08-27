@@ -101,25 +101,6 @@
         .tag-red { background: #fee2e2; color: #991b1b; }
         .tag-gray { background: #f1f5f9; color: var(--text-2); }
 
-        /* Pagination */
-        .pagination {
-            display: flex; align-items: center; justify-content: center; gap: .375rem;
-            margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border);
-        }
-        .pagination-btn {
-            min-width: 2rem; height: 2rem; padding: 0 .5rem;
-            border-radius: .375rem; font-size: .8125rem; font-weight: 500;
-            border: 1px solid var(--border); background: #fff; color: var(--text-2);
-            cursor: pointer; display: flex; align-items: center; justify-content: center;
-            transition: all .15s;
-        }
-        .pagination-btn:hover:not(:disabled) { background: #f8fafc; border-color: #cbd5e1; }
-        .pagination-btn:disabled { opacity: .4; cursor: not-allowed; }
-        .pagination-btn.active {
-            background: var(--primary); color: #fff; border-color: var(--primary);
-        }
-        .pagination-info { font-size: .75rem; color: var(--text-3); margin-left: .5rem; }
-
         /* Modal */
         .modal-overlay {
             display: none; position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 9999;
@@ -220,7 +201,17 @@
                 <button class="tab" data-category="stats" onclick="filterCategory('stats')">统计</button>
             </div>
             <div class="grid-cards" id="capabilityGrid"></div>
-            <div class="pagination" id="paginationBar"></div>
+            <div class="px-6 py-4 border-t flex items-center justify-between" style="margin-top:1.25rem;">
+                <span id="totalCount" class="text-sm text-gray-500">共 0 条记录</span>
+                <div class="flex items-center gap-4">
+                    <select id="pageSizeSelect" onchange="changePageSize()" class="px-2 py-1 border rounded text-sm">
+                        <option value="15" selected>15条/页</option>
+                        <option value="30">30条/页</option>
+                        <option value="50">50条/页</option>
+                    </select>
+                    <div id="pagination" class="flex gap-2"></div>
+                </div>
+            </div>
 
         </div>
     </main>
@@ -262,17 +253,16 @@ async function loadMCPTools() {
     }
 }
 
-let currentCategory='all', currentPage=1;
-const PAGE_SIZE = 15;
+let currentCategory='all', currentPage=1, pageSize=15, totalPages=1, totalCount=0;
 
 /* ---------- Render Cards ---------- */
 function renderCards(category) {
     const tools = category==='all' ? MCP_TOOLS : MCP_TOOLS.filter(t=>t.category===category);
-    const total = tools.length;
-    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    totalCount = tools.length;
+    totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
     const page = Math.min(currentPage, totalPages);
-    const start = (page - 1) * PAGE_SIZE;
-    const pageTools = tools.slice(start, start + PAGE_SIZE);
+    const start = (page - 1) * pageSize;
+    const pageTools = tools.slice(start, start + pageSize);
 
     document.getElementById('capabilityGrid').innerHTML = pageTools.map(t=>`
         <div class="card" onclick="openDetail('${t.tool_name}')">
@@ -290,7 +280,8 @@ function renderCards(category) {
         </div>
     `).join('');
 
-    renderPagination(page, totalPages, total);
+    document.getElementById('totalCount').textContent = `共 ${totalCount} 条记录`;
+    renderPagination();
 }
 function filterCategory(cat) {
     currentCategory = cat;
@@ -298,26 +289,66 @@ function filterCategory(cat) {
     document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.category===cat));
     renderCards(cat);
 }
-function renderPagination(page, totalPages, total) {
-    const container = document.getElementById('paginationBar');
-    if (totalPages <= 1) { container.innerHTML = ''; return; }
+function renderPagination() {
+    const pagination = document.getElementById('pagination');
+    if (!pagination) return;
 
-    let html = `
-        <button class="pagination-btn" onclick="goPage(${page-1})" ${page===1?'disabled':''}><i class="fas fa-chevron-left"></i></button>
-    `;
-    for (let i = 1; i <= totalPages; i++) {
-        html += `<button class="pagination-btn ${i===page?'active':''}" onclick="goPage(${i})">${i}</button>`;
+    const page = currentPage;
+    const pages = totalPages;
+    if (pages <= 1) {
+        pagination.innerHTML = '';
+        return;
     }
-    html += `
-        <button class="pagination-btn" onclick="goPage(${page+1})" ${page===totalPages?'disabled':''}><i class="fas fa-chevron-right"></i></button>
-        <span class="pagination-info">${total} 条 · 第 ${page}/${totalPages} 页</span>
-    `;
-    container.innerHTML = html;
+
+    let html = '';
+    // 上一页
+    html += `<button class="px-3 py-1 border rounded text-sm ${page <= 1 ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-50'}" ${page <= 1 ? 'disabled' : ''} onclick="goPage(${page - 1})">上一页</button>`;
+
+    // 首页
+    if (page > 3) {
+        html += `<button class="px-3 py-1 border rounded text-sm text-gray-500 hover:bg-gray-50" onclick="goPage(1)">1</button>`;
+        if (page > 4) {
+            html += `<span class="px-2 py-1 text-gray-400">...</span>`;
+        }
+    }
+
+    // 中间页码（以当前页为中心，最多5个）
+    let start = Math.max(1, page - 2);
+    let end = Math.min(pages, page + 2);
+    if (end - start < 4) {
+        if (start === 1) {
+            end = Math.min(pages, start + 4);
+        } else if (end === pages) {
+            start = Math.max(1, end - 4);
+        }
+    }
+    for (let i = start; i <= end; i++) {
+        html += `<button class="px-3 py-1 border rounded text-sm ${i === page ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}" onclick="goPage(${i})">${i}</button>`;
+    }
+
+    // 尾页
+    if (page < pages - 2) {
+        if (page < pages - 3) {
+            html += `<span class="px-2 py-1 text-gray-400">...</span>`;
+        }
+        html += `<button class="px-3 py-1 border rounded text-sm text-gray-500 hover:bg-gray-50" onclick="goPage(${pages})">${pages}</button>`;
+    }
+
+    // 下一页
+    html += `<button class="px-3 py-1 border rounded text-sm ${page >= pages ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-50'}" ${page >= pages ? 'disabled' : ''} onclick="goPage(${page + 1})">下一页</button>`;
+
+    pagination.innerHTML = html;
 }
 function goPage(p) {
+    if (p < 1 || p > totalPages) return;
     currentPage = p;
     renderCards(currentCategory);
     document.getElementById('capabilityGrid').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function changePageSize() {
+    pageSize = parseInt(document.getElementById('pageSizeSelect').value);
+    currentPage = 1;
+    renderCards(currentCategory);
 }
 
 /* ---------- Detail Modal ---------- */
