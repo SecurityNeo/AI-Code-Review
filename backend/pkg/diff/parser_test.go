@@ -184,21 +184,51 @@ rename to new.go
 	}
 }
 
+func TestParse_MultiFile(t *testing.T) {
+	raw := `diff --git a/a.go b/a.go
+--- a/a.go
++++ b/a.go
+@@ -1,2 +1,3 @@
+ line1
++add1
+ line2
+
+diff --git a/b.go b/b.go
+--- a/b.go
++++ b/b.go
+@@ -1,2 +1,3 @@
+ line1
++add2
+ line2
+`
+	p := NewParser()
+	files, err := p.Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("expected 2 files, got %d", len(files))
+	}
+	if files[0].NewPath != "a.go" {
+		t.Errorf("first file NewPath = %q, want a.go", files[0].NewPath)
+	}
+	if files[1].NewPath != "b.go" {
+		t.Errorf("second file NewPath = %q, want b.go", files[1].NewPath)
+	}
+}
+
 func TestParse_MultiHunk(t *testing.T) {
 	raw := `diff --git a/multi.go b/multi.go
 --- a/multi.go
 +++ b/multi.go
 @@ -1,3 +1,4 @@
  package main
-
+ 
  func Foo() {
 +	var x int
  }
 @@ -20,5 +21,6 @@ func Bar() {
  	line1
- 	line2
- 	line3
-+	line4
  }
 `
 	p := NewParser()

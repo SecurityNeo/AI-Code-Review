@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/pkg/diff"
@@ -181,11 +180,10 @@ func (ds *DiffStore) DeleteDiff(ctx context.Context, taskID uint) error {
 }
 
 func (ds *DiffStore) buildObjectKey(task *model.Task) string {
-	return fmt.Sprintf("%sproject_%d/mr_%d/task_%d_%s.diff",
+	return fmt.Sprintf("%sproject_%d/mr_%d/task_%d.diff",
 		ds.config.Prefix,
 		task.ProjectID,
 		task.MRMergeID,
 		task.ID,
-		time.Now().Format("20060102_150405"),
 	)
 }

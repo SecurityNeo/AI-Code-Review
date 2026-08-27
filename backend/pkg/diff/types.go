@@ -73,18 +73,29 @@ type ParsedDiffFile struct {
 	Deletions    int    // 删除行数
 	HasNoNewLine bool   // diff 末尾是否有 "\ No newline at end of file"
 	RawDiff      string // 原始 diff 文本（保留，用于重建）
+
+	// 内部缓存（解析完成后构建）
+	hunkByNewLine map[int]*Hunk // 按新文件行号 -> hunk 的索引（惰性构建）
 }
 
-// FindHunkByNewLine 根据新文件行号查找所属的 Hunk
-func (pdf *ParsedDiffFile) FindHunkByNewLine(newLine int) *Hunk {
+// buildHunkIndex 构建新文件行号到 hunk 的索引（O(total lines) 一次性）
+func (pdf *ParsedDiffFile) buildHunkIndex() {
+	pdf.hunkByNewLine = make(map[int]*Hunk)
 	for i := range pdf.Hunks {
-		start := pdf.Hunks[i].NewStart
-		end := pdf.Hunks[i].NewFileEnd()
-		if newLine >= start && newLine <= end {
-			return &pdf.Hunks[i]
+		h := &pdf.Hunks[i]
+		end := h.NewFileEnd()
+		for line := h.NewStart; line <= end; line++ {
+			pdf.hunkByNewLine[line] = h
 		}
 	}
-	return nil
+}
+
+// FindHunkByNewLine 根据新文件行号查找所属的 Hunk（O(1) 带惰性索引）
+func (pdf *ParsedDiffFile) FindHunkByNewLine(newLine int) *Hunk {
+	if pdf.hunkByNewLine == nil {
+		pdf.buildHunkIndex()
+	}
+	return pdf.hunkByNewLine[newLine]
 }
 
 // BuildLineMap 构建行号映射表（供 Prompt 注入和序列化用）
