@@ -98,7 +98,7 @@
                 <div class="cg-sidebar-group">
                     <div class="cg-sidebar-group-toggle ${isExpanded ? 'expanded' : ''}" onclick="toggleGroup('${menu.id}')">
                         <div style="display: flex; align-items: center; gap: 12px;">
-                            <i class="fas ${menu.icon}"></i>
+                            <i class="fas ${menu.icon}" style="width:18px;text-align:center;font-size:14px;flex-shrink:0;"></i>
                             <span>${menu.name}</span>
                         </div>
                         <i class="fas fa-chevron-right arrow"></i>
