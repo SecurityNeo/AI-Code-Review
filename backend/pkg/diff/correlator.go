@@ -97,6 +97,22 @@ func (lc *LineCorrelator) CorrectIssue(filePath string, startLine, endLine int, 
 	return result
 }
 
+// stripDiffPrefix 根据行类型安全移除 diff 前缀符号
+func stripDiffPrefix(raw string, t LineType) string {
+	cleanLine := strings.TrimSpace(raw)
+	switch t {
+	case LineTypeAddition:
+		return strings.TrimPrefix(cleanLine, "+")
+	case LineTypeDeletion:
+		return strings.TrimPrefix(cleanLine, "-")
+	case LineTypeContext:
+		if strings.HasPrefix(cleanLine, " ") {
+			return cleanLine[1:]
+		}
+	}
+	return cleanLine
+}
+
 // findExact 在文件中精确查找代码片段
 func (lc *LineCorrelator) findExact(file *ParsedDiffFile, snippet string) *DiffLine {
 	cleanSnippet := strings.TrimSpace(snippet)
@@ -105,11 +121,7 @@ func (lc *LineCorrelator) findExact(file *ParsedDiffFile, snippet string) *DiffL
 		if line.Type == LineTypeHunkHeader {
 			continue
 		}
-		cleanLine := strings.TrimSpace(line.Raw)
-		// 去掉 diff 前缀符号后再比较
-		if len(cleanLine) > 0 && (cleanLine[0] == '+' || cleanLine[0] == '-' || cleanLine[0] == ' ') {
-			cleanLine = cleanLine[1:]
-		}
+		cleanLine := stripDiffPrefix(line.Raw, line.Type)
 		if cleanLine == cleanSnippet {
 			return line
 		}
@@ -128,10 +140,7 @@ func (lc *LineCorrelator) findFuzzy(file *ParsedDiffFile, snippet string) *DiffL
 		if line.Type == LineTypeHunkHeader {
 			continue
 		}
-		cleanLine := strings.TrimSpace(line.Raw)
-		if len(cleanLine) > 0 && (cleanLine[0] == '+' || cleanLine[0] == '-' || cleanLine[0] == ' ') {
-			cleanLine = cleanLine[1:]
-		}
+		cleanLine := stripDiffPrefix(line.Raw, line.Type)
 		dist := levenshteinDistance(cleanSnippet, cleanLine)
 		if dist < bestDist {
 			bestDist = dist

@@ -70,11 +70,6 @@ func BuildPromptWithTruncation(file *ParsedDiffFile, truncator HunkTruncator, cf
 		// hunk header
 		parts = append(parts, truncated[0].Raw)
 
-		if truncator.Type() != TruncationTypeNoChange && cfg.TruncationMarkerPrefix != "" {
-			// 若存在截断标记，追加标记行
-			// （此能力由调用方在外层按需注入）
-		}
-
 		if !cfg.InjectLineNumbers {
 			for i := 1; i < len(truncated); i++ {
 				parts = append(parts, truncated[i].Raw)
