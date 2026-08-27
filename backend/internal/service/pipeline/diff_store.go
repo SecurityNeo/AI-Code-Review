@@ -8,6 +8,7 @@ import (
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/pkg/diff"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // ObjectStorage 接口别名（避免导入 service 包产生循环依赖）
@@ -157,11 +158,18 @@ func (ds *DiffStore) FetchMeta(taskID uint) (*model.MRDiffMeta, error) {
 	return &meta, nil
 }
 
-// DeleteDiff 删除对象存储中的 diff 和数据库索引
+// DeleteDiff 删除对象存储中的 diff 和数据库索引（幂等：记录不存在不报错）
 func (ds *DiffStore) DeleteDiff(ctx context.Context, taskID uint) error {
 	var meta model.MRDiffMeta
-	if err := model.DB.Where("task_id = ?", taskID).First(&meta).Error; err != nil {
-		return fmt.Errorf("mr_diff_meta not found for task %d: %w", taskID, err)
+	result := model.DB.Where("task_id = ?", taskID).First(&meta)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			zap.L().Info("mr_diff_meta not found for delete, treating as success",
+				zap.Uint("task_id", taskID),
+			)
+			return nil
+		}
+		return fmt.Errorf("fetch mr_diff_meta failed for task %d: %w", taskID, result.Error)
 	}
 
 	if meta.ObjectKey != "" && ds.storage != nil {

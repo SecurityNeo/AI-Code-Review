@@ -12,7 +12,7 @@ type MRDiffMeta struct {
 	BaseSha     string `gorm:"size:64"`        // diff_refs.base_sha
 	HeadSha     string `gorm:"size:64"`        // diff_refs.head_sha
 	StartSha    string `gorm:"size:64"`        // diff_refs.start_sha
-	LineMapJSON string `gorm:"type:text"`      // DiffLineInfo 数组的 JSON（n/o/t 格式）
+	LineMapJSON string `gorm:"type:longtext"`  // DiffLineInfo 数组的 JSON（n/o/t 格式）
 }
 
 // TableName 自定义表名
