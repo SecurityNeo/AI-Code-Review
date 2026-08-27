@@ -48,6 +48,24 @@ type DiffLineMapConfig struct {
 	StoreDiffRefs     bool `yaml:"store_diff_refs"`     // 是否存储 diff_refs
 }
 
+// Validate 检查配置一致性，返回发现的警告信息
+// 规则：子功能开启但总开关关闭时，视为配置错误
+func (cfg DiffLineMapConfig) Validate() []string {
+	var warnings []string
+	if !cfg.Enabled {
+		if cfg.InjectLineNumbers {
+			warnings = append(warnings, "inject_line_numbers=true but enabled=false, injection will not work")
+		}
+		if cfg.UseCorrelator {
+			warnings = append(warnings, "use_correlator=true but enabled=false, correlator will not work")
+		}
+		if cfg.StoreDiffRefs {
+			warnings = append(warnings, "store_diff_refs=true but enabled=false, diff refs will not be stored")
+		}
+	}
+	return warnings
+}
+
 func Load() *Config {
 	cfg := &Config{
 		Debug:    getEnvBool("DEBUG", false),
