@@ -306,7 +306,7 @@ func (p *Parser) validateHunk(hunk *Hunk) {
 		}
 	}
 	if actualOld != hunk.OldCount || actualNew != hunk.NewCount {
-	p.warnings = append(p.warnings, fmt.Sprintf(
+		p.warnings = append(p.warnings, fmt.Sprintf(
 			"hunk count mismatch at %d: old expect=%d actual=%d, new expect=%d actual=%d",
 			hunk.HeaderAt, hunk.OldCount, actualOld, hunk.NewCount, actualNew,
 		))

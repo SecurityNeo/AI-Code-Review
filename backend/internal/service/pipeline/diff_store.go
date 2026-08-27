@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -105,10 +106,15 @@ func (ds *DiffStore) StoreDiff(ctx context.Context, task *model.Task, rawDiff st
 				})
 			}
 		}
-		// TODO: JSON 序列化 allLines 到 meta.LineMapJSON
-		// 这里使用简单的 JSON 序列化，实际应使用 json.Marshal
-		// meta.LineMapJSON = string(marshalJSON(allLines))
-		_ = allLines
+		lineMapJSON, err := json.Marshal(allLines)
+		if err != nil {
+			zap.L().Warn("marshal line_map failed",
+				zap.Error(err),
+				zap.Uint("task_id", task.ID),
+			)
+		} else {
+			meta.LineMapJSON = string(lineMapJSON)
+		}
 	}
 
 	// 3. 写入数据库
