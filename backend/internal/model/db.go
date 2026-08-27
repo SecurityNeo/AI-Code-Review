@@ -325,12 +325,15 @@ func autoMigrate() error {
 	}
 
 	// MCP 集成相关表
-	if err := DB.AutoMigrate(&MCPAPIKey{}, &MCPCallLog{}); err != nil {
+	if err := DB.AutoMigrate(&MCPAPIKey{}, &MCPCallLog{}, &MCPTool{}); err != nil {
 		return err
 	}
 
 	// 初始化 Pipeline 阶段定义
 	initPipelineStages()
+
+	// 初始化 MCP 工具元数据
+	initMCPTools()
 
 	return nil
 }
@@ -996,6 +999,59 @@ func initBuiltinVulnSyncSources() {
 				"enabled":   src.Enabled,
 			}).Error; err != nil {
 				zap.L().Warn("update builtin vuln sync source failed", zap.String("url", src.URL), zap.Error(err))
+			}
+		}
+	}
+}
+
+// initMCPTools 初始化 MCP 能力中心工具元数据（INSERT IGNORE + UPDATE）
+func initMCPTools() {
+	tools := []MCPTool{
+		{ToolName: "list_tasks", DisplayName: "任务列表查询", Description: "查询代码评审任务列表，支持按状态和项目过滤。获取 task_id 的入口。", Category: "query", Icon: "fa-list", Color: "#3b82f6", Tags: `["只读","分页","需认证"]`, Params: `[{"n":"status","t":"string","r":false,"d":"running|pending|failed|success|stopped"},{"n":"project_id","t":"integer","r":false},{"n":"mine","t":"boolean","r":false,"d":"true"},{"n":"limit","t":"integer","r":false,"d":"5"}]`, Phrases: `["看看我最近的评审任务","列出所有失败的任务","项目 12 最近有哪些 MR 在评审"]`, SortOrder: 1},
+		{ToolName: "get_task", DisplayName: "任务详情查询", Description: "获取单个评审任务的完整详情（含 MR 信息、评审得分、Issue 数量、使用模型）。", Category: "query", Icon: "fa-file-alt", Color: "#3b82f6", Tags: `["只读","需认证"]`, Params: `[{"n":"task_id","t":"integer","r":true}]`, Phrases: `["任务 2084 怎么样了","这个评审的得分是多少"]`, Requires: `["task_id"]`, SortOrder: 2},
+		{ToolName: "get_task_pipeline", DisplayName: "Pipeline 详情查询", Description: "查询任务 Pipeline 各阶段执行详情，用于定位\"卡在哪一步\"或\"为什么失败\"。", Category: "query", Icon: "fa-project-diagram", Color: "#3b82f6", Tags: `["只读","需认证"]`, Params: `[{"n":"task_id","t":"integer","r":true}]`, Phrases: `["任务 2084 卡在哪一步","Pipeline 执行到哪了"]`, Requires: `["task_id"]`, SortOrder: 3},
+		{ToolName: "get_mr_review", DisplayName: "MR 评审结果查询", Description: "获取指定任务的 AI 代码评审结果（Issue 列表）。支持按 severity 和 category 过滤。", Category: "query", Icon: "fa-code", Color: "#3b82f6", Tags: `["只读","需认证","可过滤"]`, Params: `[{"n":"task_id","t":"integer","r":true},{"n":"severity","t":"string","r":false,"d":"critical|high|medium|low"},{"n":"category","t":"string","r":false,"d":"security|performance|style|..."}]`, Phrases: `["任务 2084 有什么安全问题","找出所有 critical 的 issue"]`, Requires: `["task_id"]`, SortOrder: 4},
+		{ToolName: "get_issue_detail", DisplayName: "Issue 详情查询", Description: "获取单个 Issue 的完整详情（含代码上下文、详细描述、修复方案）。", Category: "query", Icon: "fa-search-plus", Color: "#3b82f6", Tags: `["只读","需认证"]`, Params: `[{"n":"issue_id","t":"integer","r":true}]`, Phrases: `["第 3 个 issue 具体是什么","issue 42 的修复建议"]`, Requires: `["issue_id"]`, SortOrder: 5},
+		{ToolName: "list_pending_issues", DisplayName: "待处理 Issue 列表查询", Description: "查询当前用户的待处理 Issue 列表（pending / pending_inherited），用于对话式 issue 治理。返回结果含 index 编号便于对话引用。", Category: "query", Icon: "fa-clipboard-list", Color: "#3b82f6", Tags: `["只读","需认证","可过滤"]`, Params: `[{"n":"limit","t":"integer","r":false,"d":"20"}]`, Phrases: `["我有什么待处理的问题","我的待办","还有哪些 issue 没处理"]`, SortOrder: 6},
+		{ToolName: "list_historical_issues", DisplayName: "历史 Issue 列表查询", Description: "查询当前用户已处理的历史 Issue（resolved / false_positive / ignored / auto_archived）。支持按状态过滤。", Category: "query", Icon: "fa-history", Color: "#3b82f6", Tags: `["只读","需认证","可过滤"]`, Params: `[{"n":"status","t":"string","r":false,"d":"resolved|false_positive|ignored|auto_archived"},{"n":"limit","t":"integer","r":false,"d":"20"}]`, Phrases: `["我之前处理过哪些问题","看看误报记录","自动归档了哪些 issue"]`, SortOrder: 7},
+		{ToolName: "list_merge_requests", DisplayName: "MR 列表查询", Description: "查询已触发过 AI 评审的 MR 列表。支持按状态和项目过滤。", Category: "query", Icon: "fa-code-branch", Color: "#3b82f6", Tags: `["只读","分页","需认证"]`, Params: `[{"n":"project_id","t":"integer","r":false},{"n":"status","t":"string","r":false}]`, Phrases: `["看看最近的 MR","有哪些 MR 在评审"]`, SortOrder: 8},
+		{ToolName: "get_merge_request_detail", DisplayName: "MR 详情查询", Description: "获取指定 MR 的评审详情和对应任务信息。", Category: "query", Icon: "fa-info-circle", Color: "#3b82f6", Tags: `["只读","需认证"]`, Params: `[{"n":"project_id","t":"integer","r":true},{"n":"mr_iid","t":"integer","r":true}]`, Phrases: `["MR !42 评审结果如何","这个 MR 有什么问题"]`, SortOrder: 9},
+		{ToolName: "list_notifications", DisplayName: "通知列表查询", Description: "查看站内通知列表（评审完成、升级提醒等）。支持 unread/all 过滤。", Category: "query", Icon: "fa-bell", Color: "#3b82f6", Tags: `["只读","分页","需认证"]`, Params: `[{"n":"filter","t":"string","r":false,"d":"unread|all"}]`, Phrases: `["有没有新通知","未读通知有哪些"]`, SortOrder: 10},
+		{ToolName: "list_projects", DisplayName: "项目列表查询", Description: "查询已接入 AI 代码评审的项目列表。默认只返回我有任务的项目。", Category: "query", Icon: "fa-folder-open", Color: "#3b82f6", Tags: `["只读","分页","需认证"]`, Params: `[{"n":"limit","t":"integer","r":false,"d":"20"}]`, Phrases: `["有哪些项目在用评审","看看所有项目"]`, SortOrder: 11},
+		{ToolName: "retry_task", DisplayName: "任务重试", Description: "为失败或已停止的任务创建重试任务，重新触发完整 AI 评审。", Category: "write", Icon: "fa-redo", Color: "#f59e0b", Tags: `["可写","需认证","需确认"]`, Params: `[{"n":"task_id","t":"integer","r":true}]`, Phrases: `["重试任务 2084","重新评审一下","再跑一次"]`, Dangerous: true, Requires: `["task_id"]`, SortOrder: 12},
+		{ToolName: "stop_task", DisplayName: "任务停止", Description: "停止正在运行或排队中的评审任务（当前阶段完成后终止）。", Category: "write", Icon: "fa-stop-circle", Color: "#f59e0b", Tags: `["可写","需认证","需确认"]`, Params: `[{"n":"task_id","t":"integer","r":true}]`, Phrases: `["停掉任务 2084","取消评审","停止正在跑的任务"]`, Dangerous: true, Requires: `["task_id"]`, SortOrder: 13},
+		{ToolName: "mark_all_read", DisplayName: "标记全部已读", Description: "一键将当前用户所有未读通知标记为已读。", Category: "write", Icon: "fa-check-double", Color: "#f59e0b", Tags: `["可写","需认证"]`, Params: `[]`, Phrases: `["全部标记为已读","清除所有通知"]`, Dangerous: true, SortOrder: 14},
+		{ToolName: "resolve_issue", DisplayName: "Issue 标记已处理", Description: "将单个待处理 Issue 标记为已处理（resolved）。当用户在对话中说\"这个我修好了\"时使用。", Category: "write", Icon: "fa-check-circle", Color: "#f59e0b", Tags: `["可写","需认证","需确认"]`, Params: `[{"n":"issue_id","t":"integer","r":true},{"n":"comment","t":"string","r":false}]`, Phrases: `["第 1 个已处理","这个问题已经修复了","标记为已处理"]`, Dangerous: true, Requires: `["issue_id"]`, SortOrder: 15},
+		{ToolName: "reject_issue", DisplayName: "Issue 标记误报", Description: "将单个待处理 Issue 标记为误报（false_positive）。当用户在对话中说\"这是误报\"时使用。必须填写 reason 说明原因。", Category: "write", Icon: "fa-times-circle", Color: "#f59e0b", Tags: `["可写","需认证","需确认"]`, Params: `[{"n":"issue_id","t":"integer","r":true},{"n":"reason","t":"string","r":true}]`, Phrases: `["第 2 个是误报","这是误报，已经做了校验","标记为误报"]`, Dangerous: true, Requires: `["issue_id"]`, SortOrder: 16},
+		{ToolName: "ignore_issue", DisplayName: "Issue 标记忽略", Description: "将单个待处理 Issue 标记为忽略（ignored）。当用户在对话中说\"先忽略这个\"时使用。必须填写 reason 说明原因。", Category: "write", Icon: "fa-eye-slash", Color: "#f59e0b", Tags: `["可写","需认证","需确认"]`, Params: `[{"n":"issue_id","t":"integer","r":true},{"n":"reason","t":"string","r":true}]`, Phrases: `["先忽略这个","暂时不处理","标记为忽略"]`, Dangerous: true, Requires: `["issue_id"]`, SortOrder: 17},
+		{ToolName: "get_workbench", DisplayName: "工作台数据查询", Description: "获取个人工作台数据，包含待处理 Issue 统计（按严重程度分档）、超时预警。", Category: "stats", Icon: "fa-desktop", Color: "#10b981", Tags: `["只读","需认证"]`, Params: `[{"n":"admin_view","t":"boolean","r":false,"d":"false"}]`, Phrases: `["我的待办","有哪些问题需要处理","超时预警"]`, SortOrder: 18},
+		{ToolName: "get_dashboard_stats", DisplayName: "大盘统计查询", Description: "获取代码评审大盘统计（任务量、成功率、失败率、Top 项目）。支持 today/week/month。", Category: "stats", Icon: "fa-chart-bar", Color: "#10b981", Tags: `["只读","需认证"]`, Params: `[{"n":"period","t":"string","r":false,"d":"today|week|month"}]`, Phrases: `["这周评审了多少 MR","成功率多少","团队评审负载如何"]`, SortOrder: 19},
+		{ToolName: "get_token_usage", DisplayName: "Token 用量查询", Description: "查看 AI 评审 Token 消耗和成本（按天汇总）。支持 day/project/model 分组。", Category: "stats", Icon: "fa-coins", Color: "#10b981", Tags: `["只读","需认证"]`, Params: `[{"n":"group_by","t":"string","r":false,"d":"day|project|model"}]`, Phrases: `["Token 花了多少","AI 调用成本","模型 usage"]`, SortOrder: 20},
+	}
+
+	for _, tool := range tools {
+		var existing MCPTool
+		if err := SilentFirst(DB.Where("tool_name = ?", tool.ToolName), &existing); err != nil {
+			if err := DB.Create(&tool).Error; err != nil {
+				zap.L().Warn("init mcp tool failed", zap.String("tool_name", tool.ToolName), zap.Error(err))
+			} else {
+				zap.L().Info("init mcp tool", zap.String("tool_name", tool.ToolName))
+			}
+		} else {
+			if err := DB.Model(&existing).Updates(map[string]interface{}{
+				"display_name": tool.DisplayName,
+				"description":  tool.Description,
+				"category":     tool.Category,
+				"icon":         tool.Icon,
+				"color":        tool.Color,
+				"tags":         tool.Tags,
+				"params":       tool.Params,
+				"phrases":      tool.Phrases,
+				"requires":     tool.Requires,
+				"dangerous":    tool.Dangerous,
+				"sort_order":   tool.SortOrder,
+			}).Error; err != nil {
+				zap.L().Warn("update mcp tool failed", zap.String("tool_name", tool.ToolName), zap.Error(err))
 			}
 		}
 	}

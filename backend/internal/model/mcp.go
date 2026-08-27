@@ -43,3 +43,22 @@ type MCPCallLog struct {
 	ClientIP     string    `gorm:"size:45" json:"client_ip"`
 	CreatedAt    time.Time `json:"created_at"`
 }
+
+// MCPTool MCP 能力中心展示用的工具元数据
+type MCPTool struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	ToolName    string    `gorm:"size:64;uniqueIndex;not null" json:"tool_name"`
+	DisplayName string    `gorm:"size:64;not null" json:"display_name"`
+	Description string    `gorm:"type:text;not null" json:"description"`
+	Category    string    `gorm:"size:16;not null" json:"category"`
+	Icon        string    `gorm:"size:32" json:"icon"`
+	Color       string    `gorm:"size:16" json:"color"`
+	Tags        string    `gorm:"type:text" json:"tags"`
+	Params      string    `gorm:"type:text" json:"params"`
+	Phrases     string    `gorm:"type:text" json:"phrases"`
+	Requires    string    `gorm:"type:text" json:"requires"`
+	Dangerous   bool      `gorm:"default:false" json:"dangerous"`
+	SortOrder   int       `gorm:"default:0" json:"sort_order"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}

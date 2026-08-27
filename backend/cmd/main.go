@@ -718,6 +718,9 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		adminOnly.DELETE("/mcp-keys/:id", mcpKeyH.DeleteKey)
 		adminOnly.GET("/mcp-logs", mcpKeyH.ListLogs)
 
+		// MCP 能力中心工具列表（所有认证用户可见）
+		common.GET("/mcp-tools", handler.ListMCPTools)
+
 		// 对象存储配置
 		storageH := handler.NewObjectStorageHandler()
 		objStorage := adminOnly.Group("/object-storage")

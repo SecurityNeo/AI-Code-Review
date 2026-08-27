@@ -272,3 +272,36 @@ func generateRandomString(length int) string {
 	}
 	return hex.EncodeToString(b)[:length]
 }
+
+// ListMCPTools 返回 MCP 能力中心所有工具元数据
+func ListMCPTools(c *gin.Context) {
+	var tools []model.MCPTool
+	if err := model.DB.Order("sort_order ASC").Find(&tools).Error; err != nil {
+		zap.L().Error("list mcp tools failed", zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	items := make([]map[string]interface{}, 0, len(tools))
+	for _, t := range tools {
+		items = append(items, map[string]interface{}{
+			"tool_name":    t.ToolName,
+			"display_name": t.DisplayName,
+			"description":  t.Description,
+			"category":     t.Category,
+			"icon":         t.Icon,
+			"color":        t.Color,
+			"tags":         t.Tags,
+			"params":       t.Params,
+			"phrases":      t.Phrases,
+			"requires":     t.Requires,
+			"dangerous":    t.Dangerous,
+			"sort_order":   t.SortOrder,
+		})
+	}
+
+	c.JSON(200, gin.H{
+		"data":  items,
+		"total": len(items),
+	})
+}

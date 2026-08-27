@@ -79,6 +79,7 @@
         .card {
             background: var(--card); border: 1px solid var(--border); border-radius: .75rem;
             padding: 1rem; transition: box-shadow .2s, border-color .15s; cursor: pointer; position: relative;
+            display: flex; flex-direction: column;
         }
         .card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.06); border-color: #cbd5e1; }
 
@@ -88,10 +89,10 @@
             font-size: .875rem; color: #fff; flex-shrink: 0;
         }
         .card-head { flex: 1; min-width: 0; }
-        .card-title { font-size: .875rem; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: .4rem; justify-content: space-between; }
+        .card-title { font-size: .875rem; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: .4rem; }
         .card-name { font-family: ui-monospace, 'SF Mono', monospace; font-size: .75rem; color: var(--text-3); font-weight: 400; }
         .card-body { font-size: .8125rem; color: var(--text-2); margin-top: .375rem; line-height: 1.5; }
-        .card-tags { display: flex; flex-wrap: wrap; gap: .375rem; margin-top: .5rem; }
+        .card-tags { display: flex; flex-wrap: wrap; gap: .375rem; margin-top: auto; padding-top: .75rem; }
         .tag {
             font-size: .6875rem; font-weight: 600; padding: .15rem .5rem; border-radius: 999px; letter-spacing: .01em;
         }
@@ -237,28 +238,29 @@
 </div>
 
 <script>
-const MCP_TOOLS = [
-    { toolName:'list_tasks', displayName:'任务列表查询', desc:'查询代码评审任务列表，支持按状态和项目过滤。获取 task_id 的入口。', category:'query', icon:'fa-list', color:'#3b82f6', tags:['只读','分页','需认证'], params:[{n:'status',t:'string',r:false,d:'running|pending|failed|success|stopped'},{n:'project_id',t:'integer',r:false},{n:'mine',t:'boolean',r:false,d:'true'},{n:'limit',t:'integer',r:false,d:'5'}], phrases:['看看我最近的评审任务','列出所有失败的任务','项目 12 最近有哪些 MR 在评审'] },
-    { toolName:'get_task', displayName:'任务详情查询', desc:'获取单个评审任务的完整详情（含 MR 信息、评审得分、Issue 数量、使用模型）。', category:'query', icon:'fa-file-alt', color:'#3b82f6', tags:['只读','需认证'], params:[{n:'task_id',t:'integer',r:true}], phrases:['任务 2084 怎么样了','这个评审的得分是多少'], requires:['task_id'] },
-    { toolName:'get_task_pipeline', displayName:'Pipeline 详情查询', desc:'查询任务 Pipeline 各阶段执行详情，用于定位"卡在哪一步"或"为什么失败"。', category:'query', icon:'fa-project-diagram', color:'#3b82f6', tags:['只读','需认证'], params:[{n:'task_id',t:'integer',r:true}], phrases:['任务 2084 卡在哪一步','Pipeline 执行到哪了'], requires:['task_id'] },
-    { toolName:'get_mr_review', displayName:'MR 评审结果查询', desc:'获取指定任务的 AI 代码评审结果（Issue 列表）。支持按 severity 和 category 过滤。', category:'query', icon:'fa-code', color:'#3b82f6', tags:['只读','需认证','可过滤'], params:[{n:'task_id',t:'integer',r:true},{n:'severity',t:'string',r:false,d:'critical|high|medium|low'},{n:'category',t:'string',r:false,d:'security|performance|style|...'}], phrases:['任务 2084 有什么安全问题','找出所有 critical 的 issue'], requires:['task_id'] },
-    { toolName:'get_issue_detail', displayName:'Issue 详情查询', desc:'获取单个 Issue 的完整详情（含代码上下文、详细描述、修复方案）。', category:'query', icon:'fa-search-plus', color:'#3b82f6', tags:['只读','需认证'], params:[{n:'issue_id',t:'integer',r:true}], phrases:['第 3 个 issue 具体是什么','issue 42 的修复建议'], requires:['issue_id'] },
-    { toolName:'list_pending_issues', displayName:'待处理 Issue 列表查询', desc:'查询当前用户的待处理 Issue 列表（pending / pending_inherited），用于对话式 issue 治理。返回结果含 index 编号便于对话引用。', category:'query', icon:'fa-clipboard-list', color:'#3b82f6', tags:['只读','需认证','可过滤'], params:[{n:'limit',t:'integer',r:false,d:'20'}], phrases:['我有什么待处理的问题','我的待办','还有哪些 issue 没处理'] },
-    { toolName:'list_historical_issues', displayName:'历史 Issue 列表查询', desc:'查询当前用户已处理的历史 Issue（resolved / false_positive / ignored / auto_archived）。支持按状态过滤。', category:'query', icon:'fa-history', color:'#3b82f6', tags:['只读','需认证','可过滤'], params:[{n:'status',t:'string',r:false,d:'resolved|false_positive|ignored|auto_archived'},{n:'limit',t:'integer',r:false,d:'20'}], phrases:['我之前处理过哪些问题','看看误报记录','自动归档了哪些 issue'] },
-    { toolName:'list_merge_requests', displayName:'MR 列表查询', desc:'查询已触发过 AI 评审的 MR 列表。支持按状态和项目过滤。', category:'query', icon:'fa-code-branch', color:'#3b82f6', tags:['只读','分页','需认证'], params:[{n:'project_id',t:'integer',r:false},{n:'status',t:'string',r:false}], phrases:['看看最近的 MR','有哪些 MR 在评审'] },
-    { toolName:'get_merge_request_detail', displayName:'MR 详情查询', desc:'获取指定 MR 的评审详情和对应任务信息。', category:'query', icon:'fa-info-circle', color:'#3b82f6', tags:['只读','需认证'], params:[{n:'project_id',t:'integer',r:true},{n:'mr_iid',t:'integer',r:true}], phrases:['MR !42 评审结果如何','这个 MR 有什么问题'] },
-    { toolName:'list_notifications', displayName:'通知列表查询', desc:'查看站内通知列表（评审完成、升级提醒等）。支持 unread/all 过滤。', category:'query', icon:'fa-bell', color:'#3b82f6', tags:['只读','分页','需认证'], params:[{n:'filter',t:'string',r:false,d:'unread|all'}], phrases:['有没有新通知','未读通知有哪些'] },
-    { toolName:'list_projects', displayName:'项目列表查询', desc:'查询已接入 AI 代码评审的项目列表。默认只返回我有任务的项目。', category:'query', icon:'fa-folder-open', color:'#3b82f6', tags:['只读','分页','需认证'], params:[{n:'limit',t:'integer',r:false,d:'20'}], phrases:['有哪些项目在用评审','看看所有项目'] },
-    { toolName:'retry_task', displayName:'任务重试', desc:'为失败或已停止的任务创建重试任务，重新触发完整 AI 评审。', category:'write', icon:'fa-redo', color:'#f59e0b', tags:['可写','需认证','需确认'], params:[{n:'task_id',t:'integer',r:true}], phrases:['重试任务 2084','重新评审一下','再跑一次'], dangerous:true, requires:['task_id'] },
-    { toolName:'stop_task', displayName:'任务停止', desc:'停止正在运行或排队中的评审任务（当前阶段完成后终止）。', category:'write', icon:'fa-stop-circle', color:'#f59e0b', tags:['可写','需认证','需确认'], params:[{n:'task_id',t:'integer',r:true}], phrases:['停掉任务 2084','取消评审','停止正在跑的任务'], dangerous:true, requires:['task_id'] },
-    { toolName:'mark_all_read', displayName:'标记全部已读', desc:'一键将当前用户所有未读通知标记为已读。', category:'write', icon:'fa-check-double', color:'#f59e0b', tags:['可写','需认证'], params:[], phrases:['全部标记为已读','清除所有通知'], dangerous:true },
-    { toolName:'resolve_issue', displayName:'Issue 标记已处理', desc:'将单个待处理 Issue 标记为已处理（resolved）。当用户在对话中说"这个我修好了"时使用。', category:'write', icon:'fa-check-circle', color:'#f59e0b', tags:['可写','需认证','需确认'], params:[{n:'issue_id',t:'integer',r:true},{n:'comment',t:'string',r:false}], phrases:['第 1 个已处理','这个问题已经修复了','标记为已处理'], dangerous:true, requires:['issue_id'] },
-    { toolName:'reject_issue', displayName:'Issue 标记误报', desc:'将单个待处理 Issue 标记为误报（false_positive）。当用户在对话中说"这是误报"时使用。必须填写 reason 说明原因。', category:'write', icon:'fa-times-circle', color:'#f59e0b', tags:['可写','需认证','需确认'], params:[{n:'issue_id',t:'integer',r:true},{n:'reason',t:'string',r:true}], phrases:['第 2 个是误报','这是误报，已经做了校验','标记为误报'], dangerous:true, requires:['issue_id'] },
-    { toolName:'ignore_issue', displayName:'Issue 标记忽略', desc:'将单个待处理 Issue 标记为忽略（ignored）。当用户在对话中说"先忽略这个"时使用。必须填写 reason 说明原因。', category:'write', icon:'fa-eye-slash', color:'#f59e0b', tags:['可写','需认证','需确认'], params:[{n:'issue_id',t:'integer',r:true},{n:'reason',t:'string',r:true}], phrases:['先忽略这个','暂时不处理','标记为忽略'], dangerous:true, requires:['issue_id'] },
-    { toolName:'get_workbench', displayName:'工作台数据查询', desc:'获取个人工作台数据，包含待处理 Issue 统计（按严重程度分档）、超时预警。', category:'stats', icon:'fa-desktop', color:'#10b981', tags:['只读','需认证'], params:[{n:'admin_view',t:'boolean',r:false,d:'false'}], phrases:['我的待办','有哪些问题需要处理','超时预警'] },
-    { toolName:'get_dashboard_stats', displayName:'大盘统计查询', desc:'获取代码评审大盘统计（任务量、成功率、失败率、Top 项目）。支持 today/week/month。', category:'stats', icon:'fa-chart-bar', color:'#10b981', tags:['只读','需认证'], params:[{n:'period',t:'string',r:false,d:'today|week|month'}], phrases:['这周评审了多少 MR','成功率多少','团队评审负载如何'] },
-    { toolName:'get_token_usage', displayName:'Token 用量查询', desc:'查看 AI 评审 Token 消耗和成本（按天汇总）。支持 day/project/model 分组。', category:'stats', icon:'fa-coins', color:'#10b981', tags:['只读','需认证'], params:[{n:'group_by',t:'string',r:false,d:'day|project|model'}], phrases:['Token 花了多少','AI 调用成本','模型 usage'] }
-];
+let MCP_TOOLS = [];
+
+async function loadMCPTools() {
+    try {
+        const resp = await apiFetch('/api/v1/mcp-tools');
+        const json = await resp.json();
+        if (json.data && Array.isArray(json.data)) {
+            MCP_TOOLS = json.data.map(t => {
+                // Parse JSON string fields returned from backend
+                try { t.tags = JSON.parse(t.tags || '[]'); } catch(e) { t.tags = []; }
+                try { t.params = JSON.parse(t.params || '[]'); } catch(e) { t.params = []; }
+                try { t.phrases = JSON.parse(t.phrases || '[]'); } catch(e) { t.phrases = []; }
+                try { t.requires = JSON.parse(t.requires || '[]'); } catch(e) { t.requires = []; }
+                return t;
+            });
+            updateStats();
+            renderCards('all');
+        }
+    } catch (err) {
+        console.error('load mcp tools failed', err);
+        document.getElementById('capabilityGrid').innerHTML = '<div style="text-align:center;padding:2rem;color:#94a3b8;">加载失败，请刷新重试</div>';
+    }
+}
 
 let currentCategory='all', currentPage=1;
 const PAGE_SIZE = 50;
@@ -273,15 +275,13 @@ function renderCards(category) {
     const pageTools = tools.slice(start, start + PAGE_SIZE);
 
     document.getElementById('capabilityGrid').innerHTML = pageTools.map(t=>`
-        <div class="card" onclick="openDetail('${t.toolName}')">
+        <div class="card" onclick="openDetail('${t.tool_name}')">
             <div class="card-top">
                 <div class="card-icon" style="background:${t.color};"><i class="fas ${t.icon}"></i></div>
                 <div class="card-head">
-                    <div class="card-title">
-                        <span>${t.displayName}</span>
-                        <span class="card-name">${t.toolName}</span>
-                    </div>
-                    <div class="card-body">${t.desc}</div>
+                    <div class="card-title">${t.display_name}</div>
+                    <div class="card-name">${t.tool_name}</div>
+                    <div class="card-body">${t.description}</div>
                 </div>
             </div>
             <div class="card-tags">
@@ -322,13 +322,13 @@ function goPage(p) {
 
 /* ---------- Detail Modal ---------- */
 function openDetail(toolName) {
-    const t = MCP_TOOLS.find(x=>x.toolName===toolName);
+    const t = MCP_TOOLS.find(x=>x.tool_name===toolName);
     if(!t) return;
-    document.getElementById('modalTitle').textContent = t.displayName;
+    document.getElementById('modalTitle').textContent = t.display_name;
     document.getElementById('modalBody').innerHTML = `
         <div class="modal-section">
             <div class="modal-label">描述</div>
-            <div class="modal-desc">${t.desc}</div>
+            <div class="modal-desc">${t.description}</div>
         </div>
         <div class="modal-section">
             <div class="modal-label">参数</div>
@@ -338,8 +338,7 @@ function openDetail(toolName) {
                 <tbody>${t.params.map(p=>`<tr><td>${p.n}</td><td>${p.t}</td><td>${p.r?'<span style="color:#ef4444">是</span>':'否'}</td><td>${p.d||'—'}</td></tr>`).join('')}</tbody>
             </table>` : '<div style="font-size:.875rem;color:var(--text-3)">无参数</div>'}
         </div>
-        ${t.requires ? `<div class="modal-section"><div class="modal-warning"><i class="fas fa-info-circle"></i>前置条件: 需要 ${t.requires.join(', ')}</div></div>` : ''}
-        ${t.warning ? `<div class="modal-section"><div class="modal-warning"><i class="fas fa-exclamation-triangle"></i>${t.warning}</div></div>` : ''}
+        ${t.requires && t.requires.length ? `<div class="modal-section"><div class="modal-warning"><i class="fas fa-info-circle"></i>前置条件: 需要 ${t.requires.join(', ')}</div></div>` : ''}
         <div class="modal-section">
             <div class="modal-label">示例话术</div>
             <div>${t.phrases.map(p=>`<span class="modal-phrase">${p}</span>`).join('')}</div>
@@ -380,8 +379,7 @@ function updateStats() {
     document.getElementById('statWrite').textContent = MCP_TOOLS.filter(t => t.category === 'write').length;
     document.getElementById('statStats').textContent = MCP_TOOLS.filter(t => t.category === 'stats').length;
 }
-updateStats();
-renderCards('all');
+loadMCPTools();
 setTimeout(checkMCPStatus, 600);
 </script>
 </body>
