@@ -2,7 +2,6 @@ package diff
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 )
 
@@ -172,18 +171,13 @@ func rebuildHunkHeader(lines []DiffLine) Hunk {
 
 	// 如果第一行不是 header，返回原样
 	if lines[0].Type != LineTypeHunkHeader {
-		// 构造一个新的 hunk（没有合法 header）
-		h := Hunk{Lines: lines}
-		return h
+		return Hunk{Lines: lines}
 	}
 
 	// 重新计算新的 old/new count
 	oldCount := 0
 	newCount := 0
-	oldStart := 0
-	newStart := 0
-
-	for _, l := range lines {
+	for _, l := range lines[1:] { // 跳过 header 行
 		switch l.Type {
 		case LineTypeContext:
 			oldCount++
@@ -192,37 +186,21 @@ func rebuildHunkHeader(lines []DiffLine) Hunk {
 			newCount++
 		case LineTypeDeletion:
 			oldCount++
-		case LineTypeHunkHeader:
-			oldStart = l.OldLineNo
-			newStart = l.NewLineNo
 		}
 	}
 
-	// 解析旧的 header 获取 start 位置
-	re := hunkHeaderRe
+	// 解析旧的 header 获取 start 位置和上下文
 	header := lines[0].Raw
-	m := re.FindStringSubmatch(header)
-	if m != nil {
-		oldStart = mustAtoi(m[1])
-		newStart = mustAtoi(m[3])
+	m := hunkHeaderRe.FindStringSubmatch(header)
+	if m == nil {
+		// header 格式异常，返回原样
+		return Hunk{Lines: lines}
 	}
+	oldStart := mustAtoi(m[1])
+	newStart := mustAtoi(m[3])
+	ctx := strings.TrimSpace(m[5])
 
-	// 重建 header
-	newHeader := fmt.Sprintf("@@ -%d,%d +%d,%d @@%s",
-		oldStart, oldCount, newStart, newCount,
-		strings.TrimPrefix(header, "@@"))
-	newHeader = regexp.MustCompile(`^@@ .*?@@`).ReplaceAllString(newHeader, fmt.Sprintf("@@ -%d,%d +%d,%d @@", oldStart, oldCount, newStart, newCount))
-
-	// 上面简单的 ReplaceAllString 不够精确，直接构造
-	ctx := ""
-	idx := strings.Index(header, "@@")
-	if idx >= 0 {
-		idx2 := strings.Index(header[idx+2:], "@@")
-		if idx2 >= 0 {
-			ctx = header[idx+idx2+4:]
-		}
-	}
-	newHeader = fmt.Sprintf("@@ -%d,%d +%d,%d @@%s", oldStart, oldCount, newStart, newCount, ctx)
+	newHeader := fmt.Sprintf("@@ -%d,%d +%d,%d @@ %s", oldStart, oldCount, newStart, newCount, ctx)
 
 	newLines := make([]DiffLine, len(lines))
 	copy(newLines, lines)

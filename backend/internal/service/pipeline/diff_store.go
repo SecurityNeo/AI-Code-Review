@@ -80,13 +80,11 @@ func (ds *DiffStore) StoreDiff(ctx context.Context, task *model.Task, rawDiff st
 		)
 	}
 
-	// 2. 构建 line_map（轻量索引）
+	// 2. 构建 line_map（轻量索引，按文件路径分组）
 	if len(parsedFiles) > 0 {
-		// 通常 GitLab diff 只有一个文件？不，diff 可能有多文件
-		// 设计约定：目前只处理首个文件的 line_map（如果 MR 只有一个文件变更）
-		// 多文件场景交由调用方扩展
-		var allLines []diff.DiffLineInfo
+		lineMapByFile := make(map[string][]diff.DiffLineInfo)
 		for _, pf := range parsedFiles {
+			var fileLines []diff.DiffLineInfo
 			for _, line := range pf.Lines {
 				t := ""
 				switch line.Type {
@@ -99,14 +97,17 @@ func (ds *DiffStore) StoreDiff(ctx context.Context, task *model.Task, rawDiff st
 				default:
 					continue
 				}
-				allLines = append(allLines, diff.DiffLineInfo{
+				fileLines = append(fileLines, diff.DiffLineInfo{
 					N: line.NewLineNo,
 					O: line.OldLineNo,
 					T: t,
 				})
 			}
+			if len(fileLines) > 0 {
+				lineMapByFile[pf.NewPath] = fileLines
+			}
 		}
-		lineMapJSON, err := json.Marshal(allLines)
+		lineMapJSON, err := json.Marshal(lineMapByFile)
 		if err != nil {
 			zap.L().Warn("marshal line_map failed",
 				zap.Error(err),
