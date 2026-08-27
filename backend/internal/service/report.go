@@ -73,16 +73,14 @@ type scoreDist struct {
 
 // kpiData KPI数据
 type kpiData struct {
-	TotalMRs       int64
-	TotalChanges   int64
-	AvgScore       float64
-	LowQuality     int64
-	ActiveProjects int64
+	TotalMRs     int64
+	TotalChanges int64
+	AvgScore     float64
+	LowQuality   int64
 	// 第二行KPI
 	Additions   int64     // 新增行数
 	Deletions   int64     // 删除行数
 	ReviewCount int64     // 代码Review次数
-	TaskCount   int64     // 深度代码Review次数
 	StateDist   stateDist `gorm:"-"` // MR状态分布（非ORM字段）
 }
 
@@ -99,8 +97,6 @@ type momData struct {
 	AdditionsChange   string
 	ReviewCountTrend  string
 	ReviewCountChange string
-	TaskCountTrend    string
-	TaskCountChange   string
 }
 
 // stateDist 状态分布
@@ -118,6 +114,7 @@ type sysStatus struct {
 	ModelHealth       string
 	AvgReviewTime     string
 	RuleTotalCount    int64
+	VulnTotalCount    int64
 }
 
 // tokenUsageData Token 用量统计（用于周报月报，简化版：仅概览，无 TOP 排行）
@@ -203,15 +200,6 @@ func queryKPI(start, end time.Time) kpiData {
 		Count(&lq)
 	k.LowQuality = lq
 
-	// 活跃项目数（不排除 closed）
-	var ap int64
-	model.DB.Model(&model.MergeRequestReviewLog{}).
-		Select("COUNT(DISTINCT project_name)").
-		Where("COALESCE(mr_created_at, synced_at) >= ?", start).
-		Where("COALESCE(mr_created_at, synced_at) < ?", end).
-		Scan(&ap)
-	k.ActiveProjects = ap
-
 	// -------- 第二行 KPI --------
 	// 新增/删除行数（排除 closed MR）
 	model.DB.Model(&model.MergeRequestReviewLog{}).
@@ -229,14 +217,6 @@ func queryKPI(start, end time.Time) kpiData {
 		Where("COALESCE(mr_created_at, synced_at) < ?", end).
 		Scan(&rc)
 	k.ReviewCount = rc
-
-	// 深度代码Review次数（成功task数）
-	var tc int64
-	model.DB.Model(&model.Task{}).
-		Where("status = ?", model.TaskSuccess).
-		Where("created_at >= ? AND created_at < ?", start, end).
-		Count(&tc)
-	k.TaskCount = tc
 
 	// MR状态分布
 	k.StateDist = queryStateDist(start, end)
@@ -326,23 +306,6 @@ func calcMOM(cur, prev kpiData, periodName string) momData {
 		} else if p < 0 {
 			m.ReviewCountTrend = "down"
 			m.ReviewCountChange = fmt.Sprintf("↓ %.1f%% %s", -p, label)
-		}
-	}
-
-	// TaskCount
-	m.TaskCountTrend = "flat"
-	m.TaskCountChange = "— " + label + "持平"
-	if prev.TaskCount == 0 && cur.TaskCount > 0 {
-		m.TaskCountTrend = "up"
-		m.TaskCountChange = "↑ 新增"
-	} else if prev.TaskCount > 0 {
-		p := float64(cur.TaskCount-prev.TaskCount) / float64(prev.TaskCount) * 100
-		if p > 0 {
-			m.TaskCountTrend = "up"
-			m.TaskCountChange = fmt.Sprintf("↑ %.1f%% %s", p, label)
-		} else if p < 0 {
-			m.TaskCountTrend = "down"
-			m.TaskCountChange = fmt.Sprintf("↓ %.1f%% %s", -p, label)
 		}
 	}
 
@@ -532,7 +495,7 @@ func queryTokenUsage(start, end time.Time) tokenUsageData {
 }
 
 func querySysStatus() sysStatus {
-	// 审查成功率（基于 task 表）
+	// 审查成功率（基于 task 表，排除 stopped 状态）
 	var taskStats struct {
 		Total int64
 		Done  int64
@@ -540,6 +503,7 @@ func querySysStatus() sysStatus {
 	now := time.Now()
 	model.DB.Model(&model.Task{}).
 		Select("COUNT(*) as total, COUNT(CASE WHEN status = 'success' THEN 1 END) as done").
+		Where("status != ?", model.TaskStopped).
 		Where("created_at >= ?", now.AddDate(0, 0, -7)).
 		Scan(&taskStats)
 	successRate := "N/A"
@@ -580,9 +544,13 @@ func querySysStatus() sysStatus {
 		Scan(&modelStats)
 	modelHealth := fmt.Sprintf("%d/%d", modelStats.Healthy, modelStats.Total)
 
-	// 评审规则总数（当前快照，仅展示数量；不做分类/级别拆分，避免区块过载）
+	// 评审规则总数
 	var ruleTotal int64
 	model.DB.Model(&model.ReviewRule{}).Count(&ruleTotal)
+
+	// 漏洞库总数
+	var vulnTotal int64
+	model.DB.Model(&model.VulnerabilityRecord{}).Count(&vulnTotal)
 
 	return sysStatus{
 		ReviewSuccessRate: successRate,
@@ -590,6 +558,7 @@ func querySysStatus() sysStatus {
 		ModelHealth:       modelHealth,
 		AvgReviewTime:     avgReview,
 		RuleTotalCount:    ruleTotal,
+		VulnTotalCount:    vulnTotal,
 	}
 }
 
@@ -620,7 +589,6 @@ func (s *ReportService) GenerateHTML(reportType string) (string, error) {
 		"TotalChanges":   curKpi.TotalChanges,
 		"AvgScore":       fmt.Sprintf("%.1f", curKpi.AvgScore),
 		"LowQuality":     curKpi.LowQuality,
-		"ActiveProjects": curKpi.ActiveProjects,
 		"MomMRs":         mom.MRsChange,
 		"MomMRTrend":     mom.MRsTrend,
 		"MomAvg":         mom.AvgScoreChange,
@@ -631,14 +599,11 @@ func (s *ReportService) GenerateHTML(reportType string) (string, error) {
 		"Additions":           curKpi.Additions,
 		"Deletions":           curKpi.Deletions,
 		"ReviewCount":         curKpi.ReviewCount,
-		"TaskCount":           curKpi.TaskCount,
 		"StateDist":           curKpi.StateDist,
 		"MomAdditions":        mom.AdditionsChange,
 		"MomAdditionsTrend":   mom.AdditionsTrend,
 		"MomReviewCount":      mom.ReviewCountChange,
 		"MomReviewCountTrend": mom.ReviewCountTrend,
-		"MomTaskCount":        mom.TaskCountChange,
-		"MomTaskCountTrend":   mom.TaskCountTrend,
 		"Dist":                dist,
 		"DevRanks":            devRanks,
 		"ProjectRanks":        projectRanks,
@@ -891,59 +856,45 @@ const reportTemplate = `<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitiona
 <table cellpadding="0" cellspacing="0" border="0" width="852"><tr><td>
 <!-- 第一行 -->
 <table cellpadding="0" cellspacing="0" border="0" width="852"><tr>
-<td width="25%" valign="top" style="padding:0 2px 4px 0;">
+<td width="33.33%" valign="top" style="padding:0 2px 4px 0;">
 <table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="#f8f9ff"><tr><td align="center" style="padding:16px 6px;">
 <font face="Arial,Helvetica,sans-serif" size="6" color="#667eea"><b>{{.TotalMRs}}</b></font><br>
 <font face="Arial,Helvetica,sans-serif" size="1" color="#666666">新增 MR</font><br>
 <font face="Arial,Helvetica,sans-serif" size="1">{{if eq .MomMRTrend "up"}}<font color="#4caf50">{{.MomMRs}}</font>{{else if eq .MomMRTrend "down"}}<font color="#f44336">{{.MomMRs}}</font>{{else}}<font color="#999999">{{.MomMRs}}</font>{{end}}</font>
 </td></tr></table>
 </td>
-<td width="25%" valign="top" style="padding:0 2px 4px 2px;">
+<td width="33.33%" valign="top" style="padding:0 2px 4px 2px;">
 <table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="#f8f9ff"><tr><td align="center" style="padding:16px 6px;">
 <font face="Arial,Helvetica,sans-serif" size="6" color="#667eea"><b>{{.AvgScore}}</b></font><br>
 <font face="Arial,Helvetica,sans-serif" size="1" color="#666666">平均评分</font><br>
 <font face="Arial,Helvetica,sans-serif" size="1">{{if eq .MomAvgTrend "up"}}<font color="#4caf50">{{.MomAvg}}</font>{{else if eq .MomAvgTrend "down"}}<font color="#f44336">{{.MomAvg}}</font>{{else}}<font color="#999999">{{.MomAvg}}</font>{{end}}</font>
 </td></tr></table>
 </td>
-<td width="25%" valign="top" style="padding:0 2px 4px 2px;">
+<td width="33.33%" valign="top" style="padding:0 0 4px 2px;">
 <table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="#f8f9ff"><tr><td align="center" style="padding:16px 6px;">
 <font face="Arial,Helvetica,sans-serif" size="6" color="#667eea"><b>{{.LowQuality}}</b></font><br>
 <font face="Arial,Helvetica,sans-serif" size="1" color="#666666">低质量 MR</font><br>
 <font face="Arial,Helvetica,sans-serif" size="1">{{if eq .MomLQTrend "down"}}<font color="#4caf50">{{.MomLQ}}</font>{{else if eq .MomLQTrend "up"}}<font color="#f44336">{{.MomLQ}}</font>{{else}}<font color="#999999">{{.MomLQ}}</font>{{end}}</font>
 </td></tr></table>
 </td>
-<td width="25%" valign="top" style="padding:0 0 4px 2px;">
-<table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="#f8f9ff"><tr><td align="center" style="padding:16px 6px;">
-<font face="Arial,Helvetica,sans-serif" size="6" color="#667eea"><b>{{.ActiveProjects}}</b></font><br>
-<font face="Arial,Helvetica,sans-serif" size="1" color="#666666">活跃项目</font><br>
-<font face="Arial,Helvetica,sans-serif" size="1" color="#999999">环比持平</font>
-</td></tr></table>
-</td>
 </tr></table>
 <!-- 第二行 -->
 <table cellpadding="0" cellspacing="0" border="0" width="852"><tr>
-<td width="25%" valign="top" style="padding:4px 2px 0 0;">
+<td width="33.33%" valign="top" style="padding:4px 2px 0 0;">
 <table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="#f8f9ff"><tr><td align="center" style="padding:16px 6px;">
 <font face="Arial,Helvetica,sans-serif" size="6" color="#667eea"><b>{{numberFormat .TotalChanges}}</b></font><br>
 <font face="Arial,Helvetica,sans-serif" size="1" color="#666666">代码变更量</font><br>
 <font face="Arial,Helvetica,sans-serif" size="1">{{if eq .MomAdditionsTrend "up"}}<font color="#4caf50">{{.MomAdditions}}</font>{{else if eq .MomAdditionsTrend "down"}}<font color="#f44336">{{.MomAdditions}}</font>{{else}}<font color="#999999">{{.MomAdditions}}</font>{{end}}</font>
 </td></tr></table>
 </td>
-<td width="25%" valign="top" style="padding:4px 2px 0 2px;">
+<td width="33.33%" valign="top" style="padding:4px 2px 0 2px;">
 <table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="#f8f9ff"><tr><td align="center" style="padding:16px 6px;">
 <font face="Arial,Helvetica,sans-serif" size="6" color="#667eea"><b>{{.ReviewCount}}</b></font><br>
 <font face="Arial,Helvetica,sans-serif" size="1" color="#666666">代码 Review 次数</font><br>
 <font face="Arial,Helvetica,sans-serif" size="1">{{if eq .MomReviewCountTrend "up"}}<font color="#4caf50">{{.MomReviewCount}}</font>{{else if eq .MomReviewCountTrend "down"}}<font color="#f44336">{{.MomReviewCount}}</font>{{else}}<font color="#999999">{{.MomReviewCount}}</font>{{end}}</font>
 </td></tr></table>
 </td>
-<td width="25%" valign="top" style="padding:4px 2px 0 2px;">
-<table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="#f8f9ff"><tr><td align="center" style="padding:16px 6px;">
-<font face="Arial,Helvetica,sans-serif" size="6" color="#667eea"><b>{{.TaskCount}}</b></font><br>
-<font face="Arial,Helvetica,sans-serif" size="1" color="#666666">深度代码 Review</font><br>
-<font face="Arial,Helvetica,sans-serif" size="1">{{if eq .MomTaskCountTrend "up"}}<font color="#4caf50">{{.MomTaskCount}}</font>{{else if eq .MomTaskCountTrend "down"}}<font color="#f44336">{{.MomTaskCount}}</font>{{else}}<font color="#999999">{{.MomTaskCount}}</font>{{end}}</font>
-</td></tr></table>
-</td>
-<td width="25%" valign="top" style="padding:4px 0 0 2px;">
+<td width="33.33%" valign="top" style="padding:4px 0 0 2px;">
 <table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="#f8f9ff"><tr><td align="center" style="padding:16px 6px;">
 <font face="Arial,Helvetica,sans-serif" size="6" color="#667eea"><b>{{.StateDist.Merged}}/{{.StateDist.Opened}}/{{.StateDist.Closed}}</b></font><br>
 <font face="Arial,Helvetica,sans-serif" size="1" color="#666666">merged / opened / closed</font><br>
@@ -1119,6 +1070,8 @@ const reportTemplate = `<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitiona
 <td align="right" style="padding:8px 10px;border-top:1px solid #f0f0f5;"><font face="Arial,Helvetica,sans-serif" size="2" color="#333333"><b>{{.SysStatus.AvgReviewTime}}</b></font></td></tr>
 <tr><td style="padding:8px 10px;border-top:1px solid #f0f0f5;"><font face="Arial,Helvetica,sans-serif" size="2" color="#666666">评审规则总数</font></td>
 <td align="right" style="padding:8px 10px;border-top:1px solid #f0f0f5;"><font face="Arial,Helvetica,sans-serif" size="2" color="#333333"><b>{{.SysStatus.RuleTotalCount}} 条</b></font></td></tr>
+<tr><td style="padding:8px 10px;border-top:1px solid #f0f0f5;"><font face="Arial,Helvetica,sans-serif" size="2" color="#666666">漏洞库总数</font></td>
+<td align="right" style="padding:8px 10px;border-top:1px solid #f0f0f5;"><font face="Arial,Helvetica,sans-serif" size="2" color="#333333"><b>{{.SysStatus.VulnTotalCount}} 条</b></font></td></tr>
 </table>
 </td></tr></table>
 
