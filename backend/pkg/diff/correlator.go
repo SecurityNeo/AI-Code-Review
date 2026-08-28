@@ -31,12 +31,21 @@ type CorrectionResult struct {
 // LineCorrelator 行号校正器
 type LineCorrelator struct {
 	// filePath -> ParsedDiffFile mapping
-	fileMap map[string]*ParsedDiffFile
+	fileMap            map[string]*ParsedDiffFile
+	minFuzzyConfidence float64 // fuzzy 匹配最小置信度阈值，低于此值视为不匹配
 }
 
 // NewLineCorrelator 创建校正器
 func NewLineCorrelator(fileMap map[string]*ParsedDiffFile) *LineCorrelator {
-	return &LineCorrelator{fileMap: fileMap}
+	return NewLineCorrelatorWithThreshold(fileMap, 0.3)
+}
+
+// NewLineCorrelatorWithThreshold 创建带自定义阈值的校正器
+func NewLineCorrelatorWithThreshold(fileMap map[string]*ParsedDiffFile, threshold float64) *LineCorrelator {
+	if threshold <= 0 {
+		threshold = 0.3 // 安全默认值
+	}
+	return &LineCorrelator{fileMap: fileMap, minFuzzyConfidence: threshold}
 }
 
 // CorrectIssue 对单个 Issue 进行校正
@@ -90,6 +99,12 @@ func (lc *LineCorrelator) CorrectIssue(filePath string, startLine, endLine int, 
 			confidence = 0 // 两边都是空字符串，认为无意义匹配
 		} else {
 			confidence = 1.0 - float64(dist)/float64(maxLen)
+		}
+		// 【P1 修复】置信度低于阈值时，视为不匹配，避免错误校正
+		if confidence < lc.minFuzzyConfidence {
+			result.Message = fmt.Sprintf("模糊匹配置信度 %.2f 低于阈值 %.2f，不校正",
+				confidence, lc.minFuzzyConfidence)
+			return result
 		}
 		result.NewStart = getEffectiveLineNo(fuzzyLine)
 		result.NewEnd = getEffectiveLineNo(fuzzyLine)

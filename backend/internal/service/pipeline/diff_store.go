@@ -130,10 +130,31 @@ func (ds *DiffStore) StoreDiff(ctx context.Context, task *model.Task, rawDiff st
 		}
 	}
 
-	// 3. 写入数据库
+	// 3. 写入数据库（使用 FirstOrCreate 避免并发写入或重试时产生重复记录）
 	if model.DB == nil {
 		return nil, fmt.Errorf("model.DB is nil, cannot persist mr_diff_meta")
 	}
+	// 先尝试查找是否已存在记录
+	var existing model.MRDiffMeta
+	res := model.DB.Where("task_id = ?", task.ID).First(&existing)
+	if res.Error == nil {
+		// 已存在：执行更新（幂等覆盖）
+		updates := map[string]interface{}{
+			"project_id":    meta.ProjectID,
+			"mr_iid":        meta.MRIID,
+			"object_key":    meta.ObjectKey,
+			"base_sha":      meta.BaseSha,
+			"head_sha":      meta.HeadSha,
+			"start_sha":     meta.StartSha,
+			"line_map_json": meta.LineMapJSON,
+		}
+		if err := model.DB.Model(&existing).Updates(updates).Error; err != nil {
+			return nil, fmt.Errorf("update existing mr_diff_meta failed: %w", err)
+		}
+		meta.ID = existing.ID
+		return meta, nil
+	}
+	// 不存在：创建新记录
 	if err := model.DB.Create(meta).Error; err != nil {
 		return nil, fmt.Errorf("create mr_diff_meta failed: %w", err)
 	}

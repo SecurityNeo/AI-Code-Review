@@ -173,6 +173,13 @@ func SmartSplitIntoBatches(
 ) []Batch {
 	estimator := NewTokenEstimator()
 	availableTokens := maxTokensPerBatch - estimator.EstimateOverheadTokens(overhead)
+
+	// 【P1 修复】若启用了 [new|old] 行号前缀注入，需预留额外 token 余量
+	// 每行前缀约 20-35 字符，按 4 chars/token 折算约 5-9 tokens/行
+	// 为简化，统一预留 10% 可用 token 作为余量
+	if cfg := config.Load().DiffLineMap; cfg.Enabled && cfg.InjectLineNumbers {
+		availableTokens = int(float64(availableTokens) * 0.9)
+	}
 	if availableTokens <= 0 {
 		// 极端情况：上下文本身就超过限制，但仍尝试给 diff 留一半配额
 		availableTokens = maxTokensPerBatch / 2

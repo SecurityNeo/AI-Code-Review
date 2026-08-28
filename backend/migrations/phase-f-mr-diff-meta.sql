@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS `mr_diff_meta` (
     `head_sha` VARCHAR(64) NOT NULL DEFAULT '',
     `start_sha` VARCHAR(64) NOT NULL DEFAULT '',
     `line_map_json` LONGTEXT,
-    INDEX `idx_mr_diff_meta_task_id` (`task_id`),
+    UNIQUE INDEX `idx_mr_diff_meta_task_id` (`task_id`),
     INDEX `idx_mr_diff_meta_project_id` (`project_id`),
     INDEX `idx_mr_diff_meta_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

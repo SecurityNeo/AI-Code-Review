@@ -44,7 +44,8 @@ func ApplyLineCorrections(issues []llm.AIReviewIssue, rawDiff string, cfg *confi
 		fileMap[pf.NewPath] = pf
 	}
 
-	correlator := diff.NewLineCorrelator(fileMap)
+	// 【P1 修复】使用带阈值的校正器，避免低置信度 fuzzy 匹配导致错误校正
+	correlator := diff.NewLineCorrelatorWithThreshold(fileMap, cfg.MinFuzzyConfidence)
 
 	// 【P2】指标收集
 	var corrected, unchanged, exactMatch, fuzzyMatch int
