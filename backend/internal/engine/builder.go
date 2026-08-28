@@ -1254,6 +1254,12 @@ func maybeInjectLineNumbers(rawDiff, filePath string, projectID uint) string {
 		return ""
 	}
 
+	// GitLab API 返回的单文件 diff 通常不带 diff --git 头；解析行号需要文件头以提取路径。
+	// 若缺失，手动添加模拟头，使 parser 和 BuildPrompt 能正确工作。
+	if !strings.HasPrefix(rawDiff, "diff --git ") {
+		rawDiff = fmt.Sprintf("diff --git a/%s b/%s\n%s", filePath, filePath, rawDiff)
+	}
+
 	parser := diff.NewParser()
 	parsedFiles, err := parser.Parse(rawDiff)
 	if err != nil || len(parsedFiles) == 0 {
