@@ -360,43 +360,91 @@ function changePageSize() {
     renderCards(currentCategory);
 }
 
-/* ---------- Example Request Generator ---------- */
-function generateExampleRequest(t) {
-    if (!t.params || t.params.length === 0) return '{\n  // 无参数\n}';
-    const obj = {};
-    t.params.forEach(p => {
-        const key = p.n;
-        const type = p.t;
-        const required = p.r;
-        // 根据常见参数名生成合理示例值
-        switch (key) {
-            case 'task_id': obj[key] = 2084; break;
-            case 'issue_id': obj[key] = 301; break;
-            case 'project_id': obj[key] = 12; break;
-            case 'mr_iid': obj[key] = 42; break;
-            case 'limit': obj[key] = 5; break;
-            case 'status': obj[key] = 'success'; break;
-            case 'filter': obj[key] = 'unread'; break;
-            case 'severity': obj[key] = 'high'; break;
-            case 'category': obj[key] = 'security'; break;
-            case 'period': obj[key] = 'week'; break;
-            case 'group_by': obj[key] = 'day'; break;
-            case 'mine': obj[key] = true; break;
-            case 'admin_view': obj[key] = false; break;
-            case 'user_review_comment': obj[key] = '第32行的并发处理判断有误，应该用 channel 而非锁'; break;
-            case 'selected_comment_ids': obj[key] = [1, 3]; break;
-            case 'comment': obj[key] = '已修复，增加了 null 校验'; break;
-            case 'reason': obj[key] = '已经做了严格校验，不会出现该问题'; break;
-            case 'x_im_provider': obj[key] = 'wecom'; break;
-            case 'x_im_user_id': obj[key] = 'user_xxx'; break;
-            default:
-                if (type === 'integer') obj[key] = 1234;
-                else if (type === 'boolean') obj[key] = false;
-                else if (type === 'array') obj[key] = [];
-                else obj[key] = '...';
-        }
+/* ---------- Example Request Generator (with field annotations) ---------- */
+function getExampleValue(key, type) {
+    switch (key) {
+        case 'task_id': return 2084;
+        case 'issue_id': return 301;
+        case 'project_id': return 12;
+        case 'mr_iid': return 42;
+        case 'limit': return 5;
+        case 'status': return 'success';
+        case 'filter': return 'unread';
+        case 'severity': return 'high';
+        case 'category': return 'security';
+        case 'period': return 'week';
+        case 'group_by': return 'day';
+        case 'mine': return true;
+        case 'admin_view': return false;
+        case 'user_review_comment': return '第32行的并发处理判断有误，应该用 channel 而非锁';
+        case 'selected_comment_ids': return [1, 3];
+        case 'comment': return '已修复，增加了 null 校验';
+        case 'reason': return '已经做了严格校验，不会出现该问题';
+        case 'x_im_provider': return 'wecom';
+        case 'x_im_user_id': return 'user_xxx';
+        default:
+            if (type === 'integer') return 1234;
+            if (type === 'boolean') return false;
+            if (type === 'array') return [];
+            return '...';
+    }
+}
+
+function generateAnnotatedRequest(t) {
+    if (!t.params || t.params.length === 0) return '// 无参数';
+    const lines = [];
+    lines.push('{');
+    t.params.forEach((p, i) => {
+        const val = getExampleValue(p.n, p.t);
+        const comma = i < t.params.length - 1 ? ',' : '';
+        const line = `  "${p.n}": ${JSON.stringify(val)}${comma}`;
+        // 计算填充空格使注释右对齐
+        const padding = Math.max(1, 38 - line.length);
+        const reqMark = p.r ? '必填' : '可选';
+        const comment = (p.d || '') + (p.d && p.d.includes(reqMark) ? '' : `（${reqMark}）`);
+        lines.push(line + ' '.repeat(padding) + '// ' + comment);
     });
-    return JSON.stringify(obj, null, 2);
+    lines.push('}');
+    return lines.join('\n');
+}
+
+function inferResponseComments(jsonStr) {
+    try {
+        const obj = JSON.parse(jsonStr);
+        const comments = {};
+        for (const [k, v] of Object.entries(obj)) {
+            if (k === 'data') comments[k] = '业务数据';
+            else if (k === 'success') comments[k] = '是否执行成功';
+            else if (k === 'message') comments[k] = '返回消息';
+            else if (k === 'task_id') comments[k] = '任务 ID';
+            else if (k === 'issue_id') comments[k] = 'Issue ID';
+            else if (k === 'status') comments[k] = '状态';
+            else if (k === 'total') comments[k] = '总记录数';
+            else if (k === 'marked_count') comments[k] = '标记数量';
+            else if (Array.isArray(v)) comments[k] = '数组';
+            else if (typeof v === 'object' && v !== null) comments[k] = '嵌套对象';
+            else comments[k] = typeof v;
+        }
+        return comments;
+    } catch (e) { return {}; }
+}
+
+function annotateJSONString(jsonStr, fieldComments) {
+    // 先 pretty-print
+    let pretty;
+    try { pretty = JSON.stringify(JSON.parse(jsonStr), null, 2); }
+    catch (e) { pretty = jsonStr; }
+
+    const lines = pretty.split('\n');
+    return lines.map(line => {
+        const match = line.match(/^(\s*)"([^"]+)":/);
+        if (!match) return line;
+        const key = match[2];
+        const comment = fieldComments[key];
+        if (!comment) return line;
+        const padding = Math.max(1, 38 - line.length);
+        return line + ' '.repeat(padding) + '// ' + comment;
+    }).join('\n');
 }
 
 /* ---------- Detail Modal ---------- */
@@ -410,8 +458,10 @@ function openDetail(toolName) {
         : '<span class="modal-badge" style="background:#dcfce7;color:#15803d;">统计</span>';
     const dangerousBadge = t.dangerous ? '<span class="modal-badge" style="background:#fee2e2;color:#991b1b;margin-left:.25rem;">需确认</span>' : '';
 
-    const reqExample = generateExampleRequest(t);
-    const respExample = t.response_example || '{\n  // 暂无示例返回\n}';
+    const reqExample = generateAnnotatedRequest(t);
+    const respRaw = t.response_example || '{"success":true}';
+    const respComments = inferResponseComments(respRaw);
+    const respExample = annotateJSONString(respRaw, respComments);
 
     document.getElementById('modalBody').innerHTML = `
         <!-- 顶部元信息 -->
@@ -425,16 +475,16 @@ function openDetail(toolName) {
             <div class="modal-desc">${escapeHtml(t.description)}</div>
         </div>
 
-        <!-- 示例请求体（替代原来的参数表格） -->
+        <!-- 请求示例 -->
         <div class="modal-section">
             <div class="modal-label"><i class="fas fa-paper-plane" style="font-size:.625rem;"></i> 请求示例</div>
-            <div class="modal-code-block">${escapeHtml(reqExample)}</div>
+            <div class="modal-code-block" style="white-space:pre;">${escapeHtml(reqExample)}</div>
         </div>
 
-        <!-- 示例返回 -->
+        <!-- 返回示例 -->
         <div class="modal-section">
             <div class="modal-label"><i class="fas fa-reply" style="font-size:.625rem;"></i> 返回示例</div>
-            <div class="modal-code-block">${escapeHtml(respExample)}</div>
+            <div class="modal-code-block" style="white-space:pre;">${escapeHtml(respExample)}</div>
         </div>
 
         ${t.requires && t.requires.length ? `<div class="modal-section"><div class="modal-warning"><i class="fas fa-info-circle"></i>前置条件: 需要 ${t.requires.join(', ')}</div></div>` : ''}

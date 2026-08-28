@@ -321,18 +321,19 @@ func ListMCPTools(c *gin.Context) {
 	items := make([]map[string]interface{}, 0, len(tools))
 	for _, t := range tools {
 		items = append(items, map[string]interface{}{
-			"tool_name":    t.ToolName,
-			"display_name": t.DisplayName,
-			"description":  t.Description,
-			"category":     t.Category,
-			"icon":         t.Icon,
-			"color":        t.Color,
-			"tags":         t.Tags,
-			"params":       t.Params,
-			"phrases":      t.Phrases,
-			"requires":     t.Requires,
-			"dangerous":    t.Dangerous,
-			"sort_order":   t.SortOrder,
+			"tool_name":        t.ToolName,
+			"display_name":     t.DisplayName,
+			"description":      t.Description,
+			"category":         t.Category,
+			"icon":             t.Icon,
+			"color":            t.Color,
+			"tags":             t.Tags,
+			"params":           t.Params,
+			"phrases":          t.Phrases,
+			"requires":         t.Requires,
+			"response_example": t.ResponseExample,
+			"dangerous":        t.Dangerous,
+			"sort_order":       t.SortOrder,
 		})
 	}
 
