@@ -292,7 +292,7 @@ func (s *EscalationService) collectAlert(userID uint, level int, typ, title, ite
 
 func (s *EscalationService) flushAlerts() {
 	if s.isQuietHours() {
-		zap.L().Info("flushAlerts: in quiet hours, skipping alert send",
+		zap.L().Debug("flushAlerts: in quiet hours, skipping alert send",
 			zap.Int("batch_count", len(s.alertCollector)))
 		s.alertCollector = nil
 		return
@@ -313,7 +313,7 @@ func (s *EscalationService) flushAlerts() {
 // 分页处理，避免 OOM
 func (s *EscalationService) RunDailyEscalation() {
 	now := time.Now()
-	zap.L().Info("RunDailyEscalation started", zap.Time("now", now))
+	zap.L().Debug("RunDailyEscalation started", zap.Time("now", now))
 	defer func() {
 		if r := recover(); r != nil {
 			zap.L().Error("RunDailyEscalation panic recovered", zap.Any("recover", r))
@@ -325,7 +325,7 @@ func (s *EscalationService) RunDailyEscalation() {
 
 	// 冻结期入口拦截：免打扰时段或节假日直接跳过
 	if s.shouldFreezeExecution() {
-		zap.L().Info("RunDailyEscalation skipped: in frozen period",
+		zap.L().Debug("RunDailyEscalation skipped: in frozen period",
 			zap.String("quiet_start", s.quietStart),
 			zap.String("quiet_end", s.quietEnd),
 			zap.Time("now", now))
@@ -441,7 +441,7 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 	for k := range stageMap {
 		stageKeys = append(stageKeys, k)
 	}
-	zap.L().Info("processEscalation debug",
+	zap.L().Debug("processEscalation debug",
 		zap.Uint("issue_id", issue.ID),
 		zap.Int("age_hours", ageHours),
 		zap.Int("escalation_level", issue.EscalationLevel),
@@ -452,13 +452,13 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 	for level := issue.EscalationLevel + 1; level <= maxLevel; level++ {
 		stage, ok := stageMap[level]
 		if !ok {
-			zap.L().Warn("processEscalation: stage not found for level",
+			zap.L().Debug("processEscalation: stage not found for level",
 				zap.Uint("issue_id", issue.ID),
 				zap.Int("level", level))
 			continue // 该 level 未配置，跳过
 		}
 
-		zap.L().Info("processEscalation: processing level",
+		zap.L().Debug("processEscalation: processing level",
 			zap.Uint("issue_id", issue.ID),
 			zap.Int("level", level),
 			zap.Int("threshold", stage.ThresholdHours),
@@ -477,7 +477,7 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 
 		case EscalationLevel72h:
 			stewards := s.findStewards(task.ProjectID, issue.Category, project.Language)
-			zap.L().Info("processEscalation Level2 findStewards",
+			zap.L().Debug("processEscalation Level2 findStewards",
 				zap.Uint("issue_id", issue.ID),
 				zap.Int("steward_count", len(stewards)))
 			if issue.OwnerID != nil {
@@ -499,7 +499,7 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 				for _, st := range stewards {
 					notifyUserID := st.UserID
 					if notifyUserID == 0 {
-						zap.L().Warn("escalation L2: skip steward alert, no mapped user id",
+						zap.L().Debug("escalation L2: skip steward alert, no mapped user id",
 							zap.Uint("user_id", st.UserID),
 							zap.String("gitlab_username", st.User.GitlabUsername))
 					} else {
@@ -529,7 +529,7 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 
 		case EscalationLevel120hSteward:
 			stewards := s.findStewards(task.ProjectID, issue.Category, project.Language)
-			zap.L().Info("processEscalation Level3 findStewards",
+			zap.L().Debug("processEscalation Level3 findStewards",
 				zap.Uint("issue_id", issue.ID),
 				zap.Int("steward_count", len(stewards)),
 				zap.String("category", issue.Category),
@@ -545,7 +545,7 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 				for _, st := range stewards {
 					notifyUserID := st.UserID
 					if notifyUserID == 0 {
-						zap.L().Warn("escalation L3: skip steward alert, no mapped user id",
+						zap.L().Debug("escalation L3: skip steward alert, no mapped user id",
 							zap.Uint("user_id", st.UserID),
 							zap.String("gitlab_username", st.User.GitlabUsername))
 						continue
@@ -557,7 +557,7 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 				}
 				if stage.NotifyIM {
 					mentions := buildStewardMentions(stewards)
-					zap.L().Info("processEscalation Level3 collectIM",
+					zap.L().Debug("processEscalation Level3 collectIM",
 						zap.Uint("issue_id", issue.ID),
 						zap.Int("mention_count", len(mentions)),
 						zap.Strings("mentions", mentions),
@@ -573,7 +573,7 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 					}, issue.ID, issue.Message)
 				}
 			} else {
-				zap.L().Warn("processEscalation Level3: no stewards found, skipping IM",
+				zap.L().Debug("processEscalation Level3: no stewards found, skipping IM",
 					zap.Uint("issue_id", issue.ID),
 					zap.Uint("project_id", task.ProjectID),
 					zap.String("category", issue.Category))
@@ -597,7 +597,7 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 			}
 			if stage.NotifyIM {
 				mentions := s.buildAdminMentions(admins)
-				zap.L().Info("processEscalation Level4 collectIM",
+				zap.L().Debug("processEscalation Level4 collectIM",
 					zap.Uint("issue_id", issue.ID),
 					zap.Int("mention_count", len(mentions)),
 					zap.Strings("mentions", mentions))
@@ -639,7 +639,7 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 					fmt.Sprintf("【全局通知】项目 %s 有 Issue 已自动归档\nIssue #%d 因超期 %s 未处理，系统已自动归档。\nMR：%s",
 						project.Name, issue.ID, dur, task.MRTitle))
 			}
-			zap.L().Info("issue auto archived", zap.Uint("issue_id", issue.ID), zap.Int("age_hours", ageHours))
+			zap.L().Debug("issue auto archived", zap.Uint("issue_id", issue.ID), zap.Int("age_hours", ageHours))
 			return // 归档后直接退出，不再更新 escalation_level（已在上面 update 中设置）
 		}
 	}
@@ -653,7 +653,7 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 //    否则 GORM 的 Where 条件会叠加（如 scope_type='rc' AND scope_type='default'），导致 fallback 永远返回 0 行。
 // ⚠️ 返回结果已过滤掉 users.enabled=false 的记录，避免已禁用人员被分配 Issue 或收到通知。
 func (s *EscalationService) findStewards(projectID uint, category, language string) []model.ProjectResponsibility {
-	zap.L().Info("findStewards called",
+	zap.L().Debug("findStewards called",
 		zap.Uint("project_id", projectID),
 		zap.String("category", category),
 		zap.String("language", language))
@@ -665,14 +665,14 @@ func (s *EscalationService) findStewards(projectID uint, category, language stri
 			Order("priority ASC, created_at ASC").
 			Find(&catRes).Error; err == nil && len(catRes) > 0 {
 			if active := filterActiveResponsibilities(catRes); len(active) > 0 {
-				zap.L().Info("findStewards: matched by category",
+				zap.L().Debug("findStewards: matched by category",
 					zap.Uint("project_id", projectID),
 					zap.String("category", category),
 					zap.Int("count", len(active)))
 				return active
 			}
 		}
-		zap.L().Info("findStewards: no active category match",
+		zap.L().Debug("findStewards: no active category match",
 			zap.Uint("project_id", projectID),
 			zap.String("category", category))
 	}
@@ -684,14 +684,14 @@ func (s *EscalationService) findStewards(projectID uint, category, language stri
 			Order("priority ASC, created_at ASC").
 			Find(&langRes).Error; err == nil && len(langRes) > 0 {
 			if active := filterActiveResponsibilities(langRes); len(active) > 0 {
-				zap.L().Info("findStewards: matched by language",
+				zap.L().Debug("findStewards: matched by language",
 					zap.Uint("project_id", projectID),
 					zap.String("language", normalizedLang),
 					zap.Int("count", len(active)))
 				return active
 			}
 		}
-		zap.L().Info("findStewards: no active language match",
+		zap.L().Debug("findStewards: no active language match",
 			zap.Uint("project_id", projectID),
 			zap.String("language", normalizedLang))
 	}
@@ -703,7 +703,7 @@ func (s *EscalationService) findStewards(projectID uint, category, language stri
 		zap.L().Error("findStewards fallback query failed", zap.Error(err))
 	}
 	active := filterActiveResponsibilities(defRes)
-	zap.L().Info("findStewards: fallback result",
+	zap.L().Debug("findStewards: fallback result",
 		zap.Uint("project_id", projectID),
 		zap.Int("total", len(defRes)),
 		zap.Int("active", len(active)))
@@ -780,7 +780,7 @@ func (s *EscalationService) checkBatchAlerts() {
 
 // SendDailyDigest 每日摘要（09:00 执行）
 func (s *EscalationService) SendDailyDigest() {
-	zap.L().Info("SendDailyDigest started", zap.Time("now", time.Now()))
+	zap.L().Debug("SendDailyDigest started", zap.Time("now", time.Now()))
 	defer func() {
 		if r := recover(); r != nil {
 			zap.L().Error("SendDailyDigest panic recovered", zap.Any("recover", r))
@@ -790,7 +790,7 @@ func (s *EscalationService) SendDailyDigest() {
 	// 加载配置以获取 quiet hours，并检查是否处于冻结期
 	_ = s.loadEscalationConfig()
 	if s.shouldFreezeExecution() {
-		zap.L().Info("SendDailyDigest skipped: in frozen period")
+		zap.L().Debug("SendDailyDigest skipped: in frozen period")
 		return
 	}
 
@@ -847,7 +847,7 @@ func (s *EscalationService) findProjectNotifier(project model.Project) *model.We
 func (s *EscalationService) sendEscalationIMRaw(project model.Project, task model.Task, mentions []string, recipientType string, msg string) {
 	notifier := s.findProjectNotifier(project)
 	if notifier == nil {
-		zap.L().Warn("sendEscalationIMRaw: no notifier found",
+		zap.L().Debug("sendEscalationIMRaw: no notifier found",
 			zap.Uint("project_id", project.ID),
 			zap.Uint("task_id", task.ID))
 		return
@@ -876,7 +876,7 @@ func (s *EscalationService) sendEscalationIMRaw(project model.Project, task mode
 			zap.Uint("task_id", task.ID),
 			zap.Error(result.Error))
 	}
-	zap.L().Info("sendEscalationIMRaw: sent",
+	zap.L().Debug("sendEscalationIMRaw: sent",
 		zap.Uint("task_id", task.ID),
 		zap.String("recipient_type", recipientType),
 		zap.Bool("ok", ok),
@@ -910,14 +910,14 @@ func (s *EscalationService) collectIM(target imTarget, issueID uint, issueMessag
 			imTemplate:     target.imTemplate,
 		}
 		s.imCollector[key] = batch
-		zap.L().Info("collectIM: created new batch",
+		zap.L().Debug("collectIM: created new batch",
 			zap.String("key", key),
 			zap.Int("level", target.level),
 			zap.String("stage", target.stage),
 			zap.Int("mention_count", len(target.mentions)))
 	}
 	batch.issues = append(batch.issues, imIssue{ID: issueID, Message: issueMessage})
-	zap.L().Info("collectIM: added issue to batch",
+	zap.L().Debug("collectIM: added issue to batch",
 		zap.String("key", key),
 		zap.Uint("issue_id", issueID),
 		zap.Int("batch_size", len(batch.issues)))
@@ -960,18 +960,18 @@ func (s *EscalationService) shouldFreezeExecution() bool {
 // flushIMs 统一 flush 聚合后的 IM 消息
 func (s *EscalationService) flushIMs() {
 	if len(s.imCollector) == 0 {
-		zap.L().Info("flushIMs: no batches to flush")
+		zap.L().Debug("flushIMs: no batches to flush")
 		return
 	}
 	if s.isQuietHours() {
-		zap.L().Info("flushIMs: in quiet hours, skipping IM send",
+		zap.L().Debug("flushIMs: in quiet hours, skipping IM send",
 			zap.String("quiet_start", s.quietStart),
 			zap.String("quiet_end", s.quietEnd),
 			zap.Int("batch_count", len(s.imCollector)))
 		s.imCollector = nil
 		return
 	}
-	zap.L().Info("flushIMs: flushing batches", zap.Int("batch_count", len(s.imCollector)))
+	zap.L().Debug("flushIMs: flushing batches", zap.Int("batch_count", len(s.imCollector)))
 	for _, batch := range s.imCollector {
 		var msg string
 		if batch.imTemplate != "" {
@@ -979,7 +979,7 @@ func (s *EscalationService) flushIMs() {
 		} else {
 			msg = renderIMDefault(batch)
 		}
-		zap.L().Info("flushIMs: sending batch",
+		zap.L().Debug("flushIMs: sending batch",
 			zap.Int("level", batch.level),
 			zap.String("stage", batch.stage),
 			zap.Int("issue_count", len(batch.issues)),
