@@ -106,7 +106,7 @@ func TestDiffStoreBuildObjectKey(t *testing.T) {
 		t.Error("key should contain project_id")
 	}
 	if !strings.Contains(key, "mr_100") {
-		t.Error("key should contain mr_iid")
+		t.Error("key should contain mri_id")
 	}
 	if !strings.Contains(key, "task_1234") {
 		t.Error("key should contain task_id")

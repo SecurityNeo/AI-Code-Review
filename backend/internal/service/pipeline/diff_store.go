@@ -141,7 +141,7 @@ func (ds *DiffStore) StoreDiff(ctx context.Context, task *model.Task, rawDiff st
 		// 已存在：执行更新（幂等覆盖）
 		updates := map[string]interface{}{
 			"project_id":    meta.ProjectID,
-			"mr_iid":        meta.MRIID,
+			"mri_id":        meta.MRIID,
 			"object_key":    meta.ObjectKey,
 			"base_sha":      meta.BaseSha,
 			"head_sha":      meta.HeadSha,
