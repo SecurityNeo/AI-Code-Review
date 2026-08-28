@@ -1,6 +1,6 @@
 package pipeline
 
-import (
+	import (
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ai-optimizer/backend/config"
 	"github.com/ai-optimizer/backend/internal/engine"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/pkg/gitlab"
@@ -1492,6 +1493,13 @@ func (e *PostProcessExecutor) Execute(ctx StageContext) error {
 			result.TotalScore, result.Summary)
 	}
 
+	// 【P0】行号校正：在入库前校正 issues 的行号
+	rawDiff := extractRawDiffFromContext(ctx)
+	if rawDiff != "" {
+		cfg := config.Load().DiffLineMap
+		result.Issues = engine.ApplyLineCorrections(result.Issues, rawDiff, &cfg)
+	}
+
 	// 1. 持久化结构化数据到 review_issues
 	if err := engine.PersistStructuredReview(task.ID, result); err != nil {
 		zap.L().Warn("Pipeline: 持久化结构化评审失败", zap.Error(err))
@@ -1720,4 +1728,29 @@ func saveOverheadCalibration(
 	if err := model.DB.Create(&calibration).Error; err != nil {
 		zap.L().Warn("保存开销校准记录失败", zap.Error(err))
 	}
+}
+
+// extractRawDiffFromContext 从 Pipeline Context 中提取原始 diff 文本
+// 优先从 diff_files_raw 获取，回退到 diff_files
+func extractRawDiffFromContext(ctx StageContext) string {
+	for _, key := range []string{"diff_files_raw", "diff_files"} {
+		val := ctx.GetInput(key)
+		if val == nil {
+			continue
+		}
+		files, ok := val.([]map[string]interface{})
+		if !ok {
+			continue
+		}
+		var parts []string
+		for _, f := range files {
+			if diffText, ok := f["diff"].(string); ok && diffText != "" {
+				parts = append(parts, diffText)
+			}
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, "\n")
+		}
+	}
+	return ""
 }

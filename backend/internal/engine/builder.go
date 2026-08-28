@@ -7,7 +7,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ai-optimizer/backend/config"
 	"github.com/ai-optimizer/backend/internal/model"
+	"github.com/ai-optimizer/backend/pkg/diff"
 	"github.com/ai-optimizer/backend/pkg/gitlab"
 	"github.com/ai-optimizer/backend/pkg/llm"
 )
@@ -427,7 +429,7 @@ func BuildReviewPrompt(ctx *PromptContext) string {
 	// 4. 各智能体预渲染 Markdown（Batch Review 独立评审，不再前置注入 Agent 结论）
 	// 已由 review_arbitration 阶段统一汇总，避免 Token 浪费和限制 LLM 发散能力
 
-	// 5. 待评审代码
+	// 5. 待评审代码（若配置开启，注入 [new|old] 行号前缀）
 	sb.WriteString("【待评审的代码变更】\n")
 	for i, file := range ctx.Files {
 		if file.Diff == "" {
@@ -435,7 +437,7 @@ func BuildReviewPrompt(ctx *PromptContext) string {
 		}
 		sb.WriteString(fmt.Sprintf("### 文件 %d：%s\n", i+1, file.NewPath))
 		sb.WriteString("```diff\n")
-		sb.WriteString(file.Diff)
+		sb.WriteString(maybeInjectLineNumbers(file.Diff, file.NewPath))
 		sb.WriteString("\n```\n\n")
 	}
 
@@ -687,7 +689,7 @@ func BuildFullStructuredPrompt(ctx *PromptContext) (string, *llm.ResponseFormat)
 		sb.WriteString("\n\n")
 	}
 
-	// 待评审代码
+	// 待评审代码（若配置开启，注入 [new|old] 行号前缀）
 	sb.WriteString("【待评审的代码变更】\n")
 	for i, file := range ctx.Files {
 		if file.Diff == "" {
@@ -695,7 +697,7 @@ func BuildFullStructuredPrompt(ctx *PromptContext) (string, *llm.ResponseFormat)
 		}
 		sb.WriteString(fmt.Sprintf("### 文件 %d：%s\n", i+1, file.NewPath))
 		sb.WriteString("```diff\n")
-		sb.WriteString(file.Diff)
+		sb.WriteString(maybeInjectLineNumbers(file.Diff, file.NewPath))
 		sb.WriteString("\n```\n\n")
 	}
 
@@ -784,13 +786,13 @@ func BuildBatchCollectionPrompt(ctx *PromptContext, batchIndex, totalBatches int
 
 	for i, f := range batchFiles {
 		path, _ := f["path"].(string)
-		diff, _ := f["diff"].(string)
-		if diff == "" {
+		diffStr, _ := f["diff"].(string)
+		if diffStr == "" {
 			continue
 		}
 		sb.WriteString(fmt.Sprintf("%d、文件：%s\n", i+1, path))
 		sb.WriteString("```diff\n")
-		sb.WriteString(diff)
+		sb.WriteString(maybeInjectLineNumbers(diffStr, path))
 		sb.WriteString("\n```\n\n")
 	}
 
@@ -1235,6 +1237,37 @@ func buildTestSuggestionSection(suggestions []TestSuggestionItem) string {
 	}
 	sb.WriteString("\n> 注：以上为基于代码分支结构的自动分析建议，实际测试场景需结合业务逻辑判断。\n\n")
 	return sb.String()
+}
+
+// maybeInjectLineNumbers 根据配置决定是否对 diff 文本注入 [new|old] 行号前缀
+// 如果配置未启用或解析失败，直接返回原始 diff 文本
+func maybeInjectLineNumbers(rawDiff, filePath string) string {
+	cfg := config.Load().DiffLineMap
+	if !cfg.Enabled || !cfg.InjectLineNumbers {
+		return rawDiff
+	}
+	if rawDiff == "" {
+		return ""
+	}
+
+	parser := diff.NewParser()
+	parsedFiles, err := parser.Parse(rawDiff)
+	if err != nil || len(parsedFiles) == 0 {
+		return rawDiff
+	}
+
+	// 找到匹配文件路径的 ParsedDiffFile
+	for _, pf := range parsedFiles {
+		if pf.NewPath == filePath || pf.OldPath == filePath {
+			prompt := diff.BuildPrompt(pf, diff.PromptConfig{
+				Enabled:           true,
+				InjectLineNumbers: true,
+			})
+			return prompt
+		}
+	}
+
+	return rawDiff
 }
 
 // buildNoRepeatInstruction 构建禁止重复报告 Agent 发现的指令

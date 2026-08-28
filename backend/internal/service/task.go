@@ -20,6 +20,7 @@ import (
 	"github.com/ai-optimizer/backend/internal/engine"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service/pipeline"
+	"github.com/ai-optimizer/backend/pkg/diff"
 	"github.com/ai-optimizer/backend/pkg/encrypt"
 	"github.com/ai-optimizer/backend/pkg/gitlab"
 	"github.com/ai-optimizer/backend/pkg/llm"
@@ -1277,6 +1278,21 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 	defer unregisterPipelineCancel(task.ID)
 	inputs["_cancel_ch"] = cancelCh
 
+	// 【P0】将原始 diff 存储到对象存储并写入 mr_diff_meta 索引（异步，不阻塞 Pipeline）
+	rawDiffForStore := rebuildRawDiff(diffFilesRaw)
+	if rawDiffForStore != "" {
+		go func(t model.Task, rd string) {
+			storage := GetObjectStorageProvider()
+			ds := pipeline.NewDiffStore(pipeline.DefaultDiffStoreConfig, storage)
+			parser := diff.NewParser()
+			parsedFiles, _ := parser.Parse(rd)
+			_, err := ds.StoreDiff(context.Background(), &t, rd, parsedFiles)
+			if err != nil {
+				zap.L().Warn("StoreDiff failed", zap.Uint("task_id", t.ID), zap.Error(err))
+			}
+		}(task, rawDiffForStore)
+	}
+
 	// 15. 执行 Pipeline 引擎
 	eng := pipeline.NewEngine(model.DB, &pipelineLLMAdapter{svc: NewLLMService()})
 	broadcaster := func(taskID uint, status string, data map[string]interface{}) {
@@ -1940,6 +1956,13 @@ func (s *TaskService) runStructuredAIReview(task model.Task, diffFiles []gitlab.
 			fmt.Errorf("结构化输出解析失败: %w", err)
 	}
 
+	// 【P0】行号校正：在入库前校正 issues 的行号
+	rawDiff := rebuildRawDiff(diffFiles)
+	if rawDiff != "" {
+		cfg := config.Load()
+		parsedResult.Issues = engine.ApplyLineCorrections(parsedResult.Issues, rawDiff, &cfg.DiffLineMap)
+	}
+
 	// 10. 持久化结构化数据
 	if err := engine.PersistStructuredReview(task.ID, parsedResult); err != nil {
 		zap.L().Warn("persist structured review failed", zap.Error(err))
@@ -2019,6 +2042,20 @@ func prepareDiffFilesMeta(diffFiles []gitlab.DiffFile, threshold int) []map[stri
 		})
 	}
 	return result
+}
+
+// rebuildRawDiff 从 GitLab DiffFile 列表重建完整的 unified diff 文本
+func rebuildRawDiff(files []gitlab.DiffFile) string {
+	var parts []string
+	for _, f := range files {
+		if f.Diff != "" {
+			parts = append(parts, f.Diff)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n")
 }
 
 // SaveChatTaskDiffFiles 在 chat 任务成功完成后，异步获取并保存 diff 元信息
