@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 )
 
 type Config struct {
@@ -42,10 +43,12 @@ type Config struct {
 
 // DiffLineMapConfig diff 行号映射系统配置
 type DiffLineMapConfig struct {
-	Enabled           bool `yaml:"enabled"`             // 是否启用系统
-	InjectLineNumbers bool `yaml:"inject_line_numbers"` // 是否注入 [new|old] 行号前缀
-	UseCorrelator     bool `yaml:"use_correlator"`      // 是否启用后端校正
-	StoreDiffRefs     bool `yaml:"store_diff_refs"`     // 是否存储 diff_refs
+	Enabled           bool   `yaml:"enabled"`             // 是否启用系统
+	InjectLineNumbers bool   `yaml:"inject_line_numbers"` // 是否注入 [new|old] 行号前缀
+	UseCorrelator     bool   `yaml:"use_correlator"`      // 是否启用后端校正
+	StoreDiffRefs     bool   `yaml:"store_diff_refs"`     // 是否存储 diff_refs
+	GrayPercent       int    `yaml:"gray_percent"`        // 灰度百分比 0-100（0=关闭灰度，仅总开关控制；>0 时只有命中灰度的任务才启用）
+	GrayMode          string `yaml:"gray_mode"`           // 灰度模式："random" 或 "project_hash"
 }
 
 // Validate 检查配置一致性，返回发现的警告信息
@@ -63,7 +66,36 @@ func (cfg DiffLineMapConfig) Validate() []string {
 			warnings = append(warnings, "store_diff_refs=true but enabled=false, diff refs will not be stored")
 		}
 	}
+	if cfg.GrayPercent < 0 || cfg.GrayPercent > 100 {
+		warnings = append(warnings, "gray_percent should be 0-100")
+	}
+	if cfg.GrayPercent > 0 && cfg.Enabled {
+		if cfg.GrayMode != "random" && cfg.GrayMode != "project_hash" {
+			warnings = append(warnings, "gray_mode should be 'random' or 'project_hash'")
+		}
+	}
 	return warnings
+}
+
+// IsGrayEnabled 判断指定项目是否命中灰度
+// 当 GrayPercent <= 0 时，直接返回 true（不做灰度分流，由总开关控制）
+// 当 GrayPercent > 0 时，按 GrayMode 计算是否命中
+func (cfg DiffLineMapConfig) IsGrayEnabled(projectID uint) bool {
+	if cfg.GrayPercent <= 0 || cfg.GrayPercent >= 100 {
+		return true
+	}
+	var hash uint64
+	switch cfg.GrayMode {
+	case "project_hash":
+		// 使用项目 ID 的确定性哈希，保证同一项目始终命中或始终不命中
+		hash = uint64(projectID)*11400714819323198485 + 1 // simple deterministic hash
+	default:
+		// random: 使用全局随机数（每次调用独立）
+		// 由于无法 import crypto/rand 做快速随机，这里用时间戳的低字节
+		// 实际生产环境应使用 crypto/rand 或 xoshiro 等快速 PRNG
+		hash = uint64(time.Now().UnixNano())
+	}
+	return int(hash%100) < cfg.GrayPercent
 }
 
 func Load() *Config {
@@ -102,6 +134,8 @@ func Load() *Config {
 			InjectLineNumbers: getEnvBool("DIFF_LINE_MAP_INJECT", false),
 			UseCorrelator:     getEnvBool("DIFF_LINE_MAP_CORRELATOR", false),
 			StoreDiffRefs:     getEnvBool("DIFF_LINE_MAP_STORE_DIFF_REFS", false),
+			GrayPercent:       getEnvInt("DIFF_LINE_MAP_GRAY_PERCENT", 0),
+			GrayMode:          getEnv("DIFF_LINE_MAP_GRAY_MODE", "project_hash"),
 		},
 	}
 	return cfg

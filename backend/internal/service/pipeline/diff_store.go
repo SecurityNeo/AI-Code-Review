@@ -45,8 +45,9 @@ func NewDiffStore(cfg DiffStoreConfig, storage ObjectStorage) *DiffStore {
 }
 
 // StoreDiff 将原始 diff 存储到对象存储，并写入 mr_diff_meta 索引
+// 若提供了 diff_refs（baseSha/headSha/startSha），一并写入
 // 返回 mr_diff_meta ID 和可能的 error
-func (ds *DiffStore) StoreDiff(ctx context.Context, task *model.Task, rawDiff string, parsedFiles []*diff.ParsedDiffFile) (*model.MRDiffMeta, error) {
+func (ds *DiffStore) StoreDiff(ctx context.Context, task *model.Task, rawDiff string, parsedFiles []*diff.ParsedDiffFile, baseSha, headSha, startSha string) (*model.MRDiffMeta, error) {
 	if !ds.config.Enabled {
 		zap.L().Info("diff store disabled, skip storing raw diff")
 		return nil, nil
@@ -63,6 +64,9 @@ func (ds *DiffStore) StoreDiff(ctx context.Context, task *model.Task, rawDiff st
 		TaskID:    task.ID,
 		ProjectID: task.ProjectID,
 		MRIID:     task.MRMergeID,
+		BaseSha:   baseSha,
+		HeadSha:   headSha,
+		StartSha:  startSha,
 	}
 
 	// 1. 上传对象存储（如果可用）

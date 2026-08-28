@@ -1,0 +1,16 @@
+diff --git a/mixed.go b/mixed.go
+index 1111111..2222222 100644
+--- a/mixed.go
++++ b/mixed.go
+@@ -1,8 +1,9 @@
+ package main
+
+ func Mixed() {
+-	line1 := "old"
++	line1 := "new"
+ 	line2 := "keep"
++	line3 := "add"
+ 	_ = line1
+ 	_ = line2
++	_ = line3
+ }

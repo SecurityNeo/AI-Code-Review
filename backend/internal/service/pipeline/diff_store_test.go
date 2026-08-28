@@ -38,7 +38,7 @@ func (m *mockStorage) Delete(ctx context.Context, key string) error {
 
 func TestDiffStoreStoreDiff_NilTask(t *testing.T) {
 	ds := NewDiffStore(DefaultDiffStoreConfig, nil)
-	meta, err := ds.StoreDiff(context.Background(), nil, "some diff", nil)
+	meta, err := ds.StoreDiff(context.Background(), nil, "some diff", nil, "", "", "")
 	if meta != nil || err == nil {
 		t.Fatalf("expected error for nil task, got meta=%v err=%v", meta, err)
 	}
@@ -50,7 +50,7 @@ func TestDiffStoreStoreDiff_NilTask(t *testing.T) {
 func TestDiffStoreStoreDiff_EmptyDiff(t *testing.T) {
 	ds := NewDiffStore(DefaultDiffStoreConfig, nil)
 	task := &model.Task{ID: 1, ProjectID: 1, MRMergeID: 1}
-	meta, err := ds.StoreDiff(context.Background(), task, "   \n\t   ", nil)
+	meta, err := ds.StoreDiff(context.Background(), task, "   \n\t   ", nil, "", "", "")
 	if err != nil {
 		t.Fatalf("expected no error for empty diff, got %v", err)
 	}
@@ -66,7 +66,7 @@ func TestDiffStoreStoreDiff_NilParsedFiles(t *testing.T) {
 	mock := &mockStorage{}
 	ds := NewDiffStore(DefaultDiffStoreConfig, mock)
 	task := &model.Task{ID: 1, ProjectID: 1, MRMergeID: 1}
-	meta, err := ds.StoreDiff(context.Background(), task, "diff text here", nil)
+	meta, err := ds.StoreDiff(context.Background(), task, "diff text here", nil, "", "", "")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -81,7 +81,7 @@ func TestDiffStoreStoreDiff_NilParsedFiles(t *testing.T) {
 func TestDiffStoreStoreDiff_Disabled(t *testing.T) {
 	ds := NewDiffStore(DiffStoreConfig{Enabled: false}, nil)
 	task := &model.Task{ID: 1, ProjectID: 1, MRMergeID: 1}
-	meta, err := ds.StoreDiff(context.Background(), task, "some diff", nil)
+	meta, err := ds.StoreDiff(context.Background(), task, "some diff", nil, "", "", "")
 	if err != nil {
 		t.Fatalf("expected no error when disabled, got %v", err)
 	}

@@ -1,0 +1,13 @@
+diff --git a/old.go b/new.go
+similarity index 95%
+rename from old.go
+rename to new.go
+index 1234567..abcdefg 100644
+--- a/old.go
++++ b/new.go
+@@ -1,4 +1,5 @@
+ package main
+
+ func main() {
++	fmt.Println("renamed")
+ }

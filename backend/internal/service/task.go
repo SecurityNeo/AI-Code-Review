@@ -1238,6 +1238,7 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 	// 12. 组装 PromptContext
 	promptCtx := &engine.PromptContext{
 		Files:                 diffFiles,
+		ProjectID:             task.ProjectID, // 【P2】灰度策略需要项目 ID
 		CommitsText:           commitsText,
 		MRTitle:               task.MRTitle,
 		CustomInstruction:     customInstruction,
@@ -1259,10 +1260,14 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 		promptCtx.AgentStatus = buildAgentExecutionStatus(agentCfg)
 	}
 
+	// 【P0】保存原始完整 unified diff（未过滤、未截断），供入库前校正使用
+	rawDiffFull := rebuildRawDiff(diffFilesRaw)
+
 	// 14. 注入 Pipeline Context
 	inputs := map[string]interface{}{
 		"diff_files":          fileMaps,    // 过滤后的 diff，供 review/secret_scan/impact_analysis 等共享
 		"diff_files_raw":      fileMapsRaw, // 原始未过滤 diff，供 dependency_scan 读取 go.mod/package.json 等
+		"raw_diff_full":       rawDiffFull, // 【P0】原始完整 unified diff（未截断），供入库前 Correlator 使用
 		"commits_text":        commitsText,
 		"project_template":    projectTemplate.Prompt,
 		"prompt_context":      promptCtx,
@@ -1282,11 +1287,28 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 	rawDiffForStore := rebuildRawDiff(diffFilesRaw)
 	if rawDiffForStore != "" {
 		go func(t model.Task, rd string) {
+			// 【P1】获取 diff_refs（base_sha / head_sha / start_sha）
+			var baseSha, headSha, startSha string
+			host := extractHostFromPath(t.Project.ProjectPath)
+			client := gitlab.NewClient(host, t.Project.AccessToken)
+			if refs, err := client.GetMergeRequestDiffRefs(t.Project.GitLabProjectID, t.MRMergeID); err == nil && refs != nil {
+				baseSha = refs.BaseSha
+				headSha = refs.HeadSha
+				startSha = refs.StartSha
+				zap.L().Info("diff_refs fetched",
+					zap.Uint("task_id", t.ID),
+					zap.String("base_sha", baseSha),
+					zap.String("head_sha", headSha))
+			} else {
+				zap.L().Warn("fetch diff_refs failed, continue without refs",
+					zap.Uint("task_id", t.ID), zap.Error(err))
+			}
+
 			storage := GetObjectStorageProvider()
 			ds := pipeline.NewDiffStore(pipeline.DefaultDiffStoreConfig, storage)
 			parser := diff.NewParser()
 			parsedFiles, _ := parser.Parse(rd)
-			_, err := ds.StoreDiff(context.Background(), &t, rd, parsedFiles)
+			_, err := ds.StoreDiff(context.Background(), &t, rd, parsedFiles, baseSha, headSha, startSha)
 			if err != nil {
 				zap.L().Warn("StoreDiff failed", zap.Uint("task_id", t.ID), zap.Error(err))
 			}
@@ -1853,6 +1875,7 @@ func (s *TaskService) runStructuredAIReview(task model.Task, diffFiles []gitlab.
 
 	promptCtx := &engine.PromptContext{
 		Files:             diffFiles,
+		ProjectID:         task.ProjectID, // 【P2】灰度策略需要项目 ID
 		CommitsText:       commitsText,
 		MRTitle:           task.MRTitle,
 		CustomInstruction: customInstruction,
@@ -1960,7 +1983,7 @@ func (s *TaskService) runStructuredAIReview(task model.Task, diffFiles []gitlab.
 	rawDiff := rebuildRawDiff(diffFiles)
 	if rawDiff != "" {
 		cfg := config.Load()
-		parsedResult.Issues = engine.ApplyLineCorrections(parsedResult.Issues, rawDiff, &cfg.DiffLineMap)
+		parsedResult.Issues = engine.ApplyLineCorrections(parsedResult.Issues, rawDiff, &cfg.DiffLineMap, task.ProjectID)
 	}
 
 	// 10. 持久化结构化数据

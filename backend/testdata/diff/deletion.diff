@@ -1,0 +1,11 @@
+diff --git a/delete.go b/delete.go
+deleted file mode 100644
+index 1234567..0000000
+--- a/delete.go
++++ /dev/null
+@@ -1,5 +0,0 @@
+-package main
+-
+-func DeleteMe() {
+-	return
+-}

@@ -102,6 +102,7 @@ type LicenseFinding struct {
 // PromptContext Prompt 组装所需的上下文
 type PromptContext struct {
 	Files                 []gitlab.DiffFile // diff 文件列表
+	ProjectID             uint              // 【P2】项目 ID（用于灰度策略，决定是否注入行号前缀）
 	CommitsText           string
 	MRTitle               string
 	CustomInstruction     string                     // 项目自定义说明
@@ -437,7 +438,7 @@ func BuildReviewPrompt(ctx *PromptContext) string {
 		}
 		sb.WriteString(fmt.Sprintf("### 文件 %d：%s\n", i+1, file.NewPath))
 		sb.WriteString("```diff\n")
-		sb.WriteString(maybeInjectLineNumbers(file.Diff, file.NewPath))
+		sb.WriteString(maybeInjectLineNumbers(file.Diff, file.NewPath, ctx.ProjectID))
 		sb.WriteString("\n```\n\n")
 	}
 
@@ -697,7 +698,7 @@ func BuildFullStructuredPrompt(ctx *PromptContext) (string, *llm.ResponseFormat)
 		}
 		sb.WriteString(fmt.Sprintf("### 文件 %d：%s\n", i+1, file.NewPath))
 		sb.WriteString("```diff\n")
-		sb.WriteString(maybeInjectLineNumbers(file.Diff, file.NewPath))
+		sb.WriteString(maybeInjectLineNumbers(file.Diff, file.NewPath, ctx.ProjectID))
 		sb.WriteString("\n```\n\n")
 	}
 
@@ -792,7 +793,7 @@ func BuildBatchCollectionPrompt(ctx *PromptContext, batchIndex, totalBatches int
 		}
 		sb.WriteString(fmt.Sprintf("%d、文件：%s\n", i+1, path))
 		sb.WriteString("```diff\n")
-		sb.WriteString(maybeInjectLineNumbers(diffStr, path))
+		sb.WriteString(maybeInjectLineNumbers(diffStr, path, ctx.ProjectID))
 		sb.WriteString("\n```\n\n")
 	}
 
@@ -1240,10 +1241,13 @@ func buildTestSuggestionSection(suggestions []TestSuggestionItem) string {
 }
 
 // maybeInjectLineNumbers 根据配置决定是否对 diff 文本注入 [new|old] 行号前缀
-// 如果配置未启用或解析失败，直接返回原始 diff 文本
-func maybeInjectLineNumbers(rawDiff, filePath string) string {
+// 如果配置未启用、灰度不命中、或解析失败，直接返回原始 diff 文本
+func maybeInjectLineNumbers(rawDiff, filePath string, projectID uint) string {
 	cfg := config.Load().DiffLineMap
 	if !cfg.Enabled || !cfg.InjectLineNumbers {
+		return rawDiff
+	}
+	if !cfg.IsGrayEnabled(projectID) {
 		return rawDiff
 	}
 	if rawDiff == "" {
@@ -1263,11 +1267,22 @@ func maybeInjectLineNumbers(rawDiff, filePath string) string {
 				Enabled:           true,
 				InjectLineNumbers: true,
 			})
-			return prompt
+			// 【P1】注入行号说明模板，告诉模型如何解读前缀
+			return injectLineNumberInstruction(prompt)
 		}
 	}
 
 	return rawDiff
+}
+
+// injectLineNumberInstruction 在 diff 前插入行号前缀说明
+// 使用 diff 的 context 行格式（行首空格），使 LLM 明白这是说明而非代码
+func injectLineNumberInstruction(diffText string) string {
+	instruction := " [行号前缀说明] 每行开头的 [newN|oldM] 表示：新文件行号=N，旧文件行号=M\n" +
+		"             [new-|oldM] → 删除行（仅存在于旧文件第 M 行）\n" +
+		"             [newN|old-] → 新增行（仅存在于新文件第 N 行）\n" +
+		"             【重要】请在返回 line_start 时使用【新文件行号】（即 new 后面的数字）\n"
+	return instruction + diffText
 }
 
 // buildNoRepeatInstruction 构建禁止重复报告 Agent 发现的指令

@@ -1497,7 +1497,7 @@ func (e *PostProcessExecutor) Execute(ctx StageContext) error {
 	rawDiff := extractRawDiffFromContext(ctx)
 	if rawDiff != "" {
 		cfg := config.Load().DiffLineMap
-		result.Issues = engine.ApplyLineCorrections(result.Issues, rawDiff, &cfg)
+		result.Issues = engine.ApplyLineCorrections(result.Issues, rawDiff, &cfg, task.ProjectID)
 	}
 
 	// 1. 持久化结构化数据到 review_issues
@@ -1731,8 +1731,18 @@ func saveOverheadCalibration(
 }
 
 // extractRawDiffFromContext 从 Pipeline Context 中提取原始 diff 文本
-// 优先从 diff_files_raw 获取，回退到 diff_files
+// 【P0】优先读取 "raw_diff_full"（未截断的完整 unified diff）
+// 回退到 "diff_files_raw"（可能被 SmartSplitIntoBatches 截断过）
+// 最后回退到 "diff_files"
 func extractRawDiffFromContext(ctx StageContext) string {
+	// 1. 优先：原始完整 unified diff（在 task.go executePipelineReviewTask 中预置）
+	if v := ctx.GetInput("raw_diff_full"); v != nil {
+		if s, ok := v.(string); ok && s != "" {
+			return s
+		}
+	}
+
+	// 2. 回退：从 diff_files_raw / diff_files 重建（这些可能已被截断）
 	for _, key := range []string{"diff_files_raw", "diff_files"} {
 		val := ctx.GetInput(key)
 		if val == nil {

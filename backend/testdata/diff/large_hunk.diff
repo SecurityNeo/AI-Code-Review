@@ -1,0 +1,14 @@
+diff --git a/large.go b/large.go
+index 1234567..abcdefg 100644
+--- a/large.go
++++ b/large.go
+@@ -1,100 +1,101 @@
+ package main
+
+ func Large() {
+-	oldLine()
++	newLine()
+ 	for i := 0; i < 100; i++ {
+ 		_ = i
+ 	}
+ }

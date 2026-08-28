@@ -1,0 +1,17 @@
+diff --git a/multi_hunk.go b/multi_hunk.go
+index 1234567..abcdefg 100644
+--- a/multi_hunk.go
++++ b/multi_hunk.go
+@@ -1,5 +1,6 @@
+ package main
+
+ func A() {
++	// hunk1
+ 	return
+ }
+
+@@ -20,5 +21,6 @@
+ func B() {
++	// hunk2
+ 	return
+ }
