@@ -345,6 +345,11 @@
                 window.location.href = '/developer-dashboard.html';
                 return;
             }
+            // MCP 密钥管理与调用日志仅对 admin 开放
+            if (info.role !== 'admin' && (path === '/mcp-keys.html' || path === '/mcp-logs.html')) {
+                window.location.href = '/mcp-capabilities.html';
+                return;
+            }
         } catch(e) {}
         createChangePasswordModal();
         // 若当前在通知管理子页面，自动展开通知管理菜单
