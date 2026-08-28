@@ -2045,12 +2045,15 @@ func prepareDiffFilesMeta(diffFiles []gitlab.DiffFile, threshold int) []map[stri
 }
 
 // rebuildRawDiff 从 GitLab DiffFile 列表重建完整的 unified diff 文本
+// 为每个文件补充 diff --git 头，确保 Parser 能正确识别多文件边界
 func rebuildRawDiff(files []gitlab.DiffFile) string {
 	var parts []string
 	for _, f := range files {
-		if f.Diff != "" {
-			parts = append(parts, f.Diff)
+		if f.Diff == "" {
+			continue
 		}
+		header := fmt.Sprintf("diff --git a/%s b/%s", f.OldPath, f.NewPath)
+		parts = append(parts, header+"\n"+f.Diff)
 	}
 	if len(parts) == 0 {
 		return ""

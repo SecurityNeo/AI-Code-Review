@@ -16,8 +16,9 @@ const (
 
 // SubtreeConfig SubtreeTruncator 配置
 type SubtreeConfig struct {
-	TotalMaxTokens      int // diff 总体最大 token 数（触发截断的阈值）
-	SkipContextIfLarge  bool
+	TotalMaxTokens     int // diff 总体最大 token 数（触发截断的阈值）
+	SkipContextIfLarge bool
+	ContextWindow      int // 变更行前后保留的 context 行数，0 表示使用默认值 3
 }
 
 // MiddleConfig MiddleTruncator 配置
@@ -63,8 +64,11 @@ func (s *SubtreeTruncator) Truncate(hunk Hunk) []DiffLine {
 		return s.keepHeaderAndEnds(hunk, 2)
 	}
 
-	// 默认保留每处变更前后各 3 行 context（可根据 token 动态调整）
-	contextWindow := 3
+	// 保留每处变更前后各 N 行 context（可从配置动态调整）
+	contextWindow := s.config.ContextWindow
+	if contextWindow <= 0 {
+		contextWindow = 3
+	}
 	selected := make(map[int]bool)
 
 	// header 行始终保留

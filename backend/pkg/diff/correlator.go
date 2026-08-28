@@ -69,12 +69,12 @@ func (lc *LineCorrelator) CorrectIssue(filePath string, startLine, endLine int, 
 	// 首先尝试 exact match：在 file.Lines 中精确查找 snippet
 	exactLine := lc.findExact(file, snippet)
 	if exactLine != nil {
-		result.NewStart = exactLine.DiffOffset
-		result.NewEnd = exactLine.DiffOffset
+		result.NewStart = getEffectiveLineNo(exactLine)
+		result.NewEnd = getEffectiveLineNo(exactLine)
 		result.MatchType = MatchTypeExact
 		result.Confidence = 1.0
 		result.MatchedSnippet = snippet
-		result.Message = fmt.Sprintf("精确匹配到第%d行", exactLine.DiffOffset)
+		result.Message = fmt.Sprintf("精确匹配到新文件第%d行", result.NewStart)
 		return result
 	}
 
@@ -91,8 +91,8 @@ func (lc *LineCorrelator) CorrectIssue(filePath string, startLine, endLine int, 
 		} else {
 			confidence = 1.0 - float64(dist)/float64(maxLen)
 		}
-		result.NewStart = fuzzyLine.DiffOffset
-		result.NewEnd = fuzzyLine.DiffOffset
+		result.NewStart = getEffectiveLineNo(fuzzyLine)
+		result.NewEnd = getEffectiveLineNo(fuzzyLine)
 		result.MatchType = MatchTypeFuzzy
 		result.Confidence = confidence
 		result.MatchedSnippet = fuzzyLine.Raw
@@ -103,6 +103,15 @@ func (lc *LineCorrelator) CorrectIssue(filePath string, startLine, endLine int, 
 	// fallback：不校正
 	result.Message = fmt.Sprintf("未找到匹配，直接信任模型行号（搜索范围：%d 行）", len(file.Lines))
 	return result
+}
+
+// getEffectiveLineNo 返回 diff 行在目标文件中的有效行号
+// deletion 行返回旧文件行号，其他返回新文件行号
+func getEffectiveLineNo(line *DiffLine) int {
+	if line.Type == LineTypeDeletion {
+		return line.OldLineNo
+	}
+	return line.NewLineNo
 }
 
 // stripDiffPrefix 根据行类型安全移除 diff 前缀符号
