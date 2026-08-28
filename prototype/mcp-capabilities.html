@@ -73,7 +73,8 @@
         .tab.active { background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.07); }
 
         /* Cards */
-        .grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: .75rem; }
+        .grid-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; }
+        @media (max-width: 1023px) { .grid-cards { grid-template-columns: repeat(2, 1fr); } }
         @media (max-width: 639px) { .grid-cards { grid-template-columns: 1fr; } }
 
         .card {
@@ -208,9 +209,9 @@
                 <span id="totalCount" class="text-sm text-gray-500">共 0 条记录</span>
                 <div class="flex items-center gap-4">
                     <select id="pageSizeSelect" onchange="changePageSize()" class="px-2 py-1 border rounded text-sm">
-                        <option value="15" selected>15条/页</option>
-                        <option value="30">30条/页</option>
-                        <option value="50">50条/页</option>
+                        <option value="9" selected>9条/页</option>
+                        <option value="18">18条/页</option>
+                        <option value="36">36条/页</option>
                     </select>
                     <div id="pagination" class="flex gap-2"></div>
                 </div>
@@ -262,7 +263,7 @@ async function loadMCPTools() {
     }
 }
 
-let currentCategory='all', currentPage=1, pageSize=15, totalPages=1, totalCount=0;
+let currentCategory='all', currentPage=1, pageSize=9, totalPages=1, totalCount=0;
 
 /* ---------- Render Cards ---------- */
 function renderCards(category) {
