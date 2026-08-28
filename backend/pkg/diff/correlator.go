@@ -96,7 +96,8 @@ func (lc *LineCorrelator) CorrectIssue(filePath string, startLine, endLine int, 
 		result.MatchType = MatchTypeFuzzy
 		result.Confidence = confidence
 		result.MatchedSnippet = fuzzyLine.Raw
-		result.Message = fmt.Sprintf("模糊匹配到第%d行，置信度%.2f", fuzzyLine.DiffOffset, confidence)
+		// 【R1 修复】Message 使用校正后的文件行号（NewStart），而非 diff 文本偏移（DiffOffset）
+		result.Message = fmt.Sprintf("模糊匹配到新文件第%d行，置信度%.2f", result.NewStart, confidence)
 		return result
 	}
 
@@ -171,19 +172,22 @@ func (lc *LineCorrelator) findFuzzy(file *ParsedDiffFile, snippet string) *DiffL
 	return &file.Lines[bestLine]
 }
 
-// maxSnippetLen 模糊匹配时截断的最大长度，防止超长单行导致 O(n²) 性能问题
+// maxSnippetLen 模糊匹配时截断的最大 rune 数，防止超长单行导致 O(n²) 性能问题
 const maxSnippetLen = 200
 
-// levenshteinDistance 计算两个字符串的编辑距离（输入会被截断到 maxSnippetLen）
+// levenshteinDistance 计算两个字符串的编辑距离（输入会按 rune 截断到 maxSnippetLen）
+// 【R2 修复】对 rune 而非字节进行截断和计算，避免 CJK 字符被截断在字节中间产生乱码
 func levenshteinDistance(a, b string) int {
-	if len(a) > maxSnippetLen {
-		a = a[:maxSnippetLen]
+	ra := []rune(a)
+	rb := []rune(b)
+	if len(ra) > maxSnippetLen {
+		ra = ra[:maxSnippetLen]
 	}
-	if len(b) > maxSnippetLen {
-		b = b[:maxSnippetLen]
+	if len(rb) > maxSnippetLen {
+		rb = rb[:maxSnippetLen]
 	}
-	la := len(a)
-	lb := len(b)
+	la := len(ra)
+	lb := len(rb)
 	if la == 0 {
 		return lb
 	}
@@ -203,7 +207,7 @@ func levenshteinDistance(a, b string) int {
 		curr[0] = i
 		for j := 1; j <= lb; j++ {
 			cost := 0
-			if a[i-1] != b[j-1] {
+			if ra[i-1] != rb[j-1] {
 				cost = 1
 			}
 			curr[j] = min(min(

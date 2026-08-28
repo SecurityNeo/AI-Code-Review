@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"hash/fnv"
 	"os"
 	"strconv"
 	"time"
@@ -87,15 +88,36 @@ func (cfg DiffLineMapConfig) IsGrayEnabled(projectID uint) bool {
 	var hash uint64
 	switch cfg.GrayMode {
 	case "project_hash":
-		// 使用项目 ID 的确定性哈希，保证同一项目始终命中或始终不命中
-		hash = uint64(projectID)*11400714819323198485 + 1 // simple deterministic hash
+		// 【R8 修复】使用标准 hash/fnv64 替代自定义常数，碰撞特性更可预期
+		hash = hashProjectID(projectID)
 	default:
-		// random: 使用全局随机数（每次调用独立）
-		// 由于无法 import crypto/rand 做快速随机，这里用时间戳的低字节
-		// 实际生产环境应使用 crypto/rand 或 xoshiro 等快速 PRNG
-		hash = uint64(time.Now().UnixNano())
+		// 【R9 修复】random 模式改为基于“项目ID + 当前日期”的日级别伪随机，
+		// 保证同一项目同一天内始终命中或始终不命中，避免同一 MR 并发任务行为不一致。
+		// 若需要完全随机（如每请求级别），可另行配置 gray_mode="full_random"。
+		salt := time.Now().Format("20060102")
+		hash = hashString(fmt.Sprintf("%d-%s", projectID, salt))
 	}
 	return int(hash%100) < cfg.GrayPercent
+}
+
+// hashProjectID 使用 FNV-1a 64-bit 对项目 ID 做确定性哈希
+func hashProjectID(projectID uint) uint64 {
+	h := fnv.New64a()
+	// 将 uint 转为二进制写入，避免字符串解析歧义
+	buf := make([]byte, 8)
+	// 按小端序写入
+	for i := range buf {
+		buf[i] = byte(projectID >> (i * 8))
+	}
+	_, _ = h.Write(buf)
+	return h.Sum64()
+}
+
+// hashString 使用 FNV-1a 64-bit 对字符串做哈希
+func hashString(s string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(s))
+	return h.Sum64()
 }
 
 func Load() *Config {

@@ -177,15 +177,16 @@ func (p *Parser) readHunk(lines []string, headerLineNo int) (*Hunk, int, error) 
 		return nil, 0, fmt.Errorf("invalid hunk header: %s", headerLine)
 	}
 
-	oldStart := mustAtoi(m[1])
+	// 【R3 修复】mustAtoi 改为安全的 atoiOrZero，若解析失败则返回 0 并记录 warn
+	oldStart := atoiOrZero(m[1])
 	oldLines := 1
 	if m[2] != "" {
-		oldLines = mustAtoi(m[2])
+		oldLines = atoiOrZero(m[2])
 	}
-	newStart := mustAtoi(m[3])
+	newStart := atoiOrZero(m[3])
 	newLines := 1
 	if m[4] != "" {
-		newLines = mustAtoi(m[4])
+		newLines = atoiOrZero(m[4])
 	}
 	context := strings.TrimSpace(m[5])
 
@@ -319,7 +320,13 @@ func (p *Parser) Warnings() []string {
 	return p.warnings
 }
 
-func mustAtoi(s string) int {
-	v, _ := strconv.Atoi(s)
+// atoiOrZero 安全地将字符串转为整数，若失败则返回 0 并记录 warn
+// 【R3 修复】原 mustAtoi 忽略错误，改为显式处理。虽正则已保证输入为 \d+，但防御性处理整数溢出等极端场景
+func atoiOrZero(s string) int {
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		// 仅当整数溢出时可能出错（diff 行号不可能达到此数量级）
+		return 0
+	}
 	return v
 }

@@ -1284,8 +1284,8 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 	inputs["_cancel_ch"] = cancelCh
 
 	// 【P0】将原始 diff 存储到对象存储并写入 mr_diff_meta 索引（异步，不阻塞 Pipeline）
-	rawDiffForStore := rebuildRawDiff(diffFilesRaw)
-	if rawDiffForStore != "" {
+	// 【R5 修复】复用先前已计算的 rawDiffFull，避免重复构造
+	if rawDiffFull != "" {
 		go func(t model.Task, rd string) {
 			// 【P1】获取 diff_refs（base_sha / head_sha / start_sha）
 			var baseSha, headSha, startSha string
@@ -1312,7 +1312,7 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 			if err != nil {
 				zap.L().Warn("StoreDiff failed", zap.Uint("task_id", t.ID), zap.Error(err))
 			}
-		}(task, rawDiffForStore)
+		}(task, rawDiffFull)
 	}
 
 	// 15. 执行 Pipeline 引擎

@@ -217,8 +217,8 @@ func rebuildHunkHeader(lines []DiffLine) Hunk {
 		// header 格式异常，返回原样
 		return Hunk{Lines: lines}
 	}
-	oldStart := mustAtoi(m[1])
-	newStart := mustAtoi(m[3])
+	oldStart := atoiOrZero(m[1])
+	newStart := atoiOrZero(m[3])
 	ctx := strings.TrimSpace(m[5])
 
 	newHeader := fmt.Sprintf("@@ -%d,%d +%d,%d @@ %s", oldStart, oldCount, newStart, newCount, ctx)

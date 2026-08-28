@@ -48,7 +48,7 @@ func ApplyLineCorrections(issues []llm.AIReviewIssue, rawDiff string, cfg *confi
 
 	// 【P2】指标收集
 	var corrected, unchanged, exactMatch, fuzzyMatch int
-	var confidences []float64
+	var matchedConfidenceSum float64
 
 	for i := range issues {
 		result := correlator.CorrectIssue(
@@ -61,10 +61,11 @@ func ApplyLineCorrections(issues []llm.AIReviewIssue, rawDiff string, cfg *confi
 		switch result.MatchType {
 		case diff.MatchTypeExact:
 			exactMatch++
+			matchedConfidenceSum += result.Confidence
 		case diff.MatchTypeFuzzy:
 			fuzzyMatch++
+			matchedConfidenceSum += result.Confidence
 		}
-		confidences = append(confidences, result.Confidence)
 
 		if result.NewStart != result.OldStart || result.NewEnd != result.OldEnd {
 			corrected++
@@ -83,12 +84,11 @@ func ApplyLineCorrections(issues []llm.AIReviewIssue, rawDiff string, cfg *confi
 	}
 
 	// 【P2】输出结构化指标（可被 ELK / Loki 聚合分析）
+	// 【R4 修复】avgConfidence 只统计 Exact+Fuzzy，排除 NotAvailable 的 0 值
+	matchedCount := exactMatch + fuzzyMatch
 	avgConf := 0.0
-	if len(confidences) > 0 {
-		for _, c := range confidences {
-			avgConf += c
-		}
-		avgConf /= float64(len(confidences))
+	if matchedCount > 0 {
+		avgConf = matchedConfidenceSum / float64(matchedCount)
 	}
 	zap.L().Info("ApplyLineCorrections: metrics",
 		zap.Int("total_issues", len(issues)),
@@ -96,6 +96,7 @@ func ApplyLineCorrections(issues []llm.AIReviewIssue, rawDiff string, cfg *confi
 		zap.Int("unchanged", unchanged),
 		zap.Int("exact_match", exactMatch),
 		zap.Int("fuzzy_match", fuzzyMatch),
+		zap.Int("matched_count", matchedCount),
 		zap.Float64("avg_confidence", avgConf),
 	)
 
