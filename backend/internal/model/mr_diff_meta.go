@@ -7,7 +7,7 @@ type MRDiffMeta struct {
 	gorm.Model
 	TaskID      uint   `gorm:"index;not null"` // 关联的任务 ID
 	ProjectID   uint   `gorm:"index;not null"` // 项目 ID
-	MRIID       int    `gorm:"not null"`       // GitLab MR IID
+	MRIID       int    `gorm:"column:mri_id;not null"` // GitLab MR IID
 	ObjectKey   string `gorm:"size:512"`       // 对象存储中的 key（如 diffs/project_42/mr_100/task_1234.diff）
 	BaseSha     string `gorm:"size:64"`        // diff_refs.base_sha
 	HeadSha     string `gorm:"size:64"`        // diff_refs.head_sha
