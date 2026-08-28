@@ -8,6 +8,7 @@ import (
 	"github.com/ai-optimizer/backend/internal/mcp"
 	"github.com/ai-optimizer/backend/internal/mcp/mappers"
 	"github.com/ai-optimizer/backend/internal/model"
+	"github.com/ai-optimizer/backend/internal/service"
 )
 
 // ---------------------- 公共辅助函数 ----------------------
@@ -294,40 +295,60 @@ func handleRetryTask(ctx context.Context, authCtx *mcp.AuthContext, args map[str
 		return nil, err
 	}
 
-	if task.Status != model.TaskFailed && task.Status != model.TaskStopped {
-		return nil, fmt.Errorf("task status is %s, only failed or stopped tasks can be retried", task.Status)
+	// 与平台前端和后端 Service 保持一致：failed / stopped / timeout / pending / success 均可重试
+	allowed := map[model.TaskStatus]bool{
+		model.TaskFailed:  true,
+		model.TaskStopped: true,
+		model.TaskTimeout: true,
+		model.TaskPending: true,
+		model.TaskSuccess: true,
+	}
+	if !allowed[task.Status] {
+		return nil, fmt.Errorf("task status is %s, only failed / stopped / timeout / pending / success tasks can be retried", task.Status)
 	}
 
-	// 创建重试任务：复制原任务的关键字段，避免外键约束丢失
-	newTask := model.Task{
-		ProjectID:           task.ProjectID,
-		MRMergeID:           task.MRMergeID,
-		MRTitle:             task.MRTitle,
-		MRAuthor:            task.MRAuthor,
-		MRAuthorDisplayName: task.MRAuthorDisplayName,
-		MRURL:               task.MRURL,
-		NoteID:              task.NoteID,
-		TriggerType:         task.TriggerType,
-		TriggerSource:       "manual", // 重试任务标记为手动触发
-		TaskType:            task.TaskType,
-		SourceBranch:        task.SourceBranch,
-		TargetBranch:        task.TargetBranch,
-		PoolID:              task.PoolID,
-		UsedModelID:         task.UsedModelID,
-		GitlabTokenID:       task.GitlabTokenID,
-		OpencodeSessionID:   task.OpencodeSessionID,
-		Status:              model.TaskPending,
-		RetryCount:          task.RetryCount + 1,
+	// 解析可选的补充复核意见
+	var userReviewComment string
+	if v, ok := requireString(args, "user_review_comment"); ok {
+		if len(v) > 5000 {
+			return nil, fmt.Errorf("user_review_comment exceeds 5000 characters")
+		}
+		userReviewComment = v
 	}
-	if err := model.DB.Create(&newTask).Error; err != nil {
-		return nil, fmt.Errorf("create retry task failed: %w", err)
+
+	// 解析可选的历史复核意见 ID 列表
+	var selectedCommentIDs []uint
+	if arr, ok := args["selected_comment_ids"]; ok && arr != nil {
+		switch ids := arr.(type) {
+		case []interface{}:
+			for _, item := range ids {
+				if f, ok := item.(float64); ok {
+					selectedCommentIDs = append(selectedCommentIDs, uint(f))
+				}
+			}
+		case []float64:
+			for _, f := range ids {
+				selectedCommentIDs = append(selectedCommentIDs, uint(f))
+			}
+		}
+	}
+
+	// 调用后端 Service 进行重试（复用现有逻辑，包含意见注入和 Pipeline 清理）
+	err = service.NewTaskService().Retry(
+		taskID,
+		userReviewComment,
+		selectedCommentIDs,
+		authCtx.UserID,
+		"", // clientIP 在 MCP 场景下为空
+	)
+	if err != nil {
+		return nil, fmt.Errorf("retry task failed: %w", err)
 	}
 
 	return map[string]interface{}{
-		"success":     true,
-		"task_id":     taskID,
-		"new_task_id": newTask.ID,
-		"message":     fmt.Sprintf("已创建重试任务，新任务ID: %d", newTask.ID),
+		"success": true,
+		"task_id": taskID,
+		"message": "已触发重试",
 	}, nil
 }
 

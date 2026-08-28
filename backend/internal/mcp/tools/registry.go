@@ -26,7 +26,7 @@ func RegisterAllTools(server interface {
 	server.RegisterTool("ignore_issue", "将单个待处理 Issue 标记为忽略（ignored）。当用户说'先忽略这个''暂时不处理'时使用。需要 issue_id 和 reason（必填，说明忽略原因）。", ignoreIssueSchema, handleIgnoreIssue)
 
 	// 任务操作
-	server.RegisterTool("retry_task", "为失败或已停止的任务创建重试任务，重新触发完整 AI 评审。当用户说'重试那个失败的'时使用。仅允许 failed/stopped 状态。需要 task_id。", retryTaskSchema, handleRetryTask)
+	server.RegisterTool("retry_task", "重试 AI 评审任务。支持对已完成(success)、失败(failed)、停止(stopped)、超时(timeout)的任务重新触发评审；review 任务可附加 user_review_comment 补充复核意见（如'第32行判断有误'），AI 会参考意见进行针对性重审。需要 task_id。", retryTaskSchema, handleRetryTask)
 	server.RegisterTool("stop_task", "停止正在运行或排队中的评审任务（当前阶段完成后终止）。当用户说'停掉那个任务''取消评审'时使用。需要 task_id。", stopTaskSchema, handleStopTask)
 
 	// MR 查询
@@ -112,7 +112,9 @@ var retryTaskSchema = json.RawMessage(`{
 	"required": ["x_im_provider", "x_im_user_id", "task_id"],
 	"properties": {
 		` + identityProps + `,
-		"task_id": {"type": "integer"}
+		"task_id": {"type": "integer", "description": "需要重试的任务 ID"},
+		"user_review_comment": {"type": "string", "description": "补充复核意见（可选）。描述上次评审不准确之处，例如：第32行的并发处理判断有误。最多5000字符。review 任务支持。"},
+		"selected_comment_ids": {"type": "array", "items": {"type": "integer"}, "description": "选中的历史复核意见 ID 列表（可选）。会将历史意见与新意见一并注入到重试任务中。"}
 	}
 }`)
 
