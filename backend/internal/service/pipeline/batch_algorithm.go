@@ -277,9 +277,10 @@ func truncateDiffWithHunkBoundary(file map[string]interface{}, diffText string, 
 
 	// 计算截断后 hunk 的目标 token 数（留 10% 余量给截断标记）
 	targetTokens := int(float64(maxTokens) * 0.9)
-	// 逐步收紧 context window，直到满足 token 限制
+	// 逐步收紧 context window（3→1），直到满足 token 限制
+	// 注意：window 最小为 1，因为 SubtreeTruncator 中 window<=0 会被 fallback 到 3，window=0 迭代将无效
 	var truncated string
-	for window := 3; window >= 0; window-- {
+	for window := 3; window >= 1; window-- {
 		tr := diff.NewSubtreeTruncator(diff.SubtreeConfig{ContextWindow: window})
 		truncatedLines := make([]diff.DiffLine, 0)
 		for _, hunk := range pf.Hunks {

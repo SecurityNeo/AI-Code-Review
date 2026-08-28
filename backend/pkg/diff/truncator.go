@@ -42,6 +42,9 @@ type SubtreeTruncator struct {
 
 // NewSubtreeTruncator 创建子树截断器
 func NewSubtreeTruncator(cfg SubtreeConfig) *SubtreeTruncator {
+	if cfg.ContextWindow <= 0 {
+		cfg.ContextWindow = 3 // 默认值：每处变更前后保留 3 行上下文
+	}
 	return &SubtreeTruncator{config: cfg}
 }
 
@@ -64,11 +67,8 @@ func (s *SubtreeTruncator) Truncate(hunk Hunk) []DiffLine {
 		return s.keepHeaderAndEnds(hunk, 2)
 	}
 
-	// 保留每处变更前后各 N 行 context（可从配置动态调整）
+	// 使用构造函数已处理默认值的 ContextWindow（支持传入 0 表示不保留上下文）
 	contextWindow := s.config.ContextWindow
-	if contextWindow <= 0 {
-		contextWindow = 3
-	}
 	selected := make(map[int]bool)
 
 	// header 行始终保留
