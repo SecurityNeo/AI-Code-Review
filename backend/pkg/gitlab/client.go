@@ -40,6 +40,13 @@ type MergeRequestInfo struct {
 	WorkInProgress bool   `json:"work_in_progress"`
 }
 
+// DiffRefs GitLab MR 的 diff_refs（用于行内评论定位）
+type DiffRefs struct {
+	BaseSha  string `json:"base_sha"`
+	HeadSha  string `json:"head_sha"`
+	StartSha string `json:"start_sha"`
+}
+
 func NewClient(gitlabHost, token string) *Client {
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -269,6 +276,40 @@ func (c *Client) getMR(path string) (*MergeRequestInfo, error) {
 		return nil, err
 	}
 	return &mr, nil
+}
+
+// GetMergeRequestDiffRefs 获取 MR 的 diff_refs（base_sha / head_sha / start_sha）
+// 用于行内评论定位
+func (c *Client) GetMergeRequestDiffRefs(projectID, mrIID int) (*DiffRefs, error) {
+	path := fmt.Sprintf("/api/v4/projects/%d/merge_requests/%d", projectID, mrIID)
+	req, err := http.NewRequest("GET", c.baseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.token != "" {
+		req.Header.Set("PRIVATE-TOKEN", c.token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("gitlab api returned status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		DiffRefs *DiffRefs `json:"diff_refs"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	if result.DiffRefs == nil {
+		return nil, fmt.Errorf("diff_refs not found in merge request response")
+	}
+	return result.DiffRefs, nil
 }
 
 // UpdateMergeRequestTitle 更新 MR title

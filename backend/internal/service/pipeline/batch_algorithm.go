@@ -2,10 +2,13 @@ package pipeline
 
 import (
 	"fmt"
+	"strings"
 	"unicode/utf8"
 
+	"github.com/ai-optimizer/backend/config"
 	"github.com/ai-optimizer/backend/internal/engine"
 	"github.com/ai-optimizer/backend/internal/model"
+	"github.com/ai-optimizer/backend/pkg/diff"
 )
 
 // charsPerTokenApprox 字符/Token 估算比
@@ -73,6 +76,15 @@ func CalculateEffectiveBudget(configuredBudget, estimatedOverhead int) (int, str
 	return minRequired, fmt.Sprintf(
 		"配置预算(%d)不足以覆盖系统固定开销(%d)，为保证评审质量已自动扩大至%d token，建议将「每批token上限」调整为≥%d",
 		configuredBudget, estimatedOverhead, minRequired, minRequired)
+}
+
+// Estimate 估算单个字符串的 Token 数（简单字符除法）
+func (e *TokenEstimator) Estimate(s string) int {
+	tok := len(s) / e.charsPerToken
+	if tok == 0 && s != "" {
+		return 1
+	}
+	return tok
 }
 
 // EstimateOverheadTokens 估算固定开销 Token 数
@@ -178,24 +190,14 @@ func SmartSplitIntoBatches(
 			fileTokens = 1
 		}
 
-		// 单文件截断处理：创建副本避免修改原始 map
+		// 单文件截断处理：优先使用 HunkTruncator 按 diff 结构截断
 		var fileObj interface{} = file
 		if fileTokens > availableTokens {
-			maxChars := availableTokens * 4
-			if maxChars > 100 {
-				maxChars -= 100 // 给截断标记留空间
-			}
-			if utf8.RuneCountInString(diff) > maxChars {
-				fileCopy := make(map[string]interface{})
-				for k, v := range file {
-					fileCopy[k] = v
-				}
-				diff = string([]rune(diff)[:maxChars])
-				diff += "\n\n[该文件 diff 较大，当前批次为控制 token 用量仅展示部分内容。完整变更请在代码库查看]"
-				fileCopy["diff"] = diff
-				fileCopy["truncated"] = true
+			fileCopy, truncatedDiff := truncateDiffWithHunkBoundary(file, diff, availableTokens)
+			if truncatedDiff != "" {
 				fileObj = fileCopy
-				fileTokens = availableTokens
+				diff = truncatedDiff
+				fileTokens = estimator.Estimate(diff)
 			}
 		}
 
@@ -246,6 +248,100 @@ func GroupBatchesIntoWaves(totalBatches, maxParallel int) [][]int {
 }
 
 // BuildBatchContext 从 StageContext 构建 BatchContext
+// truncateDiffWithHunkBoundary 按 hunk 边界安全截断 diff
+// 返回 (fileCopy, truncatedDiff)
+// 如果不需要截断或截断失败，返回 nil 和 ""
+func truncateDiffWithHunkBoundary(file map[string]interface{}, diffText string, maxTokens int) (map[string]interface{}, string) {
+	cfg := config.Load().DiffLineMap
+	if !cfg.Enabled {
+		// 未启用 diff line map 时回退到字符级硬切
+		return truncateDiffChars(file, diffText, maxTokens)
+	}
+
+	parser := diff.NewParser()
+	parsedFiles, err := parser.Parse(diffText)
+	if err != nil || len(parsedFiles) == 0 {
+		// 解析失败回退到字符级硬切
+		return truncateDiffChars(file, diffText, maxTokens)
+	}
+
+	// 单文件 diff 只应该解析出一个 ParsedDiffFile
+	pf := parsedFiles[0]
+
+	// 估算完整 diff 的 token 数
+	estimator := NewTokenEstimator()
+	fullTokens := estimator.Estimate(diffText)
+	if fullTokens <= maxTokens {
+		return nil, ""
+	}
+
+	// 计算截断后 hunk 的目标 token 数（留 10% 余量给截断标记）
+	targetTokens := int(float64(maxTokens) * 0.9)
+	// 逐步收紧 context window，直到满足 token 限制
+	var truncated string
+	for window := 3; window >= 0; window-- {
+		tr := diff.NewSubtreeTruncator(diff.SubtreeConfig{})
+		truncatedLines := make([]diff.DiffLine, 0)
+		for _, hunk := range pf.Hunks {
+			lines := tr.Truncate(hunk)
+			truncatedLines = append(truncatedLines, lines...)
+		}
+		// 重建截断后的 diff
+		var parts []string
+		parts = append(parts, fmt.Sprintf("--- %s", pf.OldPath))
+		parts = append(parts, fmt.Sprintf("+++ %s", pf.NewPath))
+		for _, line := range truncatedLines {
+			parts = append(parts, line.Raw)
+		}
+		truncated = strings.Join(parts, "\n")
+		if estimator.Estimate(truncated) <= targetTokens {
+			break
+		}
+	}
+
+	// 截断后仍然超限，使用 MiddleTruncator
+	if estimator.Estimate(truncated) > targetTokens {
+		middleTr := diff.NewMiddleTruncator(diff.MiddleConfig{
+			MaxLinesPerHunk:    100,
+			ContextLinesAround: 3,
+		})
+		truncated = diff.BuildTruncatedDiff(pf, middleTr)
+	}
+
+	// 注入截断标记
+	truncated += "\n\n[该文件 diff 较大，当前批次为控制 token 用量仅展示部分内容。完整变更请在代码库查看]"
+
+	fileCopy := make(map[string]interface{})
+	for k, v := range file {
+		fileCopy[k] = v
+	}
+	fileCopy["diff"] = truncated
+	fileCopy["truncated"] = true
+	return fileCopy, truncated
+}
+
+// truncateDiffChars 字符级硬切（回退策略）
+func truncateDiffChars(file map[string]interface{}, diffText string, maxTokens int) (map[string]interface{}, string) {
+	maxChars := maxTokens * 4
+	if maxChars > 100 {
+		maxChars -= 100
+	}
+	if utf8.RuneCountInString(diffText) <= maxChars {
+		return nil, ""
+	}
+
+	truncated := string([]rune(diffText)[:maxChars])
+	truncated += "\n\n[该文件 diff 较大，当前批次为控制 token 用量仅展示部分内容。完整变更请在代码库查看]"
+
+	fileCopy := make(map[string]interface{})
+	for k, v := range file {
+		fileCopy[k] = v
+	}
+	fileCopy["diff"] = truncated
+	fileCopy["truncated"] = true
+	return fileCopy, truncated
+}
+
 func BuildBatchContext(ctx StageContext) BatchContext {
 	template := ""
 	if v, ok := ctx.GetInput("project_template").(string); ok {
