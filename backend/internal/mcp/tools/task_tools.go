@@ -10,12 +10,80 @@ import (
 	"github.com/ai-optimizer/backend/internal/model"
 )
 
+// ---------------------- 公共辅助函数 ----------------------
+
+// requireFloat64 安全地从 args 提取 float64 参数
+func requireFloat64(args map[string]interface{}, key string) (float64, bool) {
+	v, ok := args[key].(float64)
+	return v, ok
+}
+
+// requireString 安全地从 args 提取 string 参数
+func requireString(args map[string]interface{}, key string) (string, bool) {
+	v, ok := args[key].(string)
+	return v, ok
+}
+
+// requireUint 安全地从 args 提取 uint 类型的 task_id / issue_id
+func requireUint(args map[string]interface{}, key string) (uint, error) {
+	v, ok := args[key].(float64)
+	if !ok {
+		return 0, fmt.Errorf("missing or invalid parameter: %s", key)
+	}
+	if v < 0 {
+		return 0, fmt.Errorf("invalid parameter %s: must be non-negative", key)
+	}
+	return uint(v), nil
+}
+
+// checkTaskPermission 统一检查任务访问权限（作者或 Admin）
+// 返回 nil 表示通过，否则返回权限错误
+func checkTaskPermission(authCtx *mcp.AuthContext, task model.Task) error {
+	if authCtx.IsAdmin {
+		return nil
+	}
+	if authCtx.User != nil && task.MRAuthor != "" && task.MRAuthor == authCtx.User.GitlabUsername {
+		return nil
+	}
+	return fmt.Errorf("permission denied: not your task")
+}
+
+// checkIssuePermission 统一检查 Issue 查看权限
+func checkIssuePermission(authCtx *mcp.AuthContext, issue model.ReviewIssue, task model.Task) error {
+	if authCtx.IsAdmin {
+		return nil
+	}
+	// 1. Issue owner
+	if issue.OwnerID != nil && *issue.OwnerID == authCtx.UserID {
+		return nil
+	}
+	// 2. Task MR Author
+	if authCtx.User != nil && task.MRAuthor != "" && task.MRAuthor == authCtx.User.GitlabUsername {
+		return nil
+	}
+	// 3. 当前责任人
+	if issue.CurrentOwnerID != nil && *issue.CurrentOwnerID == authCtx.UserID {
+		return nil
+	}
+	// 4. 项目责任人
+	var count int64
+	if err := model.DB.Model(&model.ProjectResponsibility{}).
+		Where("project_id = ? AND user_id = ?", task.ProjectID, authCtx.UserID).
+		Count(&count).Error; err != nil {
+		return fmt.Errorf("permission check failed: %w", err)
+	}
+	if count > 0 {
+		return nil
+	}
+	return fmt.Errorf("permission denied: not authorized to view this issue")
+}
+
 // ---------------------- 任务相关 Tools ----------------------
 
 func handleListTasks(ctx context.Context, authCtx *mcp.AuthContext, args map[string]interface{}) (interface{}, error) {
 	limit := 5
 	offset := 0
-	if v, ok := args["limit"].(float64); ok {
+	if v, ok := requireFloat64(args, "limit"); ok {
 		limit = int(v)
 		if limit > 20 {
 			limit = 20
@@ -24,18 +92,14 @@ func handleListTasks(ctx context.Context, authCtx *mcp.AuthContext, args map[str
 			limit = 1
 		}
 	}
-	if v, ok := args["offset"].(float64); ok {
+	if v, ok := requireFloat64(args, "offset"); ok {
 		offset = int(v)
 	}
 
 	query := model.DB.Model(&model.Task{}).Order("created_at DESC")
 
 	// 数据隔离
-	mine := true
 	all := false
-	if v, ok := args["mine"].(bool); ok {
-		mine = v
-	}
 	if v, ok := args["all"].(bool); ok {
 		all = v
 	}
@@ -43,32 +107,42 @@ func handleListTasks(ctx context.Context, authCtx *mcp.AuthContext, args map[str
 	if authCtx.IsAdmin && all {
 		// Admin + all=true: 查询全部
 	} else {
-		// 默认按当前绑定用户过滤
+		// 默认按当前绑定用户过滤（非 admin 或 mine=true 时）
 		if authCtx.User != nil && authCtx.User.GitlabUsername != "" {
-			if mine {
-				query = query.Where("mr_author = ?", authCtx.User.GitlabUsername)
-			}
+			query = query.Where("mr_author = ?", authCtx.User.GitlabUsername)
+		} else if !authCtx.IsAdmin {
+			// 非 admin 且未绑定用户 → 返回空结果，避免越权
+			return map[string]interface{}{
+				"items":       []map[string]interface{}{},
+				"total":       0,
+				"query_scope": "mine",
+				"next_offset": 0,
+			}, nil
 		}
 	}
 
 	// 过滤条件
-	if status, ok := args["status"].(string); ok && status != "" {
+	if status, ok := requireString(args, "status"); ok && status != "" {
 		query = query.Where("status = ?", status)
 	}
-	if projID, ok := args["project_id"].(float64); ok && projID > 0 {
+	if projID, ok := requireFloat64(args, "project_id"); ok && projID > 0 {
 		query = query.Where("project_id = ?", uint(projID))
 	}
-	if author, ok := args["author"].(string); ok && author != "" {
+	if author, ok := requireString(args, "author"); ok && author != "" {
 		if authCtx.IsAdmin {
 			query = query.Where("mr_author = ?", author)
 		}
 	}
 
 	var total int64
-	query.Count(&total)
+	if err := query.Count(&total).Error; err != nil {
+		return nil, fmt.Errorf("count tasks failed: %w", err)
+	}
 
 	var tasks []model.Task
-	query.Limit(limit).Offset(offset).Find(&tasks)
+	if err := query.Limit(limit).Offset(offset).Find(&tasks).Error; err != nil {
+		return nil, fmt.Errorf("query tasks failed: %w", err)
+	}
 
 	items := make([]map[string]interface{}, 0, len(tasks))
 	for _, t := range tasks {
@@ -79,48 +153,58 @@ func handleListTasks(ctx context.Context, authCtx *mcp.AuthContext, args map[str
 	items = mappers.TruncateList(items, 1800)
 
 	queryScope := "mine"
-	if authCtx.IsAdmin && all {
-		queryScope = "all"
+	if authCtx.IsAdmin {
+		queryScope = "admin"
+		if all {
+			queryScope = "all"
+		}
 	}
 
 	return map[string]interface{}{
-		"items":      items,
-		"total":      total,
+		"items":       items,
+		"total":       total,
 		"query_scope": queryScope,
 		"next_offset": offset + len(items),
 	}, nil
 }
 
 func handleGetTask(ctx context.Context, authCtx *mcp.AuthContext, args map[string]interface{}) (interface{}, error) {
-	taskID := uint(args["task_id"].(float64))
+	taskID, err := requireUint(args, "task_id")
+	if err != nil {
+		return nil, err
+	}
 	var task model.Task
 	if err := model.DB.First(&task, taskID).Error; err != nil {
 		return nil, fmt.Errorf("task not found: %d", taskID)
 	}
 
-	// 权限检查
-	if !authCtx.IsAdmin && task.MRAuthor != authCtx.User.GitlabUsername {
-		return nil, fmt.Errorf("permission denied: not your task")
+	if err := checkTaskPermission(authCtx, task); err != nil {
+		return nil, err
 	}
 
 	return mappers.MapTaskDetail(task), nil
 }
 
 func handleGetTaskPipeline(ctx context.Context, authCtx *mcp.AuthContext, args map[string]interface{}) (interface{}, error) {
-	taskID := uint(args["task_id"].(float64))
+	taskID, err := requireUint(args, "task_id")
+	if err != nil {
+		return nil, err
+	}
 	var task model.Task
 	if err := model.DB.First(&task, taskID).Error; err != nil {
 		return nil, fmt.Errorf("task not found: %d", taskID)
 	}
 
-	if !authCtx.IsAdmin && task.MRAuthor != authCtx.User.GitlabUsername {
-		return nil, fmt.Errorf("permission denied: not your task")
+	if err := checkTaskPermission(authCtx, task); err != nil {
+		return nil, err
 	}
 
 	var stages []model.TaskPipelineExecution
-	model.DB.Where("task_id = ?", taskID).Order("id ASC").Find(&stages)
+	if err := model.DB.Where("task_id = ?", taskID).Order("id ASC").Find(&stages).Error; err != nil {
+		return nil, fmt.Errorf("query pipeline stages failed: %w", err)
+	}
 
-	stageList := make([]map[string]interface{}, 0)
+	stageList := make([]map[string]interface{}, 0, len(stages))
 	for _, s := range stages {
 		stageList = append(stageList, mappers.MapPipeline(s))
 	}
@@ -133,18 +217,21 @@ func handleGetTaskPipeline(ctx context.Context, authCtx *mcp.AuthContext, args m
 }
 
 func handleGetMRReview(ctx context.Context, authCtx *mcp.AuthContext, args map[string]interface{}) (interface{}, error) {
-	taskID := uint(args["task_id"].(float64))
+	taskID, err := requireUint(args, "task_id")
+	if err != nil {
+		return nil, err
+	}
 	var task model.Task
 	if err := model.DB.First(&task, taskID).Error; err != nil {
 		return nil, fmt.Errorf("task not found: %d", taskID)
 	}
 
-	if !authCtx.IsAdmin && task.MRAuthor != authCtx.User.GitlabUsername {
-		return nil, fmt.Errorf("permission denied: not your task")
+	if err := checkTaskPermission(authCtx, task); err != nil {
+		return nil, err
 	}
 
 	limit := 10
-	if v, ok := args["limit"].(float64); ok {
+	if v, ok := requireFloat64(args, "limit"); ok {
 		limit = int(v)
 		if limit > 20 {
 			limit = 20
@@ -154,18 +241,22 @@ func handleGetMRReview(ctx context.Context, authCtx *mcp.AuthContext, args map[s
 	query := model.DB.Model(&model.ReviewIssue{}).
 		Where("task_id = ? AND deleted_at IS NULL", taskID)
 
-	if severity, ok := args["severity"].(string); ok && severity != "" {
+	if severity, ok := requireString(args, "severity"); ok && severity != "" {
 		query = query.Where("severity = ?", severity)
 	}
-	if category, ok := args["category"].(string); ok && category != "" {
+	if category, ok := requireString(args, "category"); ok && category != "" {
 		query = query.Where("category = ?", category)
 	}
 
 	var total int64
-	query.Count(&total)
+	if err := query.Count(&total).Error; err != nil {
+		return nil, fmt.Errorf("count issues failed: %w", err)
+	}
 
 	var issues []model.ReviewIssue
-	query.Order("severity DESC, created_at DESC").Limit(limit).Find(&issues)
+	if err := query.Order("severity DESC, created_at DESC").Limit(limit).Find(&issues).Error; err != nil {
+		return nil, fmt.Errorf("query issues failed: %w", err)
+	}
 
 	items := make([]map[string]interface{}, 0, len(issues))
 	for _, issue := range issues {
@@ -177,27 +268,30 @@ func handleGetMRReview(ctx context.Context, authCtx *mcp.AuthContext, args map[s
 			"line_number": issue.LineStart,
 			"message":     issue.Message,
 			"suggestion":  issue.Suggestion,
+			"status":      issue.Status,
 		})
 	}
 
 	return map[string]interface{}{
-		"task_id":     taskID,
-		"mr_title":    task.MRTitle,
+		"task_id":      taskID,
+		"mr_title":     task.MRTitle,
 		"total_issues": total,
-		"items":       items,
+		"items":        items,
 	}, nil
 }
 
 func handleRetryTask(ctx context.Context, authCtx *mcp.AuthContext, args map[string]interface{}) (interface{}, error) {
-	taskID := uint(args["task_id"].(float64))
+	taskID, err := requireUint(args, "task_id")
+	if err != nil {
+		return nil, err
+	}
 	var task model.Task
 	if err := model.DB.First(&task, taskID).Error; err != nil {
 		return nil, fmt.Errorf("task not found: %d", taskID)
 	}
 
-	// 权限：作者或 Admin
-	if !authCtx.IsAdmin && task.MRAuthor != authCtx.User.GitlabUsername {
-		return nil, fmt.Errorf("permission denied: not your task")
+	if err := checkTaskPermission(authCtx, task); err != nil {
+		return nil, err
 	}
 
 	if task.Status != model.TaskFailed && task.Status != model.TaskStopped {
@@ -218,9 +312,9 @@ func handleRetryTask(ctx context.Context, authCtx *mcp.AuthContext, args map[str
 		TaskType:            task.TaskType,
 		SourceBranch:        task.SourceBranch,
 		TargetBranch:        task.TargetBranch,
-		PoolID:              task.PoolID,        // 【修复】避免 fk_tasks_pool 外键约束失败
-		UsedModelID:         task.UsedModelID,   // 【修复】复制模型ID
-		GitlabTokenID:       task.GitlabTokenID, // 【修复】复制tokenID
+		PoolID:              task.PoolID,
+		UsedModelID:         task.UsedModelID,
+		GitlabTokenID:       task.GitlabTokenID,
 		OpencodeSessionID:   task.OpencodeSessionID,
 		Status:              model.TaskPending,
 		RetryCount:          task.RetryCount + 1,
@@ -238,14 +332,17 @@ func handleRetryTask(ctx context.Context, authCtx *mcp.AuthContext, args map[str
 }
 
 func handleStopTask(ctx context.Context, authCtx *mcp.AuthContext, args map[string]interface{}) (interface{}, error) {
-	taskID := uint(args["task_id"].(float64))
+	taskID, err := requireUint(args, "task_id")
+	if err != nil {
+		return nil, err
+	}
 	var task model.Task
 	if err := model.DB.First(&task, taskID).Error; err != nil {
 		return nil, fmt.Errorf("task not found: %d", taskID)
 	}
 
-	if !authCtx.IsAdmin && task.MRAuthor != authCtx.User.GitlabUsername {
-		return nil, fmt.Errorf("permission denied: not your task")
+	if err := checkTaskPermission(authCtx, task); err != nil {
+		return nil, err
 	}
 
 	if task.Status != model.TaskRunning && task.Status != model.TaskPending {
@@ -253,7 +350,9 @@ func handleStopTask(ctx context.Context, authCtx *mcp.AuthContext, args map[stri
 	}
 
 	// 更新状态为 stopped
-	model.DB.Model(&task).Update("status", model.TaskStopped)
+	if err := model.DB.Model(&task).Update("status", model.TaskStopped).Error; err != nil {
+		return nil, fmt.Errorf("stop task failed: %w", err)
+	}
 
 	return map[string]interface{}{
 		"success": true,
@@ -264,7 +363,10 @@ func handleStopTask(ctx context.Context, authCtx *mcp.AuthContext, args map[stri
 
 // handleGetIssueDetail 查询单个 Issue 的详细信息
 func handleGetIssueDetail(ctx context.Context, authCtx *mcp.AuthContext, args map[string]interface{}) (interface{}, error) {
-	issueID := uint(args["issue_id"].(float64))
+	issueID, err := requireUint(args, "issue_id")
+	if err != nil {
+		return nil, err
+	}
 
 	var issue model.ReviewIssue
 	if err := model.DB.First(&issue, issueID).Error; err != nil {
@@ -282,39 +384,9 @@ func handleGetIssueDetail(ctx context.Context, authCtx *mcp.AuthContext, args ma
 		return nil, fmt.Errorf("project not found for issue")
 	}
 
-	// 权限控制：admin、issue owner、task author、项目责任人可查看
-	if !authCtx.IsAdmin {
-		allowed := false
-
-		// 1. Issue owner（MR 提交者）
-		if issue.OwnerID != nil && *issue.OwnerID == authCtx.UserID {
-			allowed = true
-		}
-
-		// 2. Task MR Author
-		if !allowed && task.MRAuthor != "" && task.MRAuthor == authCtx.User.GitlabUsername {
-			allowed = true
-		}
-
-		// 3. 当前责任人（current_owner_id）
-		if !allowed && issue.CurrentOwnerID != nil && *issue.CurrentOwnerID == authCtx.UserID {
-			allowed = true
-		}
-
-		// 4. 项目负责人（通过 project_responsibilities 判定）
-		if !allowed {
-			var count int64
-			model.DB.Model(&model.ProjectResponsibility{}).
-				Where("project_id = ? AND user_id = ?", task.ProjectID, authCtx.UserID).
-				Count(&count)
-			if count > 0 {
-				allowed = true
-			}
-		}
-
-		if !allowed {
-			return nil, fmt.Errorf("permission denied: not authorized to view this issue")
-		}
+	// 权限控制
+	if err := checkIssuePermission(authCtx, issue, task); err != nil {
+		return nil, err
 	}
 
 	// 构建 owner / resolver 显示名
@@ -368,42 +440,48 @@ func handleGetIssueDetail(ctx context.Context, authCtx *mcp.AuthContext, args ma
 		}
 	}
 
+	// 提取 rule_id 为局部变量【P2-2 修复】
+	var ruleID uint
+	if issue.RuleID != nil {
+		ruleID = *issue.RuleID
+	}
+
 	return map[string]interface{}{
-		"id":                 issue.ID,
-		"task_id":            issue.TaskID,
-		"mr_id":              issue.MRID,
-		"project_id":         task.ProjectID,
-		"project_name":       project.Name,
-		"mr_title":           task.MRTitle,
-		"rule_id":            func() uint { if issue.RuleID != nil { return *issue.RuleID }; return 0 }(),
-		"rule_name":          ruleName,
-		"rule_description":   ruleDescription,
-		"rule_code":          issue.RuleCode,
-		"category":           issue.Category,
-		"severity":           issue.Severity,
-		"status":             issue.Status,
-		"file_path":          issue.File,
-		"line_start":         issue.LineStart,
-		"line_end":           issue.LineEnd,
-		"code_snippet":       issue.CodeSnippet,
-		"message":            issue.Message,
-		"suggestion":         issue.Suggestion,
-		"deduct_score":       issue.DeductScore,
-		"owner_id":           issue.OwnerID,
-		"owner_name":         ownerName,
-		"current_owner_id":   issue.CurrentOwnerID,
-		"current_owner_name": currentOwnerName,
-		"escalation_level":   issue.EscalationLevel,
-		"inherited_from_id":  issue.InheritedFromIssueID,
-		"resolved_by_id":     issue.ResolvedBy,
-		"resolved_by_name":   resolvedByName,
-		"resolved_at":        formatTimePtr(issue.ResolvedAt),
-		"reject_reason":      issue.RejectReason,
+		"id":                   issue.ID,
+		"task_id":              issue.TaskID,
+		"mr_id":                issue.MRID,
+		"project_id":           task.ProjectID,
+		"project_name":         project.Name,
+		"mr_title":             task.MRTitle,
+		"rule_id":              ruleID,
+		"rule_name":            ruleName,
+		"rule_description":     ruleDescription,
+		"rule_code":            issue.RuleCode,
+		"category":             issue.Category,
+		"severity":             issue.Severity,
+		"status":               issue.Status,
+		"file_path":            issue.File,
+		"line_start":           issue.LineStart,
+		"line_end":             issue.LineEnd,
+		"code_snippet":         issue.CodeSnippet,
+		"message":              issue.Message,
+		"suggestion":           issue.Suggestion,
+		"deduct_score":         issue.DeductScore,
+		"owner_id":             issue.OwnerID,
+		"owner_name":           ownerName,
+		"current_owner_id":     issue.CurrentOwnerID,
+		"current_owner_name":   currentOwnerName,
+		"escalation_level":     issue.EscalationLevel,
+		"inherited_from_id":    issue.InheritedFromIssueID,
+		"resolved_by_id":       issue.ResolvedBy,
+		"resolved_by_name":     resolvedByName,
+		"resolved_at":          formatTimePtr(issue.ResolvedAt),
+		"reject_reason":        issue.RejectReason,
 		"gitlab_discussion_id": issue.GitlabDiscussionID,
-		"fingerprint":        issue.Fingerprint,
-		"original_created_at": formatTimePtr(issue.OriginalCreatedAt),
-		"created_at":         issue.CreatedAt.Format("2006-01-02 15:04"),
-		"updated_at":         issue.UpdatedAt.Format("2006-01-02 15:04"),
+		"fingerprint":          issue.Fingerprint,
+		"original_created_at":  formatTimePtr(issue.OriginalCreatedAt),
+		"created_at":           issue.CreatedAt.Format("2006-01-02 15:04"),
+		"updated_at":           issue.UpdatedAt.Format("2006-01-02 15:04"),
 	}, nil
 }
 
