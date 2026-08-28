@@ -204,15 +204,26 @@ func handleRetryTask(ctx context.Context, authCtx *mcp.AuthContext, args map[str
 		return nil, fmt.Errorf("task status is %s, only failed or stopped tasks can be retried", task.Status)
 	}
 
-	// 创建重试任务（简化：创建新任务复制原任务信息）
+	// 创建重试任务：复制原任务的关键字段，避免外键约束丢失
 	newTask := model.Task{
-		ProjectID:    task.ProjectID,
-		MRMergeID:    task.MRMergeID,
-		MRTitle:      task.MRTitle,
-		MRAuthor:     task.MRAuthor,
-		SourceBranch: task.SourceBranch,
-		TargetBranch: task.TargetBranch,
-		Status:       model.TaskPending,
+		ProjectID:           task.ProjectID,
+		MRMergeID:           task.MRMergeID,
+		MRTitle:             task.MRTitle,
+		MRAuthor:            task.MRAuthor,
+		MRAuthorDisplayName: task.MRAuthorDisplayName,
+		MRURL:               task.MRURL,
+		NoteID:              task.NoteID,
+		TriggerType:         task.TriggerType,
+		TriggerSource:       "manual", // 重试任务标记为手动触发
+		TaskType:            task.TaskType,
+		SourceBranch:        task.SourceBranch,
+		TargetBranch:        task.TargetBranch,
+		PoolID:              task.PoolID,        // 【修复】避免 fk_tasks_pool 外键约束失败
+		UsedModelID:         task.UsedModelID,   // 【修复】复制模型ID
+		GitlabTokenID:       task.GitlabTokenID, // 【修复】复制tokenID
+		OpencodeSessionID:   task.OpencodeSessionID,
+		Status:              model.TaskPending,
+		RetryCount:          task.RetryCount + 1,
 	}
 	if err := model.DB.Create(&newTask).Error; err != nil {
 		return nil, fmt.Errorf("create retry task failed: %w", err)
