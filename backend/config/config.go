@@ -153,10 +153,10 @@ func Load() *Config {
 
 		// Diff Line Map（默认关闭，需显式开启）
 		DiffLineMap: DiffLineMapConfig{
-			Enabled:            getEnvBool("DIFF_LINE_MAP_ENABLED", false),
-			InjectLineNumbers:  getEnvBool("DIFF_LINE_MAP_INJECT", false),
-			UseCorrelator:      getEnvBool("DIFF_LINE_MAP_CORRELATOR", false),
-			StoreDiffRefs:      getEnvBool("DIFF_LINE_MAP_STORE_DIFF_REFS", false),
+			Enabled:            getEnvBool("DIFF_LINE_MAP_ENABLED", true),
+			InjectLineNumbers:  getEnvBool("DIFF_LINE_MAP_INJECT", true),
+			UseCorrelator:      getEnvBool("DIFF_LINE_MAP_CORRELATOR", true),
+			StoreDiffRefs:      getEnvBool("DIFF_LINE_MAP_STORE_DIFF_REFS", true),
 			GrayPercent:        getEnvInt("DIFF_LINE_MAP_GRAY_PERCENT", 0),
 			GrayMode:           getEnv("DIFF_LINE_MAP_GRAY_MODE", "project_hash"),
 			MinFuzzyConfidence: getEnvFloat64("DIFF_LINE_MAP_MIN_FUZZY_CONF", 0.3),
