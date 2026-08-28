@@ -110,12 +110,14 @@
         .modal-overlay.open { display: flex; }
         .modal {
             background: var(--card); border-radius: .75rem; border: 1px solid var(--border);
-            width: 100%; max-width: 600px; max-height: 85vh; overflow-y: auto;
+            width: 100%; max-width: 600px; max-height: 85vh;
             box-shadow: 0 20px 60px rgba(0,0,0,.2);
+            display: flex; flex-direction: column; overflow: hidden;
         }
         .modal-head {
             display: flex; justify-content: space-between; align-items: center;
             padding: 1rem 1.25rem; border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
         }
         .modal-title { font-size: 1rem; font-weight: 700; color: var(--text); }
         .modal-close {
@@ -123,7 +125,7 @@
             background: #f1f5f9; color: var(--text-3); cursor: pointer; display: flex; align-items: center; justify-content: center;
         }
         .modal-close:hover { background: #e2e8f0; color: var(--text); }
-        .modal-body { padding: 1.25rem; }
+        .modal-body { padding: 1.25rem; overflow-y: auto; flex: 1; }
         .modal-section { margin-bottom: 1.25rem; }
         .modal-section:last-child { margin-bottom: 0; }
         .modal-label { font-size: .75rem; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .04em; margin-bottom: .5rem; display: flex; align-items: center; gap: .375rem; }
