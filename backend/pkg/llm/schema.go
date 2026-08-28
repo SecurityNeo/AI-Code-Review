@@ -147,15 +147,15 @@ func GetBatchCollectionJSONSchema() interface{} {
 						},
 						"line_start": map[string]interface{}{
 							"type":        "integer",
-							"description": "起始行号，不确定时填 0",
+							"description": "问题区域在文件中的起始行号（真正触发 bug 的第一行），不确定时填 0",
 						},
 						"line_end": map[string]interface{}{
 							"type":        "integer",
-							"description": "结束行号，单行为 0",
+							"description": "问题区域在文件中的结束行号。单行问题可等于 line_start 或填 0",
 						},
 						"code_snippet": map[string]interface{}{
 							"type":        "string",
-							"description": "相关代码片段",
+							"description": "相关代码片段（含上下文）。必须在问题区域首尾行末尾分别添加 ` <<< 问题区域开始` 和 ` <<< 问题区域结束` 标记；单行问题则添加 ` <<< 问题所在`",
 						},
 						"message": map[string]interface{}{
 							"type":        "string",
@@ -256,15 +256,15 @@ func GetReviewJSONSchema(dimensions []string) interface{} {
 						},
 						"line_start": map[string]interface{}{
 							"type":        "integer",
-							"description": "起始行号，不确定时填 0",
+							"description": "问题区域在文件中的起始行号（真正触发 bug 的第一行），不确定时填 0",
 						},
 						"line_end": map[string]interface{}{
 							"type":        "integer",
-							"description": "结束行号，单行为 0",
+							"description": "问题区域在文件中的结束行号。单行问题可等于 line_start 或填 0",
 						},
 						"code_snippet": map[string]interface{}{
 							"type":        "string",
-							"description": "相关代码片段",
+							"description": "相关代码片段（含上下文）。必须在问题区域首尾行末尾分别添加 ` <<< 问题区域开始` 和 ` <<< 问题区域结束` 标记；单行问题则添加 ` <<< 问题所在`",
 						},
 						"message": map[string]interface{}{
 							"type":        "string",

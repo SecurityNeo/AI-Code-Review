@@ -77,8 +77,13 @@ func ApplyLineCorrections(issues []llm.AIReviewIssue, rawDiff string, cfg *confi
 				zap.Float64("confidence", result.Confidence),
 				zap.String("match_type", matchTypeString(result.MatchType)),
 			)
+			// 【修复】保持原始 range 长度，只平移起始位置。
+			// 如果原始 line_end > line_start（多行问题区域），delta 同步应用到 line_end。
+			delta := result.NewStart - result.OldStart
 			issues[i].LineStart = result.NewStart
-			issues[i].LineEnd = result.NewEnd
+			if issues[i].LineEnd > issues[i].LineStart {
+				issues[i].LineEnd += delta
+			}
 		} else {
 			unchanged++
 		}

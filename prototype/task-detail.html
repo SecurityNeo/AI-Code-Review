@@ -954,6 +954,58 @@ function escapeHtml(text) {
         .replace(/'/g, '&#039;');
 }
 
+/**
+ * parseCodeSnippet 解析代码片段中的问题区域标记
+ * 返回 { lines: [{text, type}], snippetStartLine, problemStartRel, problemEndRel }
+ * type: 'context' | 'problem-start' | 'problem-end' | 'problem-single'
+ */
+function parseCodeSnippet(snippet, issueLineStart, issueLineEnd) {
+    if (!snippet) return null;
+    const rawLines = snippet.split('\n');
+    const lines = [];
+    let problemStartRel = -1, problemEndRel = -1;
+
+    rawLines.forEach((raw, idx) => {
+        let text = raw;
+        let type = 'context';
+
+        if (text.endsWith(' <<< 问题区域开始')) {
+            text = text.replace(/ <<< 问题区域开始$/, '');
+            type = 'problem-start';
+            problemStartRel = idx;
+        } else if (text.endsWith(' <<< 问题区域结束')) {
+            text = text.replace(/ <<< 问题区域结束$/, '');
+            type = 'problem-end';
+            problemEndRel = idx;
+        } else if (text.endsWith(' <<< 问题所在')) {
+            text = text.replace(/ <<< 问题所在$/, '');
+            type = 'problem-single';
+            problemStartRel = idx;
+            problemEndRel = idx;
+        }
+
+        lines.push({ text: escapeHtml(text), type, rawIdx: idx });
+    });
+
+    // Fallback: 如果没有任何标记，使用 issue.line_start/line_end 推断
+    if (problemStartRel < 0 && issueLineStart > 0) {
+        // 假设 code_snippet 的第一行对应 issue.line_start 或附近
+        // 简单 fallback：如果 snippet 有 N 行，中间行作为问题行
+        problemStartRel = Math.floor(lines.length / 2);
+        problemEndRel = problemStartRel;
+        if (lines[problemStartRel]) lines[problemStartRel].type = 'problem-single';
+    }
+
+    // 计算代码片段在文件中的起始行号
+    let snippetStartLine = issueLineStart;
+    if (problemStartRel > 0) {
+        snippetStartLine = issueLineStart - problemStartRel;
+        if (snippetStartLine < 1) snippetStartLine = 1;
+    }
+
+    return { lines, snippetStartLine, problemStartRel, problemEndRel };
+}
+
 // ========== Diff 相关 ==========
 async function loadDiffFiles(task) {
     if (task.diff_files_json && task.diff_files_json !== '[]' && task.diff_files_json !== '{}') {
@@ -1234,16 +1286,39 @@ function renderIssues() {
                 <!-- Note: 问题描述和文件位置在折叠态摘要区已展示，展开态不再重复 -->
 
                 <!-- 问题代码 -->
-                ${issue.code_snippet ? `
+                ${issue.code_snippet ? (() => {
+                    const parsed = parseCodeSnippet(issue.code_snippet, issue.line_start || 0, issue.line_end || 0);
+                    if (!parsed) return '';
+                    const { lines, snippetStartLine, problemStartRel, problemEndRel } = parsed;
+                    const hasProblem = problemStartRel >= 0;
+                    // 计算问题区域的实际文件行号
+                    let problemFileStart = (issue.line_start || snippetStartLine + problemStartRel);
+                    let problemFileEnd = (issue.line_end || problemFileStart);
+                    if (hasProblem && problemEndRel > problemStartRel) {
+                        problemFileEnd = snippetStartLine + problemEndRel;
+                    }
+                    const lineNumWidth = String(snippetStartLine + lines.length).length;
+                    return `
                 <div class="mb-4">
                     <div class="flex items-center gap-1.5 mb-1.5">
                         <div class="w-1 h-3.5 bg-indigo-500 rounded-full"></div>
                         <span class="text-xs font-semibold text-gray-700">问题代码</span>
+                        ${hasProblem ? `<span class="text-[10px] px-1.5 py-0.5 bg-red-100 text-red-600 rounded border border-red-200 ml-1">问题区域: 第 ${problemFileStart}${problemFileEnd > problemFileStart ? '-'+problemFileEnd : ''} 行</span>` : ''}
+                        <span class="text-[10px] text-gray-400 ml-1">(上下文: 第 ${snippetStartLine}-${snippetStartLine + lines.length - 1} 行)</span>
                     </div>
                     <div class="pl-3">
-                        <pre class="text-xs bg-gray-800 text-gray-100 p-3 rounded-lg overflow-x-auto border border-gray-700"><code>${escapeHtml(issue.code_snippet)}</code></pre>
+                        <pre class="text-xs bg-gray-800 text-gray-100 p-3 rounded-lg overflow-x-auto border border-gray-700 leading-relaxed"><code>${lines.map((ln, i) => {
+                        const lineNo = snippetStartLine + i;
+                        const isProblem = ln.type === 'problem-start' || ln.type === 'problem-end' || ln.type === 'problem-single';
+                        const numHtml = `<span class="inline-block text-right text-gray-500 select-none mr-3" style="min-width:${lineNumWidth}ch">${lineNo}</span>`;
+                        if (isProblem) {
+                            return `<div class="bg-red-900/30 -mx-3 px-3 border-l-2 border-red-400">${numHtml}${ln.text}</div>`;
+                        }
+                        return `<div>${numHtml}${ln.text}</div>`;
+                    }).join('')}</code></pre>
                     </div>
-                </div>` : ''}
+                </div>`;
+                })() : ''}
 
                 <!-- 修改建议 -->
                 ${issue.suggestion ? `
