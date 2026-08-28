@@ -523,16 +523,37 @@ async function loadReviewCategories() {
     } catch (e) { console.error('加载维度分类失败:', e); }
 }
 
-function switchTab(tab) {
+async function switchTab(tab) {
     document.querySelectorAll('.tab-nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tab));
 
     if (!currentTask) return;
 
+    // 切换 tab 时先刷新任务状态，避免 status 一直是页面加载时的旧值
+    try {
+        const res = await apiFetch(`${API_BASE}/tasks/${taskId}`);
+        const data = await res.json();
+        if (data.data) {
+            currentTask = data.data;
+            renderTaskMeta(currentTask);
+        }
+    } catch (e) {
+        console.error('刷新任务状态失败:', e);
+    }
+
     if (tab === 'report') {
         if (currentTask.task_type === 'review') {
             if (currentTask.status === 'success') {
                 loadStructuredReview(currentTask.id);
+            } else {
+                // 未就绪时展示友好占位
+                const container = document.getElementById('issuesListArea');
+                if (container) {
+                    container.innerHTML = `<div class="text-center py-20 text-gray-400">
+                        <i class="fas fa-spinner fa-spin text-3xl mb-4 block"></i>
+                        <p>评审进行中，请稍后刷新<br><span class="text-xs">当前状态：${getStatusText(currentTask.status)}</span></p>
+                    </div>`;
+                }
             }
         } else if (currentTask.task_type === 'chat') {
             loadChatMessages();
