@@ -512,10 +512,6 @@ let diffFileMap = {};
 let currentDiffFile = null;
 let chatEventSource = null;
 let chatHasSession = false;
-// Tab 按需加载标记：首次切换到对应 Tab 时拉取数据，避免进入页面时调用所有接口
-// report: 评审报告（review 任务）  chat: AI对话（chat 任务）
-// token: Token 用量（在 tabBtnToken 的 onClick 中处理）
-let tabLoaded = { report: false, chat: false, token: false, pipeline: false };
 const taskId = new URLSearchParams(window.location.search).get('id');
 
 async function loadReviewCategories() {
@@ -531,38 +527,22 @@ function switchTab(tab) {
     document.querySelectorAll('.tab-nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tab));
 
-    // 按需加载：仅在 Tab 首次激活时拉取对应数据，避免进入页面就调用所有接口
     if (!currentTask) return;
 
     if (tab === 'report') {
         if (currentTask.task_type === 'review') {
-            if (!tabLoaded.report && currentTask.status === 'success') {
-                tabLoaded.report = true;
+            if (currentTask.status === 'success') {
                 loadStructuredReview(currentTask.id);
             }
         } else if (currentTask.task_type === 'chat') {
-            if (!tabLoaded.chat) {
-                tabLoaded.chat = true;
-                loadChatMessages();
-            } else {
-                const chatMessages = document.getElementById('chatMessages');
-                if (chatMessages) {
-                    setTimeout(() => { chatMessages.scrollTop = chatMessages.scrollHeight; }, 50);
-                }
-            }
+            loadChatMessages();
         }
     }
     if (tab === 'token') {
-        if (!tabLoaded.token) {
-            tabLoaded.token = true;
-            loadTaskTokenUsage();
-        }
+        loadTaskTokenUsage();
     }
     if (tab === 'pipeline') {
-        if (!tabLoaded.pipeline) {
-            tabLoaded.pipeline = true;
-            loadPipelineStatus();
-        }
+        loadPipelineStatus();
     }
 }
 
