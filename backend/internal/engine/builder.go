@@ -1281,7 +1281,8 @@ func injectLineNumberInstruction(diffText string) string {
 	instruction := " [行号前缀说明] 每行开头的 [newN|oldM] 表示：新文件行号=N，旧文件行号=M\n" +
 		"             [new-|oldM] → 删除行（仅存在于旧文件第 M 行）\n" +
 		"             [newN|old-] → 新增行（仅存在于新文件第 N 行）\n" +
-		"             【重要】请在返回 line_start 时使用【新文件行号】（即 new 后面的数字）\n"
+		"             【重要】请在返回 line_start 时使用【新文件行号】（即 new 后面的数字）\n" +
+		"             【重要】请在 code_snippet 中问题所在行的行末添加 ` <<< 问题所在` 标记\n"
 	return instruction + diffText
 }
 
