@@ -543,15 +543,25 @@ async function switchTab(tab) {
 
     if (tab === 'report') {
         if (currentTask.task_type === 'review') {
-            if (currentTask.status === 'success') {
+	// 加载评审报告的条件：success（已完成）或 stopped（已停止，可能已有部分结果）
+            const hasReport = currentTask.status === 'success' || currentTask.status === 'stopped' || currentTask.status === 'failed' || currentTask.status === 'timeout';
+            if (hasReport) {
                 loadStructuredReview(currentTask.id);
-            } else {
-                // 未就绪时展示友好占位
+            } else if (currentTask.status === 'running' || currentTask.status === 'pending') {
+                // 运行中/排队中，展示友好占位
                 const container = document.getElementById('issuesListArea');
                 if (container) {
                     container.innerHTML = `<div class="text-center py-20 text-gray-400">
                         <i class="fas fa-spinner fa-spin text-3xl mb-4 block"></i>
                         <p>评审进行中，请稍后刷新<br><span class="text-xs">当前状态：${getStatusText(currentTask.status)}</span></p>
+                    </div>`;
+                }
+            } else {
+                // 未知状态兜底
+                const container = document.getElementById('issuesListArea');
+                if (container) {
+                    container.innerHTML = `<div class="text-center py-20 text-gray-400">
+                        <p>当前状态：${getStatusText(currentTask.status)}，无可展示内容</p>
                     </div>`;
                 }
             }
