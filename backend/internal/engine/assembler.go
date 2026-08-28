@@ -260,7 +260,7 @@ func buildIssuesList(issues []IssueContext) string {
 						b.WriteString(fmt.Sprintf(" (第 %d", issue.LineStart))
 						if issue.LineEnd > issue.LineStart {
 							b.WriteString(fmt.Sprintf("-%d", issue.LineEnd))
-							b.WriteString(" 行)，问题区域")
+							b.WriteString(" 行，问题区域)")
 						} else {
 							b.WriteString(" 行)")
 						}
@@ -486,6 +486,9 @@ func AssembleFullMarkdownReport(
 // stripSnippetMarkers 清理代码片段中的问题区域标注标记
 // 避免 ` <<< 问题区域开始` 等标记出现在 Markdown 报告中
 func stripSnippetMarkers(snippet string) string {
+	if snippet == "" {
+		return ""
+	}
 	replacements := []string{
 		" <<< 问题区域开始",
 		" <<< 问题区域结束",

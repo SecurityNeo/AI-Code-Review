@@ -987,18 +987,23 @@ function parseCodeSnippet(snippet, issueLineStart, issueLineEnd) {
         lines.push({ text: escapeHtml(text), type, rawIdx: idx });
     });
 
-    // Fallback: 如果没有任何标记，使用 issue.line_start/line_end 推断
+    // Fallback: 如果没有任何标记，使用 issueLineStart/issueLineEnd 推断
     if (problemStartRel < 0 && issueLineStart > 0) {
-        // 假设 code_snippet 的第一行对应 issue.line_start 或附近
-        // 简单 fallback：如果 snippet 有 N 行，中间行作为问题行
-        problemStartRel = Math.floor(lines.length / 2);
-        problemEndRel = problemStartRel;
-        if (lines[problemStartRel]) lines[problemStartRel].type = 'problem-single';
+        // 优先使用 issueLineStart/issueLineEnd 推断问题区域在 snippet 中的位置。
+        // 无法精确推断时，保守地将第一行标记为问题行（避免中间行误导）。
+        problemStartRel = 0;
+        problemEndRel = Math.max(0, Math.min(lines.length - 1, issueLineEnd - issueLineStart));
+        if (problemEndRel === problemStartRel) {
+            if (lines[problemStartRel]) lines[problemStartRel].type = 'problem-single';
+        } else {
+            if (lines[problemStartRel]) lines[problemStartRel].type = 'problem-start';
+            if (lines[problemEndRel]) lines[problemEndRel].type = 'problem-end';
+        }
     }
 
     // 计算代码片段在文件中的起始行号
     let snippetStartLine = issueLineStart;
-    if (problemStartRel > 0) {
+    if (problemStartRel >= 0) {
         snippetStartLine = issueLineStart - problemStartRel;
         if (snippetStartLine < 1) snippetStartLine = 1;
     }
@@ -1287,7 +1292,9 @@ function renderIssues() {
 
                 <!-- 问题代码 -->
                 ${issue.code_snippet ? (() => {
-                    const parsed = parseCodeSnippet(issue.code_snippet, issue.line_start || 0, issue.line_end || 0);
+                    const _ls = issue.line_start == null ? 0 : issue.line_start;
+                    const _le = issue.line_end == null ? 0 : issue.line_end;
+                    const parsed = parseCodeSnippet(issue.code_snippet, _ls, _le);
                     if (!parsed) return '';
                     const { lines, snippetStartLine, problemStartRel, problemEndRel } = parsed;
                     const hasProblem = problemStartRel >= 0;
