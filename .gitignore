@@ -7,5 +7,5 @@ backend/main
 query_minio.py
 docs/*.md
 AGENTS.md
-test
+test/
 *.tar
