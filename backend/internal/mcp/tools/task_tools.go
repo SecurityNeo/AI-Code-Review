@@ -370,8 +370,8 @@ func handleStopTask(ctx context.Context, authCtx *mcp.AuthContext, args map[stri
 		return nil, fmt.Errorf("task status is %s, cannot stop", task.Status)
 	}
 
-	// 更新状态为 stopped
-	if err := model.DB.Model(&task).Update("status", model.TaskStopped).Error; err != nil {
+	// 复用 service 层逻辑，与页面 API 保持一致的停止行为
+	if err := service.NewTaskService().Abort(taskID); err != nil {
 		return nil, fmt.Errorf("stop task failed: %w", err)
 	}
 
