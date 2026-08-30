@@ -378,7 +378,7 @@ func handleStopTask(ctx context.Context, authCtx *mcp.AuthContext, args map[stri
 	return map[string]interface{}{
 		"success": true,
 		"task_id": taskID,
-		"message": "已发送停止信号，任务将在当前 stage 完成后终止",
+		"message": "任务已终止，Pipeline 执行已中断",
 	}, nil
 }
 
