@@ -394,19 +394,32 @@ function getExampleValue(key, type) {
 }
 
 function generateAnnotatedRequest(t) {
-    if (!t.params || t.params.length === 0) return '// 无参数';
     const lines = [];
     lines.push('{');
-    t.params.forEach((p, i) => {
-        const val = getExampleValue(p.n, p.t);
-        const comma = i < t.params.length - 1 ? ',' : '';
-        const line = `  "${p.n}": ${JSON.stringify(val)}${comma}`;
-        // 计算填充空格使注释右对齐
+
+    // 认证参数（所有工具通用）
+    const authParams = [
+        { n: 'x_im_provider', v: '"wecom"', r: true, d: '认证源标识' },
+        { n: 'x_im_user_id', v: '"user123"', r: true, d: 'IM用户唯一标识' }
+    ];
+    const allParams = [...authParams, ...(t.params || [])];
+
+    if (allParams.length === 0) {
+        lines.push('}');
+        return lines.join('\n') + '\n// 无参数（仅需认证）';
+    }
+
+    allParams.forEach((p, i) => {
+        const isAuth = i < authParams.length;
+        const val = isAuth ? p.v : JSON.stringify(getExampleValue(p.n, p.t));
+        const comma = i < allParams.length - 1 ? ',' : '';
+        const line = `  "${p.n}": ${val}${comma}`;
         const padding = Math.max(1, 38 - line.length);
         const reqMark = p.r ? '必填' : '可选';
         const comment = (p.d || '') + (p.d && p.d.includes(reqMark) ? '' : `（${reqMark}）`);
         lines.push(line + ' '.repeat(padding) + '// ' + comment);
     });
+
     lines.push('}');
     return lines.join('\n');
 }
