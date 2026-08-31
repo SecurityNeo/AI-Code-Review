@@ -86,6 +86,7 @@ type Server struct {
 	logChan   chan *model.MCPCallLog
 	sessions  map[string]*mcpSession
 	sessionMu sync.RWMutex
+	sseHub    *mcpSSEHub // SSE 广播中心
 }
 
 // NewServer 创建 MCP Server
@@ -96,12 +97,14 @@ func NewServer() *Server {
 		limiter:  NewRateLimiter(100, time.Minute),
 		logChan:  make(chan *model.MCPCallLog, 100),
 		sessions: make(map[string]*mcpSession),
+		sseHub:   newMcpSSEHub(),
 	}
 	go s.logWorker()
 	return s
 }
 
 // RegisterTool 注册 Tool（支持可选 annotations）
+// 注册完成后通知所有 SSE 客户端工具列表已变更
 func (s *Server) RegisterTool(name, description string, schema json.RawMessage, handler ToolHandler, annotations ...*ToolAnnotations) {
 	tool := Tool{Name: name, Description: description, InputSchema: schema}
 	if len(annotations) > 0 && annotations[0] != nil {
@@ -109,6 +112,8 @@ func (s *Server) RegisterTool(name, description string, schema json.RawMessage, 
 	}
 	s.tools[name] = tool
 	s.handlers[name] = handler
+	// 通知所有已连接的 SSE 客户端工具列表已变更
+	s.sseHub.NotifyToolsListChanged()
 }
 
 // HandleMCP 处理 MCP POST 请求（JSON-RPC）
@@ -163,10 +168,10 @@ func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 			"capabilities": map[string]interface{}{
 				// 旧版 capabilities（兼容旧客户端）
 				"tools": map[string]interface{}{
-					"listChanged": false,
+					"listChanged": true,
 				},
 				// MCP 1.0 新增 capabilities（旧客户端忽略）
-				"logging": map[string]interface{}{}, // 支持日志推送
+				// 注：logging 暂不提供（无 SSE 端点推送日志）
 				"prompts": map[string]interface{}{
 					"listChanged": false,
 				},
@@ -212,7 +217,7 @@ func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	case "resources/list":
 		result = map[string]interface{}{"resources": []interface{}{}}
 	case "resources/read":
-		result = map[string]interface{}{"contents": []interface{}{}}
+		err = fmt.Errorf("resource not found")
 	case "resources/templates/list":
 		result = map[string]interface{}{"resourceTemplates": []interface{}{}}
 	case "prompts/list":
@@ -251,6 +256,47 @@ func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 		ID:      req.ID,
 		Result:  result,
 	})
+}
+
+// HandleSSE 处理 MCP SSE 长连接（MCP 1.0 StreamableHTTP + SSE）
+func (s *Server) HandleSSE(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+
+	// 从 Header 或 Query 获取 Session ID
+	sessionID := r.Header.Get("Mcp-Session-Id")
+	if sessionID == "" {
+		sessionID = r.URL.Query().Get("session_id")
+	}
+	if sessionID == "" {
+		sessionID = generateSessionID()
+	}
+
+	ch := s.sseHub.register(sessionID)
+	defer s.sseHub.unregister(sessionID)
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return
+	}
+
+	for {
+		select {
+		case msg := <-ch:
+			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", msg)
+			flusher.Flush()
+		case <-ticker.C:
+			_, _ = fmt.Fprintf(w, ":keepalive\n\n")
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
 }
 
 // listTools 列出所有可用 Tools（tools/list 不根据 Scope 过滤，让智能体发现全部能力）
@@ -476,8 +522,8 @@ func (s *Server) getSession(id string) *mcpSession {
 		return nil
 	}
 
-	// Session 有效期 24 小时
-	if time.Since(sess.createdAt) > 24*time.Hour {
+	// Session 有效期 24 小时（基于最后访问时间的滑动窗口）
+	if time.Since(sess.lastUsedAt) > 24*time.Hour {
 		s.deleteSession(id)
 		return nil
 	}
@@ -495,6 +541,56 @@ func (s *Server) deleteSession(id string) {
 	s.sessionMu.Lock()
 	delete(s.sessions, id)
 	s.sessionMu.Unlock()
+}
+
+// ---------------------- SSE Hub ----------------------
+
+// mcpSSEHub SSE 广播中心
+type mcpSSEHub struct {
+		mu      sync.RWMutex
+		clients map[string]chan string // sessionID -> SSE write channel
+	}
+
+func newMcpSSEHub() *mcpSSEHub {
+	return &mcpSSEHub{
+		clients: make(map[string]chan string),
+	}
+}
+
+func (h *mcpSSEHub) register(sessionID string) chan string {
+	ch := make(chan string, 10)
+	h.mu.Lock()
+	h.clients[sessionID] = ch
+	h.mu.Unlock()
+	return ch
+}
+
+func (h *mcpSSEHub) unregister(sessionID string) {
+	h.mu.Lock()
+	delete(h.clients, sessionID)
+	h.mu.Unlock()
+}
+
+// broadcast 广播消息给所有 SSE 客户端
+func (h *mcpSSEHub) broadcast(msg string) {
+	h.mu.RLock()
+	clients := make([]chan string, 0, len(h.clients))
+	for _, ch := range h.clients {
+		clients = append(clients, ch)
+	}
+	h.mu.RUnlock()
+
+	for _, ch := range clients {
+		select {
+		case ch <- msg:
+		default: // channel full, drop silently
+		}
+	}
+}
+
+// NotifyToolsListChanged 通知所有客户端工具列表已变更
+func (h *mcpSSEHub) NotifyToolsListChanged() {
+	h.broadcast(`{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}`)
 }
 
 // generateSessionId 生成随机 Session ID

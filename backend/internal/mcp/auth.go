@@ -99,13 +99,27 @@ func isIPAllowed(clientIP, whitelist string) bool {
 	return false
 }
 
-// respondError 返回 JSON 错误响应
-func respondError(w http.ResponseWriter, code int, errCode, message string) {
+// respondError 返回 MCP JSON-RPC 格式错误（AuthMiddleware 专用，兼容旧客户端）
+func respondError(w http.ResponseWriter, httpCode int, errCode, message string) {
+	// 映射内部错误码到 MCP JSON-RPC 标准/自定义错误码
+	mcpCode := ErrInvalidRequest
+	switch errCode {
+	case "UNAUTHORIZED":
+		mcpCode = ErrUnauthorized
+	case "FORBIDDEN":
+		mcpCode = ErrUnauthorized // IP 白名单拒绝视为认证失败（无更合适的标准 code）
+	case "INTERNAL_ERROR":
+		mcpCode = ErrInternalError
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"error":      true,
-		"error_code": errCode,
-		"message":    message,
+	w.WriteHeader(httpCode)
+	_ = json.NewEncoder(w).Encode(MCPResponse{
+		JSONRPC: "2.0",
+		ID:      nil,
+		Error: &MCPError{
+			Code:    mcpCode,
+			Message: message,
+		},
 	})
 }

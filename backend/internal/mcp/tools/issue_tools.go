@@ -202,9 +202,9 @@ func handleRejectIssue(ctx context.Context, authCtx *mcp.AuthContext, args map[s
 	}
 	userID := authCtx.UserID
 
-	reason, _ := args["reason"].(string)
-	if reason == "" {
-		return nil, fmt.Errorf("reason is required for rejecting an issue")
+	reason, ok := requireString(args, "reason")
+	if !ok || reason == "" {
+		return nil, fmt.Errorf("参数 'reason' 必填，请说明误报原因")
 	}
 
 	var issue model.ReviewIssue
@@ -247,9 +247,9 @@ func handleIgnoreIssue(ctx context.Context, authCtx *mcp.AuthContext, args map[s
 	}
 	userID := authCtx.UserID
 
-	reason, _ := args["reason"].(string)
-	if reason == "" {
-		return nil, fmt.Errorf("reason is required for ignoring an issue")
+	reason, ok := requireString(args, "reason")
+	if !ok || reason == "" {
+		return nil, fmt.Errorf("参数 'reason' 必填，请说明忽略原因")
 	}
 
 	var issue model.ReviewIssue

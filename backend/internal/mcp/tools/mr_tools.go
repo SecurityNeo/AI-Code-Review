@@ -115,8 +115,16 @@ func handleListMRs(ctx context.Context, authCtx *mcp.AuthContext, args map[strin
 }
 
 func handleGetMRDetail(ctx context.Context, authCtx *mcp.AuthContext, args map[string]interface{}) (interface{}, error) {
-	projectID := uint(args["project_id"].(float64))
-	mrIID := int(args["mr_iid"].(float64))
+	projectIDRaw, err := requireUint(args, "project_id")
+	if err != nil {
+		return nil, err
+	}
+	mrIIDRaw, err := requireUint(args, "mr_iid")
+	if err != nil {
+		return nil, err
+	}
+	projectID := projectIDRaw
+	mrIID := int(mrIIDRaw)
 
 	var task model.Task
 	if err := model.DB.Where("project_id = ? AND mr_merge_id = ?", projectID, mrIID).Order("created_at DESC").First(&task).Error; err != nil {
@@ -124,7 +132,11 @@ func handleGetMRDetail(ctx context.Context, authCtx *mcp.AuthContext, args map[s
 	}
 
 	if !authCtx.IsAdmin && task.MRAuthor != authCtx.User.GitlabUsername {
-		return nil, fmt.Errorf("permission denied")
+		return map[string]interface{}{
+			"success":    false,
+			"error_code": "permission_denied",
+			"message":    "无权查看此 MR，仅 MR 作者或 Admin 可访问",
+		}, nil
 	}
 
 	// diff 摘要（使用 []map[string]interface{} 解析，因为 DiffFilesJSON 存储的是小写字段名）

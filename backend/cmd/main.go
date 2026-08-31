@@ -338,8 +338,12 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 	mcpHandler := func(c *gin.Context) {
 		mcpServer.AuthMiddleware()(http.HandlerFunc(mcpServer.HandleMCP)).ServeHTTP(c.Writer, c.Request)
 	}
+	mcpSSEHandler := func(c *gin.Context) {
+		mcpServer.AuthMiddleware()(http.HandlerFunc(mcpServer.HandleSSE)).ServeHTTP(c.Writer, c.Request)
+	}
 	r.POST("/mcp", mcpHandler)      // MCP JSON-RPC
 	r.POST("/mcp/v1", mcpHandler)   // 旧路径兼容
+	r.GET("/mcp/sse", mcpSSEHandler) // MCP 1.0 SSE 推送
 	r.HEAD("/mcp/v1", func(c *gin.Context) { c.Status(200) }) // 健康探测
 
 	api := r.Group("/api/v1")

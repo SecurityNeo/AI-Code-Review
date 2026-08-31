@@ -34,7 +34,7 @@ func RegisterAllTools(server interface {
 	server.RegisterTool("get_merge_request_detail", "获取指定 MR 的评审详情和对应任务信息。当用户问'MR !N 评审结果如何'时使用。需要 project_id 和 mr_iid。", getMRDetailSchema, handleGetMRDetail, &mcp.ToolAnnotations{Title: "获取 MR 详情", ReadOnlyHint: true})
 
 	// 工作台（只读）
-	server.RegisterTool("get_workbench", "获取个人工作台数据，包含待处理 Issue 统计（按严重程度分档）、超时预警。当用户说'我的待办'时使用。Admin 可切换 admin 视图。", getWorkbenchSchema, handleGetWorkbench, &mcp.ToolAnnotations{Title: "获取工作台", ReadOnlyHint: false, OpenWorldHint: true})
+	server.RegisterTool("get_workbench", "获取个人工作台数据，包含待处理 Issue 统计（按严重程度分档）、超时预警。当用户说'我的待办'时使用。Admin 可切换 admin 视图。", getWorkbenchSchema, handleGetWorkbench, &mcp.ToolAnnotations{Title: "获取工作台", ReadOnlyHint: true})
 
 	// 大盘统计（只读）
 	server.RegisterTool("get_dashboard_stats", "获取代码评审大盘统计（任务量、成功率、失败率、Top 项目）。当用户问'这周评审了多少'时使用。支持 today/week/month。", getDashboardStatsSchema, handleGetDashboardStats, &mcp.ToolAnnotations{Title: "获取大盘统计", ReadOnlyHint: true})
