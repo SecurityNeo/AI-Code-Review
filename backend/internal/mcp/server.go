@@ -38,15 +38,38 @@ type MCPError struct {
 	Message string `json:"message"`
 }
 
+// ToolAnnotations MCP 1.0 工具标注（可选，旧客户端忽略）
+type ToolAnnotations struct {
+	Title           string `json:"title,omitempty"`           // 人类可读标题
+	ReadOnlyHint    bool   `json:"readOnlyHint,omitempty"`    // 只读操作
+	DestructiveHint bool   `json:"destructiveHint,omitempty"` // 破坏性操作
+	IdempotentHint  bool   `json:"idempotentHint,omitempty"`  // 幂等操作
+	OpenWorldHint   bool   `json:"openWorldHint,omitempty"`   // 可能影响外部系统
+}
+
 // Tool 定义
 type Tool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	InputSchema json.RawMessage `json:"inputSchema"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	InputSchema json.RawMessage  `json:"inputSchema"`
+	Annotations *ToolAnnotations `json:"annotations,omitempty"` // MCP 1.0 新增（旧客户端忽略）
 }
 
 // ToolHandler Tool 处理函数签名
 type ToolHandler func(ctx context.Context, authCtx *AuthContext, args map[string]interface{}) (interface{}, error)
+
+// MCP 标准 Error Code 常量（MCP 1.0 规范）
+const (
+	ErrParseError     = -32700 // Parse error
+	ErrInvalidRequest = -32600 // Invalid Request
+	ErrMethodNotFound = -32601 // Method not found
+	ErrInvalidParams  = -32602 // Invalid params
+	ErrInternalError  = -32603 // Internal error
+	// 自定义 Error Code（范围 -32000 ~ -32099，不冲突）
+	ErrServerNotInitialized = -32002
+	ErrUnauthorized         = -32001
+	ErrRateLimit            = -32000
+)
 
 // mcpSession MCP Session（StreamableHTTP 传输模式）
 type mcpSession struct {
@@ -78,9 +101,13 @@ func NewServer() *Server {
 	return s
 }
 
-// RegisterTool 注册 Tool
-func (s *Server) RegisterTool(name, description string, schema json.RawMessage, handler ToolHandler) {
-	s.tools[name] = Tool{Name: name, Description: description, InputSchema: schema}
+// RegisterTool 注册 Tool（支持可选 annotations）
+func (s *Server) RegisterTool(name, description string, schema json.RawMessage, handler ToolHandler, annotations ...*ToolAnnotations) {
+	tool := Tool{Name: name, Description: description, InputSchema: schema}
+	if len(annotations) > 0 && annotations[0] != nil {
+		tool.Annotations = annotations[0]
+	}
+	s.tools[name] = tool
 	s.handlers[name] = handler
 }
 
@@ -90,20 +117,20 @@ func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	// 解析请求
 	var req MCPRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondMCPError(w, nil, -32700, "Parse error")
+		respondMCPError(w, nil, ErrParseError, "Parse error")
 		return
 	}
 
 	// 获取认证上下文
 	authCtx := GetAuthContext(r.Context())
 	if authCtx == nil {
-		respondMCPError(w, req.ID, -32001, "Unauthorized")
+		respondMCPError(w, req.ID, ErrUnauthorized, "Unauthorized")
 		return
 	}
 
 	// 限流检查（按 API Key）
 	if !s.limiter.Allow(fmt.Sprintf("key_%d", authCtx.APIKey.ID)) {
-		respondMCPError(w, req.ID, -32002, "Rate limit exceeded")
+		respondMCPError(w, req.ID, ErrRateLimit, "Rate limit exceeded")
 		return
 	}
 
@@ -120,16 +147,31 @@ func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.Unmarshal(req.Params, &initParams)
 
-		// 协商 protocolVersion：如果客户端请求的是我们支持的版本，返回客户端版本；否则返回我们的默认版本
-		protocolVersion := initParams.ProtocolVersion
-		if protocolVersion == "" {
-			protocolVersion = "2024-11-05"
+		// 协商 protocolVersion
+		// 如果客户端请求 2025-03-26，返回 1.0 版本
+		// 否则返回 2024-11-05 兼容旧客户端
+		protocolVersion := "2024-11-05"
+		if initParams.ProtocolVersion == "2025-03-26" {
+			protocolVersion = "2025-03-26"
+		} else if initParams.ProtocolVersion != "" {
+			// 未知版本降级到 2025-03-26
+			protocolVersion = "2025-03-26"
 		}
 
 		result = map[string]interface{}{
 			"protocolVersion": protocolVersion,
 			"capabilities": map[string]interface{}{
+				// 旧版 capabilities（兼容旧客户端）
 				"tools": map[string]interface{}{
+					"listChanged": false,
+				},
+				// MCP 1.0 新增 capabilities（旧客户端忽略）
+				"logging": map[string]interface{}{}, // 支持日志推送
+				"prompts": map[string]interface{}{
+					"listChanged": false,
+				},
+				"resources": map[string]interface{}{
+					"subscribe":   false,
 					"listChanged": false,
 				},
 			},
@@ -146,7 +188,7 @@ func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	case "tools/list":
 		result = s.listTools()
 	case "tools/call":
-		// 从 Header 读取 IM 认证信息（取代 arguments 中的 x_im_provider / x_im_user_id）
+		// 从 Header 读取 IM 认证信息
 		imProvider := r.Header.Get("X-IM-Provider")
 		imUserID := r.Header.Get("X-IM-User-ID")
 		var fullAuthCtx *AuthContext
@@ -165,12 +207,36 @@ func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	case "notifications/initialized", "notifications/cancelled", "notifications/progress":
 		// MCP 通知方法，无需处理，静默成功
 		isNotification = true
+
+	// MCP 1.0 新增方法：resources / prompts（当前降级返回空列表或不支持）
+	case "resources/list":
+		result = map[string]interface{}{"resources": []interface{}{}}
+	case "resources/read":
+		result = map[string]interface{}{"contents": []interface{}{}}
+	case "resources/templates/list":
+		result = map[string]interface{}{"resourceTemplates": []interface{}{}}
+	case "prompts/list":
+		result = map[string]interface{}{"prompts": []interface{}{}}
+	case "prompts/get":
+		err = fmt.Errorf("prompt not found")
+	case "completion/complete":
+		result = map[string]interface{}{"completion": map[string]interface{}{"values": []string{}, "total": 0, "hasMore": false}}
+	case "sampling/createMessage":
+		// 客户端代理采样：CodeGuard 当前不支持
+		err = fmt.Errorf("sampling is not supported by this server")
+
 	default:
 		err = fmt.Errorf("unknown method: %s", req.Method)
 	}
 
 	if err != nil {
-		respondMCPError(w, req.ID, -32602, err.Error())
+		code := ErrInvalidParams
+		if strings.HasPrefix(err.Error(), "unknown method") {
+			code = ErrMethodNotFound
+		} else if strings.HasPrefix(err.Error(), "sampling is not supported") || strings.HasPrefix(err.Error(), "prompt not found") {
+			code = ErrInvalidRequest
+		}
+		respondMCPError(w, req.ID, code, err.Error())
 		return
 	}
 
