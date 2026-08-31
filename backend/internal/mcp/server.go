@@ -146,9 +146,12 @@ func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	case "tools/list":
 		result = s.listTools()
 	case "tools/call":
+		// 从 Header 读取 IM 认证信息（取代 arguments 中的 x_im_provider / x_im_user_id）
+		imProvider := r.Header.Get("X-IM-Provider")
+		imUserID := r.Header.Get("X-IM-User-ID")
 		var fullAuthCtx *AuthContext
 		var toolName string
-		result, toolName, fullAuthCtx, err = s.callTool(r.Context(), authCtx, req.Params)
+		result, toolName, fullAuthCtx, err = s.callTool(r.Context(), authCtx, req.Params, imProvider, imUserID)
 		if fullAuthCtx != nil {
 			authCtx = fullAuthCtx
 		}
@@ -215,7 +218,7 @@ func (s *Server) ToolNames() []string {
 }
 
 // callTool 调用 Tool
-func (s *Server) callTool(ctx context.Context, baseAuthCtx *AuthContext, params json.RawMessage) (interface{}, string, *AuthContext, error) {
+func (s *Server) callTool(ctx context.Context, baseAuthCtx *AuthContext, params json.RawMessage, imProvider, imUserID string) (interface{}, string, *AuthContext, error) {
 	if baseAuthCtx == nil || baseAuthCtx.APIKey == nil {
 		return nil, "", nil, fmt.Errorf("invalid authentication context")
 	}
@@ -228,11 +231,9 @@ func (s *Server) callTool(ctx context.Context, baseAuthCtx *AuthContext, params 
 		return nil, "", nil, fmt.Errorf("invalid tool call params: %w", err)
 	}
 
-	// 1. 从 arguments 中提取身份认证信息
-	imProvider, ok1 := call.Arguments["x_im_provider"].(string)
-	imUserID, ok2 := call.Arguments["x_im_user_id"].(string)
-	if !ok1 || imProvider == "" || !ok2 || imUserID == "" {
-		return nil, call.Name, nil, fmt.Errorf("缺少必填参数 'x_im_provider' 和 'x_im_user_id'，请在 arguments 中提供 IM 供应商和用户ID")
+	// 1. 从 Header 中校验身份认证信息
+	if imProvider == "" || imUserID == "" {
+		return nil, call.Name, nil, fmt.Errorf("缺少认证 Header 'X-IM-Provider' 和 'X-IM-User-ID'，请在请求头中提供 IM 供应商和用户ID")
 	}
 	if imProvider != IMPlatformWeCom {
 		return nil, call.Name, nil, fmt.Errorf("不支持的 IM 供应商 '%s'，当前仅支持 '%s'", imProvider, IMPlatformWeCom)
@@ -267,15 +268,8 @@ func (s *Server) callTool(ctx context.Context, baseAuthCtx *AuthContext, params 
 		return nil, call.Name, fullAuthCtx, fmt.Errorf("permission denied for tool: %s", call.Name)
 	}
 
-	// 5. 从 arguments 中剥离身份字段，避免传递给业务 handler
-	cleanArgs := make(map[string]interface{})
-	for k, v := range call.Arguments {
-		if k != "x_im_provider" && k != "x_im_user_id" {
-			cleanArgs[k] = v
-		}
-	}
-
-	result, err := handler(ctx, fullAuthCtx, cleanArgs)
+	// 5. 直接使用 arguments，无需再剥离身份字段（已从 Header 获取）
+	result, err := handler(ctx, fullAuthCtx, call.Arguments)
 	if err != nil {
 		return nil, call.Name, fullAuthCtx, err
 	}

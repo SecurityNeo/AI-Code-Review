@@ -50,14 +50,10 @@ func RegisterAllTools(server interface {
 
 // ---------------------- Schemas ----------------------
 
-var identityProps = `"x_im_provider": {"type": "string", "description": "IM platform code, currently only '` + mcp.IMPlatformWeCom + `'", "enum": ["` + mcp.IMPlatformWeCom + `"]},
-		"x_im_user_id": {"type": "string", "description": "IM platform UserID (e.g. WeCom UserID)"}`
-
 var listTasksSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id"],
+	"required": [],
 	"properties": {
-		` + identityProps + `,
 		"status": {"type": "string", "description": "running|pending|failed|success|stopped"},
 		"project_id": {"type": "integer"},
 		"author": {"type": "string"},
@@ -70,27 +66,24 @@ var listTasksSchema = json.RawMessage(`{
 
 var getTaskSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id", "task_id"],
+	"required": ["task_id"],
 	"properties": {
-		` + identityProps + `,
 		"task_id": {"type": "integer", "description": "任务ID"}
 	}
 }`)
 
 var getTaskPipelineSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id", "task_id"],
+	"required": ["task_id"],
 	"properties": {
-		` + identityProps + `,
 		"task_id": {"type": "integer"}
 	}
 }`)
 
 var getMRReviewSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id", "task_id"],
+	"required": ["task_id"],
 	"properties": {
-		` + identityProps + `,
 		"task_id": {"type": "integer"},
 		"severity": {"type": "string", "description": "high|medium|low"},
 		"category": {"type": "string", "description": "security|performance|style|bug"},
@@ -100,18 +93,16 @@ var getMRReviewSchema = json.RawMessage(`{
 
 var getIssueDetailSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id", "issue_id"],
+	"required": ["issue_id"],
 	"properties": {
-		` + identityProps + `,
 		"issue_id": {"type": "integer", "description": "Issue ID (可通过 get_mr_review 或 get_task 的返回结果中获取)"}
 	}
 }`)
 
 var retryTaskSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id", "task_id"],
+	"required": ["task_id"],
 	"properties": {
-		` + identityProps + `,
 		"task_id": {"type": "integer", "description": "需要重试的任务 ID"},
 		"user_review_comment": {"type": "string", "description": "补充复核意见（可选）。描述上次评审不准确之处，例如：第32行的并发处理判断有误。最多5000字符。review 任务支持。"},
 		"selected_comment_ids": {"type": "array", "items": {"type": "integer"}, "description": "选中的历史复核意见 ID 列表（可选）。会将历史意见与新意见一并注入到重试任务中。"}
@@ -120,18 +111,16 @@ var retryTaskSchema = json.RawMessage(`{
 
 var stopTaskSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id", "task_id"],
+	"required": ["task_id"],
 	"properties": {
-		` + identityProps + `,
 		"task_id": {"type": "integer"}
 	}
 }`)
 
 var listMRsSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id"],
+	"required": [],
 	"properties": {
-		` + identityProps + `,
 		"project_id": {"type": "integer"},
 		"state": {"type": "string", "default": "opened"},
 		"author": {"type": "string"},
@@ -144,9 +133,8 @@ var listMRsSchema = json.RawMessage(`{
 
 var getMRDetailSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id", "project_id", "mr_iid"],
+	"required": ["project_id", "mr_iid"],
 	"properties": {
-		` + identityProps + `,
 		"project_id": {"type": "integer"},
 		"mr_iid": {"type": "integer"}
 	}
@@ -154,18 +142,16 @@ var getMRDetailSchema = json.RawMessage(`{
 
 var getWorkbenchSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id"],
+	"required": [],
 	"properties": {
-		` + identityProps + `,
 		"view": {"type": "string", "default": "developer", "description": "developer|admin"}
 	}
 }`)
 
 var getDashboardStatsSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id"],
+	"required": [],
 	"properties": {
-		` + identityProps + `,
 		"time_range": {"type": "string", "default": "week", "description": "today|week|month"},
 		"mine": {"type": "boolean", "default": true},
 		"all": {"type": "boolean", "default": false}
@@ -174,9 +160,8 @@ var getDashboardStatsSchema = json.RawMessage(`{
 
 var getTokenUsageSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id"],
+	"required": [],
 	"properties": {
-		` + identityProps + `,
 		"time_range": {"type": "string"},
 		"group_by": {"type": "string", "default": "day", "description": "day|project|model"}
 	}
@@ -184,9 +169,8 @@ var getTokenUsageSchema = json.RawMessage(`{
 
 var listProjectsSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id"],
+	"required": [],
 	"properties": {
-		` + identityProps + `,
 		"mine": {"type": "boolean", "default": true},
 		"all": {"type": "boolean", "default": false},
 		"limit": {"type": "integer", "default": 10}
@@ -195,9 +179,8 @@ var listProjectsSchema = json.RawMessage(`{
 
 var listNotificationsSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id"],
+	"required": [],
 	"properties": {
-		` + identityProps + `,
 		"status": {"type": "string", "default": "unread", "description": "unread|all"},
 		"limit": {"type": "integer", "default": 5}
 	}
@@ -205,9 +188,8 @@ var listNotificationsSchema = json.RawMessage(`{
 
 var markAllReadSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id"],
+	"required": [],
 	"properties": {
-		` + identityProps + `
 	}
 }`)
 
@@ -215,18 +197,16 @@ var markAllReadSchema = json.RawMessage(`{
 
 var listPendingIssuesSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id"],
+	"required": [],
 	"properties": {
-		` + identityProps + `,
 		"limit": {"type": "integer", "default": 20, "description": "返回数量上限，最大 50"}
 	}
 }`)
 
 var listHistoricalIssuesSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id"],
+	"required": [],
 	"properties": {
-		` + identityProps + `,
 		"status": {"type": "string", "description": "resolved|false_positive|ignored|auto_archived，为空返回全部"},
 		"limit": {"type": "integer", "default": 20, "description": "返回数量上限，最大 50"}
 	}
@@ -234,9 +214,8 @@ var listHistoricalIssuesSchema = json.RawMessage(`{
 
 var resolveIssueSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id", "issue_id"],
+	"required": ["issue_id"],
 	"properties": {
-		` + identityProps + `,
 		"issue_id": {"type": "integer", "description": "Issue ID"},
 		"comment": {"type": "string", "description": "处理备注（可选）"}
 	}
@@ -244,9 +223,8 @@ var resolveIssueSchema = json.RawMessage(`{
 
 var rejectIssueSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id", "issue_id", "reason"],
+	"required": ["issue_id", "reason"],
 	"properties": {
-		` + identityProps + `,
 		"issue_id": {"type": "integer", "description": "Issue ID"},
 		"reason": {"type": "string", "description": "误报原因（必填）"}
 	}
@@ -254,9 +232,8 @@ var rejectIssueSchema = json.RawMessage(`{
 
 var ignoreIssueSchema = json.RawMessage(`{
 	"type": "object",
-	"required": ["x_im_provider", "x_im_user_id", "issue_id", "reason"],
+	"required": ["issue_id", "reason"],
 	"properties": {
-		` + identityProps + `,
 		"issue_id": {"type": "integer", "description": "Issue ID"},
 		"reason": {"type": "string", "description": "忽略原因（必填）"}
 	}
