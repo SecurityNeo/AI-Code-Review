@@ -30,7 +30,7 @@ func RegisterAllTools(server interface {
 	server.RegisterTool("stop_task", "停止正在运行或排队中的评审任务（当前阶段完成后终止）。当用户说'停掉那个任务''取消评审'时使用。需要 task_id。", stopTaskSchema, handleStopTask, &mcp.ToolAnnotations{Title: "停止任务", DestructiveHint: true})
 
 	// MR 查询（只读）
-	server.RegisterTool("list_merge_requests", "查询已触发过 AI 评审的 MR 列表。当用户说'看看最近的 MR'时使用。支持按状态和项目过滤。", listMRsSchema, handleListMRs, &mcp.ToolAnnotations{Title: "查询 MR 列表", ReadOnlyHint: true})
+	server.RegisterTool("list_merge_requests", "查询 GitLab 上的 MR 列表（包含已触发或未触发 AI 评审的全部 MR）。当用户说'看看最近的 MR''未合并的 MR 有多少'时使用。支持按真实状态(opened/merged/closed)和项目名称过滤。", listMRsSchema, handleListMRs, &mcp.ToolAnnotations{Title: "查询 MR 列表", ReadOnlyHint: true})
 	server.RegisterTool("get_merge_request_detail", "获取指定 MR 的评审详情和对应任务信息。当用户问'MR !N 评审结果如何'时使用。需要 project_id 和 mr_iid。", getMRDetailSchema, handleGetMRDetail, &mcp.ToolAnnotations{Title: "获取 MR 详情", ReadOnlyHint: true})
 
 	// 工作台（只读）
@@ -121,8 +121,8 @@ var listMRsSchema = json.RawMessage(`{
 	"type": "object",
 	"required": [],
 	"properties": {
-		"project_id": {"type": "integer"},
-		"state": {"type": "string", "default": "opened"},
+		"project_name": {"type": "string", "description": "项目名称（精确匹配）"},
+		"state": {"type": "string", "default": "opened", "description": "opened|merged|closed|all"},
 		"author": {"type": "string"},
 		"mine": {"type": "boolean", "default": true},
 		"all": {"type": "boolean", "default": false},

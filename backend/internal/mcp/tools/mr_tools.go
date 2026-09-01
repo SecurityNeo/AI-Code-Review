@@ -40,15 +40,15 @@ func handleListMRs(ctx context.Context, authCtx *mcp.AuthContext, args map[strin
 		gitlabUsername = authCtx.User.GitlabUsername
 	}
 
-	// 对于 MR 查询，我们需要从 GitLab 获取实际 MR 列表
-	// 这里用 Task 表近似代替（因为只有已触发评审的 MR 才有记录）
-	query := model.DB.Model(&model.Task{}).Order("created_at DESC")
+	// 使用 MergeRequestReviewLog 表（与 Web 页面 mr-stats.html 一致）
+	// 该表包含从 GitLab 同步的真实 MR 状态 mr_state
+	query := model.DB.Model(&model.MergeRequestReviewLog{}).Order("synced_at DESC")
 
 	if authCtx.IsAdmin && all {
-		// 查询全部
+		// Admin + all=true: 查询全部
 	} else {
 		if mine && gitlabUsername != "" {
-			query = query.Where("mr_author = ?", gitlabUsername)
+			query = query.Where("author = ?", gitlabUsername)
 		}
 	}
 
@@ -57,47 +57,49 @@ func handleListMRs(ctx context.Context, authCtx *mcp.AuthContext, args map[strin
 		state = s
 	}
 	if state != "all" {
-		// Task 没有 state 字段，用 status 近似映射
-		if state == "opened" {
-			query = query.Where("status IN ?", []model.TaskStatus{model.TaskPending, model.TaskRunning, model.TaskFailed, model.TaskSuccess})
-		}
+		query = query.Where("mr_state = ?", state)
 	}
 
-	if projID, ok := args["project_id"].(float64); ok && projID > 0 {
-		query = query.Where("project_id = ?", uint(projID))
+	if projName, ok := args["project_name"].(string); ok && projName != "" {
+		query = query.Where("project_name = ?", projName)
 	}
 	if author, ok := args["author"].(string); ok && author != "" {
 		if authCtx.IsAdmin {
-			query = query.Where("mr_author = ?", author)
+			query = query.Where("author = ?", author)
 		}
 	}
 
 	var total int64
 	query.Count(&total)
 
-	var tasks []model.Task
-	query.Limit(limit).Offset(offset).Find(&tasks)
+	var logs []model.MergeRequestReviewLog
+	query.Limit(limit).Offset(offset).Find(&logs)
 
-	items := make([]map[string]interface{}, 0, len(tasks))
-	for _, t := range tasks {
-		projectName := ""
-		var p model.Project
-		model.DB.Select("name").First(&p, t.ProjectID)
-		projectName = p.Name
+	items := make([]map[string]interface{}, 0, len(logs))
+	for _, l := range logs {
+		createdAt := "-"
+		if l.MRCreatedAt != nil {
+			createdAt = l.MRCreatedAt.Format("2006-01-02")
+		}
 
 		items = append(items, map[string]interface{}{
-			"mr_iid":         t.MRMergeID,
-			"title":          t.MRTitle,
-			"author":         t.MRAuthor,
-			"project_name":   projectName,
-			"source_branch":  t.SourceBranch,
-			"target_branch":  t.TargetBranch,
-			"state":          "opened",
-			"created_at":     t.CreatedAt.Format("2006-01-02"),
-			"updated_at":     t.UpdatedAt.Format("2006-01-02"),
-			"has_task":       true,
-			"latest_task_id": t.ID,
-			"latest_task_status": string(t.Status),
+			"mr_iid":           l.MRID,
+			"title":            l.MRTitle,
+			"author":           l.Author,
+			"author_name":      l.AuthorDisplayName,
+			"project_name":     l.ProjectName,
+			"source_branch":    l.SourceBranch,
+			"target_branch":    l.TargetBranch,
+			"state":            l.MRState,
+			"is_draft":         l.IsDraft,
+			"score":            l.Score,
+			"review_count":     l.ReviewCount,
+			"additions":        l.Additions,
+			"deletions":        l.Deletions,
+			"url":              l.URL,
+			"created_at":       createdAt,
+			"synced_at":        l.SyncedAt.Format("2006-01-02"),
+			"last_commit_id":   l.LastCommitID,
 		})
 	}
 
