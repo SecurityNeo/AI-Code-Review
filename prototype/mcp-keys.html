@@ -39,9 +39,10 @@
         .search-box i { position:absolute; left:0.75rem; top:50%; transform:translateY(-50%); color:#94a3b8; font-size:0.8rem; }
         .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); display:none; align-items:center; justify-content:center; z-index:1000; }
         .modal-overlay.active { display:flex; }
-        .modal { background:#fff; border-radius:0.75rem; width:560px; max-width:90vw; max-height:90vh; overflow:auto; box-shadow:0 20px 25px -5px rgba(0,0,0,0.1); }
-        .modal-header { padding:1rem 1.25rem; border-bottom:1px solid var(--border-color); display:flex; align-items:center; justify-content:space-between; }
-        .modal-body { padding:1.25rem; }
+        .modal { background:#fff; border-radius:0.75rem; width:560px; max-width:90vw; max-height:90vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 20px 25px -5px rgba(0,0,0,0.1); }
+        .modal-header { padding:1rem 1.25rem; border-bottom:1px solid var(--border-color); display:flex; align-items:center; justify-content:space-between; flex-shrink:0; }
+        .modal-body { flex:1; overflow-y:auto; padding:1.25rem; }
+        .modal-footer { padding:1rem 1.25rem; border-top:1px solid var(--border-color); display:flex; justify-content:flex-end; gap:0.5rem; flex-shrink:0; }
         .form-row { margin-bottom:1rem; }
         .form-row label { display:block; font-size:0.8125rem; font-weight:500; color:var(--text-primary); margin-bottom:0.35rem; }
         .form-row input, .form-row select, .form-row textarea { width:100%; padding:0.5rem 0.75rem; border:1px solid var(--border-color); border-radius:0.5rem; font-size:0.875rem; outline:none; }
@@ -215,10 +216,10 @@
                 <label>过期时间（可选）</label>
                 <input type="date" id="expiresAt">
             </div>
-            <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.5rem;">
-                <button class="btn-text" onclick="closeCreateModal()">取消</button>
-                <button class="btn-primary" onclick="saveKey()">创建并显示密钥</button>
-            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-text" onclick="closeCreateModal()">取消</button>
+            <button class="btn-primary" onclick="saveKey()">创建并显示密钥</button>
         </div>
     </div>
 </div>
