@@ -330,6 +330,9 @@ func (s *Server) ToolNames() []string {
 }
 
 // callTool 调用 Tool
+// Phase 1 双轨运行：
+//   - 绑定模式（authCtx.User != nil）：直接使用 Key 绑定的用户，忽略 IM Header
+//   - 共享模式（authCtx.User == nil）：从 X-IM-Provider + X-IM-User-ID Header 读取用户身份（旧 Key 兼容）
 func (s *Server) callTool(ctx context.Context, baseAuthCtx *AuthContext, params json.RawMessage, imProvider, imUserID string) (interface{}, string, *AuthContext, error) {
 	if baseAuthCtx == nil || baseAuthCtx.APIKey == nil {
 		return nil, "", nil, fmt.Errorf("invalid authentication context")
@@ -343,31 +346,36 @@ func (s *Server) callTool(ctx context.Context, baseAuthCtx *AuthContext, params 
 		return nil, "", nil, fmt.Errorf("invalid tool call params: %w", err)
 	}
 
-	// 1. 从 Header 中校验身份认证信息
-	if imProvider == "" || imUserID == "" {
-		return nil, call.Name, nil, fmt.Errorf("缺少认证 Header 'X-IM-Provider' 和 'X-IM-User-ID'，请在请求头中提供 IM 供应商和用户ID")
-	}
-	if imProvider != IMPlatformWeCom {
-		return nil, call.Name, nil, fmt.Errorf("不支持的 IM 供应商 '%s'，当前仅支持 '%s'", imProvider, IMPlatformWeCom)
-	}
+	var fullAuthCtx *AuthContext
 
-	// 2. 查询用户（统一身份源）
-	var user model.User
-	if err := model.DB.Where("im_platform = ? AND im_user_id = ? AND enabled = ?",
-		imProvider, imUserID, true).First(&user).Error; err != nil {
-		return nil, call.Name, nil, fmt.Errorf("用户未绑定，请联系管理员在用户管理中绑定（平台: %s, 用户: %s）", imProvider, imUserID)
-	}
+	if baseAuthCtx.User != nil {
+		// -- 绑定模式：AuthMiddleware 已加载绑定用户，直接使用 --
+		fullAuthCtx = baseAuthCtx
+	} else {
+		// -- 共享模式（旧 Key 兼容）：从 Header 中补充身份认证信息 --
+		if imProvider == "" || imUserID == "" {
+			return nil, call.Name, nil, fmt.Errorf("缺少认证 Header 'X-IM-Provider' 和 'X-IM-User-ID'，请在请求头中提供 IM 供应商和用户ID")
+		}
+		if imProvider != IMPlatformWeCom {
+			return nil, call.Name, nil, fmt.Errorf("不支持的 IM 供应商 '%s'，当前仅支持 '%s'", imProvider, IMPlatformWeCom)
+		}
 
-	// 3. 构造完整 AuthContext
-	fullAuthCtx := &AuthContext{
-		APIKey:     baseAuthCtx.APIKey,
-		User:       &user,
-		UserID:     user.ID,
-		IMUserID:   imUserID,
-		IMProvider: imProvider,
-		Scopes:     baseAuthCtx.Scopes,
-		IsAdmin:    user.Role == "admin",
-		ClientIP:   baseAuthCtx.ClientIP,
+		var user model.User
+		if err := model.DB.Where("im_platform = ? AND im_user_id = ? AND enabled = ?",
+			imProvider, imUserID, true).First(&user).Error; err != nil {
+			return nil, call.Name, nil, fmt.Errorf("用户未绑定，请联系管理员在用户管理中绑定（平台: %s, 用户: %s）", imProvider, imUserID)
+		}
+
+		fullAuthCtx = &AuthContext{
+			APIKey:     baseAuthCtx.APIKey,
+			User:       &user,
+			UserID:     user.ID,
+			IMUserID:   imUserID,
+			IMProvider: imProvider,
+			Scopes:     baseAuthCtx.Scopes,
+			IsAdmin:    user.Role == "admin",
+			ClientIP:   baseAuthCtx.ClientIP,
+		}
 	}
 
 	handler, ok := s.handlers[call.Name]
@@ -375,12 +383,12 @@ func (s *Server) callTool(ctx context.Context, baseAuthCtx *AuthContext, params 
 		return nil, call.Name, fullAuthCtx, fmt.Errorf("tool not found: %s", call.Name)
 	}
 
-	// 4. 权限检查
+	// 权限检查
 	if !s.hasToolPermission(fullAuthCtx, call.Name) {
 		return nil, call.Name, fullAuthCtx, fmt.Errorf("permission denied for tool: %s", call.Name)
 	}
 
-	// 5. 直接使用 arguments，无需再剥离身份字段（已从 Header 获取）
+	// 直接使用 arguments，无需再剥离身份字段（已从 Header 或绑定模式获取）
 	result, err := handler(ctx, fullAuthCtx, call.Arguments)
 	if err != nil {
 		return nil, call.Name, fullAuthCtx, err
@@ -680,11 +688,41 @@ func (s *Server) AuthMiddleware() func(http.Handler) http.Handler {
 			matchedKey.LastUsedAt = &now
 			model.DB.Save(matchedKey)
 
-			// 构造通道级认证上下文（不含用户身份，用户身份在 tools/call 时从 arguments 提取）
-			authCtx := &AuthContext{
-				APIKey:   matchedKey,
-				Scopes:   scopes,
-				ClientIP: getClientIP(r),
+			clientIP := getClientIP(r)
+			var authCtx *AuthContext
+
+			if matchedKey.UserID > 0 {
+				// -- 绑定模式（新 Key）-- 直接加载绑定用户，无需 IM Header
+				var user model.User
+				if err := model.DB.First(&user, matchedKey.UserID).Error; err == nil {
+					authCtx = &AuthContext{
+						APIKey:     matchedKey,
+						User:       &user,
+						UserID:     user.ID,
+						IMUserID:   user.IMUserID,
+						IMProvider: user.IMPlatform,
+						Scopes:     scopes,
+						IsAdmin:    user.Role == "admin",
+						ClientIP:   clientIP,
+					}
+				} else {
+					// 绑定用户已删除：降级为共享模式，留待 tools/call 时从 Header 补充身份
+					authCtx = &AuthContext{
+						APIKey:   matchedKey,
+						Scopes:   scopes,
+						ClientIP: clientIP,
+					}
+					zap.L().Warn("MCP API Key bound user not found, fallback to shared mode",
+						zap.Uint("key_id", matchedKey.ID),
+						zap.Uint("user_id", matchedKey.UserID))
+				}
+			} else {
+				// -- 共享模式（旧 Key 兼容）-- 仅通道认证，用户身份在 tools/call 时从 Header 获取
+				authCtx = &AuthContext{
+					APIKey:   matchedKey,
+					Scopes:   scopes,
+					ClientIP: clientIP,
+				}
 			}
 
 			// 将认证上下文放入 request context

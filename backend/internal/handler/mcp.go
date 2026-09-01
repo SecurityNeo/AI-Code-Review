@@ -97,6 +97,7 @@ func (h *MCPKeyHandler) CreateKey(c *gin.Context) {
 		IPWhitelist string   `json:"ip_whitelist"`
 		RateLimit   int      `json:"rate_limit"`
 		ExpiresAt   *string  `json:"expires_at"`
+		UserID      uint     `json:"user_id"` // 绑定用户（Phase 1：新 Key 强烈建议绑定）
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -107,6 +108,15 @@ func (h *MCPKeyHandler) CreateKey(c *gin.Context) {
 	if err := validateScopes(req.Scopes); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
+	}
+
+	// 如果指定了 user_id，校验用户存在
+	if req.UserID > 0 {
+		var user model.User
+		if err := model.DB.First(&user, req.UserID).Error; err != nil {
+			c.JSON(400, gin.H{"error": "绑定的用户不存在"})
+			return
+		}
 	}
 
 	// 生成密钥
@@ -135,6 +145,7 @@ func (h *MCPKeyHandler) CreateKey(c *gin.Context) {
 		IPWhitelist: req.IPWhitelist,
 		RateLimit:   req.RateLimit,
 		Status:      "active",
+		UserID:      req.UserID,
 	}
 
 	if req.ExpiresAt != nil && *req.ExpiresAt != "" {
@@ -156,6 +167,7 @@ func (h *MCPKeyHandler) CreateKey(c *gin.Context) {
 			"name":       key.Name,
 			"prefix":     key.Prefix,
 			"scopes":     req.Scopes,
+			"user_id":    key.UserID,
 			"full_key":   fullKey, // 仅创建时返回一次
 			"status":     key.Status,
 			"expires_at": key.ExpiresAt,
@@ -174,6 +186,7 @@ func (h *MCPKeyHandler) UpdateKey(c *gin.Context) {
 		RateLimit   int      `json:"rate_limit"`
 		Status      string   `json:"status"`
 		ExpiresAt   *string  `json:"expires_at"`
+		UserID      *uint    `json:"user_id"` // nil 表示不修改，0 表示解除绑定
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -216,6 +229,16 @@ func (h *MCPKeyHandler) UpdateKey(c *gin.Context) {
 				key.ExpiresAt = &t
 			}
 		}
+	}
+	if req.UserID != nil {
+		if *req.UserID > 0 {
+			var user model.User
+			if err := model.DB.First(&user, *req.UserID).Error; err != nil {
+				c.JSON(400, gin.H{"error": "绑定的用户不存在"})
+				return
+			}
+		}
+		key.UserID = *req.UserID
 	}
 
 	if err := model.DB.Save(&key).Error; err != nil {

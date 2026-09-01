@@ -7,6 +7,9 @@ import (
 )
 
 // MCPAPIKey MCP 接入密钥
+// 从共享模式升级为绑定模式（Phase 1 双轨运行）：
+//   - 新 Key 必须绑定 UserID（user_id > 0），调用时直接用绑定用户身份，无需再传 X-IM-* Header
+//   - 旧 Key user_id = 0 继续兼容共享模式，调用时仍需通过 X-IM-Provider + X-IM-User-ID 传入身份
 type MCPAPIKey struct {
 	ID           uint           `gorm:"primaryKey" json:"id"`
 	Name         string         `gorm:"size:100;not null" json:"name"`
@@ -15,7 +18,8 @@ type MCPAPIKey struct {
 	Scopes       string         `gorm:"size:512;not null" json:"scopes"`       // JSON 数组，如 ["tasks:read","tasks:write"]
 	IPWhitelist  string         `gorm:"size:512" json:"ip_whitelist"`          // 逗号分隔的 IP 列表，空表示不限制
 	RateLimit    int            `gorm:"not null;default:100" json:"rate_limit"` // 请求/分钟
-	Status       string         `gorm:"size:20;not null;default:active" json:"status"` // active / disabled
+	Status       string         `gorm:"size:20;not null;default:active" json:"status"` // active / disabled / deprecated
+	UserID       uint           `gorm:"index;default:0" json:"user_id"`        // 绑定用户（0 表示旧共享模式）
 	LastUsedAt   *time.Time     `json:"last_used_at"`
 	ExpiresAt    *time.Time     `json:"expires_at"`
 	CreatedAt    time.Time      `json:"created_at"`
