@@ -2238,14 +2238,12 @@ async function loadPipelineStatus(force) {
         document.getElementById('pipelineCards').classList.remove('hidden');
         renderPipeline(data);
 
-        // 只在任务运行中时才建立 SSE 和轮询（避免已完成任务反复建立 SSE 连接）
+        // 只在任务运行中时才建立 SSE（避免已完成任务反复建立 SSE 连接）
         if (data.overall_status === 'running' || data.overall_status === 'pending') {
             connectPipelineSSE();
-            if (!pipelineTimer) pipelineTimer = setInterval(() => loadPipelineStatus(true), 5000);
         } else {
             // 任务已完成/失败/停止，清理所有动态更新机制
             disconnectPipelineSSE();
-            if (pipelineTimer) { clearInterval(pipelineTimer); pipelineTimer = null; }
         }
     } catch (e) {
         loading.classList.add('hidden');
@@ -2265,10 +2263,6 @@ function connectPipelineSSE() {
     try {
         const es = new EventSource(url);
         pipelineSSE = es;
-
-        es.onopen = () => {
-            if (pipelineTimer) { clearInterval(pipelineTimer); pipelineTimer = null; }
-        };
 
         es.onmessage = (e) => {
             try {
@@ -2290,6 +2284,7 @@ function connectPipelineSSE() {
 
         es.onerror = () => {
             es.close(); pipelineSSE = null;
+            // SSE 连接失败时 fallback 到 5s 轮询
             if (!pipelineTimer) { pipelineTimer = setInterval(() => loadPipelineStatus(true), 5000); }
         };
     } catch (e) {}
