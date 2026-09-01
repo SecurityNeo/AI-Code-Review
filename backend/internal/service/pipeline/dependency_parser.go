@@ -15,6 +15,7 @@ type Dependency struct {
 	FilePath   string
 	LineNumber int
 	Indirect   bool // 仅 Go mod 使用
+	IsInDiff   bool // 该依赖声明是否落在本次 diff 的 + 行上（变更引入的依赖）
 }
 
 // DependencyParser 依赖解析器接口

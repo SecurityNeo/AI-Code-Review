@@ -585,6 +585,8 @@ func (e *DependencyScanExecutor) Execute(ctx StageContext) error {
 	var allDeps []Dependency
 	directDepCount := 0
 	indirectDepCount := 0
+	// 记录每个依赖（name:version）是否属于本次 diff 变更
+	depChangeMap := make(map[string]bool)
 
 	for _, f := range files {
 		path, _ := f["path"].(string)
@@ -603,13 +605,35 @@ func (e *DependencyScanExecutor) Execute(ctx StageContext) error {
 			continue
 		}
 
+		// 提取该文件 diff 中的 + 行内容（去掉 + 号），用于内容级匹配
+		var changedContents map[string]bool
+		if diffText, _ := f["diff"].(string); diffText != "" {
+			changedContents = extractChangedLineContents(diffText)
+		}
+
 		deps, err := ParseDependenciesFromFile(path, content)
 		if err != nil {
 			zap.L().Debug("parse dependencies failed, file is not a dependency manifest", zap.String("path", path), zap.Error(err))
 			continue
 		}
 
+		// 按行切分 content，用于和 diff 中的 + 行做内容匹配
+		// contentLines 和 dep.LineNumber 始终来自同一数据源（完整文件或 diff 片段），保证一致
+		contentLines := strings.Split(content, "\n")
+
 		for _, dep := range deps {
+			// 用依赖声明所在行的文本内容与 diff + 行匹配，避免绝对行号错位
+			if changedContents != nil && dep.LineNumber > 0 && dep.LineNumber <= len(contentLines) {
+				lineText := strings.TrimSpace(contentLines[dep.LineNumber-1])
+				dep.IsInDiff = changedContents[lineText]
+			}
+			// 记录变更标记，供后续组装 engine.DependencyVuln 使用
+			// 使用 OR 语义：只要有一个同名同版本的依赖声明落在 diff + 行上，就视为变更
+			// ⚠️ 必须在生态过滤之前记录，避免变更项被过滤后漏标记
+			key := dep.Name + ":" + dep.Version
+			if dep.IsInDiff {
+				depChangeMap[key] = true
+			}
 			// 生态过滤：如果指定了生态且不匹配则跳过
 			if len(ecofilter) > 0 && !stringSliceContains(ecofilter, dep.Ecosystem) {
 				continue
@@ -638,14 +662,16 @@ func (e *DependencyScanExecutor) Execute(ctx StageContext) error {
 	var dependencyVulns []engine.DependencyVuln
 	for _, matches := range depVulnMatches {
 		for _, m := range matches {
+			isRelated := depChangeMap[m.PackageName+":"+m.CurrentVersion]
 			dependencyVulns = append(dependencyVulns, engine.DependencyVuln{
-				PackageName:    m.PackageName,
-				CurrentVersion: m.CurrentVersion,
-				VulnID:         m.VulnID,
-				Aliases:        m.Aliases,
-				Severity:       m.Severity,
-				Summary:        m.Summary,
-				FixedVersion:   m.FixedVersion,
+				PackageName:       m.PackageName,
+				CurrentVersion:    m.CurrentVersion,
+				VulnID:            m.VulnID,
+				Aliases:           m.Aliases,
+				Severity:          m.Severity,
+				Summary:           m.Summary,
+				FixedVersion:      m.FixedVersion,
+				IsRelatedToChange: isRelated,
 			})
 		}
 	}
@@ -784,6 +810,18 @@ func stringSliceContains(arr []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// extractChangedLineContents 从 unified diff 中提取 + 行的内容（去掉 + 号和首尾空格）
+// 用于与 Parser 解析出的依赖声明行做内容级匹配，避免绝对行号错位
+func extractChangedLineContents(diffText string) map[string]bool {
+	changed := make(map[string]bool)
+	for _, line := range strings.Split(diffText, "\n") {
+		if len(line) > 0 && line[0] == '+' && !strings.HasPrefix(line, "+++") {
+			changed[strings.TrimSpace(line[1:])] = true
+		}
+	}
+	return changed
 }
 
 // ========== BatchReviewFrameExecutor ==========
@@ -1473,9 +1511,14 @@ func (e *PostProcessExecutor) Execute(ctx StageContext) error {
 	var report string
 	if promptCtx != nil {
 		// 从 dependency_scan 阶段输出获取漏洞结果（prompt_ctx 中的 DependencyVulns 可能为空）
+		// 只取本次变更相关的漏洞，避免非变更依赖的漏洞出现在最终报告中
 		var depVulns []engine.DependencyVuln
 		if v, ok := ctx.GetOutput("dependency_vulns").([]engine.DependencyVuln); ok {
-			depVulns = v
+			for _, dep := range v {
+				if dep.IsRelatedToChange {
+					depVulns = append(depVulns, dep)
+				}
+			}
 		}
 		var err error
 		report, err = engine.AssembleFullMarkdownReport(result, promptCtx.GitLabCommentTemplate, depVulns)

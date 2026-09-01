@@ -241,13 +241,14 @@ func (p *PromptContext) SecretScanJsonBytes() ([]byte, error) {
 
 // DependencyVuln 依赖漏洞信息（用于注入 Prompt）
 type DependencyVuln struct {
-	PackageName    string `json:"package_name"`
-	CurrentVersion string `json:"current_version"`
-	VulnID         string `json:"vuln_id"`
-	Aliases        string `json:"aliases"` // CVE-XXXX-XXXX, GHSA-XXXX (逗号分隔)
-	Severity       string `json:"severity"`
-	Summary        string `json:"summary"`
-	FixedVersion   string `json:"fixed_version"`
+	PackageName       string `json:"package_name"`
+	CurrentVersion    string `json:"current_version"`
+	VulnID            string `json:"vuln_id"`
+	Aliases           string `json:"aliases"` // CVE-XXXX-XXXX, GHSA-XXXX (逗号分隔)
+	Severity          string `json:"severity"`
+	Summary           string `json:"summary"`
+	FixedVersion      string `json:"fixed_version"`
+	IsRelatedToChange bool   `json:"is_related_to_change"` // 该漏洞是否属于本次变更引入/升级的依赖
 }
 
 // pkgVulnGroup 按包名+版本汇总的漏洞组
@@ -431,6 +432,10 @@ func BuildReviewPrompt(ctx *PromptContext) string {
 	// 已由 review_arbitration 阶段统一汇总，避免 Token 浪费和限制 LLM 发散能力
 
 	// 5. 待评审代码（若配置开启，注入 [new|old] 行号前缀）
+	// 【P1 修复】行号前缀说明只在 diff 区块总入口注入一次，放到文件循环外，避免 N 个文件重复 N 次
+	if isLineNumberInjectionEnabled(ctx.ProjectID) {
+		sb.WriteString(lineNumberInstruction())
+	}
 	sb.WriteString("【待评审的代码变更】\n")
 	for i, file := range ctx.Files {
 		if file.Diff == "" {
@@ -691,6 +696,10 @@ func BuildFullStructuredPrompt(ctx *PromptContext) (string, *llm.ResponseFormat)
 	}
 
 	// 待评审代码（若配置开启，注入 [new|old] 行号前缀）
+	// 【P1 修复】行号前缀说明只在 diff 区块总入口注入一次，放到文件循环外，避免 N 个文件重复 N 次
+	if isLineNumberInjectionEnabled(ctx.ProjectID) {
+		sb.WriteString(lineNumberInstruction())
+	}
 	sb.WriteString("【待评审的代码变更】\n")
 	for i, file := range ctx.Files {
 		if file.Diff == "" {
@@ -783,7 +792,11 @@ func BuildBatchCollectionPrompt(ctx *PromptContext, batchIndex, totalBatches int
 	}
 
 	// 待评审代码（使用截断后的 diff）
+	// 【P1 修复】行号前缀说明只在 diff 区块总入口注入一次，放到文件循环外，避免 N 个文件重复 N 次
 	sb.WriteString(fmt.Sprintf("\n## 待评审内容（第 %d/%d 批）\n\n", batchIndex, totalBatches))
+	if isLineNumberInjectionEnabled(ctx.ProjectID) {
+		sb.WriteString(lineNumberInstruction())
+	}
 
 	for i, f := range batchFiles {
 		path, _ := f["path"].(string)
@@ -1242,6 +1255,8 @@ func buildTestSuggestionSection(suggestions []TestSuggestionItem) string {
 
 // maybeInjectLineNumbers 根据配置决定是否对 diff 文本注入 [new|old] 行号前缀
 // 如果配置未启用、灰度不命中、或解析失败，直接返回原始 diff 文本
+// ⚠️ 注意：行号前缀说明（如 [newN|oldM] 的含义）不再由本函数注入，
+// 应在 Prompt 的 diff 区块总入口注入一次，避免 N 个文件重复 N 次。
 func maybeInjectLineNumbers(rawDiff, filePath string, projectID uint) string {
 	cfg := config.Load().DiffLineMap
 	if !cfg.Enabled || !cfg.InjectLineNumbers {
@@ -1273,23 +1288,28 @@ func maybeInjectLineNumbers(rawDiff, filePath string, projectID uint) string {
 				Enabled:           true,
 				InjectLineNumbers: true,
 			})
-			// 【P1】注入行号说明模板，告诉模型如何解读前缀
-			return injectLineNumberInstruction(prompt)
+			// 不再注入行号说明（已上提到 Prompt 总入口）
+			return prompt
 		}
 	}
 
 	return rawDiff
 }
 
-// injectLineNumberInstruction 在 diff 前插入行号前缀说明
-// 使用 diff 的 context 行格式（行首空格），使 LLM 明白这是说明而非代码
-func injectLineNumberInstruction(diffText string) string {
-	instruction := " [行号前缀说明] 每行开头的 [newN|oldM] 表示：新文件行号=N，旧文件行号=M\n" +
+// lineNumberInstruction 返回行号前缀说明文本
+// 当行号注入启用时，应在 Prompt 的 diff 区块总入口前插入一次，避免 N 个文件重复 N 次
+func lineNumberInstruction() string {
+	return " [行号前缀说明] 每行开头的 [newN|oldM] 表示：新文件行号=N，旧文件行号=M\n" +
 		"             [new-|oldM] → 删除行（仅存在于旧文件第 M 行）\n" +
 		"             [newN|old-] → 新增行（仅存在于新文件第 N 行）\n" +
 		"             【重要】请在返回 line_start 时使用【新文件行号】（即 new 后面的数字）\n" +
 		"             【重要】请在 code_snippet 中问题所在行的行末添加 ` <<< 问题所在` 标记\n"
-	return instruction + diffText
+}
+
+// isLineNumberInjectionEnabled 判断当前项目是否启用了行号前缀注入
+func isLineNumberInjectionEnabled(projectID uint) bool {
+	cfg := config.Load().DiffLineMap
+	return cfg.Enabled && cfg.InjectLineNumbers && cfg.IsGrayEnabled(projectID)
 }
 
 // buildNoRepeatInstruction 构建禁止重复报告 Agent 发现的指令

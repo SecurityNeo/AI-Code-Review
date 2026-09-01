@@ -55,9 +55,14 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 	}
 
 	// 1.1 读取依赖漏洞扫描结果（dependency_scan 阶段产出）
+	// 只取本次变更相关的漏洞，避免已有漏洞影响评分
 	var depVulns []engine.DependencyVuln
 	if v, ok := ctx.GetOutput("dependency_vulns").([]engine.DependencyVuln); ok && len(v) > 0 {
-		depVulns = v
+		for _, dep := range v {
+			if dep.IsRelatedToChange {
+				depVulns = append(depVulns, dep)
+			}
+		}
 	}
 
 	// 2. 读取 Batch Review Results
