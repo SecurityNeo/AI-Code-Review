@@ -489,7 +489,7 @@ func handleGetDashboardStats(ctx context.Context, authCtx *mcp.AuthContext, args
 }
 
 func handleGetTokenUsage(ctx context.Context, authCtx *mcp.AuthContext, args map[string]interface{}) (interface{}, error) {
-	// Token 用量统计（简化：从 llm_call_logs 表汇总）
+	// Token 用量统计（从 llm_call_logs 表汇总）
 	type usageDay struct {
 		Date         string  `json:"date"`
 		InputTokens  int64   `json:"input_tokens"`
@@ -498,20 +498,22 @@ func handleGetTokenUsage(ctx context.Context, authCtx *mcp.AuthContext, args map
 	}
 
 	var days []usageDay
-	model.DB.Raw(`SELECT DATE(created_at) as date, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens FROM llm_call_logs WHERE created_at >= ? GROUP BY DATE(created_at) ORDER BY date DESC LIMIT 30`,
+	model.DB.Raw(`SELECT DATE(created_at) as date, SUM(prompt_tokens) as input_tokens, SUM(completion_tokens) as output_tokens, SUM(cost_cents)/100.0 as cost FROM llm_call_logs WHERE created_at >= ? GROUP BY DATE(created_at) ORDER BY date DESC LIMIT 30`,
 		time.Now().AddDate(0, 0, -30)).Scan(&days)
 
 	var totalInput, totalOutput int64
+	var totalCost float64
 	for _, d := range days {
 		totalInput += d.InputTokens
 		totalOutput += d.OutputTokens
+		totalCost += d.Cost
 	}
 
 	return map[string]interface{}{
 		"summary": map[string]interface{}{
 			"total_input_tokens":  totalInput,
 			"total_output_tokens": totalOutput,
-			"total_cost_cny":      float64(totalInput+totalOutput) * 0.00001, // 简化估算
+			"total_cost_cny":      totalCost,
 		},
 		"by_day": days,
 	}, nil
