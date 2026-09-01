@@ -61,7 +61,7 @@
 
             <div class="toolbar">
                 <input type="text" id="filterTool" placeholder="Tool 名称" onchange="loadLogs()">
-                <input type="text" id="filterIMUser" placeholder="IM 用户 ID" onchange="loadLogs()">
+                <input type="text" id="filterIMUser" placeholder="用户 ID 或 IM ID" onchange="loadLogs()">
                 <select id="filterStatus" onchange="loadLogs()">
                     <option value="">全部状态</option>
                     <option value="success">成功</option>
@@ -85,7 +85,7 @@
                         <th style="width:60px;">ID</th>
                         <th>时间</th>
                         <th>密钥</th>
-                        <th>IM 用户</th>
+                        <th>用户</th>
                         <th>Method / Tool</th>
                         <th>状态</th>
                         <th>耗时</th>
@@ -135,10 +135,17 @@ async function loadLogs() {
         if (start) params.set('start_time', start);
         if (end) params.set('end_time', end);
 
-        const res = await apiFetch(`${API_BASE}/mcp-logs?${params}`);
-        const json = await res.json();
-        const logs = json.data || [];
-        const total = json.total || 0;
+        // 并行加载日志和用户列表（用于显示友好用户名）
+        const [logsRes, usersRes] = await Promise.all([
+            apiFetch(`${API_BASE}/mcp-logs?${params}`),
+            apiFetch(`${API_BASE}/users?page=1&page_size=200`)
+        ]);
+        const logsJson = await logsRes.json();
+        const usersJson = await usersRes.json();
+        const logs = logsJson.data || [];
+        const total = logsJson.total || 0;
+        const users = usersJson.data || [];
+        window.usersCache = users.reduce((m, u) => { m[u.id] = u; return m; }, {});
 
         const tbody = document.getElementById('logTableBody');
         if (logs.length === 0) {
@@ -153,12 +160,21 @@ async function loadLogs() {
                 const methodTool = log.tool_name ? `${log.method} / ${log.tool_name}` : log.method;
                 const isExpanded = expandedRows.has(log.id);
 
+                // 用户显示：优先用 user_id 查找真实用户名，fallback 到 im_user_id
+                let userDisplay = '-';
+                if (log.user_id > 0 && window.usersCache[log.user_id]) {
+                    const u = window.usersCache[log.user_id];
+                    userDisplay = `${escapeHtml(u.display_name || u.username || u.gitlab_username || `用户 #${u.id}`)} <span style="font-size:0.65rem;color:#94a3b8;">#${u.id}</span>`;
+                } else if (log.im_user_id) {
+                    userDisplay = `<code style="background:#f1f5f9; padding:0.1rem 0.3rem; border-radius:0.25rem; font-size:0.75rem;">${escapeHtml(log.im_user_id)}</code>`;
+                }
+
                 html += `
                     <tr style="cursor:pointer;" onclick="toggleDetail(${log.id})">
                         <td>${log.id}</td>
                         <td style="font-size:0.75rem; white-space:nowrap;">${timeStr}</td>
                         <td>${escapeHtml(log.api_key_name || '-')}</td>
-                        <td><code style="background:#f1f5f9; padding:0.1rem 0.3rem; border-radius:0.25rem; font-size:0.75rem;">${escapeHtml(log.im_user_id)}</code></td>
+                        <td>${userDisplay}</td>
                         <td style="font-size:0.75rem;">${escapeHtml(methodTool)}</td>
                         <td>${statusBadge}</td>
                         <td style="font-size:0.75rem;">${log.duration_ms}ms</td>
