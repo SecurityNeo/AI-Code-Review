@@ -164,7 +164,7 @@ async function loadLogs() {
                 let userDisplay = '-';
                 if (log.user_id > 0 && window.usersCache[log.user_id]) {
                     const u = window.usersCache[log.user_id];
-                    userDisplay = `${escapeHtml(u.display_name || u.username || u.gitlab_username || `用户 #${u.id}`)} <span style="font-size:0.65rem;color:#94a3b8;">#${u.id}</span>`;
+                    userDisplay = escapeHtml(u.display_name || u.username || u.gitlab_username || `用户 #${u.id}`);
                 } else if (log.im_user_id) {
                     userDisplay = `<code style="background:#f1f5f9; padding:0.1rem 0.3rem; border-radius:0.25rem; font-size:0.75rem;">${escapeHtml(log.im_user_id)}</code>`;
                 }
