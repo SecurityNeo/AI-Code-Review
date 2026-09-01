@@ -30,7 +30,7 @@
         .pagination button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
         .detail-row { background:#f8fafc !important; }
         .detail-cell { padding:0.75rem 1rem !important; }
-        .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; font-size:0.75rem; }
+            .detail-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:0.5rem; font-size:0.75rem; }
         .detail-grid .label { color:#64748b; }
         .detail-grid .value { color:var(--text-primary); font-family:monospace; word-break:break-all; }
         .json-box { background:#1e293b; color:#e2e8f0; padding:0.5rem; border-radius:0.375rem; font-family:monospace; font-size:0.75rem; max-height:120px; overflow:auto; white-space:pre-wrap; word-break:break-all; }
@@ -188,8 +188,7 @@ async function loadLogs() {
                             <td colspan="8" class="detail-cell">
                                 <div class="detail-grid">
                                     <div><span class="label">User ID:</span> <span class="value">${log.user_id || '-'}</span></div>
-                                    <div><span class="label">Provider:</span> <span class="value">${escapeHtml(log.im_provider)}</span></div>
-                                    <div><span class="label">Client IP:</span> <span class="value">${escapeHtml(log.client_ip)}</span></div>
+                                    <div><span class="label">Client IP:</span> <span class="value">${escapeHtml(log.client_ip || '-')}</span></div>
                                     <div><span class="label">Response Size:</span> <span class="value">${log.response_size || 0} bytes</span></div>
                                 </div>
                                 <div style="margin-top:0.5rem;">

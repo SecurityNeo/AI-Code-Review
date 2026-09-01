@@ -204,7 +204,13 @@ func (s *Server) HandleMCP(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Method != "ping" && !strings.HasPrefix(req.Method, "notifications/") {
 			duration := time.Since(start).Milliseconds()
-			go s.recordLog(authCtx, req.Method, toolName, req.Params, err, int(duration))
+			responseSize := 0
+			if result != nil {
+				if b, err := json.Marshal(result); err == nil {
+					responseSize = len(b)
+				}
+			}
+			go s.recordLog(authCtx, req.Method, toolName, req.Params, err, int(duration), responseSize)
 		}
 	case "ping":
 		// MCP keepalive ping，返回空对象
@@ -443,7 +449,7 @@ func (s *Server) hasToolPermission(authCtx *AuthContext, toolName string) bool {
 }
 
 // recordLog 异步记录调用日志
-func (s *Server) recordLog(authCtx *AuthContext, method, toolName string, params json.RawMessage, err error, durationMs int) {
+func (s *Server) recordLog(authCtx *AuthContext, method, toolName string, params json.RawMessage, err error, durationMs, responseSize int) {
 	if authCtx == nil || authCtx.APIKey == nil {
 		return
 	}
@@ -468,6 +474,8 @@ func (s *Server) recordLog(authCtx *AuthContext, method, toolName string, params
 		StatusCode:   statusCode,
 		ErrorMsg:     errMsg,
 		DurationMs:   int64(durationMs),
+		ResponseSize: responseSize,
+		ClientIP:     authCtx.ClientIP,
 	}
 	select {
 	case s.logChan <- log:
