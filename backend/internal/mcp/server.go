@@ -694,7 +694,7 @@ func (s *Server) AuthMiddleware() func(http.Handler) http.Handler {
 			if matchedKey.UserID > 0 {
 				// -- 绑定模式（新 Key）-- 直接加载绑定用户，无需 IM Header
 				var user model.User
-				if err := model.DB.First(&user, matchedKey.UserID).Error; err == nil {
+				if err := model.DB.Where("id = ? AND enabled = ?", matchedKey.UserID, true).First(&user).Error; err == nil {
 					authCtx = &AuthContext{
 						APIKey:     matchedKey,
 						User:       &user,
@@ -706,13 +706,13 @@ func (s *Server) AuthMiddleware() func(http.Handler) http.Handler {
 						ClientIP:   clientIP,
 					}
 				} else {
-					// 绑定用户已删除：降级为共享模式，留待 tools/call 时从 Header 补充身份
+					// 绑定用户已删除或被禁用：降级为共享模式，留待 tools/call 时从 Header 补充身份
 					authCtx = &AuthContext{
 						APIKey:   matchedKey,
 						Scopes:   scopes,
 						ClientIP: clientIP,
 					}
-					zap.L().Warn("MCP API Key bound user not found, fallback to shared mode",
+					zap.L().Warn("MCP API Key bound user not found or disabled, fallback to shared mode",
 						zap.Uint("key_id", matchedKey.ID),
 						zap.Uint("user_id", matchedKey.UserID))
 				}

@@ -110,11 +110,15 @@ func (h *MCPKeyHandler) CreateKey(c *gin.Context) {
 		return
 	}
 
-	// 如果指定了 user_id，校验用户存在
+	// 如果指定了 user_id，校验用户存在且已启用
 	if req.UserID > 0 {
 		var user model.User
 		if err := model.DB.First(&user, req.UserID).Error; err != nil {
 			c.JSON(400, gin.H{"error": "绑定的用户不存在"})
+			return
+		}
+		if !user.Enabled {
+			c.JSON(400, gin.H{"error": "绑定的用户已被禁用"})
 			return
 		}
 	}
@@ -235,6 +239,10 @@ func (h *MCPKeyHandler) UpdateKey(c *gin.Context) {
 			var user model.User
 			if err := model.DB.First(&user, *req.UserID).Error; err != nil {
 				c.JSON(400, gin.H{"error": "绑定的用户不存在"})
+				return
+			}
+			if !user.Enabled {
+				c.JSON(400, gin.H{"error": "绑定的用户已被禁用"})
 				return
 			}
 		}

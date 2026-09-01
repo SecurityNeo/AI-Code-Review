@@ -23,6 +23,11 @@ func handleGetWorkbench(ctx context.Context, authCtx *mcp.AuthContext, args map[
 		}
 		return getAdminWorkbench()
 	}
+	// 绑定 admin 用户的 Key 没有具体的 developer 业务数据（无 owner_id 关联的 Issue），
+	// 默认切到 admin view 以避免返回全空结果误导智能体
+	if authCtx.IsAdmin {
+		return getAdminWorkbench()
+	}
 	return getDeveloperWorkbench(authCtx)
 }
 
