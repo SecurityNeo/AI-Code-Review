@@ -1385,7 +1385,7 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 	batchPromptCtx.AgentMarkdowns = batchAgentMarkdowns
 
 	isLastBatch := detail.Index == plan.BatchCount
-	userPrompt := engine.BuildBatchCollectionPrompt(&batchPromptCtx, detail.Index, plan.BatchCount, batchFileMaps, isLastBatch)
+	systemPrompt, userPrompt := engine.BuildBatchCollectionPrompt(&batchPromptCtx, detail.Index, plan.BatchCount, batchFileMaps, isLastBatch)
 
 	fileDetails := buildBatchFileDetails(ctx, detail.Index-1, detail.FilePaths)
 
@@ -1396,6 +1396,7 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 		"file_paths":       detail.FilePaths,
 		"file_details":     fileDetails,
 		"prompt":           userPrompt,
+		"system_prompt":    systemPrompt,
 		"model_id":         task.UsedModelID,
 		"available_tokens": plan.AvailableTokens,
 		"mode":             "batch_collection",
@@ -1411,12 +1412,13 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 		},
 	}
 
-	result, err := e.llmService.ChatCompletionStructured(ctx, &task.ID, task.UsedModelID, "batch_collection", "", userPrompt, responseFormat)
+	result, err := e.llmService.ChatCompletionStructured(ctx, &task.ID, task.UsedModelID, "batch_collection", systemPrompt, userPrompt, responseFormat)
 	if err != nil {
 		ctx.SaveOutputSnapshot(exec, map[string]interface{}{
-			"batch_index": detail.Index,
-			"error":       err.Error(),
-			"prompt":      userPrompt,
+			"batch_index":   detail.Index,
+			"error":         err.Error(),
+			"system_prompt": systemPrompt,
+			"prompt":        userPrompt,
 		})
 		ctx.MarkFailed(exec, err.Error())
 		return nil, 0, 0, 0, "", err
@@ -1432,10 +1434,11 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 	batchResult, err := engine.ParseBatchReviewResult(result.Content, promptCtx.DeductScoreConfig)
 	if err != nil {
 		ctx.SaveOutputSnapshot(exec, map[string]interface{}{
-			"batch_index": detail.Index,
-			"error":       err.Error(),
-			"raw_content": result.Content,
-			"prompt":      userPrompt,
+			"batch_index":   detail.Index,
+			"error":         err.Error(),
+			"raw_content":   result.Content,
+			"system_prompt": systemPrompt,
+			"prompt":        userPrompt,
 		})
 		ctx.MarkFailed(exec, err.Error())
 		return nil, 0, 0, 0, "", err

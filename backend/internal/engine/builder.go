@@ -741,61 +741,64 @@ func BuildFullStructuredPrompt(ctx *PromptContext) (string, *llm.ResponseFormat)
 // 输出：含规则 + diff，但 JSON Schema 只要求 issues[] 和 recommendations[]，不计算总分
 // batchFiles 必须使用 SmartSplitIntoBatches 截断后的文件 map，确保单文件不超过可用 token 配额
 // isLastBatch 控制是否在最后一批注入通用信息（Agent findings、commit、MR标题、依赖漏洞），避免每批重复
-func BuildBatchCollectionPrompt(ctx *PromptContext, batchIndex, totalBatches int, batchFiles []map[string]interface{}, isLastBatch bool) string {
-	var sb strings.Builder
+// 【P1】拆分为 (systemPrompt, userPrompt)，System Prompt 包含恒定角色和格式约束，User Prompt 包含动态规则、配置和 diff。
+func BuildBatchCollectionPrompt(ctx *PromptContext, batchIndex, totalBatches int, batchFiles []map[string]interface{}, isLastBatch bool) (string, string) {
+	var sysSb, usrSb strings.Builder
 
-	sb.WriteString("你是一名资深代码评审专家。请对以下代码变更进行评审。\n\n")
-	sb.WriteString("## 【重要】返回格式要求\n")
-	sb.WriteString("你的响应必须严格符合以下 JSON Schema，不要包含任何 Markdown 代码块标记或额外解释文字：\n")
+	// ========== System Prompt：恒定行为准则 ==========
+	sysSb.WriteString("你是一名资深代码评审专家。请对以下代码变更进行评审。\n\n")
+	sysSb.WriteString("## 【重要】返回格式要求\n")
+	sysSb.WriteString("你的响应必须严格符合以下 JSON Schema，不要包含任何 Markdown 代码块标记或额外解释文字：\n")
 	batchSchema := llm.GetBatchCollectionJSONSchema()
 	schemaBytes, _ := json.MarshalIndent(batchSchema, "", "  ")
-	sb.WriteString(string(schemaBytes))
-	sb.WriteString("\n\n")
+	sysSb.WriteString(string(schemaBytes))
+	sysSb.WriteString("\n\n")
 
-	sb.WriteString("【重要】本次为分批评审（第 ")
-	sb.WriteString(fmt.Sprintf("%d/%d", batchIndex, totalBatches))
-	sb.WriteString(" 批），你只需：\n")
-	sb.WriteString("1. 检查以下代码变更中是否存在违反评审规则的问题\n")
-	sb.WriteString("2. 按上述格式输出 issues[] 和 recommendations[]\n")
-	sb.WriteString("3. 不需要计算各维度得分和总分\n")
-	sb.WriteString("4. 后续会有汇总阶段统一裁决\n\n")
+	sysSb.WriteString("【重要】本次为分批评审（第 ")
+	sysSb.WriteString(fmt.Sprintf("%d/%d", batchIndex, totalBatches))
+	sysSb.WriteString(" 批），你只需：\n")
+	sysSb.WriteString("1. 检查以下代码变更中是否存在违反评审规则的问题\n")
+	sysSb.WriteString("2. 按上述格式输出 issues[] 和 recommendations[]\n")
+	sysSb.WriteString("3. 不需要计算各维度得分和总分\n")
+	sysSb.WriteString("4. 后续会有汇总阶段统一裁决\n\n")
 
+	// ========== User Prompt：动态规则 + diff + 上下文 ==========
 	// 完整维度定义（用于正确分类 category，不展示权重和计分公式）
-	sb.WriteString(buildDimensionDefinitionsSection(ctx.DimensionWeights))
+	usrSb.WriteString(buildDimensionDefinitionsSection(ctx.DimensionWeights))
 
 	// 项目自定义说明
 	if ctx.CustomInstruction != "" {
-		sb.WriteString("## 【项目特殊要求】\n")
-		sb.WriteString(ctx.CustomInstruction)
-		sb.WriteString("\n\n")
+		usrSb.WriteString("## 【项目特殊要求】\n")
+		usrSb.WriteString(ctx.CustomInstruction)
+		usrSb.WriteString("\n\n")
 	}
 
 	// 维度规则（仅展示有规则的维度，不影响分类维度全集）
-	sb.WriteString(buildRulesSectionLite(ctx.Rules, ctx.DimensionWeights))
+	usrSb.WriteString(buildRulesSectionLite(ctx.Rules, ctx.DimensionWeights))
 
 	// code_understanding 每批都注入（内容由上游按批次文件过滤后传入）
 	if md, ok := ctx.AgentMarkdowns["code_understanding"]; ok && md != "" {
-		sb.WriteString(md)
-		sb.WriteString("\n\n")
+		usrSb.WriteString(md)
+		usrSb.WriteString("\n\n")
 	}
 
 	if isLastBatch {
 		// Commit 信息（仅最后一批）
 		if ctx.CommitsText != "" {
-			sb.WriteString(fmt.Sprintf("\ncommits：\n%s\n", ctx.CommitsText))
+			usrSb.WriteString(fmt.Sprintf("\ncommits：\n%s\n", ctx.CommitsText))
 		}
 
 		// MR 标题（仅最后一批）
 		if ctx.MRTitle != "" {
-			sb.WriteString(fmt.Sprintf("\nMR名称：%s", ctx.MRTitle))
+			usrSb.WriteString(fmt.Sprintf("\nMR名称：%s", ctx.MRTitle))
 		}
 	}
 
 	// 待评审代码（使用截断后的 diff）
 	// 【P1 修复】行号前缀说明只在 diff 区块总入口注入一次，放到文件循环外，避免 N 个文件重复 N 次
-	sb.WriteString(fmt.Sprintf("\n## 待评审内容（第 %d/%d 批）\n\n", batchIndex, totalBatches))
+	usrSb.WriteString(fmt.Sprintf("\n## 待评审内容（第 %d/%d 批）\n\n", batchIndex, totalBatches))
 	if isLineNumberInjectionEnabled(ctx.ProjectID) {
-		sb.WriteString(lineNumberInstruction())
+		usrSb.WriteString(lineNumberInstruction())
 	}
 
 	for i, f := range batchFiles {
@@ -804,13 +807,13 @@ func BuildBatchCollectionPrompt(ctx *PromptContext, batchIndex, totalBatches int
 		if diffStr == "" {
 			continue
 		}
-		sb.WriteString(fmt.Sprintf("%d、文件：%s\n", i+1, path))
-		sb.WriteString("```diff\n")
-		sb.WriteString(maybeInjectLineNumbers(diffStr, path, ctx.ProjectID))
-		sb.WriteString("\n```\n\n")
+		usrSb.WriteString(fmt.Sprintf("%d、文件：%s\n", i+1, path))
+		usrSb.WriteString("```diff\n")
+		usrSb.WriteString(maybeInjectLineNumbers(diffStr, path, ctx.ProjectID))
+		usrSb.WriteString("\n```\n\n")
 	}
 
-	return sb.String()
+	return sysSb.String(), usrSb.String()
 }
 
 // BuildScoreArbitrationPrompt 构建汇总裁决 Prompt（汇总场景用）
@@ -913,67 +916,68 @@ func BuildScoreArbitrationPrompt(ctx *PromptContext, batchResults []*llm.BatchRe
 // 与 BuildScoreArbitrationPrompt 的区别：
 // 1. Agent findings 以结构化 JSON 注入（非 markdown 文本退化）
 // 2. 使用 GetReviewArbitrationJSONSchema（扩展了 security_findings / testing_notes / impact_notes / dedup_log / overall_suggestion）
-// 3. 返回 (string, *llm.ResponseFormat, error) 三元组
-func BuildArbitrationPrompt(ctx *PromptContext) (string, *llm.ResponseFormat, error) {
-	var sb strings.Builder
+// 3. 【P0】返回 (systemPrompt, userPrompt, *llm.ResponseFormat, error) 四元组
+//    System Prompt 包含恒定行为准则（角色、去重规则、独立输出规则），
+//    User Prompt 包含动态配置（扣分规则、维度归类、输入 JSON 数据）。
+func BuildArbitrationPrompt(ctx *PromptContext) (string, string, *llm.ResponseFormat, error) {
+	var sysSb, usrSb strings.Builder
 
-	// 1. System Prompt（角色定义 + 核心职责 + 输入说明 + 去重/评分规则）
-	sb.WriteString("你是一名资深代码评审架构师，负责整合多智能体检出结果与 AI 增量评审发现，输出最终的代码评审报告。\n\n")
-	sb.WriteString("## 核心职责\n")
-	sb.WriteString("1. 去重仲裁：合并 Agent 规则引擎发现与 LLM 增量评审发现中的重复项\n")
-	sb.WriteString("2. 统一格式化：将所有发现转换为标准化的 AIReviewIssue 格式\n")
-	sb.WriteString("3. 综合评分：基于全量问题（Agent + LLM）计算各维度得分\n")
-	sb.WriteString("4. 独立分类：将测试建议和影响分析放入独立数组，不混入 Issues[]\n")
-	sb.WriteString("5. 来源标记：在每条 issue 中标注来源（agent / llm / merged）\n\n")
+	// ========== System Prompt：恒定行为准则 ==========
+	sysSb.WriteString("你是一名资深代码评审架构师，负责整合多智能体检出结果与 AI 增量评审发现，输出最终的代码评审报告。\n\n")
+	sysSb.WriteString("## 核心职责\n")
+	sysSb.WriteString("1. 去重仲裁：合并 Agent 规则引擎发现与 LLM 增量评审发现中的重复项\n")
+	sysSb.WriteString("2. 统一格式化：将所有发现转换为标准化的 AIReviewIssue 格式\n")
+	sysSb.WriteString("3. 综合评分：基于全量问题（Agent + LLM）计算各维度得分\n")
+	sysSb.WriteString("4. 独立分类：将测试建议和影响分析放入独立数组，不混入 Issues[]\n")
+	sysSb.WriteString("5. 来源标记：在每条 issue 中标注来源（agent / llm / merged）\n\n")
 
-	sb.WriteString("## 输入数据结构与处理要求\n\n")
-	sb.WriteString("输入 JSON 包含以下 4 个顶层字段，你应当按需读取：\n\n")
-	sb.WriteString("1. `agent_findings` — 规则引擎自动检出结果（Object）\n")
-	sb.WriteString("   - `secret_scan`：敏感信息扫描（数组），如密钥、密码泄露\n")
-	sb.WriteString("   - `security_audit`：静态安全审计（数组），如不安全的反序列化、SQL 注入\n")
-	sb.WriteString("   - `dependency_scan`：依赖漏洞扫描（数组），如 CVE、GHSA\n")
-	sb.WriteString("   - `test_suggestion`：测试覆盖建议（数组）\n")
-	sb.WriteString("   - `impact_analysis`：影响分析（数组），如 API 兼容性变更、Schema 变更\n")
-	sb.WriteString("   【处理要求】提取所有 Agent 发现参与去重和评分。Agent 的 location(file/line) 精确，severity 可信；\n")
-	sb.WriteString("   去重时优先保留 Agent 的 severity，description 和 suggestion 可补充 LLM 的更详细内容。\n\n")
-	sb.WriteString("2. `batch_results` — 分批评审阶段各批次的 LLM 评审输出（数组）\n")
-	sb.WriteString("   每个元素包含：`batch_notes`、`issues`、`recommendations`。\n")
-	sb.WriteString("   【处理要求】提取所有 `issues` 参与去重和评分；`batch_notes` 和 `recommendations` 仅用于理解上下文，\n")
-	sb.WriteString("   严禁将其内容捏造为 Issues[] 成员。\n\n")
-	sb.WriteString("3. `dimension_config` — 评分维度及权重映射（Object）\n")
-	sb.WriteString("   每个维度包含 `code` 和 `weight`。权重是固定值，输出时必须原样保留，不得修改、不得省略、不得全部置 0。\n\n")
-	sb.WriteString("4. `deduct_score_config` — 扣分规则（Object）\n")
-	sb.WriteString("   每个 severity 对应固定扣分数，用于计算各维度得分。\n\n")
+	sysSb.WriteString("## 输入数据结构与处理要求\n\n")
+	sysSb.WriteString("输入 JSON 包含以下 4 个顶层字段，你应当按需读取：\n\n")
+	sysSb.WriteString("1. `agent_findings` — 规则引擎自动检出结果（Object）\n")
+	sysSb.WriteString("   - `secret_scan`：敏感信息扫描（数组），如密钥、密码泄露\n")
+	sysSb.WriteString("   - `security_audit`：静态安全审计（数组），如不安全的反序列化、SQL 注入\n")
+	sysSb.WriteString("   - `dependency_scan`：依赖漏洞扫描（数组），如 CVE、GHSA\n")
+	sysSb.WriteString("   - `test_suggestion`：测试覆盖建议（数组）\n")
+	sysSb.WriteString("   - `impact_analysis`：影响分析（数组），如 API 兼容性变更、Schema 变更\n")
+	sysSb.WriteString("   【处理要求】提取所有 Agent 发现参与去重和评分。Agent 的 location(file/line) 精确，severity 可信；\n")
+	sysSb.WriteString("   去重时优先保留 Agent 的 severity，description 和 suggestion 可补充 LLM 的更详细内容。\n\n")
+	sysSb.WriteString("2. `batch_results` — 分批评审阶段各批次的 LLM 评审输出（数组）\n")
+	sysSb.WriteString("   每个元素包含：`batch_notes`、`issues`、`recommendations`。\n")
+	sysSb.WriteString("   【处理要求】提取所有 `issues` 参与去重和评分；`batch_notes` 和 `recommendations` 仅用于理解上下文，\n")
+	sysSb.WriteString("   严禁将其内容捏造为 Issues[] 成员。\n\n")
+	sysSb.WriteString("3. `dimension_config` — 评分维度及权重映射（Object）\n")
+	sysSb.WriteString("   每个维度包含 `code` 和 `weight`。权重是固定值，输出时必须原样保留，不得修改、不得省略、不得全部置 0。\n\n")
+	sysSb.WriteString("4. `deduct_score_config` — 扣分规则（Object）\n")
+	sysSb.WriteString("   每个 severity 对应固定扣分数，用于计算各维度得分。\n\n")
 
-	sb.WriteString("## 去重规则\n")
-	sb.WriteString("1. 位置重叠：同一文件 + 行号差值 ≤ 3 行 → 视为同一位置\n")
-	sb.WriteString("2. 语义相似：消息文本相似度 > 70% 或 category 相同 + 位置重叠 → 视为同一问题\n")
-	sb.WriteString("3. 去重优先级：保留 Agent 的 severity + rule_code，优先采用 LLM 的 description + suggestion\n")
-	sb.WriteString("4. 独立保留：Agent 发现但 LLM 未发现 → 保留（source=agent）；LLM 发现但 Agent 未发现 → 保留（source=llm）\n\n")
+	sysSb.WriteString("## 去重规则\n")
+	sysSb.WriteString("1. 位置重叠：同一文件 + 行号差值 ≤ 3 行 → 视为同一位置\n")
+	sysSb.WriteString("2. 语义相似：消息文本相似度 > 70% 或 category 相同 + 位置重叠 → 视为同一问题\n")
+	sysSb.WriteString("3. 去重优先级：保留 Agent 的 severity + rule_code，优先采用 LLM 的 description + suggestion\n")
+	sysSb.WriteString("4. 独立保留：Agent 发现但 LLM 未发现 → 保留（source=agent）；LLM 发现但 Agent 未发现 → 保留（source=llm）\n\n")
 
-	// 2. 扣分规则（来自项目 AI 评审模板）
-	sb.WriteString(buildScoreRulesText(ctx.DeductScoreConfig))
-	sb.WriteString("\n")
+	sysSb.WriteString("## 独立输出规则（强制执行）\n")
+	sysSb.WriteString("- TestSuggestion → testing_notes[]（不得放入 Issues[]）\n")
+	sysSb.WriteString("- ImpactAnalysis → impact_notes[]（不得放入 Issues[]）\n")
+	sysSb.WriteString("- SecurityFinding → security_findings[]（仅展示用，已在 Issues[] 中体现扣分）\n\n")
 
-	// 3. 维度归类说明（评分公式已在上文【总分计算规则】中完整定义，此处仅说明 category 到维度的映射）
-	sb.WriteString("## 维度归类说明\n\n")
-	sb.WriteString("issues 按 `category` 字段归入对应维度，用于计算维度得分：\n")
-	sb.WriteString("- `security` → 安全维度：Issues[] 中 category=security 的问题 + Agent SecurityFindings 共同计入\n")
-	sb.WriteString("- `code_quality` → 代码质量维度：Issues[] 中 category=code_quality 的问题计入\n")
-	sb.WriteString("- `performance` → 性能维度：Issues[] 中 category=performance 的问题计入\n\n")
-	sb.WriteString("（维度得分与总分的完整计算规则见上文【总分计算规则】）\n\n")
+	// ========== User Prompt：动态配置 + 输入数据 ==========
+	// 1. 扣分规则（来自项目 AI 评审模板，按项目配置动态变化）
+	usrSb.WriteString(buildScoreRulesText(ctx.DeductScoreConfig))
+	usrSb.WriteString("\n")
 
-	// 4. 独立输出规则
-	sb.WriteString("## 独立输出规则（强制执行）\n")
-	sb.WriteString("- TestSuggestion → testing_notes[]（不得放入 Issues[]）\n")
-	sb.WriteString("- ImpactAnalysis → impact_notes[]（不得放入 Issues[]）\n")
-	sb.WriteString("- SecurityFinding → security_findings[]（仅展示用，已在 Issues[] 中体现扣分）\n\n")
+	// 2. 维度归类说明（按当前项目实际维度配置）
+	usrSb.WriteString("## 维度归类说明\n\n")
+	usrSb.WriteString("issues 按 `category` 字段归入对应维度，用于计算维度得分：\n")
+	usrSb.WriteString("- `security` → 安全维度：Issues[] 中 category=security 的问题 + Agent SecurityFindings 共同计入\n")
+	usrSb.WriteString("- `code_quality` → 代码质量维度：Issues[] 中 category=code_quality 的问题计入\n")
+	usrSb.WriteString("- `performance` → 性能维度：Issues[] 中 category=performance 的问题计入\n\n")
+	usrSb.WriteString("（维度得分与总分的完整计算规则见上文【总分计算规则】）\n\n")
 
-	// 5. 构建结构化 User Prompt（JSON 格式数据，注入 agent_findings + batch_results + 维度配置 + 扣分规则）
-	// 各智能体的核心数据已包含在 agent_findings JSON 中，不再重复注入 Markdown 格式，避免 Token 浪费和数据冗余
+	// 3. 构建结构化输入数据（JSON 格式，注入 agent_findings + batch_results + 维度配置 + 扣分规则）
 	batchJSON, err := json.Marshal(ctx.BatchReviewResults)
 	if err != nil {
-		return "", nil, fmt.Errorf("Batch results 序列化失败: %w", err)
+		return "", "", nil, fmt.Errorf("Batch results 序列化失败: %w", err)
 	}
 
 	dimConfig := ctx.GetDimensionConfig()
@@ -983,7 +987,7 @@ func BuildArbitrationPrompt(ctx *PromptContext) (string, *llm.ResponseFormat, er
 	// 始终注入结构化 Agent findings（与 Markdown 互补，供精确去重和评分）
 	agentJSON, err := ctx.AgentFindingsJSON()
 	if err != nil {
-		return "", nil, fmt.Errorf("Agent findings 序列化失败: %w", err)
+		return "", "", nil, fmt.Errorf("Agent findings 序列化失败: %w", err)
 	}
 
 	type arbitrationInputData struct {
@@ -1000,14 +1004,14 @@ func BuildArbitrationPrompt(ctx *PromptContext) (string, *llm.ResponseFormat, er
 	}
 	userJSON, err := json.MarshalIndent(userData, "", "  ")
 	if err != nil {
-		return "", nil, fmt.Errorf("输入数据序列化失败: %w", err)
+		return "", "", nil, fmt.Errorf("输入数据序列化失败: %w", err)
 	}
 
-	sb.WriteString("## 输入数据\n\n```json\n")
-	sb.Write(userJSON)
-	sb.WriteString("\n```\n")
+	usrSb.WriteString("## 输入数据\n\n```json\n")
+	usrSb.Write(userJSON)
+	usrSb.WriteString("\n```\n")
 
-	// 7. ResponseFormat（使用 review_arbitration 扩展 Schema）
+	// 4. ResponseFormat（使用 review_arbitration 扩展 Schema）
 	dimensions := ctx.GetDimensionCodes()
 	schema := llm.GetReviewArbitrationJSONSchema(dimensions)
 	responseFormat := &llm.ResponseFormat{
@@ -1019,7 +1023,7 @@ func BuildArbitrationPrompt(ctx *PromptContext) (string, *llm.ResponseFormat, er
 		},
 	}
 
-	return sb.String(), responseFormat, nil
+	return sysSb.String(), usrSb.String(), responseFormat, nil
 }
 
 // ==================== 辅助函数 ====================

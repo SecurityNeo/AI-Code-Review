@@ -99,7 +99,7 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 	}
 
 	// 6. 构建结构化 Prompt
-	userPrompt, responseFormat, err := engine.BuildArbitrationPrompt(promptCtx)
+	systemPrompt, userPrompt, responseFormat, err := engine.BuildArbitrationPrompt(promptCtx)
 	if err != nil {
 		return fmt.Errorf("构建裁决 Prompt 失败: %w", err)
 	}
@@ -116,7 +116,8 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 		promptSnap = promptSnap[:maxPromptSnapLen] + "\n\n[... Prompt truncated, total length: " + fmt.Sprintf("%d chars]", len(userPrompt))
 	}
 	inputSnapshot := map[string]interface{}{
-		"prompt": promptSnap,
+		"prompt":         promptSnap,
+		"system_prompt":  systemPrompt,
 		"agent_findings": map[string]int{
 			"secret_scan":        len(agentData.SecretScan),
 			"security_audit":     len(agentData.SecurityAudit),
@@ -131,7 +132,7 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 	ctx.SaveInputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, inputSnapshot)
 
 	// 7. 执行裁决（三层降级）
-	result, rawLLMOutput, fallbackReason, err := e.arbitrate(ctx, promptCtx, userPrompt, responseFormat, deductCfg)
+	result, rawLLMOutput, fallbackReason, err := e.arbitrate(ctx, promptCtx, systemPrompt, userPrompt, responseFormat, deductCfg)
 	if err != nil {
 		return fmt.Errorf("评审裁决失败: %w", err)
 	}
@@ -169,6 +170,7 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 func (e *ReviewArbitrationExecutor) arbitrate(
 	ctx StageContext,
 	promptCtx *engine.PromptContext,
+	systemPrompt string,
 	userPrompt string,
 	responseFormat *llm.ResponseFormat,
 	deductCfg engine.DeductScoreConfig,
@@ -185,7 +187,7 @@ func (e *ReviewArbitrationExecutor) arbitrate(
 	}()
 
 	// Layer 1: 尝试完整 LLM 汇总裁决（结构化 Prompt + JSON Schema 严格约束）
-	result, rawLLMOutput, err = e.callLLMWithStructuredPrompt(ctx, promptCtx, userPrompt, responseFormat, deductCfg)
+	result, rawLLMOutput, err = e.callLLMWithStructuredPrompt(ctx, promptCtx, systemPrompt, userPrompt, responseFormat, deductCfg)
 	if err == nil && isValidResult(result) {
 		return result, rawLLMOutput, "", nil
 	}
@@ -203,6 +205,7 @@ func (e *ReviewArbitrationExecutor) arbitrate(
 func (e *ReviewArbitrationExecutor) callLLMWithStructuredPrompt(
 	ctx StageContext,
 	promptCtx *engine.PromptContext,
+	systemPrompt string,
 	userPrompt string,
 	responseFormat *llm.ResponseFormat,
 	deductCfg engine.DeductScoreConfig,
@@ -232,7 +235,7 @@ func (e *ReviewArbitrationExecutor) callLLMWithStructuredPrompt(
 		&task.ID,
 		modelID,
 		"review_arbitration",
-		"",
+		systemPrompt,
 		userPrompt,
 		responseFormat,
 	)
