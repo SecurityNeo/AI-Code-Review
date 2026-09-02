@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ai-optimizer/backend/internal/engine"
@@ -98,6 +99,42 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 		DeductScoreConfig:     deductCfg,
 	}
 
+	// 【P0】空输入安全短路：如果所有上游均无有效产出，跳过 LLM 裁决
+	if shouldShortcutReview(ctx) {
+		result := buildEmptyReviewResult(promptCtx, deductCfg)
+		ctx.SaveInputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, map[string]interface{}{
+			"short_circuited": true,
+			"reason":          "empty_review_input",
+		})
+		outputSnapshot := map[string]interface{}{
+			"final_issues_count":      0,
+			"security_findings_count": 0,
+			"testing_notes_count":     0,
+			"impact_notes_count":      0,
+			"total_score":             result.TotalScore,
+			"dimensions":              result.Dimensions,
+			"dedup_log":               []llm.DedupEntry{},
+			"dedup_merged_count":      0,
+			"dedup_kept_agent_count":  0,
+			"dedup_kept_llm_count":    0,
+			"overall_suggestion":      "",
+			"raw_llm_output":          "",
+			"model_name":              "",
+			"input_tokens":            0,
+			"output_tokens":           0,
+			"llm_fallback_reason":     "",
+			"_shortcut":               true,
+			"_shortcut_reason":        "所有智能体检出与代码评审均未发现问题，跳过 AI 裁决",
+		}
+		ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, outputSnapshot)
+		ctx.SetOutput("ai_review_result", result)
+		ctx.SetOutput("score", result.TotalScore)
+		zap.L().Info("review_arbitration: 空输入安全短路，跳过 LLM 裁决",
+			zap.Uint("task_id", ctx.Task().ID),
+			zap.Uint("execution_id", ctx.ExecutionID()))
+		return nil
+	}
+
 	// 6. 构建结构化 Prompt
 	systemPrompt, userPrompt, responseFormat, err := engine.BuildArbitrationPrompt(promptCtx)
 	if err != nil {
@@ -188,12 +225,17 @@ func (e *ReviewArbitrationExecutor) arbitrate(
 
 	// Layer 1: 尝试完整 LLM 汇总裁决（结构化 Prompt + JSON Schema 严格约束）
 	result, rawLLMOutput, err = e.callLLMWithStructuredPrompt(ctx, promptCtx, systemPrompt, userPrompt, responseFormat, deductCfg)
-	if err == nil && isValidResult(result) {
-		return result, rawLLMOutput, "", nil
+	if err == nil {
+		ok, reason := isValidResult(result)
+		if ok {
+			return result, rawLLMOutput, "", nil
+		}
+		fallbackReason = "本地去重模式（" + reason + "）"
+		zap.L().Warn("review_arbitration: LLM 输出校验不通过，降级到本地去重模式", zap.String("reason", reason))
+	} else {
+		fallbackReason = fmt.Sprintf("本地去重模式（%v）", err)
+		zap.L().Warn("review_arbitration: LLM 汇总失败/超时，降级到本地去重模式", zap.Error(err))
 	}
-
-	fallbackReason = "本地去重模式（LLM汇总裁决失败/超时）"
-	zap.L().Warn("review_arbitration: LLM 汇总失败/超时，降级到本地去重模式", zap.Error(err))
 
 	// Layer 2: 本地去重 + 评分（不调用 LLM）
 	result = e.localDeduplicationAndMerge(promptCtx, deductCfg)
@@ -256,6 +298,11 @@ func (e *ReviewArbitrationExecutor) callLLMWithStructuredPrompt(
 		return nil, result.Content, fmt.Errorf("LLM 裁决结果解析失败: %w", err)
 	}
 
+	// 【P1】一致性校验：LLM 输出必须与输入数据一致，防止编造/幻觉
+	if err := verifyLLMOutput(parsedResult, promptCtx); err != nil {
+		return nil, result.Content, fmt.Errorf("LLM 输出未通过一致性校验: %w", err)
+	}
+
 	// 保存实际使用的模型 ID 到 Pipeline Context，供 PostProcess 和任务列表使用
 	ctx.SetOutput("model_id", result.ModelID)
 	// 同时保存模型名称和 token 用量，供 snapshot 展示
@@ -273,13 +320,8 @@ func (e *ReviewArbitrationExecutor) callLLMWithStructuredPrompt(
 		}
 	}
 
-	// 【关键修复】LLM 偶发篡改维度权重（如全部置 0），导致总分异常为 0。
-	// 使用 promptCtx 中的原始权重覆盖 LLM 输出，并重新计算维度得分与总分。
-	if parsedResult != nil && len(promptCtx.DimensionWeights) > 0 {
-		parsedResult.Dimensions, parsedResult.TotalScore = recalcDimensionsWithOriginalWeights(
-			parsedResult.Issues, promptCtx.DimensionWeights, deductCfg,
-		)
-	}
+	// verifyLLMOutput 已在 Rule4 中完成权重覆盖与得分重算，
+	// 此处无需再次调用 recalcDimensionsWithOriginalWeights。
 
 	return parsedResult, result.Content, nil
 }
@@ -435,8 +477,12 @@ func (e *ReviewArbitrationExecutor) localDeduplicationAndMerge(
 	result.Dimensions = dimensions
 	result.TotalScore = totalScore
 	result.SchemaVersion = "2.0"
-	result.Summary = fmt.Sprintf("评审完成，共发现 %d 个问题（含 %d 个安全发现）",
-		len(mergedIssues), len(securityFindings))
+	if len(mergedIssues) == 0 {
+		result.Summary = "本次评审未发现代码质量问题。"
+	} else {
+		result.Summary = fmt.Sprintf("评审完成，共发现 %d 个问题（含 %d 个安全发现）。",
+			len(mergedIssues), len(securityFindings))
+	}
 	result.Recommendations = []string{}
 
 	return result
@@ -516,9 +562,13 @@ func (e *ReviewArbitrationExecutor) fallbackMerge(
 }
 
 // isValidResult 校验结果是否有效（含维度权重和保护）
-func isValidResult(result *llm.AIReviewResult) bool {
-	if result == nil || result.TotalScore < 0 || result.TotalScore > 100 {
-		return false
+// 返回 (ok bool, reason string)
+func isValidResult(result *llm.AIReviewResult) (bool, string) {
+	if result == nil {
+		return false, "LLM输出结果为 nil"
+	}
+	if result.TotalScore < 0 || result.TotalScore > 100 {
+		return false, fmt.Sprintf("LLM输出分数 %d 超出有效范围 [0, 100]", result.TotalScore)
 	}
 	// 校验维度权重和是否为 100（防止 LLM 篡改权重导致评分失真）
 	if len(result.Dimensions) >= 5 {
@@ -527,12 +577,10 @@ func isValidResult(result *llm.AIReviewResult) bool {
 			totalWeight += d.Weight
 		}
 		if totalWeight != 100 {
-			zap.L().Warn("review_arbitration: LLM output dimension weights invalid, trigger fallback",
-				zap.Int("total_weight", totalWeight))
-			return false
+			return false, fmt.Sprintf("LLM输出维度权重和为 %d，不等于 100", totalWeight)
 		}
 	}
-	return true
+	return true, ""
 }
 
 // getStrFromCtxOutput 安全地从 StageContext Output 读取字符串
@@ -555,4 +603,157 @@ func getIntFromCtxOutput(ctx StageContext, key string) int {
 	default:
 		return 0
 	}
+}
+
+// ==================== 短路 + 校验辅助函数 ====================
+
+// shouldShortcutReview 判定是否所有上游均无有效产出，可安全短路 LLM 裁决
+func shouldShortcutReview(ctx StageContext) bool {
+	// 1. Batch results 中所有批次无 issues
+	batchResults, _ := ctx.GetOutput("batch_review_results").([]*llm.BatchReviewResult)
+	for _, br := range batchResults {
+		if br != nil && len(br.Issues) > 0 {
+			return false
+		}
+	}
+
+	// 2. Agent findings 全空
+	secretScan, _ := ctx.GetOutput("secret_scan_findings").([]model.SecretScanFinding)
+	securityAudit, _ := ctx.GetOutput("security_audit_findings").([]model.SecurityAuditFinding)
+	impactFindings, _ := ctx.GetOutput("impact_analysis_findings").([]engine.ImpactFinding)
+	testSuggestions, _ := ctx.GetOutput("test_suggestions").([]engine.TestSuggestionItem)
+	depVulns, _ := ctx.GetOutput("dependency_vulns").([]engine.DependencyVuln)
+
+	return isReviewInputEmpty(batchResults, secretScan, securityAudit, impactFindings, testSuggestions, depVulns)
+}
+
+// buildEmptyReviewResult 构造空输入场景下的标准评审结果
+func buildEmptyReviewResult(promptCtx *engine.PromptContext, deductCfg engine.DeductScoreConfig) *llm.AIReviewResult {
+	dims := make(map[string]llm.Dimension)
+	for code, dw := range promptCtx.DimensionWeights {
+		dims[code] = llm.Dimension{Score: 100, Weight: dw.Weight}
+	}
+	return &llm.AIReviewResult{
+		SchemaVersion:     "2.0",
+		Summary:           "本次评审未发现代码质量问题。",
+		Issues:            []llm.AIReviewIssue{},
+		Dimensions:        dims,
+		TotalScore:        calculateTotalScore(dims),
+		Recommendations:   []string{},
+		SecurityFindings:  []llm.SecurityFinding{},
+		TestingNotes:      []llm.TestingNote{},
+		ImpactNotes:       []llm.ImpactNote{},
+		DedupLog:          []llm.DedupEntry{},
+		OverallSuggestion: "",
+	}
+}
+
+// verifyLLMOutput 校验 LLM 输出与输入数据的一致性
+func verifyLLMOutput(result *llm.AIReviewResult, promptCtx *engine.PromptContext) error {
+	// Rule 1: 输入为空但输出非空 issues
+	if isReviewInputEmpty(promptCtx.BatchReviewResults, promptCtx.SecretScanFindings,
+		promptCtx.SecurityAuditFindings, promptCtx.ImpactFindings,
+		promptCtx.TestSuggestions, promptCtx.DependencyVulns) && len(result.Issues) > 0 {
+		return fmt.Errorf("val-01: 输入为空但输出包含 %d 条 issue", len(result.Issues))
+	}
+
+	// Rule 2: issue file 必须存在于 diff 文件列表中
+	allowedFiles := extractDiffFilePaths(promptCtx)
+	for _, issue := range result.Issues {
+		if !allowedFiles[issue.File] {
+			return fmt.Errorf("val-02: issue 文件 %s 不在 diff 列表中", issue.File)
+		}
+	}
+
+	// Rule 3: 禁止示例路径
+	bannedPatterns := []string{"com/example/", "com/sample/", "com/demo/"}
+	for _, issue := range result.Issues {
+		for _, p := range bannedPatterns {
+			if strings.Contains(issue.File, p) {
+				return fmt.Errorf("val-03: issue 包含示例路径 %s", p)
+			}
+		}
+	}
+
+	// Rule 4: total_score 重算一致性（偏差 > 5 则拒，同时用正确值覆盖）
+	if len(promptCtx.DimensionWeights) > 0 {
+		recalcDims, recalcScore := recalcDimensionsWithOriginalWeights(
+			result.Issues, promptCtx.DimensionWeights, promptCtx.DeductScoreConfig,
+		)
+		diff := result.TotalScore - recalcScore
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > 5 {
+			return fmt.Errorf("val-04: total_score=%d 与重算值=%d 差 %d 超出容忍区间",
+				result.TotalScore, recalcScore, diff)
+		}
+		result.Dimensions = recalcDims
+		result.TotalScore = recalcScore
+	}
+
+	return nil
+}
+
+// isReviewInputEmpty 判定所有上游产出是否均为空（batch review issues + agent findings + impact + test + dep vulns）
+func isReviewInputEmpty(
+	batchResults []*llm.BatchReviewResult,
+	secretScan []model.SecretScanFinding,
+	securityAudit []model.SecurityAuditFinding,
+	impactFindings []engine.ImpactFinding,
+	testSuggestions []engine.TestSuggestionItem,
+	depVulns []engine.DependencyVuln,
+) bool {
+	for _, br := range batchResults {
+		if br != nil && len(br.Issues) > 0 {
+			return false
+		}
+	}
+	if len(secretScan) > 0 {
+		return false
+	}
+	if len(securityAudit) > 0 {
+		return false
+	}
+	if len(impactFindings) > 0 {
+		return false
+	}
+	if len(testSuggestions) > 0 {
+		return false
+	}
+	for _, dep := range depVulns {
+		if dep.IsRelatedToChange {
+			return false
+		}
+	}
+	return true
+}
+
+// extractDiffFilePaths 从 PromptContext 中提取已知的合法文件路径集合
+// 来源包括：batch review issues、agent findings（secret_scan / security_audit）
+func extractDiffFilePaths(promptCtx *engine.PromptContext) map[string]bool {
+	paths := make(map[string]bool)
+	// 从 batch results 的 issues 中提取
+	for _, br := range promptCtx.BatchReviewResults {
+		if br == nil {
+			continue
+		}
+		for _, issue := range br.Issues {
+			if issue.File != "" {
+				paths[issue.File] = true
+			}
+		}
+	}
+	// 从 agent findings 中提取
+	for _, f := range promptCtx.SecretScanFindings {
+		if f.FilePath != "" {
+			paths[f.FilePath] = true
+		}
+	}
+	for _, f := range promptCtx.SecurityAuditFindings {
+		if f.FilePath != "" {
+			paths[f.FilePath] = true
+		}
+	}
+	return paths
 }

@@ -376,6 +376,11 @@ func buildStageResponse(exec model.TaskPipelineExecution) gin.H {
 				resp["dedup_kept_llm_count"] = outputSnap["dedup_kept_llm_count"]
 				resp["overall_suggestion"] = outputSnap["overall_suggestion"]
 				resp["raw_llm_output"] = outputSnap["raw_llm_output"]
+				// 【新增】shortcut 标识透传，供前端展示空输入跳过状态
+				if shortcut, ok := outputSnap["_shortcut"].(bool); ok && shortcut {
+					resp["_shortcut"] = true
+					resp["_shortcut_reason"] = outputSnap["_shortcut_reason"]
+				}
 				if dedupLog, ok := outputSnap["dedup_log"].([]interface{}); ok {
 					resp["dedup_logs"] = dedupLog
 				}
