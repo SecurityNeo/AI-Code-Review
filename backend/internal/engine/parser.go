@@ -174,7 +174,88 @@ func postParse(result *llm.AIReviewResult, deductCfg DeductScoreConfig) (*llm.AI
 		result.TotalScore = calculated
 	}
 
+	// 【Phase 2】清洗 suggestion 字段中的模型自证性废话
+	for i := range result.Issues {
+		result.Issues[i].Suggestion = cleanSuggestion(result.Issues[i].Suggestion)
+	}
+
 	return result, nil
+}
+
+// cleanSuggestion 清洗 suggestion 字段中的模型自证性废话
+// Phase 2 兜底策略：即使 model 在 suggestion 中填入评分计算、自证性文字，
+// 也能在解析后被识别并清理。
+func cleanSuggestion(suggestion string) string {
+	if suggestion == "" {
+		return ""
+	}
+
+	// 模型自证性关键词
+	selfProofKeywords := []string{
+		// 评分计算相关
+		"deduct_score", "维度得分", "总分合计", "加权贡献",
+		"max(0,100-", "/100", "经公式",
+		// 自证/合规声明
+		"与输入完全一致", "未做修改", "未混入", "未捏造", "不适用",
+		"已标注", "已遵守", "未产生", "触发零次", "仲裁完成",
+		"空问题处理", "独立数组", "顶层字段", "与 dimensions 同级",
+		// 去重/来源说明
+		"去重仲裁", "dedup_", "Agent 无发现",
+	}
+
+	// 策略1：匹配 ≥3 个关键词 → 判为模型废话，返回占位提示
+	matchCount := 0
+	for _, kw := range selfProofKeywords {
+		if strings.Contains(suggestion, kw) {
+			matchCount++
+		}
+	}
+	if matchCount >= 3 {
+		zap.L().Info("cleanSuggestion: 拦截模型自证废话",
+			zap.Int("match_count", matchCount),
+			zap.Int("original_len", len(suggestion)))
+		// 尝试截取第一个实际句子作为建议
+		firstSentence := extractFirstMeaningfulSentence(suggestion)
+		if firstSentence != "" {
+			return firstSentence + "（建议内容过长，已自动截断模型冗余信息）"
+		}
+		return "（建议内容包含模型内部推理信息，已自动过滤，请人工查看代码并给出修复建议）"
+	}
+
+	// 策略2：单句中出现 "total_score" 或 "max(0," → 截取前面的实际建议
+	if strings.Contains(suggestion, "total_score") || strings.Contains(suggestion, "max(0,") {
+		idx := strings.Index(suggestion, "total_score")
+		if idx == -1 {
+			idx = strings.Index(suggestion, "max(0,")
+		}
+		if idx > 20 {
+			truncated := strings.TrimSpace(suggestion[:idx])
+			truncated = strings.TrimRight(truncated, "，；,.;")
+			if len(truncated) > 10 {
+				return truncated
+			}
+		}
+	}
+
+	return suggestion
+}
+
+// extractFirstMeaningfulSentence 从 suggestion 中提取第一个有意义的句子
+// 用于 model 废话命中时尽量保留前半部分的真实建议
+func extractFirstMeaningfulSentence(s string) string {
+	// 按句号、问号、感叹号分割，取第一个长度 > 10 且不含自证关键词的句子
+	for _, sep := range []string{"。", "？", "！", ". ", "? ", "! "} {
+		if idx := strings.Index(s, sep); idx > 10 {
+			candidate := strings.TrimSpace(s[:idx])
+			if !strings.Contains(candidate, "max(0,") &&
+				!strings.Contains(candidate, "deduct_score") &&
+				!strings.Contains(candidate, "维度得分") &&
+				len(candidate) > 10 {
+				return candidate
+			}
+		}
+	}
+	return ""
 }
 
 // ValidateResult 校验评审结果数据质量（非阻塞，仅记录警告）

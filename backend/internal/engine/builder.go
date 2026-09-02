@@ -931,22 +931,22 @@ func BuildArbitrationPrompt(ctx *PromptContext) (string, string, *llm.ResponseFo
 	sysSb.WriteString("4. 独立分类：将测试建议和影响分析放入独立数组，不混入 Issues[]\n")
 	sysSb.WriteString("5. 来源标记：在每条 issue 中标注来源（agent / llm / merged）\n\n")
 
-	sysSb.WriteString("## 输入数据结构与处理要求\n\n")
-	sysSb.WriteString("输入 JSON 包含以下 4 个顶层字段，你应当按需读取：\n\n")
+	sysSb.WriteString("## 输入数据结构\n\n")
+	sysSb.WriteString("输入 JSON 包含以下 4 个顶层字段，按需读取：\n\n")
 	sysSb.WriteString("1. `agent_findings` — 规则引擎自动检出结果（Object）\n")
-	sysSb.WriteString("   - `secret_scan`：敏感信息扫描（数组），如密钥、密码泄露\n")
-	sysSb.WriteString("   - `security_audit`：静态安全审计（数组），如不安全的反序列化、SQL 注入\n")
-	sysSb.WriteString("   - `dependency_scan`：依赖漏洞扫描（数组），如 CVE、GHSA\n")
-	sysSb.WriteString("   - `test_suggestion`：测试覆盖建议（数组）\n")
-	sysSb.WriteString("   - `impact_analysis`：影响分析（数组），如 API 兼容性变更、Schema 变更\n")
-	sysSb.WriteString("   【处理要求】提取所有 Agent 发现参与去重和评分。Agent 的 location(file/line) 精确，severity 可信；\n")
+	sysSb.WriteString("   - `secret_scan`：敏感信息扫描\n")
+	sysSb.WriteString("   - `security_audit`：静态安全审计\n")
+	sysSb.WriteString("   - `dependency_scan`：依赖漏洞扫描\n")
+	sysSb.WriteString("   - `test_suggestion`：测试覆盖建议\n")
+	sysSb.WriteString("   - `impact_analysis`：影响分析\n")
+	sysSb.WriteString("   提取所有 Agent 发现参与去重和评分。Agent 的 location(file/line) 精确，severity 可信；\n")
 	sysSb.WriteString("   去重时优先保留 Agent 的 severity，description 和 suggestion 可补充 LLM 的更详细内容。\n\n")
 	sysSb.WriteString("2. `batch_results` — 分批评审阶段各批次的 LLM 评审输出（数组）\n")
 	sysSb.WriteString("   每个元素包含：`batch_notes`、`issues`、`recommendations`。\n")
-	sysSb.WriteString("   【处理要求】提取所有 `issues` 参与去重和评分；`batch_notes` 和 `recommendations` 仅用于理解上下文，\n")
-	sysSb.WriteString("   严禁将其内容捏造为 Issues[] 成员。\n\n")
+	sysSb.WriteString("   提取所有 `issues` 参与去重和评分；batch_notes 和 recommendations 仅用于理解上下文，\n")
+	sysSb.WriteString("   不输出到 Issues[] 中。\n\n")
 	sysSb.WriteString("3. `dimension_config` — 评分维度及权重映射（Object）\n")
-	sysSb.WriteString("   每个维度包含 `code` 和 `weight`。权重是固定值，输出时必须原样保留，不得修改、不得省略、不得全部置 0。\n\n")
+	sysSb.WriteString("   每个维度包含 `code` 和 `weight`。权重使用输入值，不做修改。\n\n")
 	sysSb.WriteString("4. `deduct_score_config` — 扣分规则（Object）\n")
 	sysSb.WriteString("   每个 severity 对应固定扣分数，用于计算各维度得分。\n\n")
 
@@ -956,10 +956,10 @@ func BuildArbitrationPrompt(ctx *PromptContext) (string, string, *llm.ResponseFo
 	sysSb.WriteString("3. 去重优先级：保留 Agent 的 severity + rule_code，优先采用 LLM 的 description + suggestion\n")
 	sysSb.WriteString("4. 独立保留：Agent 发现但 LLM 未发现 → 保留（source=agent）；LLM 发现但 Agent 未发现 → 保留（source=llm）\n\n")
 
-	sysSb.WriteString("## 独立输出规则（强制执行）\n")
-	sysSb.WriteString("- TestSuggestion → testing_notes[]（不得放入 Issues[]）\n")
-	sysSb.WriteString("- ImpactAnalysis → impact_notes[]（不得放入 Issues[]）\n")
-	sysSb.WriteString("- SecurityFinding → security_findings[]（仅展示用，已在 Issues[] 中体现扣分）\n\n")
+	sysSb.WriteString("## 独立输出规则\n")
+	sysSb.WriteString("- TestSuggestion → testing_notes[]（输出到独立数组）\n")
+	sysSb.WriteString("- ImpactAnalysis → impact_notes[]（输出到独立数组）\n")
+	sysSb.WriteString("- SecurityFinding → security_findings[]（已在 Issues[] 中体现扣分，此处仅展示）\n\n")
 
 	// ========== User Prompt：动态配置 + 输入数据 ==========
 	// 1. 扣分规则（来自项目 AI 评审模板，按项目配置动态变化）
@@ -973,6 +973,11 @@ func BuildArbitrationPrompt(ctx *PromptContext) (string, string, *llm.ResponseFo
 	usrSb.WriteString("- `code_quality` → 代码质量维度：Issues[] 中 category=code_quality 的问题计入\n")
 	usrSb.WriteString("- `performance` → 性能维度：Issues[] 中 category=performance 的问题计入\n\n")
 	usrSb.WriteString("（维度得分与总分的完整计算规则见上文【总分计算规则】）\n\n")
+
+	// 【Phase 1】明确 suggestion 字段语义，避免 model 填入评分计算、自证性文字
+	usrSb.WriteString("## suggestion 字段语义\n\n")
+	usrSb.WriteString("suggestion 只应包含给开发者的具体修复操作步骤（如：将 SQL 拼接改为参数化查询，使用 PreparedStatement）。\n")
+	usrSb.WriteString("suggestion 不应包含：评分计算过程、维度权重值、扣分说明、模型自证性文字、去重过程说明。\n\n")
 
 	// 3. 构建结构化输入数据（JSON 格式，注入 agent_findings + batch_results + 维度配置 + 扣分规则）
 	batchJSON, err := json.Marshal(ctx.BatchReviewResults)
@@ -1029,9 +1034,11 @@ func BuildArbitrationPrompt(ctx *PromptContext) (string, string, *llm.ResponseFo
 // ==================== 辅助函数 ====================
 
 // buildScoreRulesText 构建总分计算规则文本
+// 【Phase 1】移除了所有验证/禁止式措辞（"必须严格遵守""严禁""不可变""绝对"），
+// 改为客观公式描述，避免 model 在 suggestion 字段中产生自证幻觉。
 func buildScoreRulesText(dsc DeductScoreConfig) string {
 	var sb strings.Builder
-	sb.WriteString("## 【总分计算规则 - 必须严格遵守】\n")
+	sb.WriteString("## 总分计算规则\n")
 	sb.WriteString("1. 每个 Issue 按严重程度固定扣分（deduct_score）：\n")
 	sb.WriteString(fmt.Sprintf("   - critical（严重）: 扣 %d 分\n", dsc.Critical))
 	sb.WriteString(fmt.Sprintf("   - high（高危）: 扣 %d 分\n", dsc.High))
@@ -1043,13 +1050,10 @@ func buildScoreRulesText(dsc DeductScoreConfig) string {
 	sb.WriteString("4. 计算总分（加权平均）：total_score = Σ(维度得分 × 维度权重) / 100\n")
 	sb.WriteString("   结果四舍五入到整数（0-100）。\n\n")
 	sb.WriteString("5. 权重为 0 的维度不参与总分计算，但仍返回 score 供参考。\n\n")
-	sb.WriteString("6. 【不可变规则】dimensions.*.weight 必须与输入 dimension_config 完全一致，不得修改、不得省略、不得全部置 0。\n")
-	sb.WriteString("7. 【空问题处理】若 Issues[] 为空且无 Agent findings，则各维度无扣分，维度得分应为 100，总分应为 100。\n")
-	sb.WriteString("   严禁将 batch_notes、recommendations、summary 等非 issue 内容捏造为 Issues[] 成员。\n\n")
-	sb.WriteString("【重要】total_score 必须与上述公式计算结果一致，不能随意填写。\n")
-	sb.WriteString("【重要】total_score 是顶层字段，与 dimensions 同级，绝对不能放在 dimensions 对象内部。\n")
-	sb.WriteString("错误示例：\"dimensions\": { \"security\": {...}, \"total_score\": 48 }\n")
-	sb.WriteString("正确示例：\"dimensions\": { \"security\": {...} }, \"total_score\": 48\n")
+	sb.WriteString("6. dimensions.*.weight 使用输入值，不修改、不省略。\n")
+	sb.WriteString("7. 若 Issues[] 为空且无 Agent findings，则各维度无扣分，维度得分应为 100，总分应为 100。\n")
+	sb.WriteString("   summary、recommendations 等保持在各自顶层字段中。\n\n")
+	sb.WriteString("注意：total_score 须与上述公式计算结果一致；total_score 为顶层字段，与 dimensions 同级。\n")
 	return sb.String()
 }
 
