@@ -1993,6 +1993,14 @@ function renderTasks(tasks) {
         if (isUser()) {
             restrictAuthorFilterToSelf();
         }
+
+        // 【修复】从任务详情页返回时自动刷新列表（浏览器 bfcache 恢复不会触发 DOMContentLoaded）
+        window.addEventListener('pageshow', (event) => {
+            if (event.persisted) {
+                loadTasks();
+                loadStats();
+            }
+        });
     </script>
     <script defer src="/static/js/tailwindcss.min.js"></script>
 </body>
