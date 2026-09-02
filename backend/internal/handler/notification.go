@@ -397,6 +397,9 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 	// show_legacy: 0=仅活跃(默认) 1=展示全部
 	showLegacy := c.DefaultQuery("show_legacy", "0") == "1"
 
+	// owner_type: all=全部(默认) mine=仅我创建的
+	ownerType := c.DefaultQuery("owner_type", "all")
+
 	// 看板统计始终只统计活跃数据（基线之后）
 	activeStatQ := func(db *gorm.DB) *gorm.DB {
 		return db
@@ -474,10 +477,17 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 	offset := (page - 1) * pageSize
 
 	// 待处理列表（增强：携带项目信息、任务MR信息）
+	// 列表查询受 owner_type 控制：all=owner_id OR current_owner_id, mine=仅 owner_id
 	var totalIssues int64
-	totalQ := listFilter(model.DB.Model(&model.ReviewIssue{}).
-		Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?)",
-			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID))
+	baseListQ := model.DB.Model(&model.ReviewIssue{}).
+		Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?)",
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited})
+	if ownerType == "mine" {
+		baseListQ = baseListQ.Where("review_issues.owner_id = ?", user.ID)
+	} else {
+		baseListQ = baseListQ.Where("(review_issues.owner_id = ? OR review_issues.current_owner_id = ?)", user.ID, user.ID)
+	}
+	totalQ := listFilter(baseListQ)
 	totalQ.Count(&totalIssues)
 
 	var rawItems []struct {
@@ -487,13 +497,19 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 		OwnerUsername    string `json:"owner_username"`
 		OwnerDisplayName string `json:"owner_display_name"`
 	}
-	listQ := listFilter(model.DB.Model(&model.ReviewIssue{}).
+	baseListJoinQ := model.DB.Model(&model.ReviewIssue{}).
 		Select("review_issues.*, projects.name as project_name, tasks.mr_title as mr_title, owners.username as owner_username, owners.display_name as owner_display_name").
 		Joins("LEFT JOIN tasks ON tasks.id = review_issues.task_id").
 		Joins("LEFT JOIN projects ON projects.id = tasks.project_id").
 		Joins("LEFT JOIN users AS owners ON owners.id = review_issues.owner_id").
-		Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?)",
-			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID))
+		Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?)",
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited})
+	if ownerType == "mine" {
+		baseListJoinQ = baseListJoinQ.Where("review_issues.owner_id = ?", user.ID)
+	} else {
+		baseListJoinQ = baseListJoinQ.Where("(review_issues.owner_id = ? OR review_issues.current_owner_id = ?)", user.ID, user.ID)
+	}
+	listQ := listFilter(baseListJoinQ)
 	listQ.Order("review_issues.escalation_level ASC, review_issues.severity DESC, review_issues.original_created_at ASC").
 		Limit(pageSize).Offset(offset).Scan(&rawItems)
 

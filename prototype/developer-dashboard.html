@@ -134,6 +134,13 @@
                         <span id="activeModeHint" class="ml-2 text-[10px] text-gray-400 hidden">当前仅展示活跃问题</span>
                     </h3>
                     <div class="flex items-center gap-3">
+                        <div id="ownerFilterWrap" class="flex items-center gap-2">
+                            <span class="text-xs text-gray-500">只看我的问题</span>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="ownerTypeToggle" class="sr-only peer" onchange="toggleOwnerType()">
+                                <div class="w-9 h-5 bg-gray-200 peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                            </label>
+                        </div>
                         <div id="legacyToggleWrap" class="flex items-center gap-2 hidden">
                             <span class="text-xs text-gray-500">展示历史遗留问题</span>
                             <label class="relative inline-flex items-center cursor-pointer">
@@ -179,10 +186,17 @@ let currentPage = 1;
 let pageSize = 10;
 let totalPages = 1;
 let showLegacy = false;
+let ownerType = 'all';
 let currentUserId = null;
 
 function toggleShowLegacy() {
     showLegacy = document.getElementById('showLegacyToggle').checked;
+    currentPage = 1;
+    loadDashboard(true);
+}
+
+function toggleOwnerType() {
+    ownerType = document.getElementById('ownerTypeToggle').checked ? 'mine' : 'all';
     currentPage = 1;
     loadDashboard(true);
 }
@@ -193,6 +207,7 @@ async function loadDashboard(force = false) {
         params.set('page', currentPage);
         params.set('page_size', pageSize);
         params.set('show_legacy', showLegacy ? '1' : '0');
+        params.set('owner_type', ownerType);
         const res = await apiFetch(API_BASE + '/dashboard/developer?' + params.toString());
         const data = await res.json();
         const d = data.data || {};
