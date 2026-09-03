@@ -737,32 +737,45 @@ func BuildFullStructuredPrompt(ctx *PromptContext) (string, *llm.ResponseFormat)
 	return sb.String(), responseFormat
 }
 
+// buildBatchCollectionSystemPromptContent 构建 BatchCollection 的 System Prompt 完整文本
+// 【关键】此函数与 BuildBatchCollectionPrompt 中 sysSb 的构建逻辑保持 1:1 严格同步
+func buildBatchCollectionSystemPromptContent(batchIndex, totalBatches int) string {
+	var sb strings.Builder
+	sb.WriteString("你是一名资深代码评审专家。请对以下代码变更进行评审。\n\n")
+	sb.WriteString("## 【重要】返回格式要求\n")
+	sb.WriteString("你的响应必须严格符合以下 JSON Schema，不要包含任何 Markdown 代码块标记或额外解释文字：\n")
+	batchSchema := llm.GetBatchCollectionJSONSchema()
+	schemaBytes, _ := json.MarshalIndent(batchSchema, "", "  ")
+	sb.WriteString(string(schemaBytes))
+	sb.WriteString("\n\n")
+
+	sb.WriteString("【重要】本次为分批评审（第 ")
+	sb.WriteString(fmt.Sprintf("%d/%d", batchIndex, totalBatches))
+	sb.WriteString(" 批），你只需：\n")
+	sb.WriteString("1. 检查以下代码变更中是否存在违反评审规则的问题\n")
+	sb.WriteString("2. 按上述格式输出 issues[] 和 recommendations[]\n")
+	sb.WriteString("3. 不需要计算各维度得分和总分\n")
+	sb.WriteString("4. 后续会有汇总阶段统一裁决\n\n")
+
+	return sb.String()
+}
+
+// MeasureBatchCollectionSystemPrompt 返回 System Prompt 的精确字节数
+// 供 batch_algorithm.go 替代 "len(template) + 500" 的错误估算
+func MeasureBatchCollectionSystemPrompt(batchIndex, totalBatches int) int {
+	return len(buildBatchCollectionSystemPromptContent(batchIndex, totalBatches))
+}
+
 // BuildBatchCollectionPrompt 构建评审收集 Prompt（单批/多批统一使用）
 // 输出：含规则 + diff，但 JSON Schema 只要求 issues[] 和 recommendations[]，不计算总分
 // batchFiles 必须使用 SmartSplitIntoBatches 截断后的文件 map，确保单文件不超过可用 token 配额
 // isLastBatch 控制是否在最后一批注入通用信息（Agent findings、commit、MR标题、依赖漏洞），避免每批重复
 // 【P1】拆分为 (systemPrompt, userPrompt)，System Prompt 包含恒定角色和格式约束，User Prompt 包含动态规则、配置和 diff。
 func BuildBatchCollectionPrompt(ctx *PromptContext, batchIndex, totalBatches int, batchFiles []map[string]interface{}, isLastBatch bool) (string, string) {
-	var sysSb, usrSb strings.Builder
-
 	// ========== System Prompt：恒定行为准则 ==========
-	sysSb.WriteString("你是一名资深代码评审专家。请对以下代码变更进行评审。\n\n")
-	sysSb.WriteString("## 【重要】返回格式要求\n")
-	sysSb.WriteString("你的响应必须严格符合以下 JSON Schema，不要包含任何 Markdown 代码块标记或额外解释文字：\n")
-	batchSchema := llm.GetBatchCollectionJSONSchema()
-	schemaBytes, _ := json.MarshalIndent(batchSchema, "", "  ")
-	sysSb.WriteString(string(schemaBytes))
-	sysSb.WriteString("\n\n")
+	sysPrompt := buildBatchCollectionSystemPromptContent(batchIndex, totalBatches)
 
-	sysSb.WriteString("【重要】本次为分批评审（第 ")
-	sysSb.WriteString(fmt.Sprintf("%d/%d", batchIndex, totalBatches))
-	sysSb.WriteString(" 批），你只需：\n")
-	sysSb.WriteString("1. 检查以下代码变更中是否存在违反评审规则的问题\n")
-	sysSb.WriteString("2. 按上述格式输出 issues[] 和 recommendations[]\n")
-	sysSb.WriteString("3. 不需要计算各维度得分和总分\n")
-	sysSb.WriteString("4. 后续会有汇总阶段统一裁决\n\n")
-
-	// ========== User Prompt：动态规则 + diff + 上下文 ==========
+	var usrSb strings.Builder
 	// 完整维度定义（用于正确分类 category，不展示权重和计分公式）
 	usrSb.WriteString(buildDimensionDefinitionsSection(ctx.DimensionWeights))
 
@@ -813,7 +826,7 @@ func BuildBatchCollectionPrompt(ctx *PromptContext, batchIndex, totalBatches int
 		usrSb.WriteString("\n```\n\n")
 	}
 
-	return sysSb.String(), usrSb.String()
+	return sysPrompt, usrSb.String()
 }
 
 // BuildScoreArbitrationPrompt 构建汇总裁决 Prompt（汇总场景用）
@@ -1114,6 +1127,13 @@ func buildRulesSectionLite(rules []model.ReviewRule, dimWeights map[string]Dimen
 	}
 	sb.WriteString("对于未在规则列表中的其他问题，也可以一并指出，此时 `rule_code` 填空字符串，但 `category` 必须严格使用上方维度代码。\n\n")
 	return sb.String()
+}
+
+// MeasureRulesSectionLiteChars 返回 BatchCollection 规则段落的精确字符数
+// 【设计】直接调用 buildRulesSectionLite 获取长度，确保 BuildBatchContext 的预算估算
+// 与 BuildBatchCollectionPrompt 实际构建的 Prompt 内容永远同源
+func MeasureRulesSectionLiteChars(rules []model.ReviewRule, dimWeights map[string]DimensionWeight) int {
+	return len(buildRulesSectionLite(rules, dimWeights))
 }
 
 // buildRulesSection 构建规则章节（维度 + 权重 + 规则列表）

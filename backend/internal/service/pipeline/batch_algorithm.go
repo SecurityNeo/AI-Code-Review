@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"unicode/utf8"
 
@@ -11,13 +12,19 @@ import (
 	"github.com/ai-optimizer/backend/pkg/diff"
 )
 
-// charsPerTokenApprox 字符/Token 估算比
+// TokenEstimator CJK-aware Token 估算器
 type TokenEstimator struct {
-	charsPerToken int
+	charsPerToken      int     // 向后兼容
+	cjkCharsPerToken   float64 // CJK 字符每 token
+	asciiCharsPerToken float64 // ASCII 字符每 token
 }
 
 func NewTokenEstimator() *TokenEstimator {
-	return &TokenEstimator{charsPerToken: 4}
+	return &TokenEstimator{
+		charsPerToken:      4,   // 向后兼容
+		cjkCharsPerToken:   2.0,
+		asciiCharsPerToken: 4.0,
+	}
 }
 
 // BatchContext 批次上下文开销（字符数）
@@ -35,29 +42,122 @@ type BatchContext struct {
 
 // ToBreakdown 将 BatchContext 转换为 Token 构成明细（tokens）
 func (ctx BatchContext) ToBreakdown(estimator *TokenEstimator) map[string]interface{} {
-	systemTokens := ctx.SystemPromptChars / estimator.charsPerToken
-	commitsTokens := ctx.CommitsChars / estimator.charsPerToken
-	mrTitleTokens := ctx.MRTitleChars / estimator.charsPerToken
-	batchHeaderTokens := ctx.BatchHeaderChars / estimator.charsPerToken
-	outputFormatTokens := ctx.OutputFormatChars / estimator.charsPerToken
-	treeTokens := ctx.TreeSitterChars / estimator.charsPerToken
-	rulesTokens := ctx.RulesChars / estimator.charsPerToken
-	customTokens := ctx.CustomInstChars / estimator.charsPerToken
-	overhead := systemTokens + commitsTokens + mrTitleTokens + batchHeaderTokens + outputFormatTokens + treeTokens + rulesTokens + customTokens
-	safety := overhead / 10
+	// 使用与 EstimateOverheadTokens 相同的 CJK-aware 计算逻辑
+	// 【P0 修复】基于 Task 237 实际数据校准换算率
+	systemTokens := int(math.Ceil(float64(ctx.SystemPromptChars) / 3.5))
+	schemaTokens := ctx.OutputFormatChars / 4
+	headerTokens := ctx.BatchHeaderChars / 4
+	rulesTokens := int(math.Ceil(float64(ctx.RulesChars) / 5.0))
+	customTokens := int(math.Ceil(float64(ctx.CustomInstChars) / 4.0))
+	commitsTokens := int(math.Ceil(float64(ctx.CommitsChars) / 4.0))
+	mrTitleTokens := int(math.Ceil(float64(ctx.MRTitleChars) / 4.0))
+	astTokens := ctx.TreeSitterChars / 4
+
+	overhead := systemTokens + schemaTokens + headerTokens +
+		rulesTokens + customTokens + commitsTokens +
+		mrTitleTokens + astTokens
+	safety := int(math.Ceil(float64(overhead) / 10.0))
 	totalOverhead := overhead + safety
+
+	// 【新增】前台明细数组
+	parts := []map[string]interface{}{
+		{
+			"key":            "system_prompt",
+			"name":           "System Prompt",
+			"chars":          ctx.SystemPromptChars,
+			"tokens":         systemTokens,
+			"rate":           "÷3.5",
+			"note":           "混合中/英/JSON",
+			"is_cjk_aware":   true,
+		},
+		{
+			"key":            "output_format",
+			"name":           "输出格式 Schema",
+			"chars":          ctx.OutputFormatChars,
+			"tokens":         schemaTokens,
+			"rate":           "÷4",
+			"note":           "纯 ASCII JSON",
+			"is_cjk_aware":   false,
+		},
+		{
+			"key":            "rules_context",
+			"name":           "评审规则",
+			"chars":          ctx.RulesChars,
+			"tokens":         rulesTokens,
+			"rate":           "÷5.0",
+			"note":           "Markdown/ASCII 格式符占 57%",
+			"is_cjk_aware":   true,
+		},
+		{
+			"key":            "custom_instruction",
+			"name":           "项目自定义说明",
+			"chars":          ctx.CustomInstChars,
+			"tokens":         customTokens,
+			"rate":           "÷4.0",
+			"note":           "中文+英文混合",
+			"is_cjk_aware":   true,
+		},
+		{
+			"key":            "commits_info",
+			"name":           "Commit 历史",
+			"chars":          ctx.CommitsChars,
+			"tokens":         commitsTokens,
+			"rate":           "÷4.0",
+			"note":           "英文 commit msg 为主",
+			"is_cjk_aware":   true,
+		},
+		{
+			"key":            "mr_title",
+			"name":           "MR 标题",
+			"chars":          ctx.MRTitleChars,
+			"tokens":         mrTitleTokens,
+			"rate":           "÷4.0",
+			"note":           "中文/英文标题",
+			"is_cjk_aware":   true,
+		},
+		{
+			"key":            "ast_context",
+			"name":           "AST/代码理解",
+			"chars":          ctx.TreeSitterChars,
+			"tokens":         astTokens,
+			"rate":           "÷4",
+			"note":           "代码文本",
+			"is_cjk_aware":   false,
+		},
+		{
+			"key":            "batch_header",
+			"name":           "批次头信息",
+			"chars":          ctx.BatchHeaderChars,
+			"tokens":         headerTokens,
+			"rate":           "÷4",
+			"note":           "固定 ASCII",
+			"is_cjk_aware":   false,
+		},
+	}
+
 	return map[string]interface{}{
+		// 兼容旧字段
 		"system_instruction": systemTokens,
 		"commits_info":       commitsTokens,
 		"mr_title":           mrTitleTokens,
-		"batch_header":       batchHeaderTokens,
-		"output_format":      outputFormatTokens,
-		"ast_context":        treeTokens,
+		"batch_header":       headerTokens,
+		"output_format":      schemaTokens,
+		"ast_context":        astTokens,
 		"rules_context":      rulesTokens,
 		"custom_instruction": customTokens,
 		"subtotal":           overhead,
 		"safety_margin_10":   safety,
 		"total_overhead":     totalOverhead,
+		// 【新增】前台明细字段
+		"parts":              parts,
+		"system_prompt_chars": ctx.SystemPromptChars,
+		"rules_chars":         ctx.RulesChars,
+		"custom_chars":        ctx.CustomInstChars,
+		"commits_chars":       ctx.CommitsChars,
+		"mr_title_chars":      ctx.MRTitleChars,
+		"ast_chars":           ctx.TreeSitterChars,
+		"schema_chars":        ctx.OutputFormatChars,
+		"header_chars":        ctx.BatchHeaderChars,
 	}
 }
 
@@ -78,29 +178,78 @@ func CalculateEffectiveBudget(configuredBudget, estimatedOverhead int) (int, str
 		configuredBudget, estimatedOverhead, minRequired, minRequired)
 }
 
-// Estimate 估算单个字符串的 Token 数（简单字符除法）
-func (e *TokenEstimator) Estimate(s string) int {
-	tok := len(s) / e.charsPerToken
-	if tok == 0 && s != "" {
-		return 1
+// countCharTypes 统计字符串中的 CJK / ASCII / Other 字符数
+func countCharTypes(s string) (cjk, ascii, other int) {
+	for _, r := range s {
+		switch {
+		case r >= '\u4e00' && r <= '\u9fff': // CJK 统一表意文字
+			cjk++
+		case r >= '\u3040' && r <= '\u309f': // 平假名
+			cjk++
+		case r >= '\u30a0' && r <= '\u30ff': // 片假名
+			cjk++
+		case r >= '\uac00' && r <= '\ud7af': // 韩文
+			cjk++
+		case r < 128:
+			ascii++
+		default:
+			other++
+		}
 	}
-	return tok
+	return
 }
 
-// EstimateOverheadTokens 估算固定开销 Token 数
-func (e *TokenEstimator) EstimateOverheadTokens(ctx BatchContext) int {
-	rawChars := ctx.SystemPromptChars + ctx.CommitsChars + ctx.MRTitleChars +
-		ctx.BatchHeaderChars + ctx.OutputFormatChars + ctx.TreeSitterChars + ctx.RulesChars + ctx.CustomInstChars
+// Estimate 估算字符串的 Token 数（CJK-aware 混合估算）
+func (e *TokenEstimator) Estimate(s string) int {
+	if s == "" {
+		return 0
+	}
+	cjk, ascii, other := countCharTypes(s)
 
-	// 应用校准比率（如果有历史数据）
+	// CJK: 保守按 2 字符/token
+	// ASCII: 按 4 字符/token
+	// Other（韩文、符号）：按 3 字符/token
+	tokens := int(math.Ceil(float64(cjk)/e.cjkCharsPerToken)) +
+		int(math.Ceil(float64(ascii)/e.asciiCharsPerToken)) +
+		int(math.Ceil(float64(other)/3.0))
+
+	// Markdown/JSON 格式开销 +5%
+	tokens = int(math.Ceil(float64(tokens) * 1.05))
+
+	if tokens == 0 {
+		return 1
+	}
+	return tokens
+}
+
+// EstimateOverheadTokens 估算固定开销 Token 数（CJK-aware 分段估算）
+func (e *TokenEstimator) EstimateOverheadTokens(ctx BatchContext) int {
+	// 各字段按内容性质使用不同换算比（保守策略，向上取整）
+	// 【P0 修复】基于 Task 237 实际数据校准：
+	// 规则段落虽然 CJK 比例高(40%)，但 ASCII Markdown/格式符占比更高(57.6%)，
+	// 实际 bytes/token ≈ 5.0（非 2.5）。同理适用于自定义说明、MR 标题等混合文本。
+	systemTokens := int(math.Ceil(float64(ctx.SystemPromptChars) / 3.5))
+	schemaTokens := ctx.OutputFormatChars / 4
+	headerTokens := ctx.BatchHeaderChars / 4
+	rulesTokens := int(math.Ceil(float64(ctx.RulesChars) / 5.0))
+	customTokens := int(math.Ceil(float64(ctx.CustomInstChars) / 4.0))
+	commitsTokens := int(math.Ceil(float64(ctx.CommitsChars) / 4.0))
+	mrTitleTokens := int(math.Ceil(float64(ctx.MRTitleChars) / 4.0))
+	astTokens := ctx.TreeSitterChars / 4
+
+	overhead := systemTokens + schemaTokens + headerTokens +
+		rulesTokens + customTokens + commitsTokens +
+		mrTitleTokens + astTokens
+
+	// 应用校准比率
 	ratio := e.calibratedRatio(ctx.RuleCount)
 	if ratio > 0 {
-		rawChars = int(float64(rawChars) * ratio)
+		overhead = int(math.Ceil(float64(overhead) * ratio))
 	}
 
 	// 10% 安全余量
-	rawChars += rawChars / 10
-	return rawChars / e.charsPerToken
+	overhead = int(math.Ceil(float64(overhead) * 1.1))
+	return overhead
 }
 
 // calibratedRatio 从最近历史记录计算校准比率
@@ -110,8 +259,8 @@ func (e *TokenEstimator) calibratedRatio(ruleCount int) float64 {
 		return 0
 	}
 	var cals []model.OverheadCalibration
-	// 查找同规模（±5条规则）的最近20条记录
-	model.DB.Where("rule_count BETWEEN ? AND ?", ruleCount-5, ruleCount+5).
+	// 【修复】只使用修复后算法（version >= 2）的历史数据进行校准，避免旧脏数据污染
+	model.DB.Where("rule_count BETWEEN ? AND ? AND algorithm_version >= 2", ruleCount-5, ruleCount+5).
 		Order("created_at DESC").Limit(20).Find(&cals)
 
 	if len(cals) < 5 {
@@ -192,7 +341,8 @@ func SmartSplitIntoBatches(
 	for _, file := range files {
 		diff, _ := file["diff"].(string)
 		path, _ := file["path"].(string)
-		fileTokens := len(diff) / 4
+		// 【修复】使用 CJK-aware 估算替代简单的 len/4
+		fileTokens := estimator.Estimate(diff)
 		if fileTokens == 0 {
 			fileTokens = 1
 		}
@@ -351,61 +501,45 @@ func truncateDiffChars(file map[string]interface{}, diffText string, maxTokens i
 }
 
 func BuildBatchContext(ctx StageContext) BatchContext {
-	template := ""
-	if v, ok := ctx.GetInput("project_template").(string); ok {
-		template = v
-	}
-	// commits 和 MRTitle 在多批场景只在最后一批注入，不计入每批固定开销
-	if v, ok := ctx.GetInput("commits_text").(string); ok {
-		_ = v
-	}
-	if t := ctx.Task(); t != nil {
-		_ = t.MRTitle
-	}
-	// AST 文本和跨文件调用链在 batch_collection prompt 中不计入固定开销
-	// （按批次过滤后的小片段已包含在 diff 可用额度中）
-	_ = ""
-	if v, ok := ctx.GetInput("ast_context").(string); ok {
-		_ = v
-	}
-	_ = ""
-	if v, ok := ctx.GetInput("cross_file_call_chain").(string); ok {
-		_ = v
+	// ===== System Prompt 精确测量 =====
+	// BatchCollection 阶段首次估算时 totalBatches 未知，使用占位符 1/1
+	// 实际差异："第 1/1 批"(14字节) vs "第 1/100 批"(18字节)，偏差仅 4 字节
+	systemPromptChars := engine.MeasureBatchCollectionSystemPrompt(1, 1)
+
+	// ===== 从 StageContext 读取实际内容长度 =====
+	// Commits 和 MRTitle 作为保守策略始终计入 overhead
+	//（虽然只在最后一批注入，但这样可避免最后一批因突增内容而截断）
+	var commitsChars, mrTitleChars int
+
+	if v, ok := ctx.GetInput("commits_text").(string); ok && v != "" {
+		commitsChars = len(v)
 	}
 
-	// 计算规则部分的字符数（从 prompt_context 中读取）
+	if t := ctx.Task(); t != nil && t.MRTitle != "" {
+		mrTitleChars = len(t.MRTitle)
+	}
+
+	// ===== 规则部分：从粗糙估算改为精确测量 =====
 	rulesChars := 0
 	customInstChars := 0
 	ruleCount := 0
 	if pc, ok := ctx.GetInput("prompt_context").(*engine.PromptContext); ok && pc != nil {
 		ruleCount = len(pc.Rules)
-		// 估算规则文本长度（code + name + severity + prompt 的大致长度）
-		for _, rule := range pc.Rules {
-			rulesChars += len(rule.Code) + len(rule.Name) + len(rule.Severity) + len(rule.Prompt) + 50 // 格式开销
-		}
-		// 维度权重文本
-		for code, dim := range pc.DimensionWeights {
-			rulesChars += len(code) + len(dim.Label) + 30
-		}
-		// 扣分规则文本
-		rulesChars += 300
-		// 总分计算规则
-		rulesChars += 400
-		// 项目自定义说明
+		// 【修复】直接使用实际构建函数的精确测量，替代 len(Code)+len(Name)+...+50 的粗糙估算
+		// 确保预算估算值与最终注入 LLM 的 Prompt 中规则段落长度严格一致
+		rulesChars = engine.MeasureRulesSectionLiteChars(pc.Rules, pc.DimensionWeights)
 		customInstChars = len(pc.CustomInstruction)
 	}
 
 	return BatchContext{
-		SystemPromptChars: len(template) + 500, // template + 固定指令
-		// 【修复】batch_collection prompt 中不包含完整 AST 和跨文件调用链文本
-		// 这些文本只在 context_extract 阶段内部使用，或通过 filterCrossFileContextForBatch
-		// 按批次过滤后的小片段注入 prompt。使用完整文本估算会严重高估 overhead，
-		// 导致 availableTokens 为负值，所有文件被无意义截断。
+		SystemPromptChars: systemPromptChars,  // 【修复】实测值，非估算
+		CommitsChars:      commitsChars,       // 【修复】保守计入（只最后一批注入）
+		MRTitleChars:      mrTitleChars,       // 【修复】保守计入（只最后一批注入）
+		// 【注意】AST/代码理解内容按批次动态过滤，每批片段大小差异大
+		// 使用完整报告长度会严重高估 overhead，故保持为 0
 		TreeSitterChars:   0,
-		CommitsChars:      0, // 多批场景只在最后一批注入
-		MRTitleChars:      0, // 同上
 		BatchHeaderChars:  100,
-		OutputFormatChars: 1200, // 结构化输出 Schema 较大
+		OutputFormatChars: 1200,
 		RulesChars:        rulesChars,
 		CustomInstChars:   customInstChars,
 		RuleCount:         ruleCount,

@@ -15,6 +15,7 @@ type OverheadCalibration struct {
 	ActualOverhead    int       `json:"actual_overhead"`
 	TotalInputTokens  int       `json:"total_input_tokens"`
 	DiffTokens        int       `json:"diff_tokens"`
+	AlgorithmVersion  int       `json:"algorithm_version"` // 1=旧算法，2=修复后
 	CreatedAt         time.Time `json:"created_at"`
 }
 

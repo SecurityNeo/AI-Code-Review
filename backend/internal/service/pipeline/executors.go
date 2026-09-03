@@ -1730,12 +1730,13 @@ func extractScoreFromReport(report string) int {
 	return int(score)
 }
 
-// calcDiffTokens 从 fileDetails 计算 diff 内容的 token 估算值
+// calcDiffTokens 从 fileDetails 计算 diff 内容的 token 估算值（CJK-aware）
 func calcDiffTokens(fileDetails []map[string]interface{}) int {
 	tokens := 0
+	estimator := NewTokenEstimator()
 	for _, fd := range fileDetails {
 		if diff, ok := fd["diff"].(string); ok && diff != "" {
-			tokens += len(diff) / 4
+			tokens += estimator.Estimate(diff)
 		}
 	}
 	return tokens
@@ -1766,6 +1767,7 @@ func saveOverheadCalibration(
 		ActualOverhead:    actualOverhead,
 		TotalInputTokens:  actualInputTokens,
 		DiffTokens:        diffTokens,
+		AlgorithmVersion:  2, // 修复后算法版本
 	}
 
 	if model.DB == nil {
