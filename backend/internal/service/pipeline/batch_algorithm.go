@@ -40,10 +40,9 @@ type BatchContext struct {
 	RuleCount         int // 参与评审的规则数量（用于校准比率查询）
 }
 
-// ToBreakdown 将 BatchContext 转换为 Token 构成明细（tokens）
-func (ctx BatchContext) ToBreakdown(estimator *TokenEstimator) map[string]interface{} {
-	// 使用与 EstimateOverheadTokens 相同的 CJK-aware 计算逻辑
-	// 【P0 修复】基于 Task 237 实际数据校准换算率
+// tokenComponents 计算固定开销各组件的 token 数（单一来源-of-truth）
+// 返回原始 overhead（不含校准系数和安全余量）和各组件明细
+func tokenComponents(ctx BatchContext) (overhead int, parts []map[string]interface{}) {
 	systemTokens := int(math.Ceil(float64(ctx.SystemPromptChars) / 3.5))
 	schemaTokens := ctx.OutputFormatChars / 4
 	headerTokens := ctx.BatchHeaderChars / 4
@@ -53,103 +52,111 @@ func (ctx BatchContext) ToBreakdown(estimator *TokenEstimator) map[string]interf
 	mrTitleTokens := int(math.Ceil(float64(ctx.MRTitleChars) / 4.0))
 	astTokens := ctx.TreeSitterChars / 4
 
-	overhead := systemTokens + schemaTokens + headerTokens +
+	overhead = systemTokens + schemaTokens + headerTokens +
 		rulesTokens + customTokens + commitsTokens +
 		mrTitleTokens + astTokens
+
+	parts = []map[string]interface{}{
+		{
+			"key":          "system_prompt",
+			"name":         "System Prompt",
+			"chars":        ctx.SystemPromptChars,
+			"tokens":       systemTokens,
+			"rate":         "÷3.5",
+			"note":         "混合中/英/JSON",
+			"is_cjk_aware": true,
+		},
+		{
+			"key":          "output_format",
+			"name":         "输出格式 Schema",
+			"chars":        ctx.OutputFormatChars,
+			"tokens":       schemaTokens,
+			"rate":         "÷4",
+			"note":         "纯 ASCII JSON",
+			"is_cjk_aware": false,
+		},
+		{
+			"key":          "rules_context",
+			"name":         "评审规则",
+			"chars":        ctx.RulesChars,
+			"tokens":       rulesTokens,
+			"rate":         "÷5.0",
+			"note":         "Markdown/ASCII 格式符占 57%",
+			"is_cjk_aware": true,
+		},
+		{
+			"key":          "custom_instruction",
+			"name":         "项目自定义说明",
+			"chars":        ctx.CustomInstChars,
+			"tokens":       customTokens,
+			"rate":         "÷4.0",
+			"note":         "中文+英文混合",
+			"is_cjk_aware": true,
+		},
+		{
+			"key":          "commits_info",
+			"name":         "Commit 历史",
+			"chars":        ctx.CommitsChars,
+			"tokens":       commitsTokens,
+			"rate":         "÷4.0",
+			"note":         "英文 commit msg 为主",
+			"is_cjk_aware": true,
+		},
+		{
+			"key":          "mr_title",
+			"name":         "MR 标题",
+			"chars":        ctx.MRTitleChars,
+			"tokens":       mrTitleTokens,
+			"rate":         "÷4.0",
+			"note":         "中文/英文标题",
+			"is_cjk_aware": true,
+		},
+		{
+			"key":          "ast_context",
+			"name":         "AST/代码理解",
+			"chars":        ctx.TreeSitterChars,
+			"tokens":       astTokens,
+			"rate":         "÷4",
+			"note":         "代码文本",
+			"is_cjk_aware": false,
+		},
+		{
+			"key":          "batch_header",
+			"name":         "批次头信息",
+			"chars":        ctx.BatchHeaderChars,
+			"tokens":       headerTokens,
+			"rate":         "÷4",
+			"note":         "固定 ASCII",
+			"is_cjk_aware": false,
+		},
+	}
+	return overhead, parts
+}
+
+// ToBreakdown 将 BatchContext 转换为 Token 构成明细（tokens）
+// Deprecated: estimator 参数不再使用，保留以兼容已有调用处。
+func (ctx BatchContext) ToBreakdown(estimator *TokenEstimator) map[string]interface{} {
+	_ = estimator // 显式忽略，保持向后兼容
+
+	overhead, parts := tokenComponents(ctx)
 	safety := int(math.Ceil(float64(overhead) / 10.0))
 	totalOverhead := overhead + safety
 
-	// 【新增】前台明细数组
-	parts := []map[string]interface{}{
-		{
-			"key":            "system_prompt",
-			"name":           "System Prompt",
-			"chars":          ctx.SystemPromptChars,
-			"tokens":         systemTokens,
-			"rate":           "÷3.5",
-			"note":           "混合中/英/JSON",
-			"is_cjk_aware":   true,
-		},
-		{
-			"key":            "output_format",
-			"name":           "输出格式 Schema",
-			"chars":          ctx.OutputFormatChars,
-			"tokens":         schemaTokens,
-			"rate":           "÷4",
-			"note":           "纯 ASCII JSON",
-			"is_cjk_aware":   false,
-		},
-		{
-			"key":            "rules_context",
-			"name":           "评审规则",
-			"chars":          ctx.RulesChars,
-			"tokens":         rulesTokens,
-			"rate":           "÷5.0",
-			"note":           "Markdown/ASCII 格式符占 57%",
-			"is_cjk_aware":   true,
-		},
-		{
-			"key":            "custom_instruction",
-			"name":           "项目自定义说明",
-			"chars":          ctx.CustomInstChars,
-			"tokens":         customTokens,
-			"rate":           "÷4.0",
-			"note":           "中文+英文混合",
-			"is_cjk_aware":   true,
-		},
-		{
-			"key":            "commits_info",
-			"name":           "Commit 历史",
-			"chars":          ctx.CommitsChars,
-			"tokens":         commitsTokens,
-			"rate":           "÷4.0",
-			"note":           "英文 commit msg 为主",
-			"is_cjk_aware":   true,
-		},
-		{
-			"key":            "mr_title",
-			"name":           "MR 标题",
-			"chars":          ctx.MRTitleChars,
-			"tokens":         mrTitleTokens,
-			"rate":           "÷4.0",
-			"note":           "中文/英文标题",
-			"is_cjk_aware":   true,
-		},
-		{
-			"key":            "ast_context",
-			"name":           "AST/代码理解",
-			"chars":          ctx.TreeSitterChars,
-			"tokens":         astTokens,
-			"rate":           "÷4",
-			"note":           "代码文本",
-			"is_cjk_aware":   false,
-		},
-		{
-			"key":            "batch_header",
-			"name":           "批次头信息",
-			"chars":          ctx.BatchHeaderChars,
-			"tokens":         headerTokens,
-			"rate":           "÷4",
-			"note":           "固定 ASCII",
-			"is_cjk_aware":   false,
-		},
-	}
-
 	return map[string]interface{}{
 		// 兼容旧字段
-		"system_instruction": systemTokens,
-		"commits_info":       commitsTokens,
-		"mr_title":           mrTitleTokens,
-		"batch_header":       headerTokens,
-		"output_format":      schemaTokens,
-		"ast_context":        astTokens,
-		"rules_context":      rulesTokens,
-		"custom_instruction": customTokens,
+		"system_instruction": systemTokensFromParts(parts),
+		"commits_info":       commitsTokensFromParts(parts),
+		"mr_title":           mrTitleTokensFromParts(parts),
+		"batch_header":       headerTokensFromParts(parts),
+		"output_format":      schemaTokensFromParts(parts),
+		"ast_context":        astTokensFromParts(parts),
+		"rules_context":      rulesTokensFromParts(parts),
+		"custom_instruction": customTokensFromParts(parts),
 		"subtotal":           overhead,
 		"safety_margin_10":   safety,
 		"total_overhead":     totalOverhead,
 		// 【新增】前台明细字段
-		"parts":              parts,
+		"parts":               parts,
 		"system_prompt_chars": ctx.SystemPromptChars,
 		"rules_chars":         ctx.RulesChars,
 		"custom_chars":        ctx.CustomInstChars,
@@ -160,6 +167,26 @@ func (ctx BatchContext) ToBreakdown(estimator *TokenEstimator) map[string]interf
 		"header_chars":        ctx.BatchHeaderChars,
 	}
 }
+
+// 以下辅助函数从 parts 数组中提取对应 tokens，避免硬编码重复
+func tokensFromParts(parts []map[string]interface{}, key string) int {
+	for _, p := range parts {
+		if p["key"] == key {
+			if v, ok := p["tokens"].(int); ok {
+				return v
+			}
+		}
+	}
+	return 0
+}
+func systemTokensFromParts(parts []map[string]interface{}) int  { return tokensFromParts(parts, "system_prompt") }
+func schemaTokensFromParts(parts []map[string]interface{}) int   { return tokensFromParts(parts, "output_format") }
+func headerTokensFromParts(parts []map[string]interface{}) int   { return tokensFromParts(parts, "batch_header") }
+func rulesTokensFromParts(parts []map[string]interface{}) int    { return tokensFromParts(parts, "rules_context") }
+func customTokensFromParts(parts []map[string]interface{}) int   { return tokensFromParts(parts, "custom_instruction") }
+func commitsTokensFromParts(parts []map[string]interface{}) int  { return tokensFromParts(parts, "commits_info") }
+func mrTitleTokensFromParts(parts []map[string]interface{}) int  { return tokensFromParts(parts, "mr_title") }
+func astTokensFromParts(parts []map[string]interface{}) int      { return tokensFromParts(parts, "ast_context") }
 
 // CalculateEffectiveBudget 计算有效预算
 // 当配置预算 < 系统开销*1.25 时，自动扩大预算并返回警告说明
@@ -182,6 +209,8 @@ func CalculateEffectiveBudget(configuredBudget, estimatedOverhead int) (int, str
 func countCharTypes(s string) (cjk, ascii, other int) {
 	for _, r := range s {
 		switch {
+		case r >= '\u3400' && r <= '\u4dbf': // CJK Extension A
+			cjk++
 		case r >= '\u4e00' && r <= '\u9fff': // CJK 统一表意文字
 			cjk++
 		case r >= '\u3040' && r <= '\u309f': // 平假名
@@ -224,22 +253,7 @@ func (e *TokenEstimator) Estimate(s string) int {
 
 // EstimateOverheadTokens 估算固定开销 Token 数（CJK-aware 分段估算）
 func (e *TokenEstimator) EstimateOverheadTokens(ctx BatchContext) int {
-	// 各字段按内容性质使用不同换算比（保守策略，向上取整）
-	// 【P0 修复】基于 Task 237 实际数据校准：
-	// 规则段落虽然 CJK 比例高(40%)，但 ASCII Markdown/格式符占比更高(57.6%)，
-	// 实际 bytes/token ≈ 5.0（非 2.5）。同理适用于自定义说明、MR 标题等混合文本。
-	systemTokens := int(math.Ceil(float64(ctx.SystemPromptChars) / 3.5))
-	schemaTokens := ctx.OutputFormatChars / 4
-	headerTokens := ctx.BatchHeaderChars / 4
-	rulesTokens := int(math.Ceil(float64(ctx.RulesChars) / 5.0))
-	customTokens := int(math.Ceil(float64(ctx.CustomInstChars) / 4.0))
-	commitsTokens := int(math.Ceil(float64(ctx.CommitsChars) / 4.0))
-	mrTitleTokens := int(math.Ceil(float64(ctx.MRTitleChars) / 4.0))
-	astTokens := ctx.TreeSitterChars / 4
-
-	overhead := systemTokens + schemaTokens + headerTokens +
-		rulesTokens + customTokens + commitsTokens +
-		mrTitleTokens + astTokens
+	overhead, _ := tokenComponents(ctx)
 
 	// 应用校准比率
 	ratio := e.calibratedRatio(ctx.RuleCount)
@@ -260,7 +274,11 @@ func (e *TokenEstimator) calibratedRatio(ruleCount int) float64 {
 	}
 	var cals []model.OverheadCalibration
 	// 【修复】只使用修复后算法（version >= 2）的历史数据进行校准，避免旧脏数据污染
-	model.DB.Where("rule_count BETWEEN ? AND ? AND algorithm_version >= 2", ruleCount-5, ruleCount+5).
+	minRC := ruleCount - 5
+	if minRC < 0 {
+		minRC = 0
+	}
+	model.DB.Where("rule_count BETWEEN ? AND ? AND algorithm_version >= 2", minRC, ruleCount+5).
 		Order("created_at DESC").Limit(20).Find(&cals)
 
 	if len(cals) < 5 {

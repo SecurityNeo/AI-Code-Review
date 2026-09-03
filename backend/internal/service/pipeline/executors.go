@@ -1276,6 +1276,13 @@ func (e *BatchReviewFrameExecutor) executeSingleBatchStructured(ctx StageContext
 	exec.ActualOverhead = result.InputTokens - calcDiffTokens(fileDetails)
 	model.DB.Model(exec).Update("actual_overhead", exec.ActualOverhead)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				zap.L().Error("saveOverheadCalibration panic recovered",
+					zap.Uint("task_id", task.ID),
+					zap.Any("recover", r))
+			}
+		}()
 		estOH := NewTokenEstimator().EstimateOverheadTokens(BuildBatchContext(ctx))
 		saveOverheadCalibration(
 			task.ID, exec.ID, exec.StageCode,
@@ -1497,6 +1504,13 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 	exec.ActualOverhead = actualOH
 	model.DB.Model(exec).Update("actual_overhead", actualOH)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				zap.L().Error("saveOverheadCalibration panic recovered",
+					zap.Uint("task_id", task.ID),
+					zap.Any("recover", r))
+			}
+		}()
 		saveOverheadCalibration(
 			task.ID, exec.ID, exec.StageCode,
 			len(promptCtx.Rules), plan.EstimatedOverhead,

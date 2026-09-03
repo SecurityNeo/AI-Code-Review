@@ -650,13 +650,8 @@ func (s *LLMService) ChatCompletionStructured(ctx context.Context, taskID *uint,
 		if len(resp.Choices) > 0 {
 			content = resp.Choices[0].Message.Content
 		}
-		// 【P0 修复】空 Content 防御：部分模型返回 success 但 content 为空（reasoning-only）
-		if strings.TrimSpace(content) == "" {
-			finishReason := ""
-			if len(resp.Choices) > 0 {
-				finishReason = resp.Choices[0].FinishReason
-			}
-			return nil, fmt.Errorf("LLM returned empty content (finish_reason=%s, output_tokens=%d)", finishReason, resp.Usage.CompletionTokens)
+		if err := validateContent(content, resp); err != nil {
+			return nil, err
 		}
 		return &StructuredChatResult{
 			Content:      content,
@@ -677,13 +672,8 @@ func (s *LLMService) ChatCompletionStructured(ctx context.Context, taskID *uint,
 	if len(resp.Choices) > 0 {
 		content = resp.Choices[0].Message.Content
 	}
-	// 【P0 修复】空 Content 防御：主备链路同样需要防御
-	if strings.TrimSpace(content) == "" {
-		finishReason := ""
-		if len(resp.Choices) > 0 {
-			finishReason = resp.Choices[0].FinishReason
-		}
-		return nil, fmt.Errorf("LLM returned empty content (finish_reason=%s, output_tokens=%d)", finishReason, resp.Usage.CompletionTokens)
+	if err := validateContent(content, resp); err != nil {
+		return nil, err
 	}
 	return &StructuredChatResult{
 		Content:      content,
@@ -693,4 +683,16 @@ func (s *LLMService) ChatCompletionStructured(ctx context.Context, taskID *uint,
 		OutputTokens: resp.Usage.CompletionTokens,
 		Response:     resp,
 	}, nil
+}
+
+// validateContent 检测 LLM 返回的 content 是否为空（reasoning-only 场景）
+func validateContent(content string, resp *llm.ChatResponse) error {
+	if strings.TrimSpace(content) == "" {
+		finishReason := ""
+		if len(resp.Choices) > 0 {
+			finishReason = resp.Choices[0].FinishReason
+		}
+		return fmt.Errorf("LLM returned empty content (finish_reason=%s, output_tokens=%d)", finishReason, resp.Usage.CompletionTokens)
+	}
+	return nil
 }
