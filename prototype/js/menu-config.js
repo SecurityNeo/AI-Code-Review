@@ -55,7 +55,7 @@ const MENU_CONFIG = [
             { id: 'review-rules', name: '评审规则库', href: 'review-rules.html', icon: 'fa-shield-halved',  role: ['admin'] },
             { id: 'incubator',    name: '规则孵化台', href: 'incubator.html',    icon: 'fa-flask',            role: ['admin'] },
             { id: 'tasks',        name: '评审任务列表', href: 'tasks.html',        icon: 'fa-tasks',             role: ['admin', 'user'] },
-            { id: 'pools',        name: '任务资源池', href: 'pools.html',        icon: 'fa-server',            role: ['admin'] },
+            { id: 'pools',        name: '智能体资源池', href: 'pools.html',        icon: 'fa-server',            role: ['admin'] },
             { id: 'models',       name: '大模型管理', href: 'models.html',       icon: 'fa-microchip',         role: ['admin'] },
             { id: 'vulnerability-db', name: '漏洞数据库', href: 'vulnerability-db.html', icon: 'fa-bug', role: ['admin', 'user'] },
             { id: 'agent-config',     name: '智能体配置', href: 'agent-config.html', icon: 'fa-sliders', role: ['admin'] },
