@@ -1424,6 +1424,27 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 		return nil, 0, 0, 0, "", err
 	}
 
+	// 【P0 修复】空 Content 防御：部分模型（如 Kimi）可能返回 success 但 content 为空
+	// completion_tokens > 0 但 content == ""（reasoning-only 输出），需提前拦截
+	if strings.TrimSpace(result.Content) == "" {
+		finishReason := ""
+		if result.Response != nil && len(result.Response.Choices) > 0 {
+			finishReason = result.Response.Choices[0].FinishReason
+		}
+		err := fmt.Errorf("LLM returned empty content (finish_reason=%s, output_tokens=%d)", finishReason, result.OutputTokens)
+		ctx.SaveOutputSnapshot(exec, map[string]interface{}{
+			"batch_index":    detail.Index,
+			"error":          err.Error(),
+			"finish_reason":  finishReason,
+			"output_tokens":  result.OutputTokens,
+			"system_prompt":  systemPrompt,
+			"prompt":         userPrompt,
+			"raw_content":    result.Content,
+		})
+		ctx.MarkFailed(exec, err.Error())
+		return nil, 0, 0, 0, "", err
+	}
+
 	// Refusal 检测
 	if result.Response != nil && len(result.Response.Choices) > 0 && result.Response.Choices[0].Message.Refusal != "" {
 		ctx.MarkFailed(exec, "模型拒绝回答")

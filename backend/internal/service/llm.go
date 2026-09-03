@@ -650,6 +650,14 @@ func (s *LLMService) ChatCompletionStructured(ctx context.Context, taskID *uint,
 		if len(resp.Choices) > 0 {
 			content = resp.Choices[0].Message.Content
 		}
+		// 【P0 修复】空 Content 防御：部分模型返回 success 但 content 为空（reasoning-only）
+		if strings.TrimSpace(content) == "" {
+			finishReason := ""
+			if len(resp.Choices) > 0 {
+				finishReason = resp.Choices[0].FinishReason
+			}
+			return nil, fmt.Errorf("LLM returned empty content (finish_reason=%s, output_tokens=%d)", finishReason, resp.Usage.CompletionTokens)
+		}
 		return &StructuredChatResult{
 			Content:      content,
 			ModelID:      m.ID,
@@ -668,6 +676,14 @@ func (s *LLMService) ChatCompletionStructured(ctx context.Context, taskID *uint,
 	content := ""
 	if len(resp.Choices) > 0 {
 		content = resp.Choices[0].Message.Content
+	}
+	// 【P0 修复】空 Content 防御：主备链路同样需要防御
+	if strings.TrimSpace(content) == "" {
+		finishReason := ""
+		if len(resp.Choices) > 0 {
+			finishReason = resp.Choices[0].FinishReason
+		}
+		return nil, fmt.Errorf("LLM returned empty content (finish_reason=%s, output_tokens=%d)", finishReason, resp.Usage.CompletionTokens)
 	}
 	return &StructuredChatResult{
 		Content:      content,
