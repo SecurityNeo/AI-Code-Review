@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -346,6 +347,9 @@ func extractScoreFromText(text string) int {
 // ParseBatchReviewResult 解析分批评审收集模式的简化输出
 // 不校验 total_score/dimensions，只提取 issues 和 recommendations
 func ParseBatchReviewResult(content string, deductCfg DeductScoreConfig) (*llm.BatchReviewResult, error) {
+	if strings.TrimSpace(content) == "" {
+		return nil, errors.New("batch review result is empty")
+	}
 	cleaned := sanitizeJSON(content)
 	var result llm.BatchReviewResult
 	if err := json.Unmarshal([]byte(cleaned), &result); err != nil {

@@ -4204,11 +4204,6 @@ function renderBatchPlanDetail(json) {
         html += `<span class="text-xs font-bold text-orange-700">系统开销合计</span>`;
         html += `<span class="text-sm font-bold font-mono text-orange-700 tabular-nums">${totalOH.toLocaleString()} <span class="text-[10px] font-normal text-orange-500">tk</span></span>`;
         html += `</div>`;
-
-        // 如果 context_breakdown 有校准比率，显示一行说明
-        if (contextBreakdown && contextBreakdown.CalibratedRatio > 0) {
-            html += `<div class="mt-1 text-[10px] text-orange-500">校准系数 ${contextBreakdown.CalibratedRatio.toFixed(2)}x · 基于历史 ${contextBreakdown.CalibrationCount || 0} 条记录</div>`;
-        }
         html += `</div>`;
 
         html += `</div></div>`;

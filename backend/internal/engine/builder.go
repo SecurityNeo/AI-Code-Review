@@ -745,8 +745,13 @@ func buildBatchCollectionSystemPromptContent(batchIndex, totalBatches int) strin
 	sb.WriteString("## 【重要】返回格式要求\n")
 	sb.WriteString("你的响应必须严格符合以下 JSON Schema，不要包含任何 Markdown 代码块标记或额外解释文字：\n")
 	batchSchema := llm.GetBatchCollectionJSONSchema()
-	schemaBytes, _ := json.MarshalIndent(batchSchema, "", "  ")
-	sb.WriteString(string(schemaBytes))
+	schemaBytes, err := json.MarshalIndent(batchSchema, "", "  ")
+	if err != nil {
+		// fallback：无法序列化 Schema 时使用简化占位符
+		sb.WriteString("{ \"type\": \"object\", \"properties\": { ... } }")
+	} else {
+		sb.WriteString(string(schemaBytes))
+	}
 	sb.WriteString("\n\n")
 
 	sb.WriteString("【重要】本次为分批评审（第 ")

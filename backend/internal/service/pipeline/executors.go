@@ -1166,13 +1166,15 @@ func (e *BatchReviewFrameExecutor) executeBatchPlan(ctx StageContext, task *mode
 	exec.LLMInputBudget = configuredBudget
 	exec.EffectiveBudget = effectiveBudget
 	exec.BudgetWarning = budgetWarning
-	model.DB.Model(exec).Updates(map[string]interface{}{
+	if err := model.DB.Model(exec).Updates(map[string]interface{}{
 		"estimated_overhead": estimatedOverhead,
 		"actual_overhead":    0, // batch_plan 阶段无实际开销
 		"llm_input_budget":   configuredBudget,
 		"effective_budget":   effectiveBudget,
 		"budget_warning":     budgetWarning,
-	})
+	}).Error; err != nil {
+		zap.L().Error("batch_plan 预算元数据更新失败", zap.Error(err), zap.Uint("task_id", task.ID))
+	}
 
 	ctx.MarkSuccess(exec)
 
@@ -1274,7 +1276,9 @@ func (e *BatchReviewFrameExecutor) executeSingleBatchStructured(ctx StageContext
 
 	// 【新增】保存实际开销到 execution 记录，并异步保存校准数据
 	exec.ActualOverhead = result.InputTokens - calcDiffTokens(fileDetails)
-	model.DB.Model(exec).Update("actual_overhead", exec.ActualOverhead)
+	if err := model.DB.Model(exec).Update("actual_overhead", exec.ActualOverhead).Error; err != nil {
+		zap.L().Error("更新 actual_overhead 失败", zap.Error(err), zap.Uint("task_id", task.ID))
+	}
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -1502,7 +1506,9 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 		actualOH = 0
 	}
 	exec.ActualOverhead = actualOH
-	model.DB.Model(exec).Update("actual_overhead", actualOH)
+	if err := model.DB.Model(exec).Update("actual_overhead", actualOH).Error; err != nil {
+		zap.L().Error("更新 actual_overhead 失败", zap.Error(err), zap.Uint("task_id", task.ID))
+	}
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -1723,6 +1729,7 @@ func buildBatchFileDetails(ctx StageContext, batchIdx int, filePaths []string) [
 				"status":    status,
 				"additions": additions,
 				"deletions": deletions,
+				"diff":      f["diff"], // 【修复】加入 diff，供 calcDiffTokens 使用
 			})
 		}
 	}
