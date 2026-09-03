@@ -238,8 +238,9 @@ func (e *ReviewArbitrationExecutor) arbitrate(
 	}
 
 	// Layer 2: 本地去重 + 评分（不调用 LLM）
+	// 【修复】保留 Layer 1 的 LLM 原始输出，方便定位校验失败原因
 	result = e.localDeduplicationAndMerge(promptCtx, deductCfg)
-	return result, "", fallbackReason, nil
+	return result, rawLLMOutput, fallbackReason, nil
 }
 
 // callLLMWithStructuredPrompt 调用 LLM 进行结构化裁决
@@ -654,23 +655,31 @@ func verifyLLMOutput(result *llm.AIReviewResult, promptCtx *engine.PromptContext
 	if isReviewInputEmpty(promptCtx.BatchReviewResults, promptCtx.SecretScanFindings,
 		promptCtx.SecurityAuditFindings, promptCtx.ImpactFindings,
 		promptCtx.TestSuggestions, promptCtx.DependencyVulns) && len(result.Issues) > 0 {
-		return fmt.Errorf("val-01: 输入为空但输出包含 %d 条 issue", len(result.Issues))
+		return fmt.Errorf("LLM 在输入为空的情况下生成了 %d 条 issue，疑似捏造", len(result.Issues))
 	}
 
-	// Rule 2: issue file 必须存在于 diff 文件列表中
+	// Rule 2: 绑定到具体文件的 issue，其文件路径必须存在于 diff 列表中
+	// 【修复】file=="" 的 issue（如 Commit 规范、总体建议等非文件类问题）是合法的，不应触发校验失败
 	allowedFiles := extractDiffFilePaths(promptCtx)
 	for _, issue := range result.Issues {
+		if issue.File == "" {
+			// 非文件相关 issue，跳过路径校验
+			continue
+		}
 		if !allowedFiles[issue.File] {
-			return fmt.Errorf("val-02: issue 文件 %s 不在 diff 列表中", issue.File)
+			return fmt.Errorf("LLM 将 issue 关联到了变更范围外的文件 '%s'，疑似编造", issue.File)
 		}
 	}
 
-	// Rule 3: 禁止示例路径
+	// Rule 3: 绑定到具体文件的 issue，禁止示例路径（template example）
 	bannedPatterns := []string{"com/example/", "com/sample/", "com/demo/"}
 	for _, issue := range result.Issues {
+		if issue.File == "" {
+			continue // 非文件相关 issue，无需检查路径
+		}
 		for _, p := range bannedPatterns {
 			if strings.Contains(issue.File, p) {
-				return fmt.Errorf("val-03: issue 包含示例路径 %s", p)
+				return fmt.Errorf("LLM 使用了示例路径 '%s'（%s），疑似复制模板", p, issue.File)
 			}
 		}
 	}
@@ -685,7 +694,7 @@ func verifyLLMOutput(result *llm.AIReviewResult, promptCtx *engine.PromptContext
 			diff = -diff
 		}
 		if diff > 5 {
-			return fmt.Errorf("val-04: total_score=%d 与重算值=%d 差 %d 超出容忍区间",
+			return fmt.Errorf("LLM 返回的总分 %d 与重算值 %d 相差 %d，超出容忍区间",
 				result.TotalScore, recalcScore, diff)
 		}
 		result.Dimensions = recalcDims
