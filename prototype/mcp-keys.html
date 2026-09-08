@@ -496,17 +496,18 @@ function openKeyModal(mode, keyId) {
 
     loadOrgSelect('orgSelect', mode === 'edit' ? ((window.keysCache || []).find(k => k.id === keyId)?.org_id || null) : null);
 
-    // 组织选择变化时联动刷新用户列表
+    // 组织选择变化时联动刷新用户列表（使用全局引用避免重复绑定）
     const orgSel = document.getElementById('orgSelect');
     if (orgSel) {
-        // 移除旧监听器（避免重复）
-        const newOrgSel = orgSel.cloneNode(true);
-        orgSel.parentNode.replaceChild(newOrgSel, orgSel);
-        newOrgSel.addEventListener('change', function(e) {
+        if (window._mcpOrgChangeHandler) {
+            orgSel.removeEventListener('change', window._mcpOrgChangeHandler);
+        }
+        window._mcpOrgChangeHandler = function(e) {
             const oid = parseInt(e.target.value) || 0;
             const selUserId = parseInt(document.getElementById('keyUserId').value) || 0;
             loadUsersByOrg(oid, selUserId);
-        });
+        };
+        orgSel.addEventListener('change', window._mcpOrgChangeHandler);
     }
 
     document.getElementById('createModal').classList.add('active');
