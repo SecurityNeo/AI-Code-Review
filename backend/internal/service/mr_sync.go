@@ -22,11 +22,11 @@ var (
 // InitMRSyncCron 在 main.go 启动时初始化 MR 同步定时任务
 func InitMRSyncCron(c *cron.Cron) {
 	mrSyncCron = c
-	RebuildMRSyncCron()
+	RebuildMRSyncCron(nil)
 }
 
 // RebuildMRSyncCron 重建 MR 同步定时任务（配置更新后调用）
-func RebuildMRSyncCron() {
+func RebuildMRSyncCron(scope *model.UserAuthScope) {
 	mrSyncMu.Lock()
 	defer mrSyncMu.Unlock()
 
@@ -41,8 +41,9 @@ func RebuildMRSyncCron() {
 		mrSyncEntryID = 0
 	}
 
+	db := model.DBWithScope(scope)
 	var cfg model.SystemConfig
-	if err := model.SilentFirst(model.DB, &cfg); err != nil {
+	if err := model.SilentFirst(db, &cfg); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			zap.L().Info("mr sync: system config not found, skipping")
 		} else {
@@ -58,7 +59,7 @@ func RebuildMRSyncCron() {
 
 	spec := fmt.Sprintf("@every %ds", cfg.MRSyncIntervalSec)
 	id, err := mrSyncCron.AddFunc(spec, func() {
-		NewMRSyncService().SyncOpenedMRs()
+		NewMRSyncService().SyncOpenedMRs(scope)
 	})
 	if err != nil {
 		zap.L().Error("mr sync: add cron job failed", zap.String("spec", spec), zap.Error(err))
@@ -78,9 +79,10 @@ func NewMRSyncService() *MRSyncService {
 }
 
 // SyncOpenedMRs 轮询 GitLab API，刷新本地非 merged 状态 MR 的 mr_state、is_draft 等字段
-func (s *MRSyncService) SyncOpenedMRs() {
+func (s *MRSyncService) SyncOpenedMRs(scope *model.UserAuthScope) {
+	db := model.DBWithScope(scope)
 	var cfg model.SystemConfig
-	if err := model.SilentFirst(model.DB, &cfg); err != nil {
+	if err := model.SilentFirst(db, &cfg); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			zap.L().Info("mr sync: system config not found, skipping")
 		} else {
@@ -95,7 +97,7 @@ func (s *MRSyncService) SyncOpenedMRs() {
 
 	// 每次最多同步 50 条最久未同步的 非 merged 状态 MR（opened、closed 都需要刷新）
 	var logs []model.MergeRequestReviewLog
-	if err := model.DB.Where("mr_state != ?", "merged").
+	if err := db.Where("mr_state != ?", "merged").
 		Order("synced_at ASC").
 		Limit(50).
 		Find(&logs).Error; err != nil {
@@ -112,7 +114,7 @@ func (s *MRSyncService) SyncOpenedMRs() {
 
 	for i := range logs {
 		log := &logs[i]
-		project := s.getProjectFromCache(log.ProjectName, projectCache)
+		project := s.getProjectFromCache(scope, log.ProjectName, log.OrgID, projectCache)
 		if project == nil || project.GitLabProjectID == 0 {
 			continue
 		}
@@ -135,21 +137,23 @@ func (s *MRSyncService) SyncOpenedMRs() {
 		// 更新 synced_at 并保存
 		now := time.Now()
 		log.SyncedAt = now
-		if err := model.DB.Save(log).Error; err != nil {
+		if err := db.Omit("org_id").Save(log).Error; err != nil { // ⚠️ 多租户改造：Omit org_id 防止零值覆盖
 			zap.L().Error("mr sync: save log failed", zap.Uint("id", log.ID), zap.Error(err))
 		}
 	}
 }
 
-func (s *MRSyncService) getProjectFromCache(name string, cache map[string]*model.Project) *model.Project {
-	if p, ok := cache[name]; ok {
+func (s *MRSyncService) getProjectFromCache(scope *model.UserAuthScope, projectName string, orgID uint, cache map[string]*model.Project) *model.Project {
+	cacheKey := fmt.Sprintf("%d:%s", orgID, projectName)
+	if p, ok := cache[cacheKey]; ok {
 		return p
 	}
+	db := model.DBWithScope(scope)
 	var project model.Project
-	if err := model.DB.Where("name = ?", name).First(&project).Error; err != nil {
-		cache[name] = nil
+	if err := db.Where("name = ? AND org_id = ?", projectName, orgID).First(&project).Error; err != nil {
+		cache[cacheKey] = nil
 		return nil
 	}
-	cache[name] = &project
+	cache[cacheKey] = &project
 	return &project
 }

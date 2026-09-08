@@ -598,7 +598,23 @@ func ParseDiffFilesToMap(diffFiles interface{}) []map[string]interface{} {
 }
 
 // SysCfgMaxTokensPerBatch 返回当前生效的每批最大 token 数（从 ReviewAgentConfig batch_review_frame 阶段配置读取）
+// Deprecated: 多租户改造后建议在 StageContext 可用时调用 SysCfgMaxTokensPerBatchFromSnapshot，
+// 以保持 Stage 间配置一致性。此方法保留以兼容无 StageContext 的调用路径。
 func SysCfgMaxTokensPerBatch() int {
+	return SysCfgMaxTokensPerBatchFromSnapshot(nil)
+}
+
+// SysCfgMaxTokensPerBatchFromSnapshot 从 OrgConfigSnapshot 读取每批最大 token 数
+// 多租户改造：优先从快照读取，避免 Stage 间配置不一致；若 snapshot 为 nil 则 fallback 到旧逻辑。
+func SysCfgMaxTokensPerBatchFromSnapshot(snapshot *OrgConfigSnapshot) int {
+	if snapshot != nil && snapshot.AgentConfig.ID > 0 {
+		if sc := snapshot.AgentConfig.StageConfig("batch_review_frame"); sc != nil {
+			if v, ok := sc["max_tokens_per_batch"].(float64); ok && v > 0 {
+				return int(v)
+			}
+		}
+	}
+	// fallback：向后兼容
 	var agentCfg model.ReviewAgentConfig
 	if err := model.DB.First(&agentCfg, 1).Error; err == nil {
 		if sc := agentCfg.StageConfig("batch_review_frame"); sc != nil {

@@ -52,7 +52,26 @@ func detectLanguageFromFiles(files []map[string]interface{}) string {
 	return maxLang
 }
 
+// getStageLLMEnhanceTimeoutFromCtx 从 StageContext 的配置快照读取指定阶段的 LLM 增强超时（秒）
+// 多租户改造：优先从 OrgConfigSnapshot 读取，避免 Stage 间配置不一致。
+func getStageLLMEnhanceTimeoutFromCtx(ctx StageContext, stageCode string) time.Duration {
+	def := 300 * time.Second
+	snap := GetOrgConfigSnapshotFromCtx(ctx)
+	if snap != nil && snap.AgentConfig.ID > 0 {
+		if sc := snap.AgentConfig.StageConfig(stageCode); sc != nil {
+			if t, ok := sc["llm_enhance_timeout"].(float64); ok && t > 0 {
+				return time.Duration(t) * time.Second
+			}
+		}
+		return def
+	}
+	// fallback：向后兼容（旧调用路径无 StageContext 时仍走原逻辑）
+	return getStageLLMEnhanceTimeout(stageCode)
+}
+
 // getStageLLMEnhanceTimeout 从 ReviewAgentConfig 读取指定阶段的 LLM 增强超时（秒）
+// Deprecated: 多租户改造后建议在 StageContext 可用时使用 getStageLLMEnhanceTimeoutFromCtx，
+// 以保持 Stage 间配置一致性。
 func getStageLLMEnhanceTimeout(stageCode string) time.Duration {
 	def := 300 * time.Second
 	var agentCfg model.ReviewAgentConfig

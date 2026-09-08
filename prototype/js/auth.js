@@ -28,25 +28,44 @@
         }
     };
 
-    // ========== 角色权限检查 ==========
+    // ========== 角色权限检查（基于 org_users.role，废弃 users.role） ==========
+    // isAdmin = 组织管理员及以上（super_admin / org_admin）
     window.isAdmin = function() {
         try {
+            if (window.getCurrentOrg) {
+                const currentOrg = window.getCurrentOrg();
+                if (currentOrg && currentOrg.role) {
+                    return ['super_admin', 'org_admin'].includes(currentOrg.role);
+                }
+            }
             const info = JSON.parse(localStorage.getItem(USER_KEY) || '{}');
-            return info.role === 'admin';
+            return ['super_admin', 'org_admin'].includes(info.current_org_role);
         } catch(e) {
             return false;
         }
     };
-    window.isUser = function() {
+    // isSystemAdmin = 仅系统管理员（super_admin）
+    window.isSystemAdmin = function() {
         try {
+            if (window.getCurrentOrg) {
+                const currentOrg = window.getCurrentOrg();
+                if (currentOrg && currentOrg.role) {
+                    return currentOrg.role === 'super_admin';
+                }
+            }
             const info = JSON.parse(localStorage.getItem(USER_KEY) || '{}');
-            return info.role === 'user';
+            return info.current_org_role === 'super_admin';
         } catch(e) {
-            return true; // 默认假设为普通用户
+            return false;
         }
+    };
+    // isUser 废弃：角色不再只有 user/admin 二元区分，统一用 isAdmin 判定
+    window.isUser = function() {
+        return !window.isAdmin();
     };
 
     // ========== 页面加载后自动隐藏/显示管理员专属元素 ==========
+    // 多租户改造：在 OrgContext 初始化完成后调用，确保 currentOrg.role 可用
     window.applyAdminVisibility = function() {
         const adminEls = document.querySelectorAll('[data-admin-only]');
         adminEls.forEach(el => {
@@ -63,11 +82,22 @@
     window.restrictAuthorFilterToSelf = function() {
         try {
             const info = JSON.parse(localStorage.getItem(USER_KEY) || '{}');
-            if (info.role !== 'user' || !info.gitlab_username) return;
+            if (!window.isUser() || !info.gitlab_username) return;
             const filter = document.getElementById('authorFilter');
             if (!filter) return;
             // 保留"所有作者"但置灰不可用，默认选中自己
-            filter.innerHTML = `<option value="" disabled>所有作者</option><option value="${info.gitlab_username}" selected>${info.gitlab_username}</option>`;
+            // 多租户改造：使用 createElement 替代 innerHTML，防止 XSS
+            filter.innerHTML = '';
+            const allOpt = document.createElement('option');
+            allOpt.value = '';
+            allOpt.textContent = '所有作者';
+            allOpt.disabled = true;
+            filter.appendChild(allOpt);
+            const selfOpt = document.createElement('option');
+            selfOpt.value = info.gitlab_username;
+            selfOpt.textContent = info.gitlab_username;
+            selfOpt.selected = true;
+            filter.appendChild(selfOpt);
             filter.title = '仅显示您自己的数据';
         } catch(e) {}
     };
@@ -97,8 +127,15 @@
             // 避免重复添加
             if (!headers['Authorization'] && !headers['authorization']) {
                 headers['Authorization'] = 'Bearer ' + token;
-                options = Object.assign({}, opts, { headers });
             }
+            // 多租户改造：自动注入 X-Org-Id
+            if (!headers['X-Org-Id'] && !headers['x-org-id']) {
+                const currentOrg = window.getCurrentOrg && window.getCurrentOrg();
+                if (currentOrg && currentOrg.id) {
+                    headers['X-Org-Id'] = String(currentOrg.id);
+                }
+            }
+            options = Object.assign({}, opts, { headers });
         }
         
         // 调用原生 fetch
@@ -112,7 +149,7 @@
         return res;
     };
     
-    // apiFetch 独立实现，确保始终携带 Token
+    // apiFetch 独立实现，确保始终携带 Token + Org ID
     window.apiFetch = async function(url, options) {
         const token = getToken();
         const opts = options || {};
@@ -126,6 +163,14 @@
         if (!isLogin && token) {
             if (!headers['Authorization'] && !headers['authorization']) {
                 headers['Authorization'] = 'Bearer ' + token;
+            }
+        }
+
+        // 多租户改造：自动注入 X-Org-Id Header（优先使用 OrgContext 中的当前组织）
+        if (!isLogin && !headers['X-Org-Id'] && !headers['x-org-id']) {
+            const currentOrg = window.getCurrentOrg && window.getCurrentOrg();
+            if (currentOrg && currentOrg.id) {
+                headers['X-Org-Id'] = String(currentOrg.id);
             }
         }
 
@@ -335,22 +380,50 @@
             const el = document.getElementById('currentUser');
             if (el) el.textContent = info.display_name || info.username || '管理员';
 
-            // 角色与页面权限控制：admin 默认进入管理员控制台，user 不能访问管理员控制台
+            // 角色与页面权限控制：管理员默认进入管理员控制台，非管理员不能访问管理员控制台
             const path = window.location.pathname;
-            if (info.role === 'admin' && (path === '/developer-dashboard.html' || path === '/' || path === '/index.html')) {
+            if (isAdmin() && (path === '/developer-dashboard.html' || path === '/' || path === '/index.html')) {
                 window.location.href = '/admin-dashboard.html';
                 return;
             }
-            if (info.role === 'user' && path === '/admin-dashboard.html') {
+            if (!isAdmin() && path === '/admin-dashboard.html') {
                 window.location.href = '/developer-dashboard.html';
                 return;
             }
-            // MCP 密钥管理与调用日志仅对 admin 开放
-            if (info.role !== 'admin' && (path === '/mcp-keys.html' || path === '/mcp-logs.html')) {
+            // MCP 密钥管理与调用日志仅对管理员开放
+            if (!isAdmin() && (path === '/mcp-keys.html' || path === '/mcp-logs.html')) {
                 window.location.href = '/mcp-capabilities.html';
                 return;
             }
         } catch(e) {}
+        // ========== 多租户改造：动态加载组织上下文与 API 封装 ==========
+        (function loadOrgScripts() {
+            function injectScript(src) {
+                return new Promise(function(resolve, reject) {
+                    var s = document.createElement('script');
+                    s.src = src;
+                    s.async = false;
+                    s.onload = resolve;
+                    s.onerror = reject;
+                    document.head.appendChild(s);
+                });
+            }
+            injectScript('/js/api-fetch.js?v=9')
+                .then(function() { return injectScript('/js/org-context.js?v=9'); })
+                .then(function() {
+                    if (window.loadUserOrganizations) {
+                        return window.loadUserOrganizations();
+                    }
+                })
+                .then(function() {
+                    // 通知 sidebar 重新渲染（权限可能因组织角色变化）
+                    if (typeof window.renderSidebar === 'function') {
+                        window.renderSidebar(window.activePageId);
+                    }
+                })
+                .catch(function(e) { console.warn('org-scripts load failed:', e); });
+        })();
+
         createChangePasswordModal();
         // 若当前在通知管理子页面，自动展开通知管理菜单
         const path = window.location.pathname;

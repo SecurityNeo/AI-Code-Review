@@ -1,10 +1,17 @@
 package model
 
-import "time"
+import (
+	"errors"
+	"time"
+
+	"gorm.io/gorm"
+)
 
 // Notification 站内信/通知中心
 type Notification struct {
 	ID            uint      `gorm:"primaryKey" json:"id"`
+	OrgID         uint      `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
+	OrgName       string    `gorm:"-" json:"org_name,omitempty"`
 	UserID        uint      `gorm:"index:idx_user_unread, priority:1;not null" json:"user_id"`
 	Type          string    `gorm:"size:32;not null" json:"type"` // task_completed / issue_escalation / deadline_digest / daily_digest / auto_archived / batch_alert
 	Title         string    `gorm:"size:200;not null" json:"title"`
@@ -32,6 +39,8 @@ type NotificationDeliveryLog struct {
 // Holiday 节假日配置
 type Holiday struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
+	OrgID       uint      `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
+	OrgName     string    `gorm:"-" json:"org_name,omitempty"`
 	Date        string    `gorm:"size:10;not null;uniqueIndex:idx_date_type" json:"date"` // YYYY-MM-DD
 	Name        string    `gorm:"size:100" json:"name"`
 	Type        string    `gorm:"size:20;default:'national';uniqueIndex:idx_date_type" json:"type"` // national / company / makeup
@@ -40,6 +49,24 @@ type Holiday struct {
 	IsWorkday   bool      `gorm:"default:false" json:"is_workday"`                                  // true=调休上班（补班）
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// BeforeUpdate GORM hook: 防止 org_id 被修改
+func (h *Holiday) BeforeUpdate(tx *gorm.DB) error {
+	if tx.Statement == nil {
+		return nil
+	}
+	switch dest := tx.Statement.Dest.(type) {
+	case map[string]interface{}:
+		if _, exists := dest["org_id"]; exists {
+			return errors.New("org_id cannot be modified on Holiday")
+		}
+	case *Holiday:
+		if dest.OrgID != 0 && dest.OrgID != h.OrgID {
+			return errors.New("org_id cannot be modified on Holiday")
+		}
+	}
+	return nil
 }
 
 const (
@@ -72,6 +99,8 @@ const (
 // NotificationRule 通知规则模板（后台管理）
 type NotificationRule struct {
 	ID                 uint      `gorm:"primaryKey" json:"id"`
+	OrgID              uint      `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
+	OrgName            string    `gorm:"-" json:"org_name,omitempty"`
 	Name               string    `gorm:"size:100;not null" json:"name"`
 	Trigger            string    `gorm:"size:50;not null" json:"trigger"` // task.completed / issue.escalation / daily.digest 等
 	Provider           string    `gorm:"size:32;default:'wecom'" json:"provider"`          // 供应商：wecom / dingtalk / lark
@@ -87,6 +116,24 @@ type NotificationRule struct {
 	Enabled            bool      `gorm:"default:true" json:"enabled"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+// BeforeUpdate GORM hook: 防止 org_id 被修改
+func (r *NotificationRule) BeforeUpdate(tx *gorm.DB) error {
+	if tx.Statement == nil {
+		return nil
+	}
+	switch dest := tx.Statement.Dest.(type) {
+	case map[string]interface{}:
+		if _, exists := dest["org_id"]; exists {
+			return errors.New("org_id cannot be modified on NotificationRule")
+		}
+	case *NotificationRule:
+		if dest.OrgID != 0 && dest.OrgID != r.OrgID {
+			return errors.New("org_id cannot be modified on NotificationRule")
+		}
+	}
+	return nil
 }
 
 // NotificationGlobalSetting 通知规则全局生效起点（单行表，id=1）

@@ -126,6 +126,11 @@ type DevDailyScore struct {
 }
 
 func (h *StatisticsHandler) Get(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	user, ok := middleware.GetUser(c)
 	if !ok {
 		c.JSON(401, gin.H{"error": "未登录"})
@@ -151,6 +156,10 @@ func (h *StatisticsHandler) Get(c *gin.Context) {
 	dateCol := "IF(mr_created_at IS NOT NULL AND mr_created_at > '1970-01-01', mr_created_at, synced_at)"
 
 	db := model.DB.Model(&model.MergeRequestReviewLog{})
+	// 多租户改造：按组织过滤（admin不过滤）
+	if !scope.IsSuperAdmin {
+		db = db.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
 
 	// 按用户角色过滤
 	db = model.FilterByUser(db, user, "author")
@@ -204,9 +213,13 @@ func (h *StatisticsHandler) Get(c *gin.Context) {
 	_ = db.Session(&gorm.Session{}).Select("COUNT(DISTINCT project_name) as active_projs").Scan(&activeProjs).Error
 	resp.KPI.ActiveProjects = activeProjs
 
-	// 总项目数（不随筛选条件变化，取 projects 表总记录数）
+	// 总项目数（当前组织可见项目数）
 	var totalProjs int64
-	model.DB.Model(&model.Project{}).Count(&totalProjs)
+	if scope.IsSuperAdmin {
+		model.DB.Model(&model.Project{}).Count(&totalProjs)
+	} else {
+		model.DB.Model(&model.Project{}).Where("org_id IN ?", scope.VisibleOrgIDs).Count(&totalProjs)
+	}
 	resp.KPI.TotalProjects = totalProjs
 
 	// 2. 项目活跃度 TOP10（MR 数量，不排除 closed）
@@ -322,7 +335,7 @@ func (h *StatisticsHandler) Get(c *gin.Context) {
 		projectMRCounts := make(map[string]int64)
 		for _, proj := range radarProjects {
 			var cnt int64
-			_ = model.DB.Model(&model.MergeRequestReviewLog{}).
+			_ = model.DB.Model(&model.MergeRequestReviewLog{}).Scopes(model.OrgScope(scope)).
 				Where("project_name = ?", proj).
 				Count(&cnt).Error
 			projectMRCounts[proj] = cnt
@@ -353,7 +366,7 @@ func (h *StatisticsHandler) Get(c *gin.Context) {
 				MRCount    int64
 				LowQRate   float64
 			}
-			_ = model.DB.Model(&model.MergeRequestReviewLog{}).
+			_ = model.DB.Model(&model.MergeRequestReviewLog{}).Scopes(model.OrgScope(scope)).
 				Where("project_name = ?", proj).
 				Where("mr_state != ?", "closed").
 				Select(
@@ -400,7 +413,7 @@ func (h *StatisticsHandler) Get(c *gin.Context) {
 	}
 
 	var sources []trendSource
-	trendQueryDB := model.DB.Model(&model.MergeRequestReviewLog{}).Select("id, mr_created_at, synced_at, score, additions, deletions")
+	trendQueryDB := model.DB.Model(&model.MergeRequestReviewLog{}).Scopes(model.OrgScope(scope)).Select("id, mr_created_at, synced_at, score, additions, deletions")
 	// 补上用户角色过滤（Bug：此前遗漏导致普通用户能看到所有人的质量趋势）
 	trendQueryDB = model.FilterByUser(trendQueryDB, user, "author")
 	if projectName != "" {

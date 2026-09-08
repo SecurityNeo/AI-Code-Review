@@ -33,10 +33,11 @@ var validTriggerEvents = map[string]bool{
 }
 
 // GetOrDefault 获取当前配置，若不存在则返回默认配置
-func (s *ReviewAgentConfigService) GetOrDefault() model.ReviewAgentConfig {
+func (s *ReviewAgentConfigService) GetOrDefault(scope *model.UserAuthScope, orgID uint) model.ReviewAgentConfig {
+	db := model.DBWithScope(scope)
 	var cfg model.ReviewAgentConfig
-	if err := model.DB.First(&cfg, 1).Error; err != nil {
-		return defaultReviewAgentConfig()
+	if err := db.Where("org_id = ?", orgID).First(&cfg).Error; err != nil {
+		return defaultReviewAgentConfig(orgID)
 	}
 	// 兼容旧配置：自动将 mandatory 阶段加入 enabled_stages
 	stages := cfg.EnabledStageCodes()
@@ -94,7 +95,7 @@ func (s *ReviewAgentConfigService) GetOrDefault() model.ReviewAgentConfig {
 	if needsUpdate {
 		cfg.SetEnabledStageCodes(stages)
 		// 静默更新数据库，不抛错
-		model.DB.Model(&model.ReviewAgentConfig{}).
+		db.Model(&model.ReviewAgentConfig{}).
 			Where("id = ?", cfg.ID).
 			Updates(map[string]interface{}{
 				"enabled_stages": cfg.EnabledStages,
@@ -120,12 +121,15 @@ func (e *DependencyViolationError) Error() string {
 
 // Save 保存智能体全局配置（整表覆盖更新）
 func (s *ReviewAgentConfigService) Save(
+	scope *model.UserAuthScope,
+	orgID uint,
 	stages []string,
 	stageConfigs map[string]interface{},
 	triggerEvents []string,
 	showStatus bool,
 	userID uint,
 ) error {
+	db := model.DBWithScope(scope)
 	// 保证 batch_review_frame 始终启用（代码评审核心智能体不可禁用）
 	if !contains(stages, "batch_review_frame") {
 		stages = append(stages, "batch_review_frame")
@@ -270,7 +274,7 @@ func (s *ReviewAgentConfigService) Save(
 
 	// 从 stages 数组推导扩展阶段状态，保持模型字段同步
 	cfg := model.ReviewAgentConfig{
-		ID:                    1,
+		OrgID:                 orgID,
 		StageConfigs:          string(jsonBytes),
 		ShowAgentStatus:       showStatus,
 		SecretScanEnabled:     contains(stages, "secret_scan"),
@@ -283,26 +287,32 @@ func (s *ReviewAgentConfigService) Save(
 	cfg.SetEnabledStageCodes(stages)
 	cfg.SetTriggerEventCodes(triggerEvents)
 
-	// 只更新目标字段，避免触碰 created_at
-	return model.DB.Model(&model.ReviewAgentConfig{}).
-		Where("id = ?", 1).
-		Updates(map[string]interface{}{
-			"enabled_stages":          cfg.EnabledStages,
-			"stage_configs":           cfg.StageConfigs,
-			"trigger_events":          cfg.TriggerEvents,
-			"show_agent_status":       showStatus,
-			"secret_scan_enabled":     cfg.SecretScanEnabled,
-			"security_audit_enabled":  cfg.SecurityAuditEnabled,
-			"test_suggestion_enabled": cfg.TestSuggestionEnabled,
-			"impact_analysis_enabled": cfg.ImpactAnalysisEnabled,
-			"license_check_enabled":   cfg.LicenseCheckEnabled,
-			"updated_by":              userID,
-		}).Error
+	// 多租户改造：按 org_id 查找并更新，不存在则创建
+	var existing model.ReviewAgentConfig
+	if err := db.Where("org_id = ?", orgID).First(&existing).Error; err == nil {
+		return db.Model(&existing).
+			Omit("org_id", "created_at").
+			Updates(map[string]interface{}{
+				"enabled_stages":          cfg.EnabledStages,
+				"stage_configs":           cfg.StageConfigs,
+				"trigger_events":          cfg.TriggerEvents,
+				"show_agent_status":       showStatus,
+				"secret_scan_enabled":     cfg.SecretScanEnabled,
+				"security_audit_enabled":  cfg.SecurityAuditEnabled,
+				"test_suggestion_enabled": cfg.TestSuggestionEnabled,
+				"impact_analysis_enabled": cfg.ImpactAnalysisEnabled,
+				"license_check_enabled":   cfg.LicenseCheckEnabled,
+				"updated_by":              userID,
+			}).Error
+	}
+
+	// 该组织尚无配置，创建默认记录
+	return db.Create(&cfg).Error
 }
 
-func defaultReviewAgentConfig() model.ReviewAgentConfig {
+func defaultReviewAgentConfig(orgID uint) model.ReviewAgentConfig {
 	cfg := model.ReviewAgentConfig{
-		ID:              1,
+		OrgID:           orgID,
 		ShowAgentStatus: true,
 	}
 	cfg.SetEnabledStageCodes([]string{

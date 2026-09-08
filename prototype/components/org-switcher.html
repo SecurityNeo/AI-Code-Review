@@ -1,0 +1,157 @@
+<style>
+  .org-switcher-container {
+    position: relative;
+    display: inline-block;
+  }
+  .org-switcher-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 6px;
+    color: #e5e7eb;
+    font-size: 14px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  .org-switcher-btn:hover {
+    border-color: #60a5fa;
+  }
+  .org-switcher-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 6px;
+    min-width: 200px;
+    background: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3);
+    z-index: 1000;
+    display: none;
+    overflow: hidden;
+  }
+  .org-switcher-dropdown.show {
+    display: block;
+  }
+  .org-switcher-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: #d1d5db;
+    transition: background 0.15s;
+  }
+  .org-switcher-item:hover {
+    background: #374151;
+  }
+  .org-switcher-item.active {
+    color: #60a5fa;
+    font-weight: 500;
+  }
+  .org-switcher-item .check-icon {
+    font-size: 14px;
+  }
+  .org-switcher-divider {
+    height: 1px;
+    background: #374151;
+    margin: 4px 0;
+  }
+  .org-switcher-manage {
+    padding: 10px 14px;
+    font-size: 13px;
+    color: #9ca3af;
+    text-align: center;
+    cursor: pointer;
+  }
+  .org-switcher-manage:hover {
+    color: #e5e7eb;
+  }
+</style>
+
+<!-- 组织切换下拉组件 -->
+<div class="org-switcher-container" id="orgSwitcherContainer">
+  <button class="org-switcher-btn" id="orgSwitcherBtn" onclick="toggleOrgSwitcher()">
+    <span id="currentOrgName">加载中...</span>
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+      <path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </button>
+  <div class="org-switcher-dropdown" id="orgSwitcherDropdown">
+    <!-- 动态填充 -->
+  </div>
+</div>
+
+<script>
+(function() {
+  function toggleOrgSwitcher() {
+    var dropdown = document.getElementById('orgSwitcherDropdown');
+    dropdown.classList.toggle('show');
+  }
+
+  function renderOrgSwitcher() {
+    var container = document.getElementById('orgSwitcherDropdown');
+    var currentOrg = window.getCurrentOrg ? window.getCurrentOrg() : null;
+    var orgList = JSON.parse(localStorage.getItem('org_list') || '[]');
+
+    if (!container) return;
+
+    var html = '';
+    orgList.forEach(function(org) {
+      var isActive = currentOrg && org.id === currentOrg.id;
+      html += '<div class="org-switcher-item ' + (isActive ? 'active' : '') + '" data-id="' + org.id + '">' +
+        '<span>' + escapeHtml(org.name) + '</span>' +
+        (isActive ? '<span class="check-icon">✓</span>' : '') +
+      '</div>';
+    });
+    html += '<div class="org-switcher-divider"></div>';
+    html += '<div class="org-switcher-manage" onclick="location.href=\'/org-admin.html\'">⚙ 组织管理</div>';
+    container.innerHTML = html;
+
+    // 绑定点击事件
+    container.querySelectorAll('.org-switcher-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        var orgID = parseInt(this.dataset.id);
+        if (window.switchOrganization) {
+          window.switchOrganization(orgID);
+        }
+      });
+    });
+
+    // 更新按钮文字
+    var btnName = document.getElementById('currentOrgName');
+    if (btnName && currentOrg) {
+      btnName.textContent = escapeHtml(currentOrg.name);
+    }
+  }
+
+  function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  // 点击外部关闭
+  document.addEventListener('click', function(e) {
+    var container = document.getElementById('orgSwitcherContainer');
+    if (container && !container.contains(e.target)) {
+      var dropdown = document.getElementById('orgSwitcherDropdown');
+      if (dropdown) dropdown.classList.remove('show');
+    }
+  });
+
+  // 初始化
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', renderOrgSwitcher);
+  } else {
+    renderOrgSwitcher();
+  }
+
+  // 暴露到全局
+  window.toggleOrgSwitcher = toggleOrgSwitcher;
+  window.renderOrgSwitcher = renderOrgSwitcher;
+})();
+</script>

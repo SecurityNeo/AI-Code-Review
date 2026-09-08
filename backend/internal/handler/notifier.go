@@ -3,6 +3,7 @@ package handler
 import (
 	"strconv"
 
+	"github.com/ai-optimizer/backend/internal/middleware"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
 	"github.com/gin-gonic/gin"
@@ -16,7 +17,12 @@ func NewNotifierHandler() *NotifierHandler {
 }
 
 func (h *NotifierHandler) List(c *gin.Context) {
-	notifiers, err := service.NewNotifierService().List()
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+	notifiers, err := service.NewNotifierService().List(scope)
 	if err != nil {
 		zap.L().Error("list notifiers failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -30,6 +36,8 @@ func (h *NotifierHandler) List(c *gin.Context) {
 		HasTemplate    bool   `json:"has_template"`
 		ProjectID      *uint  `json:"project_id"`
 		ProjectName    string `json:"project_name"`
+		OrgID          uint   `json:"org_id"`
+		OrgName        string `json:"org_name"`
 		Enabled        bool   `json:"enabled"`
 		LastTestStatus string `json:"last_test_status"`
 		CreatedAt      string `json:"created_at"`
@@ -56,6 +64,13 @@ func (h *NotifierHandler) List(c *gin.Context) {
 		}
 	}
 
+	// 批量查询组织名称
+	orgIDs := make([]uint, 0, len(notifiers))
+	for _, n := range notifiers {
+		orgIDs = append(orgIDs, n.OrgID)
+	}
+	orgNameMap := model.BatchOrgNames(orgIDs)
+
 	result := make([]NotifierResponse, 0, len(notifiers))
 	for _, n := range notifiers {
 		projectName := "全局"
@@ -73,6 +88,8 @@ func (h *NotifierHandler) List(c *gin.Context) {
 			HasTemplate:    n.MessageTemplate != "",
 			ProjectID:      n.ProjectID,
 			ProjectName:    projectName,
+			OrgID:          n.OrgID,
+			OrgName:        orgNameMap[n.OrgID],
 			Enabled:        n.Enabled,
 			LastTestStatus: n.LastTestStatus,
 			CreatedAt:      n.CreatedAt.Format("2006-01-02 15:04:05"),
@@ -83,8 +100,13 @@ func (h *NotifierHandler) List(c *gin.Context) {
 }
 
 func (h *NotifierHandler) Get(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
-	notifier, err := service.NewNotifierService().Get(uint(id))
+	notifier, err := service.NewNotifierService().Get(scope, uint(id))
 	if err != nil {
 		c.JSON(404, gin.H{"error": "not found"})
 		return
@@ -104,6 +126,11 @@ func (h *NotifierHandler) Get(c *gin.Context) {
 }
 
 func (h *NotifierHandler) Create(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var data map[string]interface{}
 	if err := c.ShouldBindJSON(&data); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
@@ -118,7 +145,12 @@ func (h *NotifierHandler) Create(c *gin.Context) {
 		}
 	}
 
-	notifier, err := service.NewNotifierService().Create(data)
+	
+	// 多租户改造：注入当前 org_id（非 super_admin 禁止客户端传入）
+	if _, ok := data["org_id"]; !ok || !scope.IsSuperAdmin {
+		data["org_id"] = middleware.GetCurrentOrgID(c)
+	}
+	notifier, err := service.NewNotifierService().Create(scope, data)
 	if err != nil {
 		zap.L().Error("create notifier failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -131,6 +163,11 @@ func (h *NotifierHandler) Create(c *gin.Context) {
 }
 
 func (h *NotifierHandler) Update(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 	var data map[string]interface{}
 	if err := c.ShouldBindJSON(&data); err != nil {
@@ -143,7 +180,25 @@ func (h *NotifierHandler) Update(c *gin.Context) {
 		delete(data, "webhook_url")
 	}
 
-	err := service.NewNotifierService().Update(uint(id), data)
+	// 1. 非 super_admin 禁止修改 org_id
+	if !scope.IsSuperAdmin {
+		delete(data, "org_id")
+	}
+
+	// 2. super_admin 可以修改 org_id：用 UpdateColumn 绕过 GORM hook
+	if scope.IsSuperAdmin {
+		if orgID, ok := extractOrgIDFromMap(data); ok {
+			zap.L().Info("notifier update: changing org_id", zap.Int("id", id), zap.Uint("new_org_id", orgID))
+			if err := model.DB.Model(&model.WeComNotifier{}).Where("id = ?", id).UpdateColumn("org_id", orgID).Error; err != nil {
+				zap.L().Error("notifier update: org_id update failed", zap.Int("id", id), zap.Uint("org_id", orgID), zap.Error(err))
+				c.JSON(500, gin.H{"error": "组织归属更新失败: " + err.Error()})
+				return
+			}
+			delete(data, "org_id")
+		}
+	}
+
+	err := service.NewNotifierService().Update(scope, uint(id), data)
 	if err != nil {
 		zap.L().Error("update notifier failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -157,6 +212,11 @@ func (h *NotifierHandler) Update(c *gin.Context) {
 
 // UpdateTemplate 更新消息模板
 func (h *NotifierHandler) UpdateTemplate(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 	var data map[string]interface{}
 	if err := c.ShouldBindJSON(&data); err != nil {
@@ -170,7 +230,7 @@ func (h *NotifierHandler) UpdateTemplate(c *gin.Context) {
 		return
 	}
 
-	err := service.NewNotifierService().UpdateTemplate(uint(id), template)
+	err := service.NewNotifierService().UpdateTemplate(scope, uint(id), template)
 	if err != nil {
 		zap.L().Error("update template failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -183,10 +243,15 @@ func (h *NotifierHandler) UpdateTemplate(c *gin.Context) {
 }
 
 func (h *NotifierHandler) Delete(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 
-	notifier, _ := service.NewNotifierService().Get(uint(id))
-	err := service.NewNotifierService().Delete(uint(id))
+	notifier, _ := service.NewNotifierService().Get(scope, uint(id))
+	err := service.NewNotifierService().Delete(scope, uint(id))
 	if err != nil {
 		zap.L().Error("delete notifier failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -199,9 +264,14 @@ func (h *NotifierHandler) Delete(c *gin.Context) {
 }
 
 func (h *NotifierHandler) Test(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 
-	success, msg, err := service.NewNotifierService().Test(uint(id))
+	success, msg, err := service.NewNotifierService().Test(scope, uint(id))
 	if err != nil {
 		zap.L().Error("test notifier failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -216,6 +286,11 @@ func (h *NotifierHandler) Test(c *gin.Context) {
 }
 
 func (h *NotifierHandler) Toggle(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 	var data map[string]interface{}
 	if err := c.ShouldBindJSON(&data); err != nil {
@@ -228,7 +303,7 @@ func (h *NotifierHandler) Toggle(c *gin.Context) {
 		enabled = v
 	}
 
-	err := service.NewNotifierService().Toggle(uint(id), enabled)
+	err := service.NewNotifierService().Toggle(scope, uint(id), enabled)
 	if err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return

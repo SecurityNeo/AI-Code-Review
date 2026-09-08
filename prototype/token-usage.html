@@ -1,15 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Token 用量 - CodeGuard</title>
     <script defer src="/static/js/echarts.min.js"></script>
-    <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+    <script src="js/auth.js?v=9"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <script defer src="/static/js/tailwindcss.min.js"></script>
@@ -169,6 +169,7 @@
                         <thead>
                             <tr>
                                 <th>时间</th>
+                                <th>所属组织</th>
                                 <th>模型</th>
                                 <th>调用方</th>
                                 <th style="text-align:right;">输入</th>
@@ -180,7 +181,7 @@
                             </tr>
                         </thead>
                         <tbody id="callsTableBody">
-                            <tr><td colspan="9" class="text-center text-gray-400 py-8">加载中...</td></tr>
+                            <tr><td colspan="10" class="text-center text-gray-400 py-8">加载中...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -546,7 +547,7 @@
         const tbody = document.getElementById('callsTableBody');
 
         if (rows.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="9" class="text-center text-gray-400 py-8">暂无数据</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="10" class="text-center text-gray-400 py-8">暂无数据</td></tr>';
         } else {
             tbody.innerHTML = rows.map(r => {
                 // 安全转义：task_id 用于 href 必须 encodeURIComponent
@@ -557,6 +558,7 @@
                 return `
                     <tr>
                         <td>${(r.created_at || '').slice(0, 19).replace('T', ' ')}</td>
+                        <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(r.org_name || '根组织')}</td>
                         <td>${escapeHtml(formatModelName(r.model_name, r.provider))}</td>
                         <td>${renderCallerBadge(r.caller)}</td>
                         <td style="text-align:right;">${formatNumber(r.prompt_tokens)}</td>
@@ -590,7 +592,11 @@
         renderSidebar('token-usage');
         const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
         document.getElementById('currentUser').textContent = userInfo.display_name || userInfo.username || '-';
-        document.getElementById('currentRole').textContent = userInfo.role === 'admin' ? '管理员' : '开发者';
+        const orgRole = userInfo.current_org_role || '';
+        let roleLabel = '开发者';
+        if (orgRole === 'super_admin') roleLabel = '系统管理员';
+        else if (orgRole === 'org_admin') roleLabel = '组织管理员';
+        document.getElementById('currentRole').textContent = roleLabel;
         initCallerFilter();  // 动态生成调用方筛选选项
         loadAll();
     });

@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script src="../js/theme.js?v=9"></script>
+    <style>html{background-color:#1e293b;}</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>组织管理 - CodeGuard</title>
+    <script src="../js/auth.js?v=9"></script>
+    <script src="../js/menu-config.js?v=9"></script>
+    <script src="../js/sidebar.js?v=9"></script>
+    <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="../css/theme.css?v=1">
+    <script src="/static/js/tailwindcss.min.js"></script>
+    <style>
+        .sidebar-item:hover { background-color: rgba(255,255,255,0.1); }
+        .sidebar-item.active { background-color: rgba(255,255,255,0.15); border-left: 3px solid #3b82f6; }
+        .org-tree-row { transition: background-color .15s; }
+        .org-tree-row:hover { background-color: #f8fafc; }
+        .org-tree-row.matched { background-color: #fef9c3; }
+        .org-tree-toggle { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; border-radius: 4px; margin-right: 4px; color: #64748b; }
+        .org-tree-toggle:hover { background: #e2e8f0; }
+        .org-tree-indent { display: inline-block; width: 24px; }
+        .status-badge {
+            display: inline-block; padding: 2px 8px; border-radius: 4px;
+            font-size: 12px; font-weight: 500;
+        }
+        .status-active { background: #d1fae5; color: #065f46; }
+        .status-suspended { background: #fef3c7; color: #92400e; }
+        .status-archived { background: #f3f4f6; color: #4b5563; }
+        .quota-bar { width: 80px; height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; }
+        .quota-fill { height: 100%; border-radius: 3px; background: #3b82f6; }
+        .quota-text { font-size: 11px; color: #6b7280; margin-top: 2px; }
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; align-items: center; justify-content: center; }
+        .modal-overlay.active { display: flex; }
+        .modal-box { background: white; border-radius: 12px; width: 100%; max-width: 560px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); }
+        .modal-header { padding: 16px 20px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
+        .modal-body { padding: 20px; }
+        .modal-footer { padding: 12px 20px; border-top: 1px solid #e5e7eb; display: flex; justify-content: flex-end; gap: 8px; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 4px; }
+        .form-group input, .form-group select { width: 100%; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box; }
+        .tree-select-option { padding: 6px 8px; cursor: pointer; }
+        .tree-select-option:hover { background: #f1f5f9; }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans">
+
+<div id="page-transition" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#1e293b;z-index:99999;transition:opacity .25s ease;"></div>
+<script>
+(function(){
+  function hide(){var el=document.getElementById('page-transition');if(el){el.style.opacity='0';setTimeout(function(){el.remove();},250);}}
+  if(document.readyState==='complete'){hide();}else{window.addEventListener('load',hide);}
+})();
+</script>
+
+<div class="flex h-screen">
+    <aside id="sidebar" class="w-64 bg-slate-900 text-white flex-shrink-0 flex flex-col">
+        <nav style="padding: 20px; text-align: center; color: var(--cg-text-tertiary); font-size: 13px;">加载中...</nav>
+    </aside>
+
+    <main class="flex-1 overflow-y-auto">
+        <div id="toastContainer"></div>
+        <header class="bg-white border-b px-8 py-4 flex items-center justify-between sticky top-0 z-10">
+            <div>
+                <h2 class="text-xl font-bold text-gray-800"><i class="fas fa-building text-blue-600 mr-2"></i>组织管理</h2>
+                <p class="text-sm text-gray-500 mt-1">管理平台组织架构，支持多层级树形结构</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <button onclick="openModal()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 flex items-center gap-2">
+                    <i class="fas fa-plus"></i>新建组织
+                </button>
+            </div>
+        </header>
+
+        <div class="px-8 py-6">
+            <!-- 搜索筛选 -->
+            <div class="bg-white rounded-xl border p-4 mb-6 flex items-center gap-4">
+                <input type="text" id="searchInput" class="flex-1 px-4 py-2 border rounded-lg text-sm" placeholder="搜索组织名称 / 域名标识..." oninput="onSearch()">
+                <select id="statusFilter" class="px-3 py-2 border rounded-lg text-sm" onchange="renderTree()">
+                    <option value="">全部状态</option>
+                    <option value="active">正常</option>
+                    <option value="suspended">暂停</option>
+                    <option value="archived">归档</option>
+                </select>
+
+            </div>
+
+            <!-- 树形表格 -->
+            <div class="bg-white rounded-xl border overflow-hidden">
+                <table class="w-full">
+                    <thead class="bg-gray-50 border-b">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500" style="min-width:280px">组织架构</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">域名标识</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">状态</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">LLM配额</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">成员</th>
+                            <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500" style="width:220px">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="orgTreeBody" class="divide-y"></tbody>
+                </table>
+                <div class="empty-state" id="emptyState" style="display:none; text-align:center; padding:48px; color:#6b7280;">
+                    <i class="fas fa-search text-4xl mb-3"></i>
+                    <p>未找到匹配的组织</p>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Create/Edit Modal -->
+<div class="modal-overlay" id="orgModal">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3 class="font-bold text-gray-800" id="modalTitle">新建组织</h3>
+            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>组织名称 <span class="text-red-500">*</span></label>
+                <input type="text" id="orgName" placeholder="如：研发一部">
+            </div>
+            <div class="form-group">
+                <label>域名标识 (slug)</label>
+                <input type="text" id="orgSlug" placeholder="如：dev-team-1">
+            </div>
+            <div class="form-group">
+                <label>上级组织</label>
+                <select id="orgParent">
+                    <option value="0">（无 - 根组织）</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>状态</label>
+                <select id="orgStatus">
+                    <option value="active">正常</option>
+                    <option value="suspended">暂停</option>
+                    <option value="archived">归档</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>LLM调用日配额</label>
+                <input type="number" id="llmQuota" value="1000">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50" onclick="closeModal()">取消</button>
+            <button class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700" onclick="saveOrg()">保存</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    window.activePageId = 'settings-org';
+    let orgTree = [];          // 原始树形数据
+    let flatOrgs = [];         // 扁平化列表（用于选择上级）
+    let expandedIds = new Set([1]); // 默认展开根组织
+    let editingId = null;
+    let searchKeyword = '';
+
+    async function loadOrgs() {
+      try {
+        const res = await apiFetch('/api/v1/organizations');
+        const data = await res.json();
+        orgTree = data.data || [];
+        flatOrgs = flattenTree(orgTree);
+        renderTree();
+        populateParentSelect();
+      } catch (e) {
+        console.error('加载组织列表失败', e);
+        showToast('加载组织列表失败', 'error');
+        document.getElementById('orgTreeBody').innerHTML =
+          '<tr><td colspan="6" class="px-6 py-8 text-center text-gray-500">加载失败，请刷新重试</td></tr>';
+      }
+    }
+
+    // 将树扁平化为列表（保留 parent_id, level）
+    function flattenTree(nodes, list) {
+      list = list || [];
+      nodes.forEach(n => {
+        list.push(n);
+        if (n.children && n.children.length) flattenTree(n.children, list);
+      });
+      return list;
+    }
+
+    // 判断某个节点是否匹配搜索关键词（自身或任意子节点匹配）
+    function nodeMatches(node, kw) {
+      if (!kw) return true;
+      const text = (node.name + ' ' + (node.code || '') + ' ' + (node.slug || '')).toLowerCase();
+      if (text.includes(kw)) return true;
+      if (node.children) {
+        for (const c of node.children) {
+          if (nodeMatches(c, kw)) return true;
+        }
+      }
+      return false;
+    }
+
+    // 渲染树形表格
+    function renderTree() {
+      const status = document.getElementById('statusFilter').value;
+      const tbody = document.getElementById('orgTreeBody');
+      const empty = document.getElementById('emptyState');
+
+      let hasAny = false;
+      const kw = searchKeyword.toLowerCase();
+
+      // 如果有关键词，自动展开匹配路径
+      if (kw) {
+        expandedIds = collectMatchIds(orgTree, kw);
+      }
+
+      const html = orgTree.map(node => renderNode(node, 0, status, kw)).join('');
+
+      if (!html.trim()) {
+        tbody.innerHTML = '';
+        empty.style.display = 'block';
+        return;
+      }
+      empty.style.display = 'none';
+      tbody.innerHTML = html;
+    }
+
+    // 递归收集所有匹配节点的祖先 ID
+    function collectMatchIds(nodes, kw, result) {
+      result = result || new Set();
+      nodes.forEach(n => {
+        if (nodeMatches(n, kw)) {
+          result.add(n.id);
+          // 展开祖先（从根到这里的路径上的所有节点）
+          collectAncestors(n.id, result);
+        }
+        if (n.children) collectMatchIds(n.children, kw, result);
+      });
+      return result;
+    }
+
+    function collectAncestors(id, result) {
+      const node = flatOrgs.find(o => o.id === id);
+      if (node && node.parent_id) {
+        result.add(node.parent_id);
+        collectAncestors(node.parent_id, result);
+      }
+    }
+
+    function renderNode(node, level, statusFilter, kw) {
+      // 状态过滤
+      if (statusFilter && node.status !== statusFilter) return '';
+
+      const isExpanded = expandedIds.has(node.id);
+      const hasChildren = node.children && node.children.length > 0;
+      const isMatched = kw && nodeMatches(node, kw);
+
+      // 构建行 HTML
+      const indent = level > 0 ? '<span class="org-tree-indent"></span>'.repeat(level) : '';
+      const toggle = hasChildren
+        ? `<span class="org-tree-toggle" onclick="toggleExpand(${node.id}, event)"><i class="fas fa-chevron-${isExpanded ? 'down' : 'right'}" style="font-size:10px"></i></span>`
+        : '<span class="org-tree-indent" style="width:20px"></span>';
+
+      // LLM配额：使用 Organization.max_llm_tokens_per_day（数据库真实字段）
+      const llmQuota = node.max_llm_tokens_per_day || 0;
+      const llmUsed = node.llm_used || 0;
+      const llmPct = llmQuota > 0 ? Math.min(100, Math.round(llmUsed / llmQuota * 100)) : 0;
+      const llmDisplay = llmQuota > 0 ? `${llmUsed} / ${llmQuota}` : `${llmUsed} / 不限`;
+
+      let row = `<tr class="org-tree-row ${isMatched ? 'matched' : ''}">
+        <td class="px-6 py-4">
+          <div style="display:flex;align-items:center;">
+            ${indent}${toggle}
+            <div>
+              <div class="font-medium text-sm text-gray-800">${escapeHtml(node.name)}</div>
+              <div class="text-xs text-gray-400">ID: ${node.id}</div>
+            </div>
+          </div>
+        </td>
+        <td class="px-6 py-4 text-sm text-gray-600">${escapeHtml(node.code || node.slug || '-')}</td>
+        <td class="px-6 py-4"><span class="status-badge status-${node.status}">${statusLabel(node.status)}</span></td>
+        <td class="px-6 py-4">
+          <div class="quota-bar"><div class="quota-fill" style="width:${llmPct}%"></div></div>
+          <div class="quota-text">${llmDisplay}</div>
+        </td>
+        <td class="px-6 py-4 text-sm text-gray-600">${node.member_count||0}</td>
+        <td class="px-6 py-4 text-center">
+          <div class="flex items-center justify-center gap-2">
+            <button class="text-blue-600 hover:text-blue-800 text-xs px-2 py-1 rounded hover:bg-blue-50" onclick="editOrg(${node.id})">编辑</button>
+            <button class="text-indigo-600 hover:text-indigo-800 text-xs px-2 py-1 rounded hover:bg-indigo-50" onclick="location.href='/pages/org-members.html?id=${node.id}'">成员</button>
+            ${node.id !== 1 ? `<button class="text-red-600 hover:text-red-800 text-xs px-2 py-1 rounded hover:bg-red-50" onclick="archiveOrg(${node.id})">归档</button>` : ''}
+          </div>
+        </td>
+      </tr>`;
+
+      // 递归渲染子节点（如果展开）
+      if (hasChildren && isExpanded) {
+        node.children.forEach(child => {
+          row += renderNode(child, level + 1, statusFilter, kw);
+        });
+      }
+
+      return row;
+    }
+
+    function toggleExpand(id, event) {
+      event.stopPropagation();
+      if (expandedIds.has(id)) {
+        expandedIds.delete(id);
+      } else {
+        expandedIds.add(id);
+      }
+      renderTree();
+    }
+
+    function expandAll() {
+      flatOrgs.forEach(o => expandedIds.add(o.id));
+      renderTree();
+    }
+
+    function collapseAll() {
+      expandedIds.clear();
+      expandedIds.add(1); // 保留根组织展开
+      renderTree();
+    }
+
+    function onSearch() {
+      searchKeyword = document.getElementById('searchInput').value.trim();
+      renderTree();
+    }
+
+    function openModal(id) {
+      editingId = id || null;
+      document.getElementById('modalTitle').textContent = id ? '编辑组织' : '新建组织';
+      document.getElementById('orgModal').classList.add('active');
+      populateParentSelect();
+      if (!id) {
+        document.getElementById('orgName').value = '';
+        document.getElementById('orgSlug').value = '';
+        document.getElementById('orgParent').value = '0';
+        document.getElementById('orgStatus').value = 'active';
+        document.getElementById('llmQuota').value = 1000;
+      }
+    }
+
+    function closeModal() {
+      document.getElementById('orgModal').classList.remove('active');
+      editingId = null;
+    }
+
+    function populateParentSelect() {
+      const sel = document.getElementById('orgParent');
+      const currentVal = sel.value;
+      let html = '<option value="0">（无 - 根组织）</option>';
+      flatOrgs.forEach(o => {
+        // 编辑时不能选择自己及其子节点作为父节点
+        if (editingId && (o.id === editingId || isDescendant(o.id, editingId))) return;
+        const indent = '&nbsp;&nbsp;'.repeat(o.level || 0);
+        html += `<option value="${o.id}">${indent}${escapeHtml(o.name)}</option>`;
+      });
+      sel.innerHTML = html;
+      if (currentVal) sel.value = currentVal;
+    }
+
+    function isDescendant(childId, ancestorId) {
+      const child = flatOrgs.find(o => o.id === childId);
+      if (!child || !child.parent_id) return false;
+      if (child.parent_id === ancestorId) return true;
+      return isDescendant(child.parent_id, ancestorId);
+    }
+
+    function editOrg(id) {
+      const o = flatOrgs.find(x => x.id === id);
+      if (!o) return;
+      openModal(id);
+      document.getElementById('orgName').value = o.name;
+      document.getElementById('orgSlug').value = o.code || o.slug || '';
+      document.getElementById('orgParent').value = String(o.parent_id || 0);
+      document.getElementById('orgStatus').value = o.status;
+      document.getElementById('llmQuota').value = o.llm_quota || 1000;
+    }
+
+    async function saveOrg() {
+      const payload = {
+        name: document.getElementById('orgName').value.trim(),
+        slug: document.getElementById('orgSlug').value.trim(),
+        parent_id: parseInt(document.getElementById('orgParent').value) || 0,
+        status: document.getElementById('orgStatus').value,
+        llm_quota: parseInt(document.getElementById('llmQuota').value),
+      };
+      if (!payload.name) { showToast('请输入组织名称', 'error'); return; }
+      try {
+        if (editingId) {
+          await apiFetch(`/api/v1/organizations/${editingId}`, { method: 'PUT', body: payload });
+        } else {
+          await apiFetch('/api/v1/organizations', { method: 'POST', body: payload });
+        }
+        closeModal();
+        showToast('保存成功', 'success');
+        await loadOrgs();
+      } catch (e) {
+        showToast('保存失败: ' + (e.message || '未知错误'), 'error');
+      }
+    }
+
+    async function archiveOrg(id) {
+      if (id === 1) { showToast('根组织不能归档', 'error'); return; }
+      if (!confirm('确定要归档该组织吗？归档后组织内项目将暂停评审。')) return;
+      try {
+        await apiFetch(`/api/v1/organizations/${id}/archive`, { method: 'POST' });
+        showToast('归档成功', 'success');
+        await loadOrgs();
+      } catch (e) {
+        showToast('归档失败: ' + (e.message || '未知错误'), 'error');
+      }
+    }
+
+    function statusLabel(s) {
+      const map = { active: '正常', suspended: '暂停', archived: '归档' };
+      return map[s] || s;
+    }
+    function escapeHtml(t) {
+      if (!t) return '';
+      return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+    function formatNumber(n) {
+      if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+      if (n >= 1000) return (n/1000).toFixed(1) + 'K';
+      return n;
+    }
+
+    // 加载保护
+    function ensureApiFetch(fn, retries) {
+        retries = retries || 0;
+        if (window.apiFetch) { fn(); return; }
+        if (retries >= 50) {
+            showToast('页面加载失败，请刷新重试', 'error');
+            document.getElementById('orgTreeBody').innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center text-gray-500">加载失败，请刷新重试</td></tr>';
+            return;
+        }
+        setTimeout(function() { ensureApiFetch(fn, retries + 1); }, 100);
+    }
+    ensureApiFetch(loadOrgs);
+</script>
+</body>
+</html>

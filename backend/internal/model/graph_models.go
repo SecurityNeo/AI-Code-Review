@@ -1,10 +1,16 @@
 package model
 
-import "time"
+import (
+	"errors"
+	"time"
+
+	"gorm.io/gorm"
+)
 
 // GraphScanTask 全量扫描任务
 type GraphScanTask struct {
 	ID            uint64     `gorm:"column:id;primaryKey;autoIncrement"`
+	OrgID         uint       `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
 	ProjectID     uint64     `gorm:"column:project_id;not null;index:idx_project_status"`
 	Branch        string     `gorm:"column:branch;not null;default:'main'"`
 	ScanType      string     `gorm:"column:scan_type;size:32;not null;default:'full'"` // full | incremental
@@ -30,6 +36,7 @@ func (GraphScanTask) TableName() string {
 // GraphVersion 基线版本快照
 type GraphVersion struct {
 	ID             uint64     `gorm:"column:id;primaryKey;autoIncrement"`
+	OrgID          uint       `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
 	ProjectID      uint64     `gorm:"column:project_id;not null;index"`
 	Branch         string     `gorm:"column:branch;not null"`
 	CommitHash     string     `gorm:"column:commit_hash;size:64;not null"`
@@ -38,6 +45,24 @@ type GraphVersion struct {
 	ScanType       string     `gorm:"column:scan_type;size:32;not null"`
 	LastFullScanAt *time.Time `gorm:"column:last_full_scan_at"`
 	CreatedAt      time.Time  `gorm:"column:created_at;autoCreateTime"`
+}
+
+// BeforeUpdate GORM hook: 防止 org_id 被修改
+func (gv *GraphVersion) BeforeUpdate(tx *gorm.DB) error {
+	if tx.Statement == nil {
+		return nil
+	}
+	switch dest := tx.Statement.Dest.(type) {
+	case map[string]interface{}:
+		if _, exists := dest["org_id"]; exists {
+			return errors.New("org_id cannot be modified on GraphVersion")
+		}
+	case *GraphVersion:
+		if dest.OrgID != 0 && dest.OrgID != gv.OrgID {
+			return errors.New("org_id cannot be modified on GraphVersion")
+		}
+	}
+	return nil
 }
 
 // TableName 指定表名

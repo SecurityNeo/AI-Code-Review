@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ai-optimizer/backend/internal/middleware"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
 	"github.com/ai-optimizer/backend/internal/vectorstore"
@@ -31,7 +32,12 @@ func NewIncubatorHandler(store vectorstore.Store) *IncubatorHandler {
 // Status returns incubator status and embedding availability.
 // GET /api/v1/incubator/status
 func (h *IncubatorHandler) Status(c *gin.Context) {
-	data, err := h.svc.Status()
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+	data, err := h.svc.Status(scope)
 	if err != nil {
 		zap.L().Error("incubator status failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -43,6 +49,11 @@ func (h *IncubatorHandler) Status(c *gin.Context) {
 // ListIssues returns unmatched review issues.
 // GET /api/v1/incubator/issues
 func (h *IncubatorHandler) ListIssues(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	if pageSize > 100 {
@@ -65,11 +76,21 @@ func (h *IncubatorHandler) ListIssues(c *gin.Context) {
 		filter.ProjectID = uint(pid)
 	}
 
-	issues, total, err := h.svc.ListUnmatchedIssues(filter)
+	issues, total, err := h.svc.ListUnmatchedIssues(scope, filter)
 	if err != nil {
 		zap.L().Error("list unmatched issues failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
+	}
+
+	// 批量填充组织名称
+	orgIDs := make([]uint, 0, len(issues))
+	for _, iss := range issues {
+		orgIDs = append(orgIDs, iss.OrgID)
+	}
+	orgNameMap := model.BatchOrgNames(orgIDs)
+	for i := range issues {
+		issues[i].OrgName = orgNameMap[issues[i].OrgID]
 	}
 
 	c.JSON(200, gin.H{
@@ -84,6 +105,11 @@ func (h *IncubatorHandler) ListIssues(c *gin.Context) {
 // Cluster triggers keyword clustering on unmatched issues.
 // POST /api/v1/incubator/cluster
 func (h *IncubatorHandler) Cluster(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var req struct {
 		TimeRangeDays int      `json:"time_range_days"`
 		Languages     []string `json:"languages"`
@@ -95,7 +121,7 @@ func (h *IncubatorHandler) Cluster(c *gin.Context) {
 		return
 	}
 
-	job, err := h.svc.ClusterIssues(req.TimeRangeDays, req.Languages, req.MinGroupSize)
+	job, err := h.svc.ClusterIssues(scope, req.TimeRangeDays, req.Languages, req.MinGroupSize)
 	if err != nil {
 		zap.L().Error("cluster issues failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -114,6 +140,11 @@ func (h *IncubatorHandler) Cluster(c *gin.Context) {
 // GetClusterJob returns a cluster job status with parsed summary.
 // GET /api/v1/incubator/cluster/jobs/:id
 func (h *IncubatorHandler) GetClusterJob(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
 	var job model.RuleIncubationJob
 	if err := model.DB.First(&job, uint(id)).Error; err != nil {
@@ -151,6 +182,11 @@ func (h *IncubatorHandler) GetClusterJob(c *gin.Context) {
 // CreateCandidate creates a candidate rule from selected issues.
 // POST /api/v1/incubator/candidates
 func (h *IncubatorHandler) CreateCandidate(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var req service.CreateCandidateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "参数错误: " + err.Error()})
@@ -158,7 +194,7 @@ func (h *IncubatorHandler) CreateCandidate(c *gin.Context) {
 	}
 
 	userID, _ := c.Get("user_id")
-	cand, err := h.svc.CreateCandidate(req, userID.(uint))
+	cand, err := h.svc.CreateCandidate(scope, req, userID.(uint))
 	if err != nil {
 		zap.L().Error("create candidate failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -178,17 +214,32 @@ func (h *IncubatorHandler) CreateCandidate(c *gin.Context) {
 // ListCandidates lists incubation candidates.
 // GET /api/v1/incubator/candidates
 func (h *IncubatorHandler) ListCandidates(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	status := c.Query("status")
 	keyword := c.Query("keyword")
 	severity := c.Query("severity")
 
-	list, total, err := h.svc.ListCandidates(status, keyword, severity, page, pageSize)
+	list, total, err := h.svc.ListCandidates(scope, status, keyword, severity, page, pageSize)
 	if err != nil {
 		zap.L().Error("list candidates failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
+	}
+
+	// 批量填充组织名称
+	orgIDs := make([]uint, 0, len(list))
+	for _, cnd := range list {
+		orgIDs = append(orgIDs, cnd.OrgID)
+	}
+	orgNameMap := model.BatchOrgNames(orgIDs)
+	for i := range list {
+		list[i].OrgName = orgNameMap[list[i].OrgID]
 	}
 
 	c.JSON(200, gin.H{
@@ -203,8 +254,13 @@ func (h *IncubatorHandler) ListCandidates(c *gin.Context) {
 // GetCandidate returns a candidate with source issues.
 // GET /api/v1/incubator/candidates/:id
 func (h *IncubatorHandler) GetCandidate(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
-	cand, issues, err := h.svc.GetCandidate(uint(id))
+	cand, issues, err := h.svc.GetCandidate(scope, uint(id))
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(404, gin.H{"error": "候选规则不存在"})
@@ -226,6 +282,11 @@ func (h *IncubatorHandler) GetCandidate(c *gin.Context) {
 // UpdateCandidate edits a candidate.
 // PUT /api/v1/incubator/candidates/:id
 func (h *IncubatorHandler) UpdateCandidate(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
 	var req map[string]any
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -233,7 +294,7 @@ func (h *IncubatorHandler) UpdateCandidate(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.UpdateCandidate(uint(id), req); err != nil {
+	if err := h.svc.UpdateCandidate(scope, uint(id), req); err != nil {
 		zap.L().Error("update candidate failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -245,8 +306,13 @@ func (h *IncubatorHandler) UpdateCandidate(c *gin.Context) {
 // DeleteCandidate marks a candidate as rejected.
 // DELETE /api/v1/incubator/candidates/:id
 func (h *IncubatorHandler) DeleteCandidate(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err := h.svc.DeleteCandidate(uint(id)); err != nil {
+	if err := h.svc.DeleteCandidate(scope, uint(id)); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
@@ -256,6 +322,12 @@ func (h *IncubatorHandler) DeleteCandidate(c *gin.Context) {
 // PublishCandidate publishes a candidate as a real rule.
 // POST /api/v1/incubator/candidates/:id/publish
 func (h *IncubatorHandler) PublishCandidate(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
 	var req service.PublishRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -264,7 +336,7 @@ func (h *IncubatorHandler) PublishCandidate(c *gin.Context) {
 	}
 
 	userID, _ := c.Get("user_id")
-	ruleID, err := h.svc.PublishCandidate(uint(id), req, userID.(uint))
+	ruleID, err := h.svc.PublishCandidate(scope, middleware.GetCurrentOrgID(c), uint(id), req, userID.(uint))
 	if err != nil {
 		zap.L().Error("publish candidate failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -283,8 +355,13 @@ func (h *IncubatorHandler) PublishCandidate(c *gin.Context) {
 // GetSimilarGraph returns the similarity graph for a candidate rule.
 // GET /api/v1/incubator/candidates/:id/similar-graph
 func (h *IncubatorHandler) GetSimilarGraph(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
-	data, err := h.svc.GetSimilarGraph(uint(id))
+	data, err := h.svc.GetSimilarGraph(scope, uint(id))
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(404, gin.H{"error": "候选规则不存在"})
@@ -299,19 +376,29 @@ func (h *IncubatorHandler) GetSimilarGraph(c *gin.Context) {
 // GetConfig returns incubator configuration.
 // GET /api/v1/incubator/config
 func (h *IncubatorHandler) GetConfig(c *gin.Context) {
-	cfg := h.svc.GetConfig()
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+	cfg := h.svc.GetConfig(scope)
 	c.JSON(200, gin.H{"code": 0, "data": cfg})
 }
 
 // SaveConfig updates incubator configuration.
 // PUT /api/v1/incubator/config
 func (h *IncubatorHandler) SaveConfig(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var req map[string]any
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "参数错误"})
 		return
 	}
-	if err := h.svc.SaveConfig(req); err != nil {
+	if err := h.svc.SaveConfig(scope, req); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
@@ -322,6 +409,11 @@ func (h *IncubatorHandler) SaveConfig(c *gin.Context) {
 // POST /api/v1/incubator/config/validate-embedding
 // Supports passing model_id to test a newly selected model before saving configuration.
 func (h *IncubatorHandler) ValidateEmbedding(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var req struct {
 		ModelID uint `json:"model_id"`
 	}
@@ -363,7 +455,7 @@ func (h *IncubatorHandler) ValidateEmbedding(c *gin.Context) {
 	}
 
 	zap.L().Info("ValidateEmbedding: testing model", zap.Uint("model_id", req.ModelID))
-	data, err := h.svc.ValidateEmbedding(req.ModelID)
+	data, err := h.svc.ValidateEmbedding(scope, req.ModelID)
 	if err != nil {
 		c.JSON(200, gin.H{"code": 0, "data": map[string]any{"available": false, "error": err.Error()}})
 		return
@@ -374,14 +466,24 @@ func (h *IncubatorHandler) ValidateEmbedding(c *gin.Context) {
 // VectorizeRules triggers a background job to vectorize all existing enabled rules.
 // POST /api/v1/incubator/vectorize-rules
 func (h *IncubatorHandler) VectorizeRules(c *gin.Context) {
-	go h.svc.EnsureRuleEmbeddings()
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+	go h.svc.EnsureRuleEmbeddings(scope)
 	c.JSON(200, gin.H{"code": 0, "message": "已有规则向量化任务已在后台启动"})
 }
 
 // VectorizationStatus returns the current progress of rule embedding generation.
 // GET /api/v1/incubator/vectorization-status
 func (h *IncubatorHandler) VectorizationStatus(c *gin.Context) {
-	total, done, running := h.svc.GetVectorizationStatus()
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+	total, done, running := h.svc.GetVectorizationStatus(scope)
 	c.JSON(200, gin.H{"code": 0, "data": map[string]any{
 		"total":   total,
 		"done":    done,
@@ -392,8 +494,13 @@ func (h *IncubatorHandler) VectorizationStatus(c *gin.Context) {
 // TriggerRefine queues a refine job for a candidate.
 // POST /api/v1/incubator/candidates/:id/refine
 func (h *IncubatorHandler) TriggerRefine(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
-	job, err := service.QueueJob("refine", map[string]any{"incubation_id": uint(id)})
+	job, err := service.QueueJob(scope, "refine", map[string]any{"incubation_id": uint(id)})
 	if err != nil {
 		zap.L().Error("queue refine job failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -405,8 +512,13 @@ func (h *IncubatorHandler) TriggerRefine(c *gin.Context) {
 // TriggerSimilarCheck queues a similar-rule check job.
 // POST /api/v1/incubator/candidates/:id/similar-check
 func (h *IncubatorHandler) TriggerSimilarCheck(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
-	job, err := service.QueueJob("similar_check", map[string]any{"incubation_id": uint(id)})
+	job, err := service.QueueJob(scope, "similar_check", map[string]any{"incubation_id": uint(id)})
 	if err != nil {
 		zap.L().Error("queue similar_check job failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -418,8 +530,13 @@ func (h *IncubatorHandler) TriggerSimilarCheck(c *gin.Context) {
 // TriggerSandboxTest queues a sandbox test job.
 // POST /api/v1/incubator/candidates/:id/test
 func (h *IncubatorHandler) TriggerSandboxTest(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
-	job, err := service.QueueJob("sandbox_test", map[string]any{"incubation_id": uint(id)})
+	job, err := service.QueueJob(scope, "sandbox_test", map[string]any{"incubation_id": uint(id)})
 	if err != nil {
 		zap.L().Error("queue sandbox_test job failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -431,6 +548,11 @@ func (h *IncubatorHandler) TriggerSandboxTest(c *gin.Context) {
 // Pipeline returns the full incubation pipeline visualization data.
 // GET /api/v1/incubator/pipeline
 func (h *IncubatorHandler) Pipeline(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	jobIDStr := c.Query("job_id")
 	var jobID *uint
 	if jobIDStr != "" {
@@ -440,7 +562,7 @@ func (h *IncubatorHandler) Pipeline(c *gin.Context) {
 			jobID = &uid
 		}
 	}
-	status, err := h.svc.GetPipelineStatus(jobID)
+	status, err := h.svc.GetPipelineStatus(scope, jobID)
 	if err != nil {
 		zap.L().Error("get pipeline status failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -452,6 +574,12 @@ func (h *IncubatorHandler) Pipeline(c *gin.Context) {
 // SubscribePipelineEvents SSE endpoint for real-time pipeline status updates.
 // GET /api/v1/incubator/pipeline/events?job_id=xxx
 func (h *IncubatorHandler) SubscribePipelineEvents(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	jobIDStr := c.Query("job_id")
 	jobID, err := strconv.ParseInt(jobIDStr, 10, 64)
 	if err != nil || jobID <= 0 {
@@ -514,8 +642,13 @@ func (h *IncubatorHandler) SubscribePipelineEvents(c *gin.Context) {
 // CandidateTrace returns the full bloodline trace of a candidate rule.
 // GET /api/v1/incubator/candidates/:id/trace
 func (h *IncubatorHandler) CandidateTrace(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
-	trace, err := h.svc.GetCandidateTrace(uint(id))
+	trace, err := h.svc.GetCandidateTrace(scope, uint(id))
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(404, gin.H{"error": "candidate not found"})
@@ -531,8 +664,13 @@ func (h *IncubatorHandler) CandidateTrace(c *gin.Context) {
 // IssueTrace returns the full lifecycle trace of a review issue.
 // GET /api/v1/incubator/issues/:id/trace
 func (h *IncubatorHandler) IssueTrace(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
-	trace, err := h.svc.GetIssueTrace(uint(id))
+	trace, err := h.svc.GetIssueTrace(scope, uint(id))
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(404, gin.H{"error": "issue not found"})
@@ -548,6 +686,11 @@ func (h *IncubatorHandler) IssueTrace(c *gin.Context) {
 // RetroMatch queues a retroactive matching job for a published rule.
 // POST /api/v1/incubator/retro-match
 func (h *IncubatorHandler) RetroMatch(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var req struct {
 		RuleID       uint    `json:"rule_id" binding:"required"`
 		LookbackDays int     `json:"lookback_days"`
@@ -557,7 +700,7 @@ func (h *IncubatorHandler) RetroMatch(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "参数错误: " + err.Error()})
 		return
 	}
-	job, err := service.QueueJob("retro_match", map[string]any{
+	job, err := service.QueueJob(scope, "retro_match", map[string]any{
 		"rule_id":       req.RuleID,
 		"lookback_days": req.LookbackDays,
 		"threshold":     req.Threshold,
@@ -573,6 +716,11 @@ func (h *IncubatorHandler) RetroMatch(c *gin.Context) {
 // RuleHealth returns the health overview of published rules.
 // GET /api/v1/incubator/health/rules
 func (h *IncubatorHandler) RuleHealth(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	if page < 1 {
 		page = 1
@@ -587,7 +735,7 @@ func (h *IncubatorHandler) RuleHealth(c *gin.Context) {
 	alertOnly := c.Query("alert_only") == "true"
 
 	var rules []model.ReviewRule
-	if err := model.DB.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
+	if err := model.DB.Scopes(model.OrgScope(scope)).Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
 		zap.L().Error("load rules for health failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -597,16 +745,16 @@ func (h *IncubatorHandler) RuleHealth(c *gin.Context) {
 	var result []gin.H
 	for _, rule := range rules {
 		var hitCount int64
-		model.DB.Model(&model.ReviewIssue{}).Where("rule_id = ? AND created_at >= ?", rule.ID, sevenDaysAgo).Count(&hitCount)
+		model.DB.Scopes(model.OrgScope(scope)).Model(&model.ReviewIssue{}).Where("rule_id = ? AND created_at >= ?", rule.ID, sevenDaysAgo).Count(&hitCount)
 
 		var missedCount int64
-		model.DB.Model(&model.ReviewIssue{}).
+		model.DB.Scopes(model.OrgScope(scope)).Model(&model.ReviewIssue{}).
 			Where("rule_id IS NULL AND created_at >= ? AND category = ?", sevenDaysAgo, rule.Category).
 			Count(&missedCount)
 
 		var totalIssues, rejectedIssues int64
-		model.DB.Model(&model.ReviewIssue{}).Where("rule_id = ?", rule.ID).Count(&totalIssues)
-		model.DB.Model(&model.ReviewIssue{}).Where("rule_id = ? AND status = ?", rule.ID, "false_positive").Count(&rejectedIssues)
+		model.DB.Scopes(model.OrgScope(scope)).Model(&model.ReviewIssue{}).Where("rule_id = ?", rule.ID).Count(&totalIssues)
+		model.DB.Scopes(model.OrgScope(scope)).Model(&model.ReviewIssue{}).Where("rule_id = ? AND status = ?", rule.ID, "false_positive").Count(&rejectedIssues)
 
 		rejectRate := float64(0)
 		if totalIssues > 0 {
@@ -688,6 +836,11 @@ func (h *IncubatorHandler) RuleHealth(c *gin.Context) {
 // RunPipeline triggers a full automated pipeline run (cluster → refine → similar → test).
 // POST /api/v1/incubator/pipeline/run
 func (h *IncubatorHandler) RunPipeline(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var req struct {
 		TimeRangeDays int `json:"time_range_days"`
 		MinGroupSize  int `json:"min_group_size"`
@@ -696,7 +849,7 @@ func (h *IncubatorHandler) RunPipeline(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "参数错误: " + err.Error()})
 		return
 	}
-	job, err := h.svc.RunPipeline(req.TimeRangeDays, req.MinGroupSize)
+	job, err := h.svc.RunPipeline(scope, req.TimeRangeDays, req.MinGroupSize)
 	if err != nil {
 		if running, ok := err.(*service.ErrPipelineRunning); ok {
 			c.JSON(409, gin.H{

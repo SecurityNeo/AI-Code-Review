@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ai-optimizer/backend/internal/middleware"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
 	"github.com/ai-optimizer/backend/internal/service/pipeline"
@@ -23,6 +24,11 @@ func NewPipelineHandler(hub *service.PipelineSSEHub) *PipelineHandler {
 
 // GetPipelineStatus 获取任务的 Pipeline 执行状态
 func (h *PipelineHandler) GetPipelineStatus(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	taskID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(400, gin.H{"error": "invalid task id"})
@@ -31,7 +37,11 @@ func (h *PipelineHandler) GetPipelineStatus(c *gin.Context) {
 
 	// 检查是否存在 Pipeline 执行记录
 	var count int64
-	model.DB.Model(&model.TaskPipelineExecution{}).Where("task_id = ?", taskID).Count(&count)
+	q := model.DB.Model(&model.TaskPipelineExecution{}).Where("task_id = ?", taskID)
+	if !scope.IsSuperAdmin {
+		q = q.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	q.Count(&count)
 	if count == 0 {
 		c.JSON(200, gin.H{
 			"task_id":     taskID,
@@ -43,14 +53,22 @@ func (h *PipelineHandler) GetPipelineStatus(c *gin.Context) {
 
 	// 查询所有阶段（parent_id IS NULL 的顶层阶段）
 	var executions []model.TaskPipelineExecution
-	if err := model.DB.Where("task_id = ? AND parent_id IS NULL", taskID).Order("sort_order ASC").Find(&executions).Error; err != nil {
+	execQuery := model.DB.Where("task_id = ? AND parent_id IS NULL", taskID).Order("sort_order ASC")
+	if !scope.IsSuperAdmin {
+		execQuery = execQuery.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	if err := execQuery.Find(&executions).Error; err != nil {
 		c.JSON(500, gin.H{"error": "查询失败"})
 		return
 	}
 
 	// 兜底：若 count>0 但顶层阶段为空，说明数据异常，回退查询全部记录
 	if len(executions) == 0 && count > 0 {
-		model.DB.Where("task_id = ?", taskID).Order("sort_order ASC, id ASC").Find(&executions)
+		fallbackQuery := model.DB.Where("task_id = ?", taskID).Order("sort_order ASC, id ASC")
+		if !scope.IsSuperAdmin {
+			fallbackQuery = fallbackQuery.Where("org_id IN ?", scope.VisibleOrgIDs)
+		}
+		fallbackQuery.Find(&executions)
 	}
 
 	// 构建树形响应
@@ -73,7 +91,11 @@ func (h *PipelineHandler) GetPipelineStatus(c *gin.Context) {
 
 	// 计算整体进度
 	var task model.Task
-	model.DB.First(&task, taskID)
+	taskQuery := model.DB
+	if !scope.IsSuperAdmin {
+		taskQuery = taskQuery.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	taskQuery.First(&task, taskID)
 	overallStatus := string(task.Status)
 	if overallStatus == string(model.TaskRunning) && len(stages) > 0 {
 		// 若任务仍在 running，以 pipeline 最后一个阶段状态为准
@@ -97,6 +119,11 @@ func (h *PipelineHandler) GetPipelineStatus(c *gin.Context) {
 
 // GetStageDetail 获取阶段详情（含输入输出快照）
 func (h *PipelineHandler) GetStageDetail(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	execID, err := strconv.Atoi(c.Param("execution_id"))
 	if err != nil {
 		c.JSON(400, gin.H{"error": "invalid execution id"})
@@ -104,7 +131,11 @@ func (h *PipelineHandler) GetStageDetail(c *gin.Context) {
 	}
 
 	var exec model.TaskPipelineExecution
-	if err := model.DB.First(&exec, execID).Error; err != nil {
+	db := model.DB
+	if !scope.IsSuperAdmin {
+		db = db.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	if err := db.First(&exec, execID).Error; err != nil {
 		c.JSON(404, gin.H{"error": "阶段不存在"})
 		return
 	}
@@ -174,9 +205,21 @@ func (h *PipelineHandler) GetStageDetail(c *gin.Context) {
 
 // SubscribePipelineEvents SSE 推送 Pipeline 事件（事件驱动为主， ticker 兜底）
 func (h *PipelineHandler) SubscribePipelineEvents(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	taskID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(400, gin.H{"error": "invalid task id"})
+		return
+	}
+
+	// 权限校验：用户必须能访问该任务
+	if !CanAccessTask(scope, uint(taskID)) {
+		c.JSON(403, gin.H{"error": "无权访问此任务"})
 		return
 	}
 
@@ -186,7 +229,11 @@ func (h *PipelineHandler) SubscribePipelineEvents(c *gin.Context) {
 
 	// 检查任务是否存在 Pipeline 记录
 	var count int64
-	model.DB.Model(&model.TaskPipelineExecution{}).Where("task_id = ?", taskID).Count(&count)
+	countQuery := model.DB.Model(&model.TaskPipelineExecution{}).Where("task_id = ?", taskID)
+	if !scope.IsSuperAdmin {
+		countQuery = countQuery.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	countQuery.Count(&count)
 	if count == 0 {
 		c.SSEvent("message", gin.H{"type": "legacy_mode", "task_id": taskID})
 		c.Writer.Flush()

@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MCP 接入密钥 - CodeGuard</title>
-    <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+    <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <script src="/static/js/tailwindcss.min.js"></script>
@@ -133,6 +134,7 @@
                         <thead>
                             <tr>
                                 <th>名称</th>
+                                <th>所属组织</th>
                                 <th>前缀</th>
                                 <th>绑定用户</th>
                                 <th>权限范围</th>
@@ -143,7 +145,7 @@
                             </tr>
                         </thead>
                         <tbody id="keyTableBody">
-                            <tr><td colspan="8" style="text-align:center; padding:2rem; color:#94a3b8;">加载中...</td></tr>
+                            <tr><td colspan="9" style="text-align:center; padding:2rem; color:#94a3b8;">加载中...</td></tr>
                         </tbody>
                     </table>
 
@@ -192,6 +194,10 @@
             <div class="form-row">
                 <label>密钥名称 <span style="color:#ef4444">*</span></label>
                 <input type="text" id="keyName" placeholder="例如：企业微信-MCP-生产">
+            </div>
+            <div class="form-row">
+                <label>所属组织</label>
+                <select id="orgSelect"></select>
             </div>
             <div class="form-row">
                 <label>绑定用户 <span style="color:#ef4444">*</span> <span style="font-weight:400;color:#64748b;font-size:0.75rem;">绑定后该 Key 直接拥有此用户身份，调用时不再需要 X-IM-Provider / X-IM-User-ID</span></label>
@@ -317,7 +323,7 @@ async function loadKeys() {
 
         const tbody = document.getElementById('keyTableBody');
         if (keys.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:2rem; color:#94a3b8;">暂无数据</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:2rem; color:#94a3b8;">暂无数据</td></tr>';
         } else {
             tbody.innerHTML = keys.map(k => {
                 let scopes = [];
@@ -332,6 +338,7 @@ async function loadKeys() {
                 return `
                     <tr style="cursor:pointer;" onclick="viewKeyDetail(${k.id})">
                         <td style="font-weight:500; color:var(--text-primary);">${escapeHtml(k.name)}</td>
+                        <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(k.org_name || '根组织')}</td>
                         <td><code style="background:#f1f5f9; padding:0.15rem 0.4rem; border-radius:0.25rem; font-size:0.8125rem;">${escapeHtml(k.prefix)}...</code></td>
                         <td>${escapeHtml(boundUser)}</td>
                         <td><span class="badge badge-gray" title="${escapeHtml(scopes.join(', '))}">${scopes.length} 个</span></td>
@@ -353,7 +360,7 @@ async function loadKeys() {
         updateConfigDisplay();
     } catch (err) {
         console.error('load keys failed', err);
-        document.getElementById('keyTableBody').innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:#ef4444;">加载失败: ${err.message}</td></tr>`;
+        document.getElementById('keyTableBody').innerHTML = `<tr><td colspan="9" style="text-align:center; padding:2rem; color:#ef4444;">加载失败: ${err.message}</td></tr>`;
     }
 }
 
@@ -470,6 +477,7 @@ function openKeyModal(mode, keyId) {
         btnEl.textContent = '创建并显示密钥';
     }
 
+    loadOrgSelect('orgSelect', mode === 'edit' ? ((window.keysCache || []).find(k => k.id === keyId)?.org_id || null) : null);
     document.getElementById('createModal').classList.add('active');
 }
 
@@ -497,28 +505,31 @@ async function saveKey() {
     const rateLimit = parseInt(document.getElementById('rateLimit').value) || 100;
     const expiresAt = document.getElementById('expiresAt').value || null;
 
-    try {
-        if (keyModalMode === 'create') {
-            const res = await apiFetch(`${API_BASE}/mcp-keys`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, scopes, user_id: userId, ip_whitelist: ipWhitelist, rate_limit: rateLimit, expires_at: expiresAt })
-            });
-            const json = await res.json();
-            if (json.data && json.data.full_key) {
-                document.getElementById('fullKeyDisplay').textContent = json.data.full_key;
-                closeCreateModal();
-                document.getElementById('showKeyModal').classList.add('active');
-                loadKeys();
-            } else {
-                alert('创建失败: ' + (json.error || '未知错误'));
-            }
-        } else {
-            const res = await apiFetch(`${API_BASE}/mcp-keys/${editingKeyId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, scopes, user_id: userId, ip_whitelist: ipWhitelist, rate_limit: rateLimit, expires_at: expiresAt })
-            });
+     try {
+         let payload = { name, scopes, user_id: userId, ip_whitelist: ipWhitelist, rate_limit: rateLimit, expires_at: expiresAt };
+         injectOrgId(payload, 'orgSelect');
+         const orgHeaders = getOrgOverrideHeaders('orgSelect');
+         if (keyModalMode === 'create') {
+             const res = await apiFetch(`${API_BASE}/mcp-keys`, {
+                 method: 'POST',
+                 headers: { ...orgHeaders, 'Content-Type': 'application/json' },
+                 body: JSON.stringify(payload)
+             });
+             const json = await res.json();
+             if (json.data && json.data.full_key) {
+                 document.getElementById('fullKeyDisplay').textContent = json.data.full_key;
+                 closeCreateModal();
+                 document.getElementById('showKeyModal').classList.add('active');
+                 loadKeys();
+             } else {
+                 alert('创建失败: ' + (json.error || '未知错误'));
+             }
+         } else {
+             const res = await apiFetch(`${API_BASE}/mcp-keys/${editingKeyId}`, {
+                 method: 'PUT',
+                 headers: { ...orgHeaders, 'Content-Type': 'application/json' },
+                 body: JSON.stringify(payload)
+             });
             const json = await res.json();
             if (json.message === 'updated') {
                 showToast('修改已保存', 'success');

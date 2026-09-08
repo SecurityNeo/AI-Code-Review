@@ -48,6 +48,10 @@ func main() {
 		logger.Fatal("init database failed", zap.Error(err))
 	}
 
+	// 3.1 多租户改造：初始化 Feature Flag（从配置读取层数，默认 Layer 0 = 全局关闭）
+	middleware.InitFeatureFlag(cfg)
+	logger.Info("feature flag initialized", zap.Int("multitenancy_layer", middleware.GlobalFeatureFlag.Layer()))
+
 	// 4. 初始化加密模块
 	initEncrypt(cfg.EncryptKey)
 
@@ -78,7 +82,7 @@ func main() {
 	_, _ = cronRunner.AddFunc("@every 1m", service.RefreshSysCfgCache)
 
 	// 5.2.6. 初始化对象存储 provider
-	if err := service.InitObjectStorageProvider(); err != nil {
+	if err := service.InitObjectStorageProvider(nil); err != nil {
 		logger.Warn("init object storage provider failed", zap.Error(err))
 	}
 
@@ -90,7 +94,7 @@ func main() {
 
 	// 5.3.5. 启动规则健康检查定时 Job（每周一次）
 	if entryID, err := cronRunner.AddFunc("0 0 2 * * 1", func() {
-		if _, err := service.QueueJob("health_check", map[string]any{}); err != nil {
+		if _, err := service.QueueJob(nil, "health_check", map[string]any{}); err != nil {
 			zap.L().Warn("queue health check job failed", zap.Error(err))
 		}
 	}); err != nil {
@@ -117,28 +121,66 @@ func main() {
 
 	escalationSvc := service.NewEscalationService()
 	if entryID, err := cronRunner.AddFunc("0 0 * * * *", func() { // 每小时执行一次升级检查
-		escalationSvc.RunDailyEscalation()
+		var orgs []model.Organization
+		model.DB.Where("status = ?", "active").Find(&orgs)
+		if len(orgs) == 0 {
+			orgs = append(orgs, model.Organization{ID: 1, Name: "Root Organization"})
+		}
+		for _, org := range orgs {
+			scope := &model.UserAuthScope{CurrentOrgID: org.ID}
+			escalationSvc.RunDailyEscalation(scope)
+		}
 	}); err != nil {
 		zap.L().Error("register RunDailyEscalation cron failed", zap.Error(err))
 	} else {
 		zap.L().Sugar().Infow("RunDailyEscalation cron registered", "entryID", entryID, "spec", "0 0 * * * *")
 	}
 	if entryID, err := cronRunner.AddFunc("0 0 9 * * 1-5", func() { // 工作日 09:00 发送每日摘要
-		escalationSvc.SendDailyDigest()
+		var orgs []model.Organization
+		model.DB.Where("status = ?", "active").Find(&orgs)
+		if len(orgs) == 0 {
+			orgs = append(orgs, model.Organization{ID: 1, Name: "Root Organization"})
+		}
+		for _, org := range orgs {
+			scope := &model.UserAuthScope{CurrentOrgID: org.ID}
+			escalationSvc.SendDailyDigest(scope)
+		}
 	}); err != nil {
 		zap.L().Error("register SendDailyDigest cron failed", zap.Error(err))
 	} else {
 		zap.L().Sugar().Infow("SendDailyDigest cron registered", "entryID", entryID, "spec", "0 0 9 * * 1-5")
 	}
 
-	// 每天凌晨 2 点执行漏洞数据库同步（从所有启用的同步源）
 	if entryID, err := cronRunner.AddFunc("0 0 2 * * *", func() {
 		syncSvc := service.NewVulnerabilitySyncSourceService()
-		syncSvc.SyncAllEnabled()
+		syncSvc.SyncAllEnabled(nil)
 	}); err != nil {
 		zap.L().Error("register vuln sync sources cron failed", zap.Error(err))
 	} else {
 		zap.L().Sugar().Infow("vuln sync sources cron registered", "entryID", entryID)
+	}
+
+	// 多租户改造：每日 00:00 重置 org 级资源配额（llm_tokens_daily 等按日周期配额）
+	if entryID, err := cronRunner.AddFunc("0 0 0 * * *", func() {
+		if err := model.ResetDailyResourceQuotas(model.DB); err != nil {
+			zap.L().Error("reset daily resource quotas failed", zap.Error(err))
+		} else {
+			zap.L().Info("daily resource quotas reset completed")
+		}
+	}); err != nil {
+		zap.L().Error("register resource quota reset cron failed", zap.Error(err))
+	} else {
+		zap.L().Sugar().Infow("resource_quota_reset cron registered", "entryID", entryID, "spec", "0 0 0 * * *")
+	}
+
+	// 登录失败记录清理：每日 02:00 清理 7 天前的记录
+	if entryID, err := cronRunner.AddFunc("0 0 2 * * *", func() {
+		model.CleanupExpiredLoginAttempts()
+		zap.L().Info("login attempts cleanup completed")
+	}); err != nil {
+		zap.L().Error("register login attempt cleanup cron failed", zap.Error(err))
+	} else {
+		zap.L().Sugar().Infow("login_attempt_cleanup cron registered", "entryID", entryID, "spec", "0 0 2 * * *")
 	}
 
 	// 5.4. 启动 LLM 调用日志后台 worker（依赖 model.DB，必须在 InitDB 之后调用）
@@ -204,7 +246,7 @@ func initCron(cfg *config.Config, taskSvc *service.TaskService) *cron.Cron {
 	service.InitMRSyncCron(cronRunner)
 
 	_, _ = cronRunner.AddFunc("@every 10s", func() {
-		taskSvc.TimeoutCheck()
+		taskSvc.TimeoutCheck(nil)
 	})
 
 	cronRunner.Start()
@@ -318,6 +360,7 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 	r.GET("/vulnerability-db.html", func(c *gin.Context) {
 		c.File(frontendPath + "/vulnerability-db.html")
 	})
+	r.Static("/pages", frontendPath+"/pages")
 	r.GET("/agent-config.html", func(c *gin.Context) {
 		c.File(frontendPath + "/agent-config.html")
 	})
@@ -358,14 +401,17 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 	api.GET("/auth/gitlab", gitlabAuthHandler.Redirect)
 	api.GET("/auth/gitlab/callback", gitlabAuthHandler.Callback)
 
-	// GitLab Webhook（无需认证）
-	api.POST("/webhooks/gitlab", handler.NewWebhookHandler().GitLabWebhook)
+	// GitLab Webhook（无需认证）——应用 Rate Limit 与 Payload 大小限制中间件
+	api.POST("/webhooks/gitlab", middleware.WebhookRateLimit(), handler.NewWebhookHandler().GitLabWebhook)
 	api.POST("/tasks/callback", handler.NewTaskHandler().Callback)
+
+	// 公共 GitLab 实例列表（无需认证）——应用公共 API Rate Limit
+	api.GET("/gitlab-instances/public", middleware.PublicAPIRateLimit(), gitlabAuthHandler.ListInstances)
 
 	// 公共需要认证的API（数据在handler/service层按user过滤）
 	notifH := handler.NewNotificationHandler()
 	common := api.Group("")
-	common.Use(middleware.Auth())
+	common.Use(middleware.Auth(), middleware.OrgScopeMiddleware())
 	{
 		// 用户信息
 		common.GET("/users/me", userHandler.GetCurrentUser)
@@ -470,37 +516,42 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		common.GET("/dashboard/project-owner", notifH.ProjectOwnerDashboard)
 	}
 
-	// 管理员专属API
-	adminOnly := api.Group("")
-	adminOnly.Use(middleware.Auth(), middleware.AdminOnly())
+	// 组织管理员及以上可访问的API（日常管理资源配置）
+	// 注：系统级 handler 提前定义，供后续 sysAdmin 路由组复用
+	featureFlagH := handler.NewFeatureFlagHandler()
+	orgH := handler.NewOrganizationHandler()
+	sysHandler := handler.NewSystemHandler()
+
+	orgAdmin := api.Group("")
+	orgAdmin.Use(middleware.Auth(), middleware.OrgScopeMiddleware(), middleware.RequireOrgAdmin())
 	{
 		// 管理员大盘
-		adminOnly.GET("/dashboard/admin", notifH.AdminDashboard)
+		orgAdmin.GET("/dashboard/admin", notifH.AdminDashboard)
 
 		// 通知规则模板管理
-		adminOnly.GET("/notification-rules", notifH.ListRules)
-		adminOnly.GET("/notification-rules/:id", notifH.GetRule)
-		adminOnly.POST("/notification-rules/:id/test", notifH.TestRule)
-		adminOnly.POST("/notification-rules", notifH.CreateRule)
-		adminOnly.PUT("/notification-rules/:id", notifH.UpdateRule)
-		adminOnly.DELETE("/notification-rules/:id", notifH.DeleteRule)
+		orgAdmin.GET("/notification-rules", notifH.ListRules)
+		orgAdmin.GET("/notification-rules/:id", notifH.GetRule)
+		orgAdmin.POST("/notification-rules/:id/test", notifH.TestRule)
+		orgAdmin.POST("/notification-rules", notifH.CreateRule)
+		orgAdmin.PUT("/notification-rules/:id", notifH.UpdateRule)
+		orgAdmin.DELETE("/notification-rules/:id", notifH.DeleteRule)
 
 		// 通知规则全局生效起点
-		adminOnly.GET("/notification-global-settings", notifH.GetGlobalSettings)
-		adminOnly.PUT("/notification-global-settings", notifH.UpdateGlobalSettings)
-		adminOnly.GET("/notification-global-settings/preview", notifH.PreviewBaseline)
+		orgAdmin.GET("/notification-global-settings", notifH.GetGlobalSettings)
+		orgAdmin.PUT("/notification-global-settings", notifH.UpdateGlobalSettings)
+		orgAdmin.GET("/notification-global-settings/preview", notifH.PreviewBaseline)
 
 		// 节假日管理
-		adminOnly.GET("/holidays", notifH.ListHolidays)
-		adminOnly.POST("/holidays", notifH.CreateHoliday)
-		adminOnly.PUT("/holidays/:id", notifH.UpdateHoliday)
-		adminOnly.DELETE("/holidays/:id", notifH.DeleteHoliday)
-		adminOnly.POST("/holidays/batch-delete", notifH.BatchDeleteHolidays)
-		adminOnly.POST("/holidays/import", notifH.ImportHolidays)
-		adminOnly.POST("/holidays/sync-api", notifH.SyncHolidaysFromAPI)
+		orgAdmin.GET("/holidays", notifH.ListHolidays)
+		orgAdmin.POST("/holidays", notifH.CreateHoliday)
+		orgAdmin.PUT("/holidays/:id", notifH.UpdateHoliday)
+		orgAdmin.DELETE("/holidays/:id", notifH.DeleteHoliday)
+		orgAdmin.POST("/holidays/batch-delete", notifH.BatchDeleteHolidays)
+		orgAdmin.POST("/holidays/import", notifH.ImportHolidays)
+		orgAdmin.POST("/holidays/sync-api", notifH.SyncHolidaysFromAPI)
 
 		// 任务管理 - 写操作（仅限管理员）
-		adminTask := adminOnly.Group("/tasks")
+		adminTask := orgAdmin.Group("/tasks")
 		{
 			h := handler.NewTaskHandler()
 			adminTask.POST("", h.Create)
@@ -509,7 +560,7 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		}
 
 		// 项目管理（仅管理员可写）
-		project := adminOnly.Group("/projects")
+		project := orgAdmin.Group("/projects")
 		{
 			h := handler.NewProjectHandler()
 			project.POST("", h.Create)
@@ -522,7 +573,7 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		}
 
 		// 评审规则库管理
-		reviewRules := adminOnly.Group("/review-rules")
+		reviewRules := orgAdmin.Group("/review-rules")
 		{
 			h := handler.NewReviewRuleHandler(embedSvc, store)
 			reviewRules.GET("", h.List)
@@ -534,7 +585,7 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		}
 
 		// 评审维度管理（仅管理员可写，GET 已移至 common）
-		reviewCats := adminOnly.Group("/review-categories")
+		reviewCats := orgAdmin.Group("/review-categories")
 		{
 			h := handler.NewReviewCategoryHandler()
 			reviewCats.POST("", h.Create)
@@ -543,7 +594,7 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		}
 
 		// 模版管理
-		template := adminOnly.Group("/templates")
+		template := orgAdmin.Group("/templates")
 		{
 			h := handler.NewTemplateHandler()
 			template.GET("", h.List)
@@ -556,7 +607,7 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		}
 
 		// 资源池管理
-		pool := adminOnly.Group("/pools")
+		pool := orgAdmin.Group("/pools")
 		{
 			h := handler.NewPoolHandler()
 			pool.GET("", h.List)
@@ -573,7 +624,7 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		}
 
 		// 大模型管理
-		modelGroup := adminOnly.Group("/models")
+		modelGroup := orgAdmin.Group("/models")
 		{
 			h := handler.NewModelHandler()
 			modelGroup.GET("", h.List)
@@ -592,7 +643,7 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		}
 
 		// 企业微信通知
-		notifier := adminOnly.Group("/notifiers")
+		notifier := orgAdmin.Group("/notifiers")
 		{
 			h := handler.NewNotifierHandler()
 			notifier.GET("", h.List)
@@ -612,7 +663,7 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		// steward handler 已移除，请使用 /team-members API
 
 		// 人员管理（融合成员映射 + 项目负责人）
-		teamMember := adminOnly.Group("/team-members")
+		teamMember := orgAdmin.Group("/team-members")
 		{
 			h := handler.NewTeamMemberHandler()
 			teamMember.GET("", h.List)
@@ -628,11 +679,11 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 			teamMember.DELETE("/responsibilities/:rid", h.DeleteResponsibility)
 		}
 
-		// 项目维度职责查询（公共查询，用于项目详情页）
-		api.GET("/projects/:id/responsibilities", handler.NewTeamMemberHandler().ListResponsibilitiesByProject)
+		// 项目维度职责查询（项目详情页负责人tab，需要认证）
+		common.GET("/projects/:id/responsibilities", handler.NewTeamMemberHandler().ListResponsibilitiesByProject)
 
 		// 用户管理（管理员）
-		users := adminOnly.Group("/users")
+		users := orgAdmin.Group("/users")
 		{
 			users.GET("", userHandler.ListUsers)
 			users.POST("", userHandler.CreateUser)
@@ -646,8 +697,18 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 			users.DELETE("/responsibilities/:rid", userHandler.DeleteUserResponsibility)
 		}
 
+		// GitLab 实例管理（管理员）
+		gitlabInstance := orgAdmin.Group("/gitlab-instances")
+		{
+			gitlabInstance.GET("", gitlabAuthHandler.ListInstancesAdmin)
+			gitlabInstance.POST("", gitlabAuthHandler.CreateInstance)
+			gitlabInstance.PUT("/:id", gitlabAuthHandler.UpdateInstance)
+			gitlabInstance.DELETE("/:id", gitlabAuthHandler.DeleteInstance)
+			gitlabInstance.POST("/:id/test", gitlabAuthHandler.TestInstance)
+		}
+
 		// 规则孵化台
-		incubator := adminOnly.Group("/incubator")
+		incubator := orgAdmin.Group("/incubator")
 		{
 			h := handler.NewIncubatorHandler(vectorstore.NewMySQLStore(model.DB))
 			incubator.GET("/status", h.Status)
@@ -678,23 +739,12 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 			incubator.GET("/vectorization-status", h.VectorizationStatus)
 		}
 
-		// 系统管理
-		sys := adminOnly.Group("/system")
-		{
-			h := handler.NewSystemHandler()
-			sys.GET("/config", h.GetConfig)
-			sys.PUT("/config", h.UpdateConfig)
-			sys.GET("/logs", h.OperationLogs)
-			sys.DELETE("/logs", h.ClearLogs)
-			sys.GET("/info", h.Info)
-		}
-
-		// 知识图谱管理 —— 只读路由给 common，写入路由给 adminOnly
+		// 知识图谱管理 —— 只读路由给 common，写入路由给 orgAdmin
 		graphH := handler.NewGraphHandler(model.DB, getWorkspace())
-		graphH.RegisterRoutes(common, adminOnly)
+		graphH.RegisterRoutes(common, orgAdmin)
 
 		// 报表管理
-		report := adminOnly.Group("/reports")
+		report := orgAdmin.Group("/reports")
 		{
 			h := handler.NewReportHandler()
 			report.GET("/smtp", h.GetSMTPConfig)
@@ -716,19 +766,19 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 
 		// MCP 密钥与调用日志管理
 		mcpKeyH := handler.NewMCPKeyHandler()
-		adminOnly.GET("/mcp-keys", mcpKeyH.ListKeys)
-		adminOnly.GET("/mcp-keys/:id", mcpKeyH.GetKey)
-		adminOnly.POST("/mcp-keys", mcpKeyH.CreateKey)
-		adminOnly.PUT("/mcp-keys/:id", mcpKeyH.UpdateKey)
-		adminOnly.DELETE("/mcp-keys/:id", mcpKeyH.DeleteKey)
-		adminOnly.GET("/mcp-logs", mcpKeyH.ListLogs)
+		orgAdmin.GET("/mcp-keys", mcpKeyH.ListKeys)
+		orgAdmin.GET("/mcp-keys/:id", mcpKeyH.GetKey)
+		orgAdmin.POST("/mcp-keys", mcpKeyH.CreateKey)
+		orgAdmin.PUT("/mcp-keys/:id", mcpKeyH.UpdateKey)
+		orgAdmin.DELETE("/mcp-keys/:id", mcpKeyH.DeleteKey)
+		orgAdmin.GET("/mcp-logs", mcpKeyH.ListLogs)
 
 		// MCP 能力中心工具列表（所有认证用户可见）
 		common.GET("/mcp-tools", handler.ListMCPTools)
 
 		// 对象存储配置
 		storageH := handler.NewObjectStorageHandler()
-		objStorage := adminOnly.Group("/object-storage")
+		objStorage := orgAdmin.Group("/object-storage")
 		{
 			objStorage.GET("/configs", storageH.ListConfigs)
 			objStorage.GET("/configs/:id", storageH.GetConfig)
@@ -748,18 +798,18 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		common.GET("/vulnerabilities/ecosystems", vulnH.Ecosystems)
 		common.GET("/vulnerabilities/:id", vulnH.Get)
 		// 写操作：仅管理员
-		adminOnly.POST("/vulnerabilities/import", vulnH.Import)
-		adminOnly.POST("/vulnerabilities/sync", vulnH.Sync)
-		adminOnly.POST("/vulnerabilities", vulnH.Create)
-		adminOnly.PUT("/vulnerabilities/:id", vulnH.Update)
-		adminOnly.DELETE("/vulnerabilities/:id", vulnH.Delete)
+		orgAdmin.POST("/vulnerabilities/import", vulnH.Import)
+		orgAdmin.POST("/vulnerabilities/sync", vulnH.Sync)
+		orgAdmin.POST("/vulnerabilities", vulnH.Create)
+		orgAdmin.PUT("/vulnerabilities/:id", vulnH.Update)
+		orgAdmin.DELETE("/vulnerabilities/:id", vulnH.Delete)
 
 		// 漏洞白名单管理（读操作对所有用户开放，写操作仅管理员）
 		allowH := handler.NewVulnerabilityAllowlistHandler()
 		common.GET("/vulnerability-allowlist", allowH.List)
-		adminOnly.POST("/vulnerability-allowlist", allowH.Create)
-		adminOnly.PUT("/vulnerability-allowlist/:id", allowH.Update)
-		adminOnly.DELETE("/vulnerability-allowlist/:id", allowH.Delete)
+		orgAdmin.POST("/vulnerability-allowlist", allowH.Create)
+		orgAdmin.PUT("/vulnerability-allowlist/:id", allowH.Update)
+		orgAdmin.DELETE("/vulnerability-allowlist/:id", allowH.Delete)
 
 		// 漏洞库同步源管理（读操作对所有用户开放，写操作仅管理员）
 		syncH := handler.NewVulnerabilitySyncSourceHandler()
@@ -767,16 +817,47 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		common.GET("/vulnerability-sync-sources/:id", syncH.Get)
 		common.GET("/vulnerability-sync-sources/check-all", syncH.CheckAllVersions)
 		common.POST("/vulnerability-sync-sources/:id/check-version", syncH.CheckVersion)
-		adminOnly.POST("/vulnerability-sync-sources", syncH.Create)
-		adminOnly.PUT("/vulnerability-sync-sources/:id", syncH.Update)
-		adminOnly.DELETE("/vulnerability-sync-sources/:id", syncH.Delete)
-		adminOnly.POST("/vulnerability-sync-sources/:id/sync", syncH.Sync)
+		orgAdmin.POST("/vulnerability-sync-sources", syncH.Create)
+		orgAdmin.PUT("/vulnerability-sync-sources/:id", syncH.Update)
+		orgAdmin.DELETE("/vulnerability-sync-sources/:id", syncH.Delete)
+		orgAdmin.POST("/vulnerability-sync-sources/:id/sync", syncH.Sync)
 
 		// AI 评审智能体全局配置
 		agentCfgH := handler.NewReviewAgentConfigHandler()
 		api.GET("/review-agent-config", agentCfgH.Get)                                        // GET 任何人可读
 		api.GET("/review-agent-config/file-filter-defaults", agentCfgH.GetFileFilterDefaults) // GET 默认过滤规则
-		adminOnly.PUT("/review-agent-config", agentCfgH.Save)                                 // PUT 仅 admin 可写
+		orgAdmin.PUT("/review-agent-config", agentCfgH.Save)                                 // PUT 仅 admin 可写
+
+		// Feature Flag / 组织管理 / 系统管理 已移至 sysAdmin 路由组
+	}
+
+	// 系统管理员专属 API（全局配置、组织树、系统管理）
+	sysAdmin := api.Group("")
+	sysAdmin.Use(middleware.Auth(), middleware.OrgScopeMiddleware(), middleware.RequireSystemAdmin())
+	{
+		// Feature Flag 动态管理
+		sysAdmin.GET("/feature-flag", featureFlagH.GetLayer)
+		sysAdmin.PUT("/feature-flag", featureFlagH.SetLayer)
+
+		// 组织管理
+		sysAdmin.GET("/organizations", orgH.ListOrganizations)
+		sysAdmin.POST("/organizations", orgH.CreateOrganization)
+		sysAdmin.PUT("/organizations/:id", orgH.UpdateOrganization)
+		sysAdmin.POST("/organizations/:id/archive", orgH.ArchiveOrganization)
+		sysAdmin.GET("/organizations/:id/members", orgH.ListOrganizationMembers)
+		sysAdmin.POST("/organizations/:id/members", orgH.AddOrganizationMember)
+		sysAdmin.DELETE("/organizations/:id/members/:userId", orgH.RemoveOrganizationMember)
+		sysAdmin.PUT("/organizations/:id/members/:userId/role", orgH.UpdateMemberRole)
+
+		// 系统管理
+		sys := sysAdmin.Group("/system")
+		{
+			sys.GET("/config", sysHandler.GetConfig)
+			sys.PUT("/config", sysHandler.UpdateConfig)
+			sys.GET("/logs", sysHandler.OperationLogs)
+			sys.DELETE("/logs", sysHandler.ClearLogs)
+			sys.GET("/info", sysHandler.Info)
+		}
 	}
 
 	return r
@@ -822,7 +903,7 @@ func startGraphCronScan(db *gorm.DB) {
 		if branch == "" {
 			branch = "main"
 		}
-		if _, err := scanService.TriggerScan(uint64(p.ID), branch); err != nil {
+		if _, err := scanService.TriggerScan(nil, uint64(p.ID), branch); err != nil {
 			zap.L().Warn("graph cron scan: trigger failed",
 				zap.Uint("project_id", p.ID),
 				zap.String("branch", branch),

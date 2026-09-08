@@ -334,7 +334,13 @@ func handleRetryTask(ctx context.Context, authCtx *mcp.AuthContext, args map[str
 	}
 
 	// 调用后端 Service 进行重试（复用现有逻辑，包含意见注入和 Pipeline 清理）
+	scope := &model.UserAuthScope{
+		IsSuperAdmin:  authCtx.IsAdmin,
+		VisibleOrgIDs: []uint{authCtx.OrgID},
+		CurrentOrgID:  authCtx.OrgID,
+	}
 	err = service.NewTaskService().Retry(
+		scope,
 		taskID,
 		userReviewComment,
 		selectedCommentIDs,
@@ -371,7 +377,12 @@ func handleStopTask(ctx context.Context, authCtx *mcp.AuthContext, args map[stri
 	}
 
 	// 复用 service 层逻辑，与页面 API 保持一致的停止行为
-	if err := service.NewTaskService().Abort(taskID); err != nil {
+	scope := &model.UserAuthScope{
+		IsSuperAdmin:  authCtx.IsAdmin,
+		VisibleOrgIDs: []uint{authCtx.OrgID},
+		CurrentOrgID:  authCtx.OrgID,
+	}
+	if err := service.NewTaskService().Abort(scope, taskID); err != nil {
 		return nil, fmt.Errorf("stop task failed: %w", err)
 	}
 

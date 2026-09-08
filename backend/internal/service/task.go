@@ -24,7 +24,8 @@ import (
 	"github.com/ai-optimizer/backend/pkg/encrypt"
 	"github.com/ai-optimizer/backend/pkg/gitlab"
 	"github.com/ai-optimizer/backend/pkg/llm"
-	"go.uber.org/zap"
+    "go.uber.org/zap"
+    "gorm.io/gorm"
 )
 
 type TaskService struct {
@@ -74,9 +75,9 @@ func NewTaskService() *TaskService {
 }
 
 // CanViewTask 判断用户是否有权查看某个任务详情
-// admin 拥有全部权限；普通用户只能查看：自己提交的、或自己负责项目的任务
-func (s *TaskService) CanViewTask(user model.User, task model.Task) bool {
-	if user.Role == model.RoleAdmin {
+// 组织管理员及以上拥有全部权限；普通用户只能查看：自己提交的、或自己负责项目的任务
+func (s *TaskService) CanViewTask(scope *model.UserAuthScope, user model.User, task model.Task) bool {
+	if scope != nil && scope.HasOrgRole("super_admin", "org_admin") {
 		return true
 	}
 	if task.MRAuthor != "" && task.MRAuthor == user.GitlabUsername {
@@ -93,7 +94,7 @@ func (s *TaskService) CanViewTask(user model.User, task model.Task) bool {
 	return count > 0
 }
 
-func (s *TaskService) List(user model.User, projectID uint, status string, startTime, endTime time.Time, author, mrIID string, hasPendingIssues bool, page, pageSize int) ([]model.Task, int64, error) {
+func (s *TaskService) List(scope *model.UserAuthScope, user model.User, projectID uint, status string, startTime, endTime time.Time, author, mrIID string, hasPendingIssues bool, page, pageSize int) ([]model.Task, int64, error) {
 	zap.L().Debug("TaskService.List called",
 		zap.Uint("project_id", projectID),
 		zap.String("status", status),
@@ -104,9 +105,10 @@ func (s *TaskService) List(user model.User, projectID uint, status string, start
 	var tasks []model.Task
 	var total int64
 
-	query := model.DB.Model(&model.Task{})
-	// 可见性：admin 不过滤，普通用户只能查看自己提交的任务和自己负责项目的任务
-	if user.Role != model.RoleAdmin {
+	db := model.DBWithScope(scope).Session(&gorm.Session{})
+	query := db.Model(&model.Task{})
+	// 可见性：组织管理员及以上不过滤，普通用户只能查看自己提交的任务和自己负责项目的任务
+	if scope == nil || !scope.HasOrgRole("super_admin", "org_admin") {
 		var conditions []string
 		var args []interface{}
 
@@ -123,14 +125,14 @@ func (s *TaskService) List(user model.User, projectID uint, status string, start
 		// 2. 查找当前用户负责的项目（直接使用 user 的 primary key）
 		var projectIDs []uint
 		if user.ID > 0 {
-			model.DB.Model(&model.ProjectResponsibility{}).
+			db.Model(&model.ProjectResponsibility{}).
 				Distinct("project_id").
 				Where("user_id = ?", user.ID).
 				Pluck("project_id", &projectIDs)
 		}
-			// 条件格式化保持原始格式
+		// 条件格式化保持原始格式
 		// 3. 添加负责项目的条件
-			if len(projectIDs) > 0 {
+		if len(projectIDs) > 0 {
 			conditions = append(conditions, "project_id IN ?")
 			args = append(args, projectIDs)
 		}
@@ -163,13 +165,18 @@ func (s *TaskService) List(user model.User, projectID uint, status string, start
 	}
 
 	// 子查询：统计每个任务的 pending issue 数量
-	pendingSubquery := model.DB.Table("review_issues").
-		Select("task_id, COUNT(*) as cnt").
-		Where("status = ? AND deleted_at IS NULL", "pending").
-		Group("task_id")
+	// GORM v2 的 Joins 不支持传入 *gorm.DB 作为子查询，直接内联 SQL
+	pendingSubSQL := "SELECT task_id, COUNT(*) as cnt FROM review_issues WHERE status = 'pending' AND deleted_at IS NULL"
+	var pendingJoinArgs []interface{}
+	if scope != nil && !scope.IsSuperAdmin {
+		pendingSubSQL += " AND org_id IN ?"
+		pendingJoinArgs = append(pendingJoinArgs, scope.VisibleOrgIDs)
+	}
+	pendingSubSQL += " GROUP BY task_id"
 
-	query = query.Joins("LEFT JOIN (?) AS pending_counts ON pending_counts.task_id = tasks.id", pendingSubquery).
-		Select("tasks.*, COALESCE(pending_counts.cnt, 0) as pending_issue_count")
+	query = query.
+		Select("tasks.*, COALESCE(pending_counts.cnt, 0) as pending_issue_count").
+		Joins("LEFT JOIN ("+pendingSubSQL+") AS pending_counts ON pending_counts.task_id = tasks.id", pendingJoinArgs...)
 
 	if hasPendingIssues {
 		query = query.Where("COALESCE(pending_counts.cnt, 0) > 0")
@@ -188,18 +195,33 @@ func (s *TaskService) List(user model.User, projectID uint, status string, start
 	return tasks, total, nil
 }
 
-func (s *TaskService) Get(id uint) (*model.Task, error) {
+func (s *TaskService) Get(scope *model.UserAuthScope, id uint) (*model.Task, error) {
+	db := model.DBWithScope(scope)
 	var task model.Task
-	if err := model.DB.Preload("Project").Preload("Pool").Preload("UsedModel").First(&task, id).Error; err != nil {
+	if err := db.Preload("Project").Preload("Pool").Preload("UsedModel").First(&task, id).Error; err != nil {
 		return nil, err
 	}
 	return &task, nil
+}
+
+func (s *TaskService) GetByProjectAndMR(scope *model.UserAuthScope, projectID uint, mrID int) ([]model.Task, error) {
+	db := model.DBWithScope(scope)
+	var tasks []model.Task
+	if err := db.Where("project_id = ? AND mr_merge_id = ?", projectID, mrID).Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+	return tasks, nil
 }
 
 func (s *TaskService) Create(data map[string]interface{}) (*model.Task, error) {
 	modelID := uint(0)
 	if m, ok := data["model_id"].(float64); ok {
 		modelID = uint(m)
+	} else if m, ok := data["model_id"].(string); ok && m != "" {
+		// webhook 触发时传入 string 类型的 model_id
+		if mid, err := strconv.ParseUint(m, 10, 64); err == nil {
+			modelID = uint(mid)
+		}
 	}
 
 	mrURL := ""
@@ -245,6 +267,7 @@ func (s *TaskService) Create(data map[string]interface{}) (*model.Task, error) {
 	}
 
 	task := model.Task{
+		OrgID:               uint(data["org_id"].(float64)),
 		ProjectID:           uint(data["project_id"].(float64)),
 		PoolID:              0,
 		UsedModelID:         modelID,
@@ -456,9 +479,10 @@ func (s *TaskService) startNextPendingTask(projectID uint) {
 	}(nextTask.ID, nextTask.TaskType)
 }
 
-func (s *TaskService) UpdateStatus(taskID uint, status model.TaskStatus, response string) error {
+func (s *TaskService) UpdateStatus(scope *model.UserAuthScope, taskID uint, status model.TaskStatus, response string) error {
+	db := model.DBWithScope(scope)
 	var task model.Task
-	if err := model.DB.First(&task, taskID).Error; err != nil {
+	if err := db.First(&task, taskID).Error; err != nil {
 		return err
 	}
 
@@ -476,7 +500,7 @@ func (s *TaskService) UpdateStatus(taskID uint, status model.TaskStatus, respons
 	if response != "" {
 		updates["ai_response"] = response
 	}
-	res := model.DB.Model(&model.Task{}).Where("id = ? AND status = ?", taskID, model.TaskRunning).Updates(updates)
+	res := db.Model(&model.Task{}).Where("id = ? AND status = ?", taskID, model.TaskRunning).Updates(updates)
 	if res.Error != nil {
 		zap.L().Error("failed to update task status", zap.Uint("task_id", taskID), zap.String("target_status", string(status)), zap.Error(res.Error))
 		return res.Error
@@ -496,9 +520,10 @@ func (s *TaskService) UpdateStatus(taskID uint, status model.TaskStatus, respons
 	return nil
 }
 
-func (s *TaskService) Abort(taskID uint) error {
+func (s *TaskService) Abort(scope *model.UserAuthScope, taskID uint) error {
+	db := model.DBWithScope(scope)
 	var task model.Task
-	if err := model.DB.First(&task, taskID).Error; err != nil {
+	if err := db.First(&task, taskID).Error; err != nil {
 		return err
 	}
 
@@ -537,7 +562,7 @@ func (s *TaskService) Abort(taskID uint) error {
 		}(),
 	}
 	// Abort 统一使用 Where 条件更新，避免覆盖已被修改的状态
-	res := model.DB.Model(&model.Task{}).Where("id = ? AND status = ?", task.ID, model.TaskRunning).Updates(updates)
+	res := db.Model(&model.Task{}).Where("id = ? AND status = ?", task.ID, model.TaskRunning).Updates(updates)
 	if res.Error != nil {
 		zap.L().Error("abort task update failed", zap.Uint("task_id", taskID), zap.Error(res.Error))
 		return res.Error
@@ -560,9 +585,10 @@ func (s *TaskService) ListReviewComments(taskID uint) ([]model.TaskReviewComment
 	return comments, nil
 }
 
-func (s *TaskService) Retry(taskID uint, userReviewComment string, selectedCommentIDs []uint, operatorID uint, clientIP string) error {
+func (s *TaskService) Retry(scope *model.UserAuthScope, taskID uint, userReviewComment string, selectedCommentIDs []uint, operatorID uint, clientIP string) error {
+	db := model.DBWithScope(scope)
 	var task model.Task
-	if err := model.DB.First(&task, taskID).Error; err != nil {
+	if err := db.First(&task, taskID).Error; err != nil {
 		return err
 	}
 
@@ -574,7 +600,7 @@ func (s *TaskService) Retry(taskID uint, userReviewComment string, selectedComme
 	var injectedParts []string
 	if len(selectedCommentIDs) > 0 {
 		var selected []model.TaskReviewComment
-		if err := model.DB.Where("task_id = ? AND id IN ?", taskID, selectedCommentIDs).Order("retry_round asc").Find(&selected).Error; err == nil {
+		if err := db.Where("task_id = ? AND id IN ?", taskID, selectedCommentIDs).Order("retry_round asc").Find(&selected).Error; err == nil {
 			for _, c := range selected {
 				injectedParts = append(injectedParts, fmt.Sprintf("- 【第%d次复核】%s", c.RetryRound, c.Content))
 			}
@@ -584,12 +610,13 @@ func (s *TaskService) Retry(taskID uint, userReviewComment string, selectedComme
 	// 将新复核意见写入独立表
 	if userReviewComment != "" {
 		comment := model.TaskReviewComment{
+			OrgID:      task.OrgID,
 			TaskID:     task.ID,
 			Content:    userReviewComment,
 			RetryRound: task.RetryCount + 1,
 			OperatorID: operatorID,
 		}
-		if err := model.DB.Create(&comment).Error; err != nil {
+		if err := db.Create(&comment).Error; err != nil {
 			zap.L().Error("create task review comment failed", zap.Error(err))
 			return fmt.Errorf("保存复核意见失败: %w", err)
 		}
@@ -611,14 +638,23 @@ func (s *TaskService) Retry(taskID uint, userReviewComment string, selectedComme
 	now := time.Now()
 	task.StartedAt = &now
 	// review 类型无资源池，避免外键约束失败
+	var saveErr error
 	if task.TaskType == "review" {
-		model.DB.Omit("pool_id").Save(&task)
+		saveErr = db.Omit("org_id", "pool_id").Save(&task).Error // ⚠️ 多租户改造：Omit org_id 防止零值覆盖
 	} else {
-		model.DB.Save(&task)
+		saveErr = db.Omit("org_id").Save(&task).Error // ⚠️ 多租户改造：Omit org_id 防止零值覆盖
+	}
+	if saveErr != nil {
+		zap.L().Error("save task failed before execution",
+			zap.Uint("task_id", taskID),
+			zap.Error(saveErr),
+		)
+		return fmt.Errorf("save task failed: %w", saveErr)
 	}
 
 	// 清理旧的 Pipeline 执行记录（防止重试时新旧数据混合展示）
 	// 先删除子阶段，再删除父阶段（避免外键约束）
+	// 使用全新的 DB 句柄，避免 Save(&task) 残留的 Model 上下文污染 Delete
 	model.DB.Where("task_id = ? AND parent_id IS NOT NULL", task.ID).Delete(&model.TaskPipelineExecution{})
 	model.DB.Where("task_id = ? AND parent_id IS NULL", task.ID).Delete(&model.TaskPipelineExecution{})
 
@@ -635,22 +671,23 @@ func (s *TaskService) Retry(taskID uint, userReviewComment string, selectedComme
 	return nil
 }
 
-func (s *TaskService) TimeoutCheck() {
+func (s *TaskService) TimeoutCheck(scope *model.UserAuthScope) {
+	db := model.DBWithScope(scope)
 	// 非 review 类型任务使用系统配置中的超时时间
 	var sysConfig model.SystemConfig
 	timeoutMin := 120
-	if err := model.SilentFirst(model.DB, &sysConfig); err == nil && sysConfig.TaskTimeoutMin > 0 {
+	if err := model.SilentFirst(db, &sysConfig); err == nil && sysConfig.TaskTimeoutMin > 0 {
 		timeoutMin = sysConfig.TaskTimeoutMin
 	} else if err != nil {
 		zap.L().Debug("timeout check using default timeout", zap.Int("timeout_min", timeoutMin), zap.Error(err))
 	}
 
 	// AI 评审类任务使用各阶段超时之和 + 宽裕时间，不再受系统配置限制
-	reviewTimeoutMin := getReviewTaskTimeoutMin()
-	zap.L().Debug("timeout check thresholds", zap.Int("sys_timeout_min", timeoutMin), zap.Int("review_timeout_min", reviewTimeoutMin))
+	// 多租户改造：超时配置改为循环内按 org_id 读取
+	zap.L().Debug("timeout check thresholds", zap.Int("sys_timeout_min", timeoutMin))
 
 	var tasks []model.Task
-	if err := model.DB.Where("status = ?", model.TaskRunning).Find(&tasks).Error; err != nil {
+	if err := db.Where("status = ?", model.TaskRunning).Find(&tasks).Error; err != nil {
 		zap.L().Error("timeout check query failed", zap.Error(err))
 		return
 	}
@@ -663,7 +700,8 @@ func (s *TaskService) TimeoutCheck() {
 
 		var taskTimeoutMin int
 		if task.TaskType == "review" {
-			taskTimeoutMin = reviewTimeoutMin
+			// 多租户改造：按 org_id 读取评审任务超时配置
+			taskTimeoutMin = getReviewTaskTimeoutMin(task.OrgID)
 		} else {
 			taskTimeoutMin = timeoutMin
 		}
@@ -701,7 +739,7 @@ func (s *TaskService) TimeoutCheck() {
 				return 0
 			}(),
 		}
-		res := model.DB.Model(&model.Task{}).Where("id = ? AND status = ?", task.ID, model.TaskRunning).Updates(updates)
+		res := db.Model(&model.Task{}).Where("id = ? AND status = ?", task.ID, model.TaskRunning).Updates(updates)
 		if res.Error != nil {
 			zap.L().Error("timeout check update failed", zap.Uint("task_id", task.ID), zap.Error(res.Error))
 		} else if res.RowsAffected == 0 {
@@ -715,11 +753,15 @@ func (s *TaskService) TimeoutCheck() {
 
 // getReviewTaskTimeoutMin 计算 AI 评审类任务的超时时间（分钟）。
 // 基于 ReviewAgentConfig 中所有启用阶段的 timeout 之和，加上 30 分钟宽裕时间。
-func getReviewTaskTimeoutMin() int {
+// 多租户改造：按 org_id 查询配置，替代硬编码 ID=1。
+func getReviewTaskTimeoutMin(orgID uint) int {
 	var cfg model.ReviewAgentConfig
-	if err := model.DB.First(&cfg, 1).Error; err != nil {
-		zap.L().Warn("getReviewTaskTimeoutMin: failed to load ReviewAgentConfig, using default", zap.Error(err))
-		return 300 // 默认 5 小时
+	if err := model.DB.Where("org_id = ?", orgID).First(&cfg).Error; err != nil {
+		// fallback：根组织
+		if err := model.DB.Where("org_id = 1").First(&cfg).Error; err != nil {
+			zap.L().Warn("getReviewTaskTimeoutMin: failed to load ReviewAgentConfig, using default", zap.Uint("org_id", orgID), zap.Error(err))
+			return 300 // 默认 5 小时
+		}
 	}
 
 	totalSec := 0
@@ -1068,6 +1110,17 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 		}
 	}
 
+	// 多租户改造：加载组织配置快照
+	// 在 Pipeline 开始前一次性冻结 org 配置，确保 Stage 间配置一致
+	orgSnapshot, snapErr := pipeline.LoadOrgConfigSnapshot(model.DB, task.OrgID)
+	if snapErr != nil {
+		zap.L().Warn("加载组织配置快照失败，使用默认配置",
+			zap.Uint("task_id", task.ID),
+			zap.Uint("org_id", task.OrgID),
+			zap.Error(snapErr))
+		orgSnapshot = &pipeline.OrgConfigSnapshot{}
+	}
+
 	// 1. 获取 diff 文件
 	diffFiles, additions, deletions, err := s.fetchMRDiffFiles(task)
 	if err != nil {
@@ -1083,9 +1136,9 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 
 	// 【新增】应用文件过滤规则（依赖文件/第三方代码排除）
 	// 过滤后的 diffFiles 供除 dependency_scan 外的所有阶段共享
-	var filterAgentCfg model.ReviewAgentConfig
-	if err := model.DB.First(&filterAgentCfg, 1).Error; err == nil {
-		filterCfg := engine.LoadFileFilterConfig(filterAgentCfg)
+	// 多租户改造：从配置快照读取，替代硬编码 model.DB.First(&filterAgentCfg, 1)
+	if orgSnapshot.AgentConfig.ID > 0 {
+		filterCfg := engine.LoadFileFilterConfig(orgSnapshot.AgentConfig)
 		lang := ""
 		if task.Project.Language != "" {
 			lang = task.Project.Language
@@ -1118,7 +1171,8 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 	}
 
 	// 限制最多 N 个文件
-	maxDiffFiles := SysCfgMaxDiffFiles()
+	// 多租户改造：按 org_id 读取配置
+	maxDiffFiles := SysCfgMaxDiffFilesByOrg(task.OrgID)
 	if len(diffFiles) > maxDiffFiles {
 		zap.L().Warn("diff files exceed limit, truncating",
 			zap.Int("original", len(diffFiles)),
@@ -1144,9 +1198,12 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 	}
 
 	// 5. 加载并合并评审规则（与 Legacy runStructuredAIReview 完全一致）
-	var allRules []model.ReviewRule
-	if err := model.DB.Find(&allRules).Error; err != nil {
-		zap.L().Warn("Pipeline: load all review rules failed", zap.Uint("project_id", task.ProjectID), zap.Error(err))
+	// 多租户改造：从快照读取规则，替代无过滤的全表查询
+	allRules := orgSnapshot.Rules
+	if len(allRules) == 0 {
+		if err := model.DB.Find(&allRules).Error; err != nil {
+			zap.L().Warn("Pipeline: load all review rules failed", zap.Uint("project_id", task.ProjectID), zap.Error(err))
+		}
 	}
 
 	var configs []model.ProjectReviewConfig
@@ -1253,11 +1310,11 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 		promptCtx.GitLabCommentTemplate = sysCfg.DefaultGitLabCommentTemplate
 	}
 
-	// 13. 读取全局智能体配置并注入 PromptContext
-	var agentCfg model.ReviewAgentConfig
-	if err := model.DB.First(&agentCfg, 1).Error; err == nil {
-		promptCtx.ShowAgentStatus = agentCfg.ShowAgentStatus
-		promptCtx.AgentStatus = buildAgentExecutionStatus(agentCfg)
+	// 13. 读取智能体配置并注入 PromptContext
+	// 多租户改造：从快照读取，不再实时查库
+	if orgSnapshot.AgentConfig.ID > 0 {
+		promptCtx.ShowAgentStatus = orgSnapshot.AgentConfig.ShowAgentStatus
+		promptCtx.AgentStatus = buildAgentExecutionStatus(orgSnapshot.AgentConfig)
 	}
 
 	// 【P0】保存原始完整 unified diff（未过滤、未截断），供入库前校正使用
@@ -1269,7 +1326,7 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 		"diff_files_raw":      fileMapsRaw, // 原始未过滤 diff，供 dependency_scan 读取 go.mod/package.json 等
 		"raw_diff_full":       rawDiffFull, // 【P0】原始完整 unified diff（未截断），供入库前 Correlator 使用
 		"commits_text":        commitsText,
-		"project_template":    projectTemplate.Prompt,
+		"project_template":    projectTemplate,
 		"prompt_context":      promptCtx,
 		"selected_rules":      selectedRules,
 		"truncated_rules":     truncatedRules,
@@ -1277,6 +1334,8 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 		"deduct_score_config": deductCfg,
 		"ast_context":         astCtx,
 	}
+	// 多租户改造：将配置快照注入 Pipeline，供后续 Stage 冻结使用
+	inputs["_org_config_snapshot"] = orgSnapshot
 
 	// 注册 Pipeline 取消信号（支持手动停止任务时立即中断）
 	cancelCh := registerPipelineCancel(task.ID)
@@ -1360,9 +1419,10 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 		if err := model.DB.Preload("Project").First(&notifyTask, task.ID).Error; err != nil {
 			return
 		}
-		stats := CalcIssueStats(notifyTask.ID, notifyTask.MRMergeID)
-		NewNotifierService().NotifyAIReviewCompleted(notifyTask)
-		GetDelayedNotificationQueue().Enqueue(notifyTask, stats)
+		scope := &model.UserAuthScope{VisibleOrgIDs: []uint{notifyTask.OrgID}}
+		stats := CalcIssueStats(scope, notifyTask.ID, notifyTask.MRMergeID)
+		NewNotifierService().NotifyAIReviewCompleted(scope, notifyTask)
+		GetDelayedNotificationQueue().Enqueue(scope, notifyTask, stats)
 	}()
 
 	// 唤醒同项目 pending 任务
@@ -1380,7 +1440,17 @@ func (s *TaskService) runAIReview(taskID *uint, caller string, diffFiles []gitla
 		caller = "runAIReview"
 	}
 
-	if isSingleBatch(diffFiles) {
+	// 多租户改造：获取 org_id（此函数未传入 task 对象）
+	orgID := uint(1)
+	if taskID != nil && *taskID > 0 {
+		var t model.Task
+		if err := model.DB.Select("org_id").First(&t, *taskID).Error; err == nil {
+			orgID = t.OrgID
+		}
+	}
+	maxTokens := SysCfgMaxTokensPerBatchByOrg(orgID)
+
+	if isSingleBatch(diffFiles, maxTokens) {
 		userPrompt = buildSingleBatchPrompt(diffFiles, commitsText, mrTitle, projectTemplate)
 		result, err := NewLLMService().ChatCompletion(context.Background(), taskID, modelID, caller, "", userPrompt)
 		if err != nil {
@@ -1391,7 +1461,7 @@ func (s *TaskService) runAIReview(taskID *uint, caller string, diffFiles []gitla
 		actualModelName = result.ModelName
 	} else {
 		batchReviews := []string{}
-		batches := splitIntoBatches(diffFiles, SysCfgMaxTokensPerBatch())
+		batches := splitIntoBatches(diffFiles, maxTokens)
 
 		for i, batch := range batches {
 			batchPrompt := buildBatchPrompt(batch, i+1, len(batches), commitsText, mrTitle, projectTemplate)
@@ -1624,12 +1694,12 @@ func formatCommitsForReview(commits []gitlab.CommitInfo) string {
 	return sb.String()
 }
 
-func isSingleBatch(files []gitlab.DiffFile) bool {
+func isSingleBatch(files []gitlab.DiffFile, maxTokens int) bool {
 	totalChars := 0
 	for _, f := range files {
 		totalChars += len(f.Diff)
 	}
-	return totalChars/charsPerTokenApprox < SysCfgMaxTokensPerBatch()
+	return totalChars/charsPerTokenApprox < maxTokens
 }
 
 // truncateDiffFilesForStructured 截断 diff 文件以适配单批结构化评审
@@ -1757,7 +1827,7 @@ func saveReviewLogFromTask(task model.Task, additions, deletions int, commits []
 		if log.MRTitle == "" {
 			log.MRTitle = task.MRTitle
 		}
-		return model.DB.Save(&log).Error
+		return model.DB.Omit("org_id").Save(&log).Error // ⚠️ 多租户改造：Omit org_id 防止零值覆盖
 	}
 
 	log = model.MergeRequestReviewLog{
@@ -1794,9 +1864,10 @@ func min(a, b int) int {
 // 返回：reviewReport(Markdown), score, userPrompt, actualModelID, actualModelName, error
 func (s *TaskService) runStructuredAIReview(task model.Task, diffFiles []gitlab.DiffFile, commitsText string, reviewComment string) (string, int, string, uint, string, error) {
 	// 1. 加载所有规则，并与项目配置合并（无配置时 fallback 到全局状态）
+	// 多租户改造：按 org_id 加载，替代无过滤全表查询
 	var allRules []model.ReviewRule
-	if err := model.DB.Find(&allRules).Error; err != nil {
-		zap.L().Warn("load all review rules failed", zap.Uint("project_id", task.ProjectID), zap.Error(err))
+	if err := model.DB.Where("org_id = ? OR org_id = 1", task.OrgID).Find(&allRules).Error; err != nil {
+		zap.L().Warn("load review rules failed", zap.Uint("project_id", task.ProjectID), zap.Error(err))
 	}
 
 	var configs []model.ProjectReviewConfig
@@ -1909,7 +1980,9 @@ func (s *TaskService) runStructuredAIReview(task model.Task, diffFiles []gitlab.
 
 	llmService := NewLLMService()
 
-	if isSingleBatch(diffFiles) {
+	// 多租户改造：按 org_id 读取每批最大 token 数
+	maxTokens := SysCfgMaxTokensPerBatchByOrg(task.OrgID)
+	if isSingleBatch(diffFiles, maxTokens) {
 		result, err := llmService.ChatCompletionStructured(context.Background(), &task.ID, 0, "runAIReviewStructured", "", userPrompt, responseFormat)
 		if err != nil {
 			return "", 0, userPrompt, 0, "", err
@@ -1920,7 +1993,6 @@ func (s *TaskService) runStructuredAIReview(task model.Task, diffFiles []gitlab.
 		llmResponse = result.Response
 	} else {
 		// 多批时：截断 diff 后强制走单批结构化，不再 fallback 到旧模式
-		maxTokens := SysCfgMaxTokensPerBatch()
 		truncatedFiles := truncateDiffFilesForStructured(diffFiles, maxTokens)
 		zap.L().Info("结构化评审多批截断",
 			zap.Int("original_files", len(diffFiles)),
@@ -2105,7 +2177,7 @@ func (s *TaskService) SaveChatTaskDiffFiles(taskID uint) {
 		if err := model.DB.First(&sysCfg).Error; err == nil && sysCfg.DiffTruncationThreshold > 0 {
 			threshold = sysCfg.DiffTruncationThreshold
 		}
-		if maxDF := SysCfgMaxDiffFiles(); len(diffFiles) > maxDF {
+		if maxDF := SysCfgMaxDiffFilesByOrg(task.OrgID); len(diffFiles) > maxDF {
 			diffFiles = diffFiles[:maxDF]
 		}
 		meta := prepareDiffFilesMeta(diffFiles, threshold)
@@ -2138,7 +2210,7 @@ func (s *TaskService) GetTaskDiffFiles(task model.Task) ([]map[string]interface{
 	if err := model.DB.First(&sysCfg).Error; err == nil && sysCfg.DiffTruncationThreshold > 0 {
 		threshold = sysCfg.DiffTruncationThreshold
 	}
-	if maxDF := SysCfgMaxDiffFiles(); len(diffFiles) > maxDF {
+	if maxDF := SysCfgMaxDiffFilesByOrg(task.OrgID); len(diffFiles) > maxDF {
 		diffFiles = diffFiles[:maxDF]
 	}
 	return prepareDiffFilesMeta(diffFiles, threshold), nil

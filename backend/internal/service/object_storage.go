@@ -33,9 +33,10 @@ type ObjectStorage interface {
 var storageProvider ObjectStorage
 
 // InitObjectStorageProvider 根据默认配置初始化存储后端
-func InitObjectStorageProvider() error {
+func InitObjectStorageProvider(scope *model.UserAuthScope) error {
 	var cfg model.ObjectStorageConfig
-	if err := model.DB.Where("is_default = ?", true).First(&cfg).Error; err != nil {
+	db := model.DBWithScope(scope)
+	if err := db.Where("is_default = ?", true).First(&cfg).Error; err != nil {
 		if err.Error() == "record not found" {
 			storageProvider = &noopStorage{}
 			pipeline.SetSnapshotStorage(nil) // 使用 pipeline 的 noop
@@ -85,9 +86,9 @@ func GetObjectStorageProvider() ObjectStorage {
 }
 
 // ReloadObjectStorageProvider 重新加载默认对象存储配置（配置变更后调用）
-func ReloadObjectStorageProvider() error {
+func ReloadObjectStorageProvider(scope *model.UserAuthScope) error {
 	zap.L().Info("重新加载对象存储配置")
-	return InitObjectStorageProvider()
+	return InitObjectStorageProvider(scope)
 }
 
 // BuildStorageFromConfig 根据配置构建具体实例

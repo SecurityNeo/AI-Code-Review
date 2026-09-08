@@ -1,15 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>数据概览 - CodeGuard</title>
         <script defer src="/static/js/echarts.min.js"></script>
-    <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+    <script src="js/auth.js?v=9"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <style>
@@ -324,12 +324,13 @@
                                         <th>项目</th>
                                         <th>标题</th>
                                         <th>作者</th>
+                                        <th>所属组织</th>
                                         <th style="text-align: center;">评分</th>
                                         <th style="text-align: right;">变更量</th>
                                     </tr>
                                 </thead>
                                 <tbody id="lowQualityTable">
-                                    <tr><td colspan="5" class="text-center text-gray-400 py-8">暂无数据</td></tr>
+                                    <tr><td colspan="6" class="text-center text-gray-400 py-8">暂无数据</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -1018,7 +1019,7 @@
         function renderLowQuality(data) {
             const tbody = document.getElementById('lowQualityTable');
             if (!data || data.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-gray-400 py-8">暂无低质量 MR</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray-400 py-8">暂无低质量 MR</td></tr>';
                 return;
             }
             tbody.innerHTML = data.map(mr => `
@@ -1026,6 +1027,7 @@
                     <td><span class="project-tag">${escapeHtml(mr.project || '-')}</span></td>
                     <td title="${escapeHtml(mr.title || '')}" class="truncate max-w-[200px]">${escapeHtml(mr.title || '-')}</td>
                     <td>${escapeHtml(mr.author || '-')}</td>
+                    <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(mr.org_name || '根组织')}</td>
                     <td style="text-align: center;"><span class="score-badge-fail inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold">${mr.score}</span></td>
                     <td style="text-align: right;" class="text-sm text-gray-600">+${formatNumber(mr.additions)} / -${formatNumber(mr.deletions)}</td>
                 </tr>

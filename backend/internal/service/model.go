@@ -28,15 +28,15 @@ func NewModelService() *ModelService {
 	return &ModelService{}
 }
 
-func (s *ModelService) List(page, pageSize int, keyword string) ([]model.LLMModel, int64, error) {
-	return s.ListByType(page, pageSize, keyword, "")
+func (s *ModelService) List(scope *model.UserAuthScope, page, pageSize int, keyword string) ([]model.LLMModel, int64, error) {
+	return s.ListByType(scope, page, pageSize, keyword, "")
 }
 
-func (s *ModelService) ListByType(page, pageSize int, keyword, modelType string) ([]model.LLMModel, int64, error) {
+func (s *ModelService) ListByType(scope *model.UserAuthScope, page, pageSize int, keyword, modelType string) ([]model.LLMModel, int64, error) {
 	var models []model.LLMModel
 	var total int64
 
-	db := model.DB.Model(&model.LLMModel{})
+	db := model.DBWithScope(scope).Model(&model.LLMModel{})
 	if keyword != "" {
 		db = db.Where("model_id LIKE ?", "%"+keyword+"%")
 	}
@@ -64,9 +64,10 @@ func (s *ModelService) ListByType(page, pageSize int, keyword, modelType string)
 	return models, total, nil
 }
 
-func (s *ModelService) Get(id uint) (*model.LLMModel, error) {
+func (s *ModelService) Get(scope *model.UserAuthScope, id uint) (*model.LLMModel, error) {
 	var m model.LLMModel
-	if err := model.DB.First(&m, id).Error; err != nil {
+	db := model.DBWithScope(scope)
+	if err := db.First(&m, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrModelNotFound
 		}
@@ -81,9 +82,10 @@ func (s *ModelService) Get(id uint) (*model.LLMModel, error) {
 	return &m, nil
 }
 
-func (s *ModelService) GetDefault() (*model.LLMModel, error) {
+func (s *ModelService) GetDefault(scope *model.UserAuthScope) (*model.LLMModel, error) {
 	var m model.LLMModel
-	if err := model.DB.Where("is_default = ?", true).First(&m).Error; err != nil {
+	db := model.DBWithScope(scope)
+	if err := db.Where("is_default = ?", true).First(&m).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrModelNotFound
 		}
@@ -97,10 +99,11 @@ func (s *ModelService) GetDefault() (*model.LLMModel, error) {
 	return &m, nil
 }
 
-func (s *ModelService) Create(req *CreateModelRequest) (*model.LLMModel, error) {
-	// Check if provider + model_id combination exists
+func (s *ModelService) Create(scope *model.UserAuthScope, req *CreateModelRequest) (*model.LLMModel, error) {
+	db := model.DBWithScope(scope)
+	// Check if provider + model_id combination exists within the same org
 	var count int64
-	model.DB.Model(&model.LLMModel{}).
+	db.Model(&model.LLMModel{}).
 		Where("provider = ? AND model_id = ?", req.Provider, req.ModelID).
 		Count(&count)
 	if count > 0 {
@@ -114,11 +117,12 @@ func (s *ModelService) Create(req *CreateModelRequest) (*model.LLMModel, error) 
 
 	// If setting as primary, unset other primaries first (only for LLM type)
 	if req.IsPrimary && modelType == "llm" {
-		model.DB.Model(&model.LLMModel{}).Where("is_primary = ?", true).Update("is_primary", false)
+		db.Model(&model.LLMModel{}).Where("is_primary = ?", true).Update("is_primary", false)
 	}
 
 	m := &model.LLMModel{
 		ModelType:        modelType,
+		OrgID:            req.OrgID, // 多租户改造：注入 org_id
 		Provider:         req.Provider,
 		ModelID:          req.ModelID,
 		BaseURL:          req.BaseURL,
@@ -136,7 +140,7 @@ func (s *ModelService) Create(req *CreateModelRequest) (*model.LLMModel, error) 
 		m.CheckIntervalSec = 5
 	}
 
-	if err := model.DB.Create(m).Error; err != nil {
+	if err := db.Create(m).Error; err != nil {
 		return nil, err
 	}
 
@@ -144,15 +148,16 @@ func (s *ModelService) Create(req *CreateModelRequest) (*model.LLMModel, error) 
 	return m, nil
 }
 
-func (s *ModelService) Update(id uint, req *UpdateModelRequest) error {
-	m, err := s.Get(id)
+func (s *ModelService) Update(scope *model.UserAuthScope, id uint, req *UpdateModelRequest) error {
+	m, err := s.Get(scope, id)
 	if err != nil {
 		return err
 	}
 
+	db := model.DBWithScope(scope)
 	if req.BackupOrder != nil && *req.BackupOrder > 0 {
 		var conflict int64
-		model.DB.Model(&model.LLMModel{}).
+		db.Model(&model.LLMModel{}).
 			Where("backup_order = ? AND id != ? AND status != ?", *req.BackupOrder, id, "inactive").
 			Count(&conflict)
 		if conflict > 0 {
@@ -184,7 +189,7 @@ func (s *ModelService) Update(id uint, req *UpdateModelRequest) error {
 	// Only update model_id if provided and different
 	if req.ModelID != nil && *req.ModelID != "" && *req.ModelID != m.ModelID {
 		var count int64
-		model.DB.Model(&model.LLMModel{}).
+		db.Model(&model.LLMModel{}).
 			Where("provider = ? AND model_id = ? AND id != ?", m.Provider, *req.ModelID, id).
 			Count(&count)
 		if count > 0 {
@@ -201,7 +206,7 @@ func (s *ModelService) Update(id uint, req *UpdateModelRequest) error {
 	// Handle primary / backup update (only for LLM type)
 	if req.IsPrimary != nil && *req.IsPrimary != m.IsPrimary {
 		if *req.IsPrimary {
-			model.DB.Model(&model.LLMModel{}).Where("is_primary = ?", true).Update("is_primary", false)
+			db.Model(&model.LLMModel{}).Where("is_primary = ?", true).Update("is_primary", false)
 			updates["backup_order"] = 0
 		}
 		updates["is_primary"] = *req.IsPrimary
@@ -222,15 +227,15 @@ func (s *ModelService) Update(id uint, req *UpdateModelRequest) error {
 		return nil
 	}
 
-	if err := model.DB.Model(&model.LLMModel{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+	if err := db.Model(&model.LLMModel{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (s *ModelService) Delete(id uint) error {
-	m, err := s.GetForUpdate(id)
+func (s *ModelService) Delete(scope *model.UserAuthScope, id uint) error {
+	m, err := s.GetForUpdate(scope, id)
 	if err != nil {
 		return err
 	}
@@ -239,37 +244,41 @@ func (s *ModelService) Delete(id uint) error {
 		return ErrCannotDeleteDefault
 	}
 
-	return model.DB.Delete(&model.LLMModel{}, id).Error
+	db := model.DBWithScope(scope)
+	return db.Delete(&model.LLMModel{}, id).Error
 }
 
-func (s *ModelService) SetDefault(id uint) error {
-	_, err := s.GetForUpdate(id)
+func (s *ModelService) SetDefault(scope *model.UserAuthScope, id uint) error {
+	_, err := s.GetForUpdate(scope, id)
 	if err != nil {
 		return err
 	}
 
+	db := model.DBWithScope(scope)
 	// Unset all other defaults
-	if err := model.DB.Model(&model.LLMModel{}).Where("is_default = ?", true).Update("is_default", false).Error; err != nil {
+	if err := db.Model(&model.LLMModel{}).Where("is_default = ?", true).Update("is_default", false).Error; err != nil {
 		return err
 	}
 
 	// Set this one as default
-	return model.DB.Model(&model.LLMModel{}).Where("id = ?", id).Update("is_default", true).Error
+	return db.Model(&model.LLMModel{}).Where("id = ?", id).Update("is_default", true).Error
 }
 
-func (s *ModelService) UnsetDefault(id uint) error {
-	_, err := s.GetForUpdate(id)
+func (s *ModelService) UnsetDefault(scope *model.UserAuthScope, id uint) error {
+	_, err := s.GetForUpdate(scope, id)
 	if err != nil {
 		return err
 	}
 
-	return model.DB.Model(&model.LLMModel{}).Where("id = ?", id).Update("is_default", false).Error
+	db := model.DBWithScope(scope)
+	return db.Model(&model.LLMModel{}).Where("id = ?", id).Update("is_default", false).Error
 }
 
-func (s *ModelService) CheckConnectivity(id uint) (bool, error) {
+func (s *ModelService) CheckConnectivity(scope *model.UserAuthScope, id uint) (bool, error) {
 	var m model.LLMModel
 	var err error
-	if err = model.DB.First(&m, id).Error; err != nil {
+	db := model.DBWithScope(scope)
+	if err = db.First(&m, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return false, ErrModelNotFound
 		}
@@ -299,15 +308,16 @@ func (s *ModelService) StartHealthCheckDaemon() {
 	ticker := time.NewTicker(1 * time.Second)
 	go func() {
 		for range ticker.C {
-			s.runModelHealthChecks()
+			s.runModelHealthChecks(nil)
 		}
 	}()
 	zap.L().Info("model health check daemon started")
 }
 
-func (s *ModelService) runModelHealthChecks() {
+func (s *ModelService) runModelHealthChecks(scope *model.UserAuthScope) {
 	var models []model.LLMModel
-	if err := model.DB.Where("status != ?", "inactive").Find(&models).Error; err != nil {
+	db := model.DBWithScope(scope)
+	if err := db.Where("status != ?", "inactive").Find(&models).Error; err != nil {
 		zap.L().Error("model health check failed", zap.Error(err))
 		return
 	}
@@ -317,7 +327,7 @@ func (s *ModelService) runModelHealthChecks() {
 	alertDuration, alertCooldown := 300, 3600
 	notifierID := uint(0)
 	mentionIDs := ""
-	if err := model.SilentFirst(model.DB, &cfg); err == nil {
+	if err := model.SilentFirst(db, &cfg); err == nil {
 		alertDuration = cfg.AlertDurationSec
 		if alertDuration <= 0 {
 			alertDuration = 300
@@ -341,9 +351,9 @@ func (s *ModelService) runModelHealthChecks() {
 			continue
 		}
 		// 提前更新 last_check_at，避免 CheckConnectivity 阻塞期间其他 tick 重复检查同一模型
-		model.DB.Model(&m).Update("last_check_at", now)
+		db.Model(&m).Update("last_check_at", now)
 
-		connected, err := s.CheckConnectivity(m.ID)
+		connected, err := s.CheckConnectivity(scope, m.ID)
 		errMsg := ""
 		if !connected && err != nil {
 			errMsg = err.Error()
@@ -351,7 +361,7 @@ func (s *ModelService) runModelHealthChecks() {
 
 		// 检查模型是否在此期间被禁用（防止禁用与健康检查竞态）
 		var current model.LLMModel
-		if dbErr := model.DB.First(&current, m.ID).Error; dbErr != nil {
+		if dbErr := db.First(&current, m.ID).Error; dbErr != nil {
 			zap.L().Error("failed to query current model status", zap.Uint("model_id", m.ID), zap.Error(dbErr))
 			continue
 		}
@@ -376,16 +386,17 @@ func (s *ModelService) runModelHealthChecks() {
 			updates["status_changed_at"] = now
 		}
 
-		if err := model.DB.Model(&m).Updates(updates).Error; err != nil {
+		if err := db.Model(&m).Updates(updates).Error; err != nil {
 			zap.L().Error("model update status failed", zap.Uint("model_id", m.ID), zap.Error(err))
 			continue
 		}
 
 		// 恢复通知
 		if statusChanged && newStatus == "active" && prevStatus == "error" {
-			SendModelAlert(m, true, alertDuration, alertCooldown, notifierID, mentionIDs)
+			alertScope := &model.UserAuthScope{VisibleOrgIDs: []uint{m.OrgID}}
+			SendModelAlert(alertScope, m, true, alertDuration, alertCooldown, notifierID, mentionIDs)
 			// 恢复时重置告警时间点，下次异常重新开始计时
-			model.DB.Model(&m).Update("last_alert_at", nil)
+			db.Model(&m).Update("last_alert_at", nil)
 		}
 
 		// 异常持续达标 + 冷却期满足则告警
@@ -416,8 +427,9 @@ func (s *ModelService) runModelHealthChecks() {
 				zap.L().Info("model alert triggered (first alert)",
 					zap.Uint("model_id", m.ID),
 					zap.Int("elapsed_sec", elapsed))
-				SendModelAlert(m, false, alertDuration, alertCooldown, notifierID, mentionIDs)
-				model.DB.Model(&m).Update("last_alert_at", now)
+				alertScope := &model.UserAuthScope{VisibleOrgIDs: []uint{m.OrgID}}
+				SendModelAlert(alertScope, m, false, alertDuration, alertCooldown, notifierID, mentionIDs)
+				db.Model(&m).Update("last_alert_at", now)
 			} else {
 				sinceLastAlert := int(now.Sub(lastAlert).Seconds())
 				if sinceLastAlert >= alertCooldown {
@@ -425,8 +437,9 @@ func (s *ModelService) runModelHealthChecks() {
 						zap.Uint("model_id", m.ID),
 						zap.Int("since_last_alert_sec", sinceLastAlert),
 						zap.Int("cooldown_sec", alertCooldown))
-					SendModelAlert(m, false, alertDuration, alertCooldown, notifierID, mentionIDs)
-					model.DB.Model(&m).Update("last_alert_at", now)
+					alertScope := &model.UserAuthScope{VisibleOrgIDs: []uint{m.OrgID}}
+					SendModelAlert(alertScope, m, false, alertDuration, alertCooldown, notifierID, mentionIDs)
+					db.Model(&m).Update("last_alert_at", now)
 				} else {
 					zap.L().Info("model alert skipped (in cooldown)",
 						zap.Uint("model_id", m.ID),
@@ -440,9 +453,10 @@ func (s *ModelService) runModelHealthChecks() {
 }
 
 // GetForUpdate returns model for update
-func (s *ModelService) GetForUpdate(id uint) (*model.LLMModel, error) {
+func (s *ModelService) GetForUpdate(scope *model.UserAuthScope, id uint) (*model.LLMModel, error) {
 	var m model.LLMModel
-	if err := model.DB.First(&m, id).Error; err != nil {
+	db := model.DBWithScope(scope)
+	if err := db.First(&m, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrModelNotFound
 		}
@@ -453,8 +467,8 @@ func (s *ModelService) GetForUpdate(id uint) (*model.LLMModel, error) {
 }
 
 // Disable 禁用模型
-func (s *ModelService) Disable(id uint) error {
-	m, err := s.GetForUpdate(id)
+func (s *ModelService) Disable(scope *model.UserAuthScope, id uint) error {
+	m, err := s.GetForUpdate(scope, id)
 	if err != nil {
 		return err
 	}
@@ -466,16 +480,18 @@ func (s *ModelService) Disable(id uint) error {
 		return ErrCannotDisableDefault
 	}
 
-	return model.DB.Model(&model.LLMModel{}).Where("id = ?", id).Update("status", "inactive").Error
+	db := model.DBWithScope(scope)
+	return db.Model(&model.LLMModel{}).Where("id = ?", id).Update("status", "inactive").Error
 }
 
 // Enable 启用模型
-func (s *ModelService) Enable(id uint) error {
-	_, err := s.GetForUpdate(id)
+func (s *ModelService) Enable(scope *model.UserAuthScope, id uint) error {
+	_, err := s.GetForUpdate(scope, id)
 	if err != nil {
 		return err
 	}
-	return model.DB.Model(&model.LLMModel{}).Where("id = ?", id).Updates(map[string]interface{}{
+	db := model.DBWithScope(scope)
+	return db.Model(&model.LLMModel{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"status":      "active",
 		"check_error": "",
 	}).Error
@@ -500,15 +516,16 @@ func (s *ModelService) CheckEmbeddingConnectivityByConfig(baseURL, apiKey, model
 }
 
 // GetModelForJob returns the model configuration for creating K8s job
-func (s *ModelService) GetModelForJob(modelID uint) (string, string, error) {
+func (s *ModelService) GetModelForJob(scope *model.UserAuthScope, modelID uint) (string, string, error) {
 	var m model.LLMModel
+	db := model.DBWithScope(scope)
 	if modelID > 0 {
-		if err := model.DB.First(&m, modelID).Error; err != nil {
+		if err := db.First(&m, modelID).Error; err != nil {
 			return "", "", err
 		}
 	} else {
 		// Use default model
-		if err := model.DB.Where("is_default = ?", true).First(&m).Error; err != nil {
+		if err := db.Where("is_default = ?", true).First(&m).Error; err != nil {
 			return "", "", fmt.Errorf("no default model configured")
 		}
 	}
@@ -538,6 +555,8 @@ type CreateModelRequest struct {
 	IsDefault        bool    `json:"is_default"`
 	IsPrimary        bool    `json:"is_primary"`
 	BackupOrder      int     `json:"backup_order"`
+	// 多租户改造：后端注入，禁止客户端传入
+	OrgID uint `json:"-"`
 }
 
 type UpdateModelRequest struct {

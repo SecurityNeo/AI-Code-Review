@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ai-optimizer/backend/internal/middleware"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,9 @@ func NewReportHandler() *ReportHandler {
 // ============ SMTP 配置 ============
 
 func (h *ReportHandler) GetSMTPConfig(c *gin.Context) {
+	if _, ok := currentUserOrAbort(c); !ok {
+		return
+	}
 	var cfg model.SMTPConfig
 	if err := model.DB.First(&cfg).Error; err != nil {
 		c.JSON(200, gin.H{"data": nil})
@@ -30,6 +34,15 @@ func (h *ReportHandler) GetSMTPConfig(c *gin.Context) {
 }
 
 func (h *ReportHandler) SaveSMTPConfig(c *gin.Context) {
+	_, ok := currentUserOrAbort(c)
+	if !ok {
+		return
+	}
+	scope := middleware.GetAuthScope(c)
+	if scope == nil || !scope.HasOrgRole("super_admin", "org_admin") {
+		c.JSON(403, gin.H{"error": "admin required"})
+		return
+	}
 	var req struct {
 		Host      string `json:"host" binding:"required"`
 		Port      int    `json:"port" binding:"required"`
@@ -55,11 +68,26 @@ func (h *ReportHandler) SaveSMTPConfig(c *gin.Context) {
 	cfg.UseTLS = req.UseTLS
 	cfg.IsDefault = true
 
-	model.DB.Save(&cfg)
+	// 多租户改造：SMTPConfig 无 org_id，使用 Updates 精确更新字段，避免零值覆盖
+	model.DB.Model(&cfg).Updates(map[string]interface{}{
+		"host":       cfg.Host,
+		"port":       cfg.Port,
+		"username":   cfg.Username,
+		"password":   cfg.Password,
+		"from_email": cfg.FromEmail,
+		"from_name":  cfg.FromName,
+		"use_tls":    cfg.UseTLS,
+		"is_default": cfg.IsDefault,
+	})
 	c.JSON(200, gin.H{"message": "saved"})
 }
 
 func (h *ReportHandler) TestSMTP(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var req struct {
 		Host      string `json:"host" binding:"required"`
 		Port      int    `json:"port" binding:"required"`
@@ -92,12 +120,37 @@ func (h *ReportHandler) TestSMTP(c *gin.Context) {
 // ============ 接收人管理 ============
 
 func (h *ReportHandler) ListRecipients(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var list []model.ReportRecipient
-	model.DB.Order("id DESC").Find(&list)
+	db := model.DB.Order("id DESC")
+	if !scope.IsSuperAdmin {
+		db = db.Scopes(model.OrgScope(scope))
+	}
+	db.Find(&list)
+
+	// 批量填充组织名称
+	orgIDs := make([]uint, 0, len(list))
+	for _, r := range list {
+		orgIDs = append(orgIDs, r.OrgID)
+	}
+	orgNameMap := model.BatchOrgNames(orgIDs)
+	for i := range list {
+		list[i].OrgName = orgNameMap[list[i].OrgID]
+	}
+
 	c.JSON(200, gin.H{"data": list})
 }
 
 func (h *ReportHandler) CreateRecipient(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var r model.ReportRecipient
 	if err := c.ShouldBindJSON(&r); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
@@ -106,14 +159,27 @@ func (h *ReportHandler) CreateRecipient(c *gin.Context) {
 	if r.GroupName == "" {
 		r.GroupName = "默认分组"
 	}
+	// 多租户改造：注入当前 org_id（非 super_admin 禁止客户端传入）
+	if r.OrgID == 0 || !scope.IsSuperAdmin {
+		r.OrgID = middleware.GetCurrentOrgID(c)
+	}
 	model.DB.Create(&r)
 	c.JSON(200, gin.H{"data": r})
 }
 
 func (h *ReportHandler) UpdateRecipient(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 	var r model.ReportRecipient
-	if err := model.DB.First(&r, id).Error; err != nil {
+	db := model.DB
+	if !scope.IsSuperAdmin {
+		db = db.Scopes(model.OrgScope(scope))
+	}
+	if err := db.First(&r, id).Error; err != nil {
 		c.JSON(404, gin.H{"error": "not found"})
 		return
 	}
@@ -139,19 +205,35 @@ func (h *ReportHandler) UpdateRecipient(c *gin.Context) {
 	if req.Enabled != nil {
 		r.Enabled = *req.Enabled
 	}
-	model.DB.Save(&r)
+	// 多租户改造：避免 Save 零值覆盖 org_id
+	model.DB.Omit("org_id").Save(&r)
 	c.JSON(200, gin.H{"data": r})
 }
 
 func (h *ReportHandler) DeleteRecipient(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
-	model.DB.Delete(&model.ReportRecipient{}, id)
+	db := model.DB
+	if !scope.IsSuperAdmin {
+		db = db.Scopes(model.OrgScope(scope))
+	}
+	db.Delete(&model.ReportRecipient{}, id)
 	c.JSON(200, gin.H{"message": "deleted"})
 }
 
 // ============ 报告配置 ============
 
 func (h *ReportHandler) GetReportConfig(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	reportType := c.Param("type")
 	if reportType != "weekly" && reportType != "monthly" {
 		c.JSON(400, gin.H{"error": "invalid type"})
@@ -159,9 +241,14 @@ func (h *ReportHandler) GetReportConfig(c *gin.Context) {
 	}
 
 	var cfg model.ReportConfig
-	if err := model.DB.Where("report_type = ?", reportType).First(&cfg).Error; err != nil {
+	db := model.DB
+	if !scope.IsSuperAdmin {
+		db = db.Scopes(model.OrgScope(scope))
+	}
+	if err := db.Where("report_type = ?", reportType).First(&cfg).Error; err != nil {
 		// 首次访问时创建默认配置
 		cfg.ReportType = reportType
+		cfg.OrgID = middleware.GetCurrentOrgID(c)
 		if reportType == "weekly" {
 			cfg.DataPeriodDays = 7
 			cfg.SendDayOfWeek = 1 // 周一
@@ -184,6 +271,12 @@ func (h *ReportHandler) GetReportConfig(c *gin.Context) {
 }
 
 func (h *ReportHandler) SaveReportConfig(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	reportType := c.Param("type")
 	if reportType != "weekly" && reportType != "monthly" {
 		c.JSON(400, gin.H{"error": "invalid type"})
@@ -207,7 +300,11 @@ func (h *ReportHandler) SaveReportConfig(c *gin.Context) {
 	}
 
 	var cfg model.ReportConfig
-	model.DB.Where("report_type = ?", reportType).First(&cfg)
+	db := model.DB
+	if !scope.IsSuperAdmin {
+		db = db.Scopes(model.OrgScope(scope))
+	}
+	db.Where("report_type = ?", reportType).First(&cfg)
 	cfg.ReportType = reportType
 	cfg.GenerateEnabled = req.GenerateEnabled
 	cfg.SendEnabled = req.SendEnabled
@@ -227,7 +324,8 @@ func (h *ReportHandler) SaveReportConfig(c *gin.Context) {
 	cfg.SendDayOfMonth = req.SendDayOfMonth
 	// 重新生成 Cron 表达式
 	cfg.CronExpr = service.NewReportService().BuildCronExpression(&cfg)
-	model.DB.Save(&cfg)
+	// 多租户改造：避免 Save 零值覆盖 org_id
+	model.DB.Omit("org_id").Save(&cfg)
 	// 热重载 cron
 	service.ReloadReportCron()
 	c.JSON(200, gin.H{"message": "saved", "cron_expr": cfg.CronExpr})
@@ -236,13 +334,18 @@ func (h *ReportHandler) SaveReportConfig(c *gin.Context) {
 // ============ 预览与发送 ============
 
 func (h *ReportHandler) PreviewReport(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	reportType := c.Param("type")
 	if reportType != "weekly" && reportType != "monthly" {
 		c.JSON(400, gin.H{"error": "invalid type"})
 		return
 	}
 
-	html, err := service.NewReportService().GenerateHTML(reportType)
+	html, err := service.NewReportService().GenerateHTML(scope, reportType)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -253,6 +356,12 @@ func (h *ReportHandler) PreviewReport(c *gin.Context) {
 }
 
 func (h *ReportHandler) SendReport(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	reportType := c.Param("type")
 	if reportType != "weekly" && reportType != "monthly" {
 		c.JSON(400, gin.H{"error": "invalid type"})
@@ -265,7 +374,7 @@ func (h *ReportHandler) SendReport(c *gin.Context) {
 	}
 	c.ShouldBindJSON(&req)
 
-	query := model.DB.Where("enabled = ?", true)
+	query := model.DBWithScope(scope).Where("enabled = ?", true)
 	if len(req.Groups) > 0 {
 		query = query.Where("group_name IN ?", req.Groups)
 	}
@@ -274,9 +383,10 @@ func (h *ReportHandler) SendReport(c *gin.Context) {
 	recipientsJSON, _ := json.Marshal(recipients)
 
 	svc := service.NewReportService()
-	html, err := svc.GenerateHTML(reportType)
+	html, err := svc.GenerateHTML(scope, reportType)
 	if err != nil {
 		log := model.ReportLog{
+			OrgID:       scope.CurrentOrgID,
 			ReportType:  reportType,
 			TriggerType: "manual",
 			Status:      "generated_failed",
@@ -289,8 +399,9 @@ func (h *ReportHandler) SendReport(c *gin.Context) {
 		return
 	}
 
-	if err := svc.SendEmail(reportType, html, req.Groups); err != nil {
+	if err := svc.SendEmail(scope, reportType, html, req.Groups); err != nil {
 		log := model.ReportLog{
+			OrgID:       scope.CurrentOrgID,
 			ReportType:  reportType,
 			TriggerType: "manual",
 			Status:      "sent_failed",
@@ -305,6 +416,7 @@ func (h *ReportHandler) SendReport(c *gin.Context) {
 	}
 
 	log := model.ReportLog{
+		OrgID:       scope.CurrentOrgID,
 		ReportType:  reportType,
 		TriggerType: "manual",
 		Status:      "sent_success",
@@ -319,6 +431,12 @@ func (h *ReportHandler) SendReport(c *gin.Context) {
 // ============ 日志 ============
 
 func (h *ReportHandler) ListLogs(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	reportType := c.Query("type")
@@ -326,6 +444,9 @@ func (h *ReportHandler) ListLogs(c *gin.Context) {
 
 	var total int64
 	db := model.DB.Model(&model.ReportLog{})
+	if !scope.IsSuperAdmin {
+		db = db.Scopes(model.OrgScope(scope))
+	}
 	if reportType != "" {
 		db = db.Where("report_type = ?", reportType)
 	}
@@ -336,13 +457,34 @@ func (h *ReportHandler) ListLogs(c *gin.Context) {
 
 	var logs []model.ReportLog
 	db.Order("id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&logs)
+
+	// 批量填充组织名称
+	orgIDs := make([]uint, 0, len(logs))
+	for _, l := range logs {
+		orgIDs = append(orgIDs, l.OrgID)
+	}
+	orgNameMap := model.BatchOrgNames(orgIDs)
+	for i := range logs {
+		logs[i].OrgName = orgNameMap[logs[i].OrgID]
+	}
+
 	c.JSON(200, gin.H{"data": logs, "total": total, "page": page, "page_size": pageSize})
 }
 
 func (h *ReportHandler) GetReportLogHTML(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	id, _ := strconv.Atoi(c.Param("id"))
 	var log model.ReportLog
-	if err := model.DB.First(&log, id).Error; err != nil {
+	db := model.DB
+	if !scope.IsSuperAdmin {
+		db = db.Scopes(model.OrgScope(scope))
+	}
+	if err := db.First(&log, id).Error; err != nil {
 		c.JSON(404, gin.H{"error": "not found"})
 		return
 	}
@@ -355,8 +497,18 @@ func (h *ReportHandler) GetReportLogHTML(c *gin.Context) {
 }
 
 func (h *ReportHandler) DeleteLog(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	id, _ := strconv.Atoi(c.Param("id"))
-	if err := model.DB.Delete(&model.ReportLog{}, id).Error; err != nil {
+	db := model.DB
+	if !scope.IsSuperAdmin {
+		db = db.Scopes(model.OrgScope(scope))
+	}
+	if err := db.Delete(&model.ReportLog{}, id).Error; err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
@@ -364,9 +516,19 @@ func (h *ReportHandler) DeleteLog(c *gin.Context) {
 }
 
 func (h *ReportHandler) ResendReport(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	id, _ := strconv.Atoi(c.Param("id"))
 	var log model.ReportLog
-	if err := model.DB.First(&log, id).Error; err != nil {
+	db := model.DB
+	if !scope.IsSuperAdmin {
+		db = db.Scopes(model.OrgScope(scope))
+	}
+	if err := db.First(&log, id).Error; err != nil {
 		c.JSON(404, gin.H{"error": "report log not found"})
 		return
 	}
@@ -376,9 +538,10 @@ func (h *ReportHandler) ResendReport(c *gin.Context) {
 		return
 	}
 
-	if err := service.NewReportService().ResendEmail(&log); err != nil {
+	if err := service.NewReportService().ResendEmail(scope, &log); err != nil {
 		// 记录新日志
 		newLog := model.ReportLog{
+			OrgID:       log.OrgID,
 			ReportType:  log.ReportType,
 			TriggerType: "manual",
 			Status:      "sent_failed",
@@ -394,6 +557,7 @@ func (h *ReportHandler) ResendReport(c *gin.Context) {
 
 	// 记录新日志
 	newLog := model.ReportLog{
+		OrgID:       log.OrgID,
 		ReportType:  log.ReportType,
 		TriggerType: "manual",
 		Status:      "sent_success",
@@ -405,28 +569,34 @@ func (h *ReportHandler) ResendReport(c *gin.Context) {
 	c.JSON(200, gin.H{"message": "报告已重新发送"})
 }
 
-// InitReportConfigs 初始化周报/月报默认配置
+// InitReportConfigs 初始化周报/月报默认配置（归属根组织）
 func InitReportConfigs() {
 	for _, t := range []string{"weekly", "monthly"} {
 		var cfg model.ReportConfig
-		if err := model.SilentFirst(model.DB.Where("report_type = ?", t), &cfg); err != nil {
-			cfg.ReportType = t
-			if t == "weekly" {
-				cfg.DataPeriodDays = 7
-				cfg.SendDayOfWeek = 1
-			} else {
-				cfg.DataPeriodDays = 30
-				cfg.SendDayOfMonth = 1
-			}
-			cfg.SendHour = 9
-			cfg.SendMinute = 0
-			cfg.CronExpr = service.NewReportService().BuildCronExpression(&cfg)
-			cfg.GenerateEnabled = false
-			cfg.SendEnabled = false
-			cfg.Enabled = false
-			if err := model.DB.Create(&cfg).Error; err != nil {
-				zap.L().Error("init report config failed", zap.String("type", t), zap.Error(err))
-			}
+		err := model.DB.Where("report_type = ? AND org_id = 1", t).First(&cfg).Error
+		if err == nil {
+			continue // 已存在，跳过
+		}
+		// 不存在则插入默认值
+		cfg = model.ReportConfig{
+			OrgID:           1,
+			ReportType:      t,
+			SendHour:        9,
+			SendMinute:      0,
+			GenerateEnabled: false,
+			SendEnabled:     false,
+			Enabled:         false,
+		}
+		if t == "weekly" {
+			cfg.DataPeriodDays = 7
+			cfg.SendDayOfWeek = 1
+		} else {
+			cfg.DataPeriodDays = 30
+			cfg.SendDayOfMonth = 1
+		}
+		cfg.CronExpr = service.NewReportService().BuildCronExpression(&cfg)
+		if err := model.DB.Create(&cfg).Error; err != nil {
+			zap.L().Error("init report config failed", zap.String("type", t), zap.Error(err))
 		}
 	}
 }

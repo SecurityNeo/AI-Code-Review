@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ai-optimizer/backend/internal/middleware"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -44,8 +45,17 @@ func NewMCPKeyHandler() *MCPKeyHandler {
 
 // ListKeys 列出所有 MCP API Key
 func (h *MCPKeyHandler) ListKeys(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	var keys []model.MCPAPIKey
 	query := model.DB.Order("created_at DESC")
+	if !scope.IsSuperAdmin {
+		query = query.Scopes(model.OrgScope(scope))
+	}
 
 	// 搜索
 	if keyword := c.Query("keyword"); keyword != "" {
@@ -72,6 +82,16 @@ func (h *MCPKeyHandler) ListKeys(c *gin.Context) {
 		return
 	}
 
+	// 批量填充组织名称
+	orgIDs := make([]uint, 0, len(keys))
+	for _, k := range keys {
+		orgIDs = append(orgIDs, k.OrgID)
+	}
+	orgNameMap := model.BatchOrgNames(orgIDs)
+	for i := range keys {
+		keys[i].OrgName = orgNameMap[keys[i].OrgID]
+	}
+
 	c.JSON(200, gin.H{
 		"data":  keys,
 		"total": total,
@@ -80,9 +100,19 @@ func (h *MCPKeyHandler) ListKeys(c *gin.Context) {
 
 // GetKey 获取单个 MCP API Key 详情
 func (h *MCPKeyHandler) GetKey(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	id, _ := strconv.Atoi(c.Param("id"))
 	var key model.MCPAPIKey
-	if err := model.DB.First(&key, id).Error; err != nil {
+	db := model.DB
+	if !scope.IsSuperAdmin {
+		db = db.Scopes(model.OrgScope(scope))
+	}
+	if err := db.First(&key, id).Error; err != nil {
 		c.JSON(404, gin.H{"error": "key not found"})
 		return
 	}
@@ -91,6 +121,12 @@ func (h *MCPKeyHandler) GetKey(c *gin.Context) {
 
 // CreateKey 创建新的 MCP API Key
 func (h *MCPKeyHandler) CreateKey(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	var req struct {
 		Name        string   `json:"name" binding:"required"`
 		Scopes      []string `json:"scopes" binding:"required"`
@@ -98,6 +134,7 @@ func (h *MCPKeyHandler) CreateKey(c *gin.Context) {
 		RateLimit   int      `json:"rate_limit"`
 		ExpiresAt   *string  `json:"expires_at"`
 		UserID      uint     `json:"user_id"` // 绑定用户（Phase 1：新 Key 强烈建议绑定）
+		OrgID       uint     `json:"org_id"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -113,7 +150,11 @@ func (h *MCPKeyHandler) CreateKey(c *gin.Context) {
 	// 如果指定了 user_id，校验用户存在且已启用
 	if req.UserID > 0 {
 		var user model.User
-		if err := model.DB.First(&user, req.UserID).Error; err != nil {
+		dbUser := model.DB
+		if !scope.IsSuperAdmin {
+			dbUser = dbUser.Scopes(model.OrgScope(scope))
+		}
+		if err := dbUser.First(&user, req.UserID).Error; err != nil {
 			c.JSON(400, gin.H{"error": "绑定的用户不存在"})
 			return
 		}
@@ -141,7 +182,13 @@ func (h *MCPKeyHandler) CreateKey(c *gin.Context) {
 		req.RateLimit = 100
 	}
 
+	orgID := middleware.GetCurrentOrgID(c)
+	if req.OrgID > 0 && scope.IsSuperAdmin {
+		orgID = req.OrgID
+	}
+
 	key := model.MCPAPIKey{
+		OrgID:       orgID, // 多租户改造：注入当前 org_id
 		Name:        req.Name,
 		Prefix:      keyPrefix,
 		KeyHash:     string(hash),
@@ -181,6 +228,12 @@ func (h *MCPKeyHandler) CreateKey(c *gin.Context) {
 
 // UpdateKey 更新 MCP API Key
 func (h *MCPKeyHandler) UpdateKey(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	id, _ := strconv.Atoi(c.Param("id"))
 
 	var req struct {
@@ -199,7 +252,11 @@ func (h *MCPKeyHandler) UpdateKey(c *gin.Context) {
 	}
 
 	var key model.MCPAPIKey
-	if err := model.DB.First(&key, id).Error; err != nil {
+	db := model.DB
+	if !scope.IsSuperAdmin {
+		db = db.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	if err := db.First(&key, id).Error; err != nil {
 		c.JSON(404, gin.H{"error": "key not found"})
 		return
 	}
@@ -237,7 +294,11 @@ func (h *MCPKeyHandler) UpdateKey(c *gin.Context) {
 	if req.UserID != nil {
 		if *req.UserID > 0 {
 			var user model.User
-			if err := model.DB.First(&user, *req.UserID).Error; err != nil {
+			dbUser := model.DB
+			if !scope.IsSuperAdmin {
+				dbUser = dbUser.Scopes(model.OrgScope(scope))
+			}
+			if err := dbUser.First(&user, *req.UserID).Error; err != nil {
 				c.JSON(400, gin.H{"error": "绑定的用户不存在"})
 				return
 			}
@@ -249,7 +310,8 @@ func (h *MCPKeyHandler) UpdateKey(c *gin.Context) {
 		key.UserID = *req.UserID
 	}
 
-	if err := model.DB.Save(&key).Error; err != nil {
+	// 多租户改造：避免 Save 零值覆盖 org_id
+	if err := model.DB.Omit("org_id").Save(&key).Error; err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
@@ -259,8 +321,18 @@ func (h *MCPKeyHandler) UpdateKey(c *gin.Context) {
 
 // DeleteKey 删除 MCP API Key
 func (h *MCPKeyHandler) DeleteKey(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	id, _ := strconv.Atoi(c.Param("id"))
-	if err := model.DB.Delete(&model.MCPAPIKey{}, id).Error; err != nil {
+	db := model.DB
+	if !scope.IsSuperAdmin {
+		db = db.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	if err := db.Delete(&model.MCPAPIKey{}, id).Error; err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
@@ -269,7 +341,17 @@ func (h *MCPKeyHandler) DeleteKey(c *gin.Context) {
 
 // ListLogs 列出 MCP 调用日志
 func (h *MCPKeyHandler) ListLogs(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	query := model.DB.Order("created_at DESC")
+	if !scope.IsSuperAdmin {
+		// 多租户改造：只查询当前组织下的 MCP Key 的日志
+		query = query.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
 
 	// 过滤
 	if apiKeyID := c.Query("api_key_id"); apiKeyID != "" {
@@ -312,6 +394,8 @@ func (h *MCPKeyHandler) ListLogs(c *gin.Context) {
 		return
 	}
 
+	// MCPCallLog 没有 OrgID 字段，跳过组织名称填充
+
 	c.JSON(200, gin.H{
 		"data":  logs,
 		"total": total,
@@ -329,6 +413,12 @@ func generateRandomString(length int) string {
 
 // ListMCPTools 返回 MCP 能力中心工具元数据（支持分页）
 func ListMCPTools(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "15"))
 	if page < 1 {

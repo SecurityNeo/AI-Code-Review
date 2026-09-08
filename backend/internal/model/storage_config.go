@@ -5,6 +5,8 @@ import "time"
 // ObjectStorageConfig 对象存储配置（独立表，支持多存储后端）
 type ObjectStorageConfig struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
+	OrgID     uint      `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
+	OrgName   string    `gorm:"-" json:"org_name,omitempty"`
 	Name      string    `gorm:"size:64;not null" json:"name"` // 配置名称（原uniqueIndex已移除，支持同名多配置）
 	IsDefault bool      `gorm:"default:false" json:"is_default"`
 	Enabled   bool      `gorm:"default:false" json:"enabled"`

@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/ai-optimizer/backend/internal/engine"
+	"github.com/ai-optimizer/backend/internal/middleware"
 	"github.com/ai-optimizer/backend/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -23,7 +24,12 @@ func NewReviewAgentConfigHandler() *ReviewAgentConfigHandler {
 // GET /api/v1/review-agent-config
 // 任何人可读（前端 Pipeline 展示需要）
 func (h *ReviewAgentConfigHandler) Get(c *gin.Context) {
-	cfg := h.svc.GetOrDefault()
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+	cfg := h.svc.GetOrDefault(scope, middleware.GetCurrentOrgID(c))
 
 	// 将 JSON 字符串字段解析为前端友好的类型
 	var stageConfigs map[string]interface{}
@@ -51,6 +57,11 @@ func (h *ReviewAgentConfigHandler) Get(c *gin.Context) {
 // PUT /api/v1/review-agent-config
 // 仅 admin 可写
 func (h *ReviewAgentConfigHandler) Save(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var req struct {
 		EnabledStages   []string               `json:"enabled_stages" binding:"required"`
 		StageConfigs    map[string]interface{} `json:"stage_configs"`
@@ -75,7 +86,7 @@ func (h *ReviewAgentConfigHandler) Save(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.Save(req.EnabledStages, req.StageConfigs, req.TriggerEvents, req.ShowAgentStatus, userID); err != nil {
+	if err := h.svc.Save(scope, middleware.GetCurrentOrgID(c), req.EnabledStages, req.StageConfigs, req.TriggerEvents, req.ShowAgentStatus, userID); err != nil {
 		// 依赖校验失败时返回 422 + 结构化 violations，方便前端精确定位标红卡片
 		var depErr *service.DependencyViolationError
 		if errors.As(err, &depErr) {
@@ -95,6 +106,7 @@ func (h *ReviewAgentConfigHandler) Save(c *gin.Context) {
 // GET /api/v1/review-agent-config/file-filter-defaults
 // 任意登录用户可读（默认规则是只读系统配置）
 func (h *ReviewAgentConfigHandler) GetFileFilterDefaults(c *gin.Context) {
+	if _, ok := currentUserOrAbort(c); !ok { return }
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"data": gin.H{

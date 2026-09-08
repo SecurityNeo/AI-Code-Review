@@ -5,6 +5,7 @@ import "gorm.io/gorm"
 // MRDiffMeta 存储 MR diff 的轻量索引，原始 diff 保存在对象存储中
 type MRDiffMeta struct {
 	gorm.Model
+	OrgID       uint   `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
 	TaskID      uint   `gorm:"index;not null"` // 关联的任务 ID
 	ProjectID   uint   `gorm:"index;not null"` // 项目 ID
 	MRIID       int    `gorm:"column:mri_id;not null"` // GitLab MR IID

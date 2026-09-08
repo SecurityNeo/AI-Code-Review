@@ -199,7 +199,7 @@ func (c *stageContextImpl) UpdateProgress(exec *model.TaskPipelineExecution, bat
 
 func (c *stageContextImpl) SaveInputSnapshot(exec *model.TaskPipelineExecution, data map[string]interface{}) {
 	mgr := NewSnapshotManager()
-	_, err := mgr.SaveInputSnapshot(exec.ID, data)
+	_, err := mgr.SaveInputSnapshot(c.db, exec.ID, data)
 	if err != nil {
 		zap.L().Warn("save input snapshot failed", zap.Error(err))
 	}
@@ -207,7 +207,7 @@ func (c *stageContextImpl) SaveInputSnapshot(exec *model.TaskPipelineExecution, 
 
 func (c *stageContextImpl) SaveOutputSnapshot(exec *model.TaskPipelineExecution, data map[string]interface{}) {
 	mgr := NewSnapshotManager()
-	_, err := mgr.SaveOutputSnapshot(exec.ID, data)
+	_, err := mgr.SaveOutputSnapshot(c.db, exec.ID, data)
 	if err != nil {
 		zap.L().Warn("save output snapshot failed", zap.Error(err))
 	}

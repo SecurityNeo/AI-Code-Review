@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>对象存储配置 - CodeGuard</title>
-    <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+    <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <style>
@@ -155,6 +156,7 @@
                     <thead class="bg-gray-50 border-b">
                         <tr>
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">配置名称</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">所属组织</th>
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">类型</th>
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">Bucket</th>
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">Endpoint</th>
@@ -164,7 +166,7 @@
                         </tr>
                     </thead>
                     <tbody id="configTableBody" class="divide-y divide-gray-100">
-                        <tr><td colspan="7" class="px-6 py-8 text-center text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i>加载中...</td></tr>
+                        <tr><td colspan="8" class="px-6 py-8 text-center text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i>加载中...</td></tr>
                     </tbody>
                 </table>
                 <div class="px-6 py-4 border-t flex items-center justify-between">
@@ -193,6 +195,10 @@
                 <label>配置名称 <span class="required">*</span></label>
                 <input type="text" id="cfgName" placeholder="例如：生产环境 COS">
                 <div class="form-error" id="nameError">配置名称不能为空</div>
+            </div>
+            <div class="form-group">
+                <label>所属组织</label>
+                <select id="orgSelect"></select>
             </div>
             <div class="form-row">
                 <div class="form-group">
@@ -371,7 +377,7 @@ async function loadConfigs() {
         configs = Array.isArray(data) ? data : (data.data || []);
         renderList();
     } catch (e) {
-        document.getElementById('configTableBody').innerHTML = '<tr><td colspan="7" class="px-6 py-8 text-center text-red-500">加载配置失败: ' + e.message + '</td></tr>';
+        document.getElementById('configTableBody').innerHTML = '<tr><td colspan="8" class="px-6 py-8 text-center text-red-500">加载配置失败: ' + e.message + '</td></tr>';
     }
 }
 
@@ -387,7 +393,7 @@ function renderList() {
 
     if (!list.length) {
         tbody.innerHTML = `
-            <tr><td colspan="7" class="px-6 py-8 text-center text-gray-500">
+            <tr><td colspan="8" class="px-6 py-8 text-center text-gray-500">
                 <div class="space-y-2">
                     <div class="text-gray-400"><i class="fas fa-database" style="font-size:24px"></i></div>
                     <div class="font-medium">暂无对象存储配置</div>
@@ -411,6 +417,7 @@ function renderRow(c) {
             <span class="font-medium text-gray-900">${esc(c.name)}</span>
             ${c.is_default ? '<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700">默认</span>' : ''}
         </td>
+        <td class="px-6 py-4 text-sm text-gray-600">${esc(c.org_name || '根组织')}</td>
         <td class="px-6 py-4 text-sm">
             <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700">${getTypeLabel(c.type)}</span>
         </td>
@@ -490,8 +497,8 @@ function openModal(id) {
             document.getElementById('cfgDefault').checked = c.is_default || false;
         }
     }
+    loadOrgSelect('orgSelect', id ? (configs.find(x => x.id === id)?.org_id || null) : null);
 }
-
 function closeModal() {
     document.getElementById('configModal').classList.remove('show');
     editingId = null;
@@ -521,26 +528,28 @@ function validateForm() {
 
 async function saveConfig() {
     if (!validateForm()) return;
-    const body = {
-        name: document.getElementById('cfgName').value.trim(),
-        type: document.getElementById('cfgType').value,
-        enabled: document.getElementById('cfgEnabled').value === 'true',
-        is_default: document.getElementById('cfgDefault').checked,
-        region: document.getElementById('cfgRegion').value,
-        bucket: document.getElementById('cfgBucket').value.trim(),
-        endpoint: document.getElementById('cfgEndpoint').value.trim(),
-        use_ssl: document.getElementById('cfgUseSSL').value === 'true',
-        prefix: document.getElementById('cfgPrefix').value,
-        access_key: document.getElementById('cfgAK').value,
-        secret_key: document.getElementById('cfgSK').value,
-        retention_days: parseInt(document.getElementById('cfgRetention').value) || 30,
-        max_object_size: (parseInt(document.getElementById('cfgMaxSize').value) || 50) * 1048576,
-        test_connection: false
-    };
+     let body = {
+         name: document.getElementById('cfgName').value.trim(),
+         type: document.getElementById('cfgType').value,
+         enabled: document.getElementById('cfgEnabled').value === 'true',
+         is_default: document.getElementById('cfgDefault').checked,
+         region: document.getElementById('cfgRegion').value,
+         bucket: document.getElementById('cfgBucket').value.trim(),
+         endpoint: document.getElementById('cfgEndpoint').value.trim(),
+         use_ssl: document.getElementById('cfgUseSSL').value === 'true',
+         prefix: document.getElementById('cfgPrefix').value,
+         access_key: document.getElementById('cfgAK').value,
+         secret_key: document.getElementById('cfgSK').value,
+         retention_days: parseInt(document.getElementById('cfgRetention').value) || 30,
+         max_object_size: (parseInt(document.getElementById('cfgMaxSize').value) || 50) * 1048576,
+         test_connection: false
+     };
+     body = injectOrgId(body, 'orgSelect');
     try {
         const url = editingId ? `${API_BASE}/object-storage/configs/${editingId}` : `${API_BASE}/object-storage/configs`;
         const method = editingId ? 'PUT' : 'POST';
-        await apiCall(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const orgHeaders = getOrgOverrideHeaders('orgSelect');
+        await apiCall(url, { method, headers: { ...orgHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         showToast('保存成功', 'success');
         closeModal();
         loadConfigs();

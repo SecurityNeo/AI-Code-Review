@@ -330,11 +330,23 @@ func autoMigrate() error {
 		return err
 	}
 
+	// 登录失败锁定表
+	if err := DB.AutoMigrate(&LoginAttempt{}); err != nil {
+		return err
+	}
+
 	// 初始化 Pipeline 阶段定义
 	initPipelineStages()
 
 	// 初始化 MCP 工具元数据
 	initMCPTools()
+
+	// ========== 多租户改造：新表创建 + 存量表 org_id 迁移 ==========
+	if err := MigrateAll(); err != nil {
+		zap.L().Error("multitenancy migration failed", zap.Error(err))
+		return err
+	}
+	zap.L().Info("multitenancy migration completed successfully")
 
 	return nil
 }
@@ -654,8 +666,9 @@ func initBuiltInReviewRules() {
 	}
 
 	for _, rule := range rules {
+		rule.OrgID = 1 // 多租户改造：内置规则归属根组织
 		var existing ReviewRule
-		if err := SilentFirst(DB.Where("code = ?", rule.Code), &existing); err != nil {
+		if err := SilentFirst(DB.Where("code = ? AND org_id = 1", rule.Code), &existing); err != nil {
 			// 不存在则插入
 			if err := DB.Create(&rule).Error; err != nil {
 				zap.L().Warn("init built-in rule failed", zap.String("code", rule.Code), zap.Error(err))
@@ -663,9 +676,8 @@ func initBuiltInReviewRules() {
 				zap.L().Info("init built-in rule", zap.String("code", rule.Code))
 			}
 		} else {
-			// 已存在，更新 IsEnabled 和 SortOrder（允许运行时调整）
+			// 已存在，仅更新 SortOrder（保留管理员手动调整的 IsEnabled）
 			DB.Model(&existing).Updates(map[string]interface{}{
-				"is_enabled": rule.IsEnabled,
 				"sort_order": rule.SortOrder,
 			})
 		}
@@ -685,17 +697,18 @@ func initDefaultProjectReviewConfigs() {
 	for _, p := range projects {
 		// 检查是否已有配置
 		var cfgCount int64
-		DB.Model(&ProjectReviewConfig{}).Where("project_id = ?", p.ID).Count(&cfgCount)
+		DB.Model(&ProjectReviewConfig{}).Where("project_id = ? AND org_id = ?", p.ID, p.OrgID).Count(&cfgCount)
 		if cfgCount > 0 {
 			continue // 已有配置，跳过
 		}
 
-		// 查询该项目语言对应的通用规则 + 特定语言规则
+		// 查询该项目语言对应的通用规则 + 特定语言规则（限定当前 org）
 		var rules []ReviewRule
-		DB.Where("is_enabled = ? AND (language = 'common' OR language = ?)", true, p.Language).Find(&rules)
+		DB.Where("(org_id = ? OR org_id = 1) AND is_enabled = ? AND (language = 'common' OR language = ?)", p.OrgID, true, p.Language).Find(&rules)
 
 		for _, rule := range rules {
 			config := ProjectReviewConfig{
+				OrgID:     p.OrgID,
 				ProjectID: p.ID,
 				RuleID:    rule.ID,
 				IsEnabled: true,

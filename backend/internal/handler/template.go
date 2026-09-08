@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ai-optimizer/backend/internal/middleware"
 	"github.com/ai-optimizer/backend/internal/engine"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
@@ -21,26 +22,68 @@ func NewTemplateHandler() *TemplateHandler {
 }
 
 func (h *TemplateHandler) List(c *gin.Context) {
-	templates, err := service.NewTemplateService().List()
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
+	templates, err := service.NewTemplateService().List(scope)
 	if err != nil {
 		zap.L().Error("list templates failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+
+	// 多租户改造：非super_admin只返回当前组织可见的模板
+	if !scope.IsSuperAdmin {
+		var filtered []model.ProjectTemplate
+		for _, t := range templates {
+			for _, orgID := range scope.VisibleOrgIDs {
+				if t.OrgID == orgID {
+					filtered = append(filtered, t)
+					break
+				}
+			}
+		}
+		templates = filtered
+	}
+
+	// 批量填充组织名称
+	orgIDs := make([]uint, 0, len(templates))
+	for _, t := range templates {
+		orgIDs = append(orgIDs, t.OrgID)
+	}
+	orgNameMap := model.BatchOrgNames(orgIDs)
+	for i := range templates {
+		templates[i].OrgName = orgNameMap[templates[i].OrgID]
+	}
+
 	c.JSON(200, gin.H{"data": templates})
 }
 
 func (h *TemplateHandler) Create(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	var t model.ProjectTemplate
 	if err := c.ShouldBindJSON(&t); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
+	// 多租户改造：注入当前 org_id（非 super_admin 禁止客户端传入）
+	if t.OrgID == 0 || !scope.IsSuperAdmin {
+		t.OrgID = middleware.GetCurrentOrgID(c)
+	}
+
 	// 如果未设置 Prompt 但有 CustomInstruction，动态生成
 	if t.Prompt == "" && t.CustomInstruction != "" {
 		t.Prompt = "请根据以下规则进行代码审查：\n\n" + t.CustomInstruction
 	}
-	err := service.NewTemplateService().Create(&t)
+	err := service.NewTemplateService().Create(scope, &t)
 	if err != nil {
 		zap.L().Error("create template failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -52,16 +95,43 @@ func (h *TemplateHandler) Create(c *gin.Context) {
 }
 
 func (h *TemplateHandler) Get(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	id, _ := strconv.Atoi(c.Param("id"))
-	t, err := service.NewTemplateService().Get(uint(id))
+	t, err := service.NewTemplateService().Get(scope, uint(id))
 	if err != nil {
 		c.JSON(404, gin.H{"error": "not found"})
 		return
 	}
+
+	// 多租户改造：非super_admin需校验org_id
+	if !scope.IsSuperAdmin {
+		found := false
+		for _, orgID := range scope.VisibleOrgIDs {
+			if t.OrgID == orgID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			c.JSON(403, gin.H{"error": "无权访问该模板"})
+			return
+		}
+	}
+
 	c.JSON(200, gin.H{"data": t})
 }
 
 func (h *TemplateHandler) Update(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 	var req map[string]interface{}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -142,12 +212,12 @@ func (h *TemplateHandler) Update(c *gin.Context) {
 		updates["deduct_score_config"] = dsStr
 	}
 
-	t, err := service.NewTemplateService().Get(uint(id))
+	t, err := service.NewTemplateService().Get(scope, uint(id))
 	if err != nil {
 		c.JSON(404, gin.H{"error": "template not found"})
 		return
 	}
-	err = service.NewTemplateService().Update(uint(id), updates)
+	err = service.NewTemplateService().Update(scope, uint(id), updates)
 	if err != nil {
 		zap.L().Error("update template failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -159,13 +229,18 @@ func (h *TemplateHandler) Update(c *gin.Context) {
 }
 
 func (h *TemplateHandler) Delete(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
-	t, err := service.NewTemplateService().Get(uint(id))
+	t, err := service.NewTemplateService().Get(scope, uint(id))
 	if err != nil {
 		c.JSON(404, gin.H{"error": "template not found"})
 		return
 	}
-	err = service.NewTemplateService().Delete(uint(id))
+	err = service.NewTemplateService().Delete(scope, uint(id))
 	if err != nil {
 		zap.L().Error("delete template failed", zap.Error(err))
 		if err == service.ErrTemplateInUse {
@@ -181,6 +256,11 @@ func (h *TemplateHandler) Delete(c *gin.Context) {
 }
 
 func (h *TemplateHandler) Clone(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 	var req struct {
 		Name string `json:"name"`
@@ -193,12 +273,12 @@ func (h *TemplateHandler) Clone(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "name is required"})
 		return
 	}
-	original, err := service.NewTemplateService().Get(uint(id))
+	original, err := service.NewTemplateService().Get(scope, uint(id))
 	if err != nil {
 		c.JSON(404, gin.H{"error": "template not found"})
 		return
 	}
-	t, err := service.NewTemplateService().Clone(uint(id), req.Name)
+	t, err := service.NewTemplateService().Clone(scope, uint(id), req.Name)
 	if err != nil {
 		zap.L().Error("clone template failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -220,6 +300,11 @@ func parseDimWeights(jsonStr string) (map[string]int, error) {
 
 // PreviewComment 预览评论模板渲染效果
 func (h *TemplateHandler) PreviewComment(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 
 	var req struct {
@@ -245,7 +330,7 @@ func (h *TemplateHandler) PreviewComment(c *gin.Context) {
 	}
 
 	// 获取模板
-	t, err := service.NewTemplateService().Get(uint(id))
+	t, err := service.NewTemplateService().Get(scope, uint(id))
 	if err != nil {
 		c.JSON(404, gin.H{"error": "template not found"})
 		return

@@ -62,29 +62,31 @@ func getJobStepProgress(job model.RuleIncubationJob, stepID string) (int, int) {
 // GetPipelineStatus aggregates the entire incubation pipeline data.
 // When jobID is provided, returns data scoped to that specific pipeline run.
 // When jobID is nil, returns data for the latest pipeline_run if any, otherwise global fallback.
-func (s *IncubatorService) GetPipelineStatus(jobID *uint) (*PipelineStatus, error) {
+func (s *IncubatorService) GetPipelineStatus(scope *model.UserAuthScope, jobID *uint) (*PipelineStatus, error) {
+	db := model.DBWithScope(scope)
 	if jobID != nil {
-		return s.getPipelineStatusForJob(*jobID)
+		return s.getPipelineStatusForJob(scope, *jobID)
 	}
 	// 不传 job_id 时，优先取最新的 pipeline_run 来展示其产出数据
 	var pipeJob model.RuleIncubationJob
-	if err := model.DB.Where("job_type = ?", "pipeline_run").Order("created_at DESC").First(&pipeJob).Error; err == nil {
-		return s.getPipelineStatusForJob(pipeJob.ID)
+	if err := db.Where("job_type = ?", "pipeline_run").Order("created_at DESC").First(&pipeJob).Error; err == nil {
+		return s.getPipelineStatusForJob(scope, pipeJob.ID)
 	}
-	return s.getPipelineStatusGlobal()
+	return s.getPipelineStatusGlobal(scope)
 }
 
 // getPipelineStatusGlobal returns the global pipeline overview (legacy behavior).
-func (s *IncubatorService) getPipelineStatusGlobal() (*PipelineStatus, error) {
+func (s *IncubatorService) getPipelineStatusGlobal(scope *model.UserAuthScope) (*PipelineStatus, error) {
+	db := model.DBWithScope(scope)
 	now := time.Now()
-	cfg := s.getConfig()
+	cfg := s.getConfig(scope)
 
 	// --- Step 1: Issue Pool ---
 	var totalUnmatched int64
-	model.DB.Model(&model.ReviewIssue{}).Where("rule_id IS NULL").Count(&totalUnmatched)
+	db.Model(&model.ReviewIssue{}).Where("rule_id IS NULL").Count(&totalUnmatched)
 	var newToday int64
 	todayStart := now.Truncate(24 * time.Hour)
-	model.DB.Model(&model.ReviewIssue{}).Where("rule_id IS NULL AND created_at >= ?", todayStart).Count(&newToday)
+	db.Model(&model.ReviewIssue{}).Where("rule_id IS NULL AND created_at >= ?", todayStart).Count(&newToday)
 
 	stepIssuePool := PipelineStep{
 		StepID: "issue_pool",
@@ -106,7 +108,7 @@ func (s *IncubatorService) getPipelineStatusGlobal() (*PipelineStatus, error) {
 	var latestCluster model.RuleIncubationJob
 	clusterStatus := "idle"
 	clusterOut := map[string]any{}
-	if err := model.DB.Where("job_type = ?", "cluster").Order("created_at DESC").First(&latestCluster).Error; err == nil {
+	if err := db.Where("job_type = ?", "cluster").Order("created_at DESC").First(&latestCluster).Error; err == nil {
 		if latestCluster.Status == "running" {
 			clusterStatus = "running"
 		} else if latestCluster.Status == "success" {
@@ -153,12 +155,12 @@ func (s *IncubatorService) getPipelineStatusGlobal() (*PipelineStatus, error) {
 
 	// --- Step 3: Candidate Rules ---
 	var candTotal int64
-	model.DB.Model(&model.RuleIncubation{}).Count(&candTotal)
+	db.Model(&model.RuleIncubation{}).Count(&candTotal)
 	var candDraft, candReady, candPublished, candRejected int64
-	model.DB.Model(&model.RuleIncubation{}).Where("status = ?", "draft").Count(&candDraft)
-	model.DB.Model(&model.RuleIncubation{}).Where("status = ?", "ready").Count(&candReady)
-	model.DB.Model(&model.RuleIncubation{}).Where("status = ?", "published").Count(&candPublished)
-	model.DB.Model(&model.RuleIncubation{}).Where("status = ?", "rejected").Count(&candRejected)
+	db.Model(&model.RuleIncubation{}).Where("status = ?", "draft").Count(&candDraft)
+	db.Model(&model.RuleIncubation{}).Where("status = ?", "ready").Count(&candReady)
+	db.Model(&model.RuleIncubation{}).Where("status = ?", "published").Count(&candPublished)
+	db.Model(&model.RuleIncubation{}).Where("status = ?", "rejected").Count(&candRejected)
 
 	stepCandidate := PipelineStep{
 		StepID: "candidate",
@@ -187,7 +189,7 @@ func (s *IncubatorService) getPipelineStatusGlobal() (*PipelineStatus, error) {
 	// --- Step 4: Refine (LLM Prompt enhancement) ---
 	var latestRefine model.RuleIncubationJob
 	refineStatus := "idle"
-	if err := model.DB.Where("job_type = ?", "refine").Order("created_at DESC").First(&latestRefine).Error; err == nil {
+	if err := db.Where("job_type = ?", "refine").Order("created_at DESC").First(&latestRefine).Error; err == nil {
 		if latestRefine.Status == "pending" || latestRefine.Status == "running" {
 			refineStatus = "running"
 		} else if latestRefine.Status == "success" {
@@ -217,7 +219,7 @@ func (s *IncubatorService) getPipelineStatusGlobal() (*PipelineStatus, error) {
 	// --- Step 5: Similar Check ---
 	var latestSimilar model.RuleIncubationJob
 	similarStatus := "idle"
-	if err := model.DB.Where("job_type = ?", "similar_check").Order("created_at DESC").First(&latestSimilar).Error; err == nil {
+	if err := db.Where("job_type = ?", "similar_check").Order("created_at DESC").First(&latestSimilar).Error; err == nil {
 		if latestSimilar.Status == "pending" || latestSimilar.Status == "running" {
 			similarStatus = "running"
 		} else if latestSimilar.Status == "success" {
@@ -247,7 +249,7 @@ func (s *IncubatorService) getPipelineStatusGlobal() (*PipelineStatus, error) {
 	// --- Step 6: Sandbox Test ---
 	var latestTest model.RuleIncubationJob
 	testStatus := "idle"
-	if err := model.DB.Where("job_type = ?", "sandbox_test").Order("created_at DESC").First(&latestTest).Error; err == nil {
+	if err := db.Where("job_type = ?", "sandbox_test").Order("created_at DESC").First(&latestTest).Error; err == nil {
 		if latestTest.Status == "pending" || latestTest.Status == "running" {
 			testStatus = "running"
 		} else if latestTest.Status == "success" {
@@ -257,7 +259,7 @@ func (s *IncubatorService) getPipelineStatusGlobal() (*PipelineStatus, error) {
 		}
 	}
 	var totalTestRuns int64
-	model.DB.Model(&model.RuleIncubation{}).Where("test_results IS NOT NULL AND test_results != '{}' AND test_results != ''").Count(&totalTestRuns)
+	db.Model(&model.RuleIncubation{}).Where("test_results IS NOT NULL AND test_results != '{}' AND test_results != ''").Count(&totalTestRuns)
 	stepSandbox := PipelineStep{
 		StepID: "sandbox_test",
 		Label:  "模拟测试",
@@ -297,7 +299,7 @@ func (s *IncubatorService) getPipelineStatusGlobal() (*PipelineStatus, error) {
 
 	// Merge active pipeline_run execution state into steps
 	var pipeJob model.RuleIncubationJob
-	if err := model.DB.Where("job_type = ?", "pipeline_run").Order("created_at DESC").First(&pipeJob).Error; err == nil {
+	if err := db.Where("job_type = ?", "pipeline_run").Order("created_at DESC").First(&pipeJob).Error; err == nil {
 		if pipeJob.Status == "running" || pipeJob.Status == "success" || pipeJob.Status == "failed" {
 			var jr map[string]any
 			_ = json.Unmarshal([]byte(pipeJob.ResultSummary), &jr)
@@ -319,9 +321,10 @@ func (s *IncubatorService) getPipelineStatusGlobal() (*PipelineStatus, error) {
 }
 
 // getPipelineStatusForJob returns pipeline data scoped to a specific pipeline_run job.
-func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus, error) {
+func (s *IncubatorService) getPipelineStatusForJob(scope *model.UserAuthScope, jobID uint) (*PipelineStatus, error) {
+	db := model.DBWithScope(scope)
 	var job model.RuleIncubationJob
-	if err := model.DB.First(&job, jobID).Error; err != nil {
+	if err := db.First(&job, jobID).Error; err != nil {
 		return nil, fmt.Errorf("pipeline job not found: %w", err)
 	}
 
@@ -349,7 +352,7 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 
 	// Aggregate candidates produced by this pipeline run
 	var cands []model.RuleIncubation
-	model.DB.Where("pipeline_job_id = ?", jobID).Find(&cands)
+	db.Where("pipeline_job_id = ?", jobID).Find(&cands)
 
 	totalCandidates := len(cands)
 	refinedCount := 0
@@ -378,10 +381,10 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 	// Issue pool scope: issues in the time window used by this pipeline
 	since := time.Now().AddDate(0, 0, -timeRangeDays)
 	var issueCount int64
-	model.DB.Model(&model.ReviewIssue{}).Where("rule_id IS NULL AND created_at >= ?", since).Count(&issueCount)
+	db.Model(&model.ReviewIssue{}).Where("rule_id IS NULL AND created_at >= ?", since).Count(&issueCount)
 
 	var clusterCount int64 = 0
-	model.DB.Model(&model.RuleIncubationJob{}).Where("job_type = ? AND created_at >= ?", "cluster", since).Count(&clusterCount)
+	db.Model(&model.RuleIncubationJob{}).Where("job_type = ? AND created_at >= ?", "cluster", since).Count(&clusterCount)
 
 	steps := []PipelineStep{
 		{
@@ -531,9 +534,10 @@ func (s *IncubatorService) getPipelineStatusForJob(jobID uint) (*PipelineStatus,
 }
 
 // GetCandidateTrace returns the full bloodline (upstream + downstream) of a candidate rule.
-func (s *IncubatorService) GetCandidateTrace(incubationID uint) (map[string]any, error) {
+func (s *IncubatorService) GetCandidateTrace(scope *model.UserAuthScope, incubationID uint) (map[string]any, error) {
+	db := model.DBWithScope(scope)
 	// Fetch candidate with source issues
-	cand, issues, err := s.GetCandidate(incubationID)
+	cand, issues, err := s.GetCandidate(scope, incubationID)
 	if err != nil {
 		return nil, err
 	}
@@ -556,7 +560,7 @@ func (s *IncubatorService) GetCandidateTrace(incubationID uint) (map[string]any,
 	var downstreamRule map[string]any
 	if cand.PublishedRuleID != nil && *cand.PublishedRuleID > 0 {
 		var rule model.ReviewRule
-		if err := model.DB.First(&rule, *cand.PublishedRuleID).Error; err == nil {
+		if err := db.First(&rule, *cand.PublishedRuleID).Error; err == nil {
 			downstreamRule = map[string]any{
 				"id":         rule.ID,
 				"code":       rule.Code,
@@ -569,7 +573,7 @@ func (s *IncubatorService) GetCandidateTrace(incubationID uint) (map[string]any,
 	// Downstream: retro matches
 	var retroMatches int64
 	if cand.PublishedRuleID != nil {
-		model.DB.Model(&model.ReviewIssueRuleMatch{}).Where("rule_id = ?", *cand.PublishedRuleID).Count(&retroMatches)
+		db.Model(&model.ReviewIssueRuleMatch{}).Where("rule_id = ?", *cand.PublishedRuleID).Count(&retroMatches)
 	}
 
 	// Similar rules (parsed from JSON string)
@@ -609,20 +613,21 @@ func (s *IncubatorService) GetCandidateTrace(incubationID uint) (map[string]any,
 }
 
 // GetIssueTrace returns the full lifecycle trace of a single review issue.
-func (s *IncubatorService) GetIssueTrace(issueID uint) (map[string]any, error) {
+func (s *IncubatorService) GetIssueTrace(scope *model.UserAuthScope, issueID uint) (map[string]any, error) {
+	db := model.DBWithScope(scope)
 	var issue model.ReviewIssue
-	if err := model.DB.First(&issue, issueID).Error; err != nil {
+	if err := db.First(&issue, issueID).Error; err != nil {
 		return nil, err
 	}
 
 	// Find which incubation candidates include this issue
 	var incubations []model.RuleIncubation
-	model.DB.Where("JSON_CONTAINS(source_issue_ids, ?, '$')", fmt.Sprintf("%d", issueID)).Find(&incubations)
+	db.Where("JSON_CONTAINS(source_issue_ids, ?, '$')", fmt.Sprintf("%d", issueID)).Find(&incubations)
 	// Note: JSON_CONTAINS is MySQL-specific. Fallback for generic:
 	// In a real MySQL environment the above works; for compatibility we can also scan all.
 	if len(incubations) == 0 {
 		var allCandidates []model.RuleIncubation
-		model.DB.Find(&allCandidates)
+		db.Find(&allCandidates)
 		for _, c := range allCandidates {
 			var ids []uint
 			if err := json.Unmarshal([]byte(c.SourceIssueIDs), &ids); err == nil {
@@ -649,7 +654,7 @@ func (s *IncubatorService) GetIssueTrace(issueID uint) (map[string]any, error) {
 	var hitRule map[string]any
 	if issue.RuleID != nil {
 		var rule model.ReviewRule
-		if err := model.DB.First(&rule, *issue.RuleID).Error; err == nil {
+		if err := db.First(&rule, *issue.RuleID).Error; err == nil {
 			hitRule = map[string]any{
 				"id":   rule.ID,
 				"code": rule.Code,
@@ -661,10 +666,10 @@ func (s *IncubatorService) GetIssueTrace(issueID uint) (map[string]any, error) {
 	// Find retroactive matches
 	var retroMatches []map[string]any
 	var matches []model.ReviewIssueRuleMatch
-	model.DB.Where("issue_id = ?", issueID).Find(&matches)
+	db.Where("issue_id = ?", issueID).Find(&matches)
 	for _, m := range matches {
 		var rule model.ReviewRule
-		model.DB.First(&rule, m.RuleID)
+		db.First(&rule, m.RuleID)
 		retroMatches = append(retroMatches, map[string]any{
 			"rule_id":    m.RuleID,
 			"rule_name":  rule.Name,

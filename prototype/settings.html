@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>系统管理 - CodeGuard</title>
-        <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=7"></script>
+        <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <style>
@@ -243,50 +244,6 @@
                         </div>
                     </div>
 
-                    <!-- GitLab SSO 配置卡片 -->
-                    <div class="bg-gray-50 rounded-lg p-5 border mt-5">
-                        <h4 class="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
-                            <i class="fab fa-gitlab text-orange-500"></i>GitLab 单点登录
-                        </h4>
-                        <div class="grid grid-cols-1 gap-5">
-                            <div class="flex items-center gap-4">
-                                <label class="text-sm font-medium text-gray-700">启用 GitLab OAuth</label>
-                                <input type="checkbox" id="gitlabOAuthEnabled" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500">
-                                <span class="text-xs text-gray-400">开启后登录页将显示"使用 GitLab 登录"按钮</span>
-                            </div>
-                            <div class="grid grid-cols-2 gap-5" id="gitlabOAuthFields">
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">GitLab 地址</label>
-                                    <input type="text" id="gitlabBaseURL" placeholder="https://gitlab.company.com" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
-                                    <p class="text-xs text-gray-400 mt-1">GitLab 实例地址，需包含 https://</p>
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">Client ID</label>
-                                    <input type="text" id="gitlabOAuthClientID" placeholder="在 GitLab Application 中获取" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
-                                    <p class="text-xs text-gray-400 mt-1">GitLab 应用 ID</p>
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">Client Secret</label>
-                                    <input type="password" id="gitlabOAuthClientSecret" placeholder="在 GitLab Application 中获取" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
-                                    <p class="text-xs text-gray-400 mt-1">GitLab 应用密钥</p>
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">回调地址</label>
-                                    <input type="text" id="gitlabOAuthRedirectURI" placeholder="https://codeguard.company.com/api/v1/auth/gitlab/callback" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
-                                    <p class="text-xs text-gray-400 mt-1">需与 GitLab Application 中填写的 Redirect URI 一致</p>
-                                </div>
-                                <div class="col-span-2 flex items-center gap-2">
-                                    <input type="checkbox" id="gitlabOAuthAutoCreateUser" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500">
-                                    <label class="text-sm text-gray-700">允许自动创建用户（首次登录的 GitLab 用户自动创建本地账号）</label>
-                                </div>
-                                <div class="col-span-2 flex items-center gap-2">
-                                    <input type="checkbox" id="gitlabOAuthSkipVerify" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500">
-                                    <label class="text-sm text-gray-700">跳过 TLS 证书验证（企业内部自签名证书或 IP 访问时勾选，生产环境慎用）</label>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
                     <div class="flex justify-end pt-4 border-t">
                         <button onclick="saveSettings()" class="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">保存配置</button>
                     </div>
@@ -350,6 +307,10 @@
                     </div>
 
                     <div class="flex justify-end pt-4 border-t">
+                        <div class="mr-3">
+                            <label class="block text-xs text-gray-500 mb-1">所属组织</label>
+                            <select id="orgSelectAiTemplate" class="px-3 py-2 border rounded-lg text-sm bg-white"></select>
+                        </div>
                         <button onclick="previewTemplate()" class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 mr-3">
                             <i class="fas fa-eye mr-1"></i>预览
                         </button>
@@ -413,6 +374,10 @@
                     </div>
 
                     <div class="flex justify-end pt-4 border-t">
+                        <div class="mr-3">
+                            <label class="block text-xs text-gray-500 mb-1">所属组织</label>
+                            <select id="orgSelectReviewTemplate" class="px-3 py-2 border rounded-lg text-sm bg-white"></select>
+                        </div>
                         <button onclick="previewReviewTemplate()" class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 mr-3">
                             <i class="fas fa-eye mr-1"></i>预览
                         </button>
@@ -433,14 +398,6 @@
                         </div>
                         <div class="flex items-center gap-3">
                             <div class="flex items-center gap-2">
-                                <span class="text-sm text-gray-500">角色：</span>
-                                <select id="userRoleFilter" class="px-3 py-2 border rounded-lg text-sm bg-white" onchange="loadUsers()">
-                                    <option value="">全部</option>
-                                    <option value="admin">管理员</option>
-                                    <option value="user">普通用户</option>
-                                </select>
-                            </div>
-                            <div class="flex items-center gap-2">
                                 <input type="text" id="userKeywordFilter" placeholder="搜索用户名/显示名" class="px-3 py-2 border rounded-lg text-sm" onkeydown="if(event.key==='Enter')loadUsers()">
                                 <button onclick="loadUsers()" class="bg-white text-gray-600 px-3 py-2 rounded-lg text-sm border hover:bg-gray-50 transition-colors">
                                     <i class="fas fa-search mr-1"></i>搜索
@@ -459,7 +416,7 @@
                                 <tr>
                                     <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">用户名</th>
                                     <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">显示名</th>
-                                    <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">角色</th>
+                                    <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">所属组织</th>
                                     <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">登录类型</th>
                                     <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">IM信息</th>
                                     <th class="px-4 py-2 text-left text-xs font-semibold text-gray-500">职责</th>
@@ -771,17 +728,6 @@
                     setVal('jsonRetryBackoffMultiplier', data.data.json_retry_backoff_multiplier, 2.0);
                     setVal('jsonRetryMaxDelaySec', data.data.json_retry_max_delay_sec, 30);
                     setVal('jsonRetryFallbackStrategy', data.data.json_retry_fallback_strategy, 'regex');
-
-                    // GitLab SSO 配置
-                    const enabled = !!data.data.gitlab_oauth_enabled;
-                    document.getElementById('gitlabOAuthEnabled').checked = enabled;
-                    setVal('gitlabBaseURL', data.data.gitlab_base_url, '');
-                    setVal('gitlabOAuthClientID', data.data.gitlab_oauth_client_id, '');
-                    setVal('gitlabOAuthClientSecret', data.data.gitlab_oauth_client_secret, '');
-                    setVal('gitlabOAuthRedirectURI', data.data.gitlab_oauth_redirect_uri, '');
-                    document.getElementById('gitlabOAuthAutoCreateUser').checked = data.data.gitlab_oauth_auto_create_user !== false;
-                    document.getElementById('gitlabOAuthSkipVerify').checked = !!data.data.gitlab_oauth_skip_verify;
-                    toggleGitlabOAuthFields(enabled);
                 }
             } catch (e) {
                 console.error('加载配置失败:', e);
@@ -885,9 +831,11 @@
                 const json = await res.json();
                 const container = document.getElementById('alertMentionUsers');
                 if (!container) return;
-                const list = json.data || [];
+                const list = (json.data || []).filter(function(u) {
+                    return u.im_user_id && String(u.im_user_id).trim() !== '';
+                });
                 if (list.length === 0) {
-                    container.innerHTML = '<span class="text-gray-400 text-xs">暂无人员数据</span>';
+                    container.innerHTML = '<span class="text-gray-400 text-xs">暂无人员数据（需在成员映射中配置企业微信 ID）</span>';
                     return;
                 }
                 var selected = {};
@@ -896,9 +844,11 @@
                 }
                 container.innerHTML = list.map(function(m) {
                     var checked = selected[m.im_user_id] ? 'checked' : '';
+                    var label = escapeHtml(m.display_name || m.username || m.gitlab_username || '未知');
+                    var icon = m.im_platform === 'wecom' ? '<i class="fab fa-weixin text-green-500 text-[10px] mr-0.5"></i>' : '';
                     return '<label class="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 rounded hover:bg-gray-200 cursor-pointer text-xs">' +
-                        '<input type="checkbox" value="' + m.im_user_id + '" ' + checked + ' class="w-3.5 h-3.5 text-blue-600 rounded">' +
-                        '<span>' + (m.display_name || m.gitlab_username) + '</span></label>';
+                        '<input type="checkbox" value="' + escapeHtml(m.im_user_id) + '" ' + checked + ' class="w-3.5 h-3.5 text-blue-600 rounded">' +
+                        icon + '<span>' + label + '</span></label>';
                 }).join('');
             } catch (e) { console.error('加载艾特人员失败:', e); }
         }
@@ -916,6 +866,7 @@
             } catch (e) {
                 console.error('加载模板失败:', e);
             }
+            loadOrgSelect('orgSelectAiTemplate');
         }
 
         function updateLineNumbers(textarea, lineNumbersId = 'lineNumbers') {
@@ -993,14 +944,6 @@ function previewTemplate() {
                 json_retry_backoff_multiplier: parseFloat(document.getElementById('jsonRetryBackoffMultiplier').value) || 2.0,
                 json_retry_max_delay_sec: parseInt(document.getElementById('jsonRetryMaxDelaySec').value) || 30,
                 json_retry_fallback_strategy: document.getElementById('jsonRetryFallbackStrategy').value || 'regex',
-                // GitLab SSO
-                gitlab_oauth_enabled: document.getElementById('gitlabOAuthEnabled').checked,
-                gitlab_base_url: document.getElementById('gitlabBaseURL').value.trim(),
-                gitlab_oauth_client_id: document.getElementById('gitlabOAuthClientID').value.trim(),
-                gitlab_oauth_client_secret: document.getElementById('gitlabOAuthClientSecret').value.trim(),
-                gitlab_oauth_redirect_uri: document.getElementById('gitlabOAuthRedirectURI').value.trim(),
-                gitlab_oauth_auto_create_user: document.getElementById('gitlabOAuthAutoCreateUser').checked,
-                gitlab_oauth_skip_verify: document.getElementById('gitlabOAuthSkipVerify').checked,
             };
             try {
                 const res = await apiFetch(`${API_BASE}/system/config`, {
@@ -1015,17 +958,6 @@ function previewTemplate() {
             }
         }
 
-        // 切换 GitLab OAuth 字段显隐
-        function toggleGitlabOAuthFields(enabled) {
-            const fields = document.getElementById('gitlabOAuthFields');
-            if (fields) {
-                fields.style.display = enabled ? 'grid' : 'none';
-            }
-        }
-        document.getElementById('gitlabOAuthEnabled')?.addEventListener('change', function() {
-            toggleGitlabOAuthFields(this.checked);
-        });
-
         // ---- 代码审查模板函数 ----
         async function loadReviewTemplate() {
             try {
@@ -1039,6 +971,7 @@ function previewTemplate() {
             } catch (e) {
                 console.error('加载审查模板失败:', e);
             }
+            loadOrgSelect('orgSelectReviewTemplate');
         }
 
         function previewReviewTemplate() {
@@ -1090,13 +1023,15 @@ function previewTemplate() {
         }
 
         async function saveReviewTemplate() {
-            const data = {
+            let data = {
                 review_template: document.getElementById('reviewTemplate').value,
             };
             try {
+                injectOrgId(data, 'orgSelectReviewTemplate');
+                const orgHeaders = getOrgOverrideHeaders('orgSelectReviewTemplate');
                 const res = await apiFetch(`${API_BASE}/system/config`, {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: Object.assign({ 'Content-Type': 'application/json' }, orgHeaders),
                     body: JSON.stringify(data)
                 });
                 const result = await res.json();
@@ -1107,13 +1042,15 @@ function previewTemplate() {
         }
 
         async function saveAITemplate() {
-            const data = {
+            let data = {
                 ai_log_template: document.getElementById('aiLogTemplate').value,
             };
             try {
+                injectOrgId(data, 'orgSelectAiTemplate');
+                const orgHeaders = getOrgOverrideHeaders('orgSelectAiTemplate');
                 const res = await apiFetch(`${API_BASE}/system/config`, {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: Object.assign({ 'Content-Type': 'application/json' }, orgHeaders),
                     body: JSON.stringify(data)
                 });
                 const result = await res.json();
@@ -1259,9 +1196,8 @@ function previewTemplate() {
 
         // ---- 用户管理函数 ----
         async function loadUsers() {
-            const role = document.getElementById('userRoleFilter')?.value || '';
             const keyword = document.getElementById('userKeywordFilter')?.value || '';
-            const url = `${API_BASE}/users?page=${currentUsersPage}&page_size=${usersPageSize}${role ? '&role=' + role : ''}${keyword ? '&keyword=' + encodeURIComponent(keyword) : ''}`;
+            const url = `${API_BASE}/users?page=${currentUsersPage}&page_size=${usersPageSize}${keyword ? '&keyword=' + encodeURIComponent(keyword) : ''}`;
             try {
                 const res = await apiFetch(url);
                 const data = await res.json();
@@ -1280,16 +1216,16 @@ function previewTemplate() {
                 tbody.innerHTML = '<tr><td colspan="9" class="px-4 py-8 text-center text-gray-500">暂无数据</td></tr>';
                 return;
             }
-            const roleMap = { admin: '管理员', user: '普通用户' };
             const loginTypeMap = { local: '本地', gitlab: 'GitLab' };
             const imPlatformMap = { wecom: '企业微信' };
             tbody.innerHTML = users.map(u => {
                 const imLabel = imPlatformMap[u.im_platform] || u.im_platform || '';
+                const isSuperAdmin = u.current_org_role === 'super_admin';
                 return `
                 <tr class="hover:bg-gray-50">
                     <td class="px-4 py-3 font-medium">${escapeHtml(u.username)}</td>
                     <td class="px-4 py-3 text-gray-600">${escapeHtml(u.display_name || '-')}</td>
-                    <td class="px-4 py-3"><span class="${u.role === 'admin' ? 'bg-purple-50 text-purple-600' : 'bg-gray-50 text-gray-600'} px-2 py-0.5 rounded text-xs">${roleMap[u.role] || u.role}</span></td>
+                    <td class="px-4 py-3 text-gray-600">${escapeHtml(u.org_name || '根组织')}</td>
                     <td class="px-4 py-3"><span class="bg-blue-50 text-blue-600 px-2 py-0.5 rounded text-xs">${loginTypeMap[u.login_type] || u.login_type}</span></td>
                     <td class="px-4 py-3">
                         ${imLabel ? `<div class="inline-flex items-center gap-1.5"><span class="shrink-0 bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded text-[10px] border border-indigo-100">${escapeHtml(imLabel)}</span><span class="text-xs text-gray-600 font-mono">${escapeHtml(u.im_user_id || '')}</span></div>` : '<span class="text-gray-300 text-xs">-</span>'}
@@ -1299,10 +1235,11 @@ function previewTemplate() {
                     <td class="px-4 py-3 text-gray-500">${formatDate(u.created_at)}</td>
                     <td class="px-4 py-3">
                         <div class="flex items-center gap-3">
-                            <button onclick="openEditUserModal(${u.id}, '${escapeHtml(u.display_name || '')}', '${u.role}', '${escapeHtml(u.im_platform || '')}', '${escapeHtml(u.im_user_id || '')}')" class="text-blue-600 hover:text-blue-800 text-xs font-medium" title="编辑">编辑</button>
-                            <button onclick="openDutyDrawer(${u.id}, '${escapeHtml(u.display_name || u.username)}', '${escapeHtml(u.username)}', '${u.role}', '${escapeHtml(u.im_platform || '')}', '${escapeHtml(u.im_user_id || '')}')" class="text-teal-600 hover:text-teal-800 text-xs font-medium" title="职责">职责</button>
+                            <button onclick="openEditUserModal(${u.id}, '${escapeHtml(u.display_name || '')}', '${escapeHtml(u.im_platform || '')}', '${escapeHtml(u.im_user_id || '')}', ${u.org_id || 'null'})" class="text-blue-600 hover:text-blue-800 text-xs font-medium" title="编辑">编辑</button>
+                            ${!isSuperAdmin ? `<button onclick="openAssignOrgModal(${u.id}, '${escapeHtml(u.display_name || u.username)}')" class="text-indigo-600 hover:text-indigo-800 text-xs font-medium" title="分配组织">分配组织</button>` : ''}
+                            <button onclick="openDutyDrawer(${u.id}, '${escapeHtml(u.display_name || u.username)}', '${escapeHtml(u.username)}', '${escapeHtml(u.im_platform || '')}', '${escapeHtml(u.im_user_id || '')}', ${u.org_id || 'null'})" class="text-teal-600 hover:text-teal-800 text-xs font-medium" title="职责">职责</button>
                             ${u.login_type !== 'gitlab' ? `<button onclick="openResetPasswordModal(${u.id}, '${escapeHtml(u.username)}')" class="text-orange-600 hover:text-orange-800 text-xs font-medium" title="重置密码">重置密码</button>` : ''}
-                            ${u.role !== 'admin' ? `<button onclick="deleteUser(${u.id}, '${escapeHtml(u.username)}')" class="text-red-600 hover:text-red-800 text-xs font-medium" title="删除">删除</button>` : ''}
+                            ${!isSuperAdmin ? `<button onclick="deleteUser(${u.id}, '${escapeHtml(u.username)}')" class="text-red-600 hover:text-red-800 text-xs font-medium" title="删除">删除</button>` : ''}
                         </div>
                     </td>
                 </tr>`;
@@ -1405,13 +1342,6 @@ function previewTemplate() {
                             </div>
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">角色 <span class="text-red-500">*</span></label>
-                            <select id="newUserRole" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
-                                <option value="user">普通用户</option>
-                                <option value="admin">管理员</option>
-                            </select>
-                        </div>
-                        <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">IM 平台</label>
                             <select id="newUserIMPlatform" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
                                 <option value="">无</option>
@@ -1422,6 +1352,10 @@ function previewTemplate() {
                             <label class="block text-sm font-medium text-gray-700 mb-1">IM 用户 ID</label>
                             <input type="text" id="newUserIMUserId" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="例如：ZhangSan">
                         </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">所属组织</label>
+                            <select id="orgSelect" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"></select>
+                        </div>
                     </div>
                     <div class="px-6 py-4 border-t flex justify-end gap-3">
                         <button onclick="document.getElementById('userModal').remove()" class="px-4 py-2 border rounded-lg text-sm text-gray-700 hover:bg-gray-50">取消</button>
@@ -1429,6 +1363,7 @@ function previewTemplate() {
                     </div>
                 </div>`;
             document.body.appendChild(modal);
+            loadOrgSelect('orgSelect');
         }
 
         async function submitCreateUser() {
@@ -1436,17 +1371,19 @@ function previewTemplate() {
             const displayName = document.getElementById('newUserDisplayName').value.trim();
             const password = document.getElementById('newUserPassword').value;
             const passwordConfirm = document.getElementById('newUserPasswordConfirm').value;
-            const role = document.getElementById('newUserRole').value;
             const imPlatform = document.getElementById('newUserIMPlatform').value;
             const imUserId = document.getElementById('newUserIMUserId').value.trim();
             if (!username || !password) { showToast('用户名和密码不能为空', 'error'); return; }
             if (password.length < 6) { showToast('密码至少6位', 'error'); return; }
             if (password !== passwordConfirm) { showToast('两次输入的密码不一致', 'error'); return; }
             try {
+                let payload = { username, display_name: displayName, password, im_platform: imPlatform, im_user_id: imUserId };
+                injectOrgId(payload, 'orgSelect');
+                const orgHeaders = getOrgOverrideHeaders();
                 const res = await apiFetch(`${API_BASE}/users`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, display_name: displayName, password, role, im_platform: imPlatform, im_user_id: imUserId })
+                    headers: Object.assign({ 'Content-Type': 'application/json' }, orgHeaders),
+                    body: JSON.stringify(payload)
                 });
                 const result = await res.json();
                 if (!res.ok) { showToast(result.error || '创建失败', 'error'); return; }
@@ -1456,7 +1393,7 @@ function previewTemplate() {
             } catch (e) { showToast('创建失败: ' + e.message, 'error'); }
         }
 
-        function openEditUserModal(id, displayName, role, imPlatform, imUserId) {
+        function openEditUserModal(id, displayName, imPlatform, imUserId, orgId) {
             const modal = document.createElement('div');
             modal.id = 'editUserModal';
             modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
@@ -1472,13 +1409,6 @@ function previewTemplate() {
                             <input type="text" id="editUserDisplayName" value="${escapeHtml(displayName)}" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">角色</label>
-                            <select id="editUserRole" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
-                                <option value="user" ${role === 'user' ? 'selected' : ''}>普通用户</option>
-                                <option value="admin" ${role === 'admin' ? 'selected' : ''}>管理员</option>
-                            </select>
-                        </div>
-                        <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">IM 平台</label>
                             <select id="editUserIMPlatform" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
                                 <option value="">无</option>
@@ -1489,6 +1419,10 @@ function previewTemplate() {
                             <label class="block text-sm font-medium text-gray-700 mb-1">IM 用户 ID</label>
                             <input type="text" id="editUserIMUserId" value="${escapeHtml(imUserId || '')}" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="例如：ZhangSan">
                         </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">所属组织</label>
+                            <select id="orgSelect" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"></select>
+                        </div>
                     </div>
                     <div class="px-6 py-4 border-t flex justify-end gap-3">
                         <button onclick="document.getElementById('editUserModal').remove()" class="px-4 py-2 border rounded-lg text-sm text-gray-700 hover:bg-gray-50">取消</button>
@@ -1496,18 +1430,21 @@ function previewTemplate() {
                     </div>
                 </div>`;
             document.body.appendChild(modal);
+            loadOrgSelect('orgSelect', orgId);
         }
 
         async function submitEditUser(id) {
             const displayName = document.getElementById('editUserDisplayName').value.trim();
-            const role = document.getElementById('editUserRole').value;
             const imPlatform = document.getElementById('editUserIMPlatform').value;
             const imUserId = document.getElementById('editUserIMUserId').value.trim();
             try {
+                let payload = { display_name: displayName, im_platform: imPlatform, im_user_id: imUserId };
+                injectOrgId(payload, 'orgSelect');
+                const orgHeaders = getOrgOverrideHeaders();
                 const res = await apiFetch(`${API_BASE}/users/${id}`, {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ display_name: displayName, role, im_platform: imPlatform, im_user_id: imUserId })
+                    headers: Object.assign({ 'Content-Type': 'application/json' }, orgHeaders),
+                    body: JSON.stringify(payload)
                 });
                 const result = await res.json();
                 if (!res.ok) { showToast(result.error || '更新失败', 'error'); return; }
@@ -1573,15 +1510,39 @@ function previewTemplate() {
             } catch (e) { showToast('重置失败: ' + e.message, 'error'); }
         }
 
-        async function deleteUser(id, username) {
-            if (!confirm(`确定删除用户 "${username}"？此操作不可撤销。`)) return;
+        function deleteUser(id, username) {
+            const modal = document.createElement('div');
+            modal.id = 'deleteUserModal';
+            modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
+            modal.innerHTML = `
+                <div class="bg-white rounded-xl shadow-xl max-w-sm w-full mx-4">
+                    <div class="px-6 py-5 text-center">
+                        <div class="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+                            <i class="fas fa-exclamation-triangle text-red-500 text-xl"></i>
+                        </div>
+                        <h3 class="text-lg font-bold text-gray-900 mb-2">确认删除用户</h3>
+                        <p class="text-sm text-gray-500">确定要删除用户 <span class="font-medium text-gray-700">"${escapeHtml(username)}"</span> 吗？<br>此操作不可撤销，用户将被禁用。</p>
+                    </div>
+                    <div class="px-6 py-4 border-t flex gap-3">
+                        <button onclick="document.getElementById('deleteUserModal').remove()" class="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors">取消</button>
+                        <button onclick="confirmDeleteUser(${id})" class="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 transition-colors">确认删除</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(modal);
+        }
+
+        async function confirmDeleteUser(id) {
             try {
                 const res = await apiFetch(`${API_BASE}/users/${id}`, { method: 'DELETE' });
                 const result = await res.json();
+                document.getElementById('deleteUserModal')?.remove();
                 if (!res.ok) { showToast(result.error || '删除失败', 'error'); return; }
                 showToast(result.message || '已删除', 'success');
                 loadUsers();
-            } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
+            } catch (e) {
+                document.getElementById('deleteUserModal')?.remove();
+                showToast('删除失败: ' + e.message, 'error');
+            }
         }
 
         // 根据 URL query 参数初始化 Tab
@@ -1710,10 +1671,13 @@ function previewTemplate() {
         }
 
         // ========== 职责分配 Drawer ==========
-        function openDutyDrawer(userId, displayName, username, role, imPlatform, imUserId) {
+        let currentDutyUserOrgId = null;
+
+        function openDutyDrawer(userId, displayName, username, imPlatform, imUserId, userOrgId) {
             currentDutyUserId = userId;
+            currentDutyUserOrgId = userOrgId;
             document.getElementById('dutyDrawerSubtitle').textContent = displayName || username || '';
-            loadDutyUserInfo(username, role, imPlatform, imUserId);
+            loadDutyUserInfo(username, imPlatform, imUserId);
 
             // 重置表单
             document.getElementById('dutyProject').value = '';
@@ -1730,8 +1694,8 @@ function previewTemplate() {
             setTimeout(() => { overlay.classList.remove('opacity-0'); }, 10);
             drawer.classList.remove('translate-x-full');
 
-            // 加载数据
-            loadDutyProjects();
+            // 加载数据（按被分配用户所在组织过滤项目）
+            loadDutyProjects(currentDutyUserOrgId);
             loadUserDuties(userId);
         }
 
@@ -1742,13 +1706,13 @@ function previewTemplate() {
             drawer.classList.add('translate-x-full');
             setTimeout(() => { overlay.classList.add('hidden'); }, 200);
             currentDutyUserId = null;
+            currentDutyUserOrgId = null;
             resetDutyForm();
         }
 
-        function loadDutyUserInfo(username, role, imPlatform, imUserId) {
+        function loadDutyUserInfo(username, imPlatform, imUserId) {
             const metaParts = [];
             if (username) metaParts.push('用户名: ' + escapeHtml(username));
-            if (role) metaParts.push('角色: ' + (role === 'admin' ? '管理员' : '普通用户'));
             document.getElementById('dutyUserMeta').textContent = metaParts.join('  |  ') || '-';
 
             const imParts = [];
@@ -1757,9 +1721,12 @@ function previewTemplate() {
             document.getElementById('dutyUserIM').textContent = imParts.length ? 'IM: ' + imParts.join(' / ') : '未配置 IM';
         }
 
-        async function loadDutyProjects() {
+        async function loadDutyProjects(userOrgId) {
             try {
-                const res = await apiFetch(`${API_BASE}/projects?page=1&page_size=1000`);
+                const url = userOrgId
+                    ? `${API_BASE}/projects?page=1&page_size=1000&org_id=${userOrgId}`
+                    : `${API_BASE}/projects?page=1&page_size=1000`;
+                const res = await apiFetch(url);
                 const json = await res.json();
                 allProjectsForDuty = json.data || [];
                 const sel = document.getElementById('dutyProject');
@@ -2091,6 +2058,82 @@ function previewTemplate() {
         </div>
     </div>
 
+    <!-- 分配组织 Modal -->
+    <div id="assignOrgModal" class="fixed inset-0 bg-black/50 items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-xl w-[480px] max-h-[85vh] flex flex-col shadow-xl">
+            <div class="px-6 py-4 border-b flex items-center justify-between">
+                <h3 class="font-bold text-lg">分配组织</h3>
+                <button onclick="closeAssignOrgModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="p-6 space-y-4 overflow-y-auto">
+                <p id="assignOrgUserLabel" class="text-sm text-gray-600"></p>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">选择组织</label>
+                    <select id="assignOrgSelect" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                        <option value="">加载中...</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">组织内角色</label>
+                    <select id="assignOrgRole" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                        <option value="developer">开发者</option>
+                        <option value="org_admin">组织管理员</option>
+                    </select>
+                </div>
+                <label class="flex items-center gap-2 text-sm text-gray-500">
+                    <input type="checkbox" id="assignOrgIsDefault" checked disabled class="w-4 h-4 rounded text-blue-600 opacity-60 cursor-not-allowed">
+                    <span>同时设为默认组织（分配后用户的主要组织将变更为目标组织）</span>
+                </label>
+            </div>
+            <div class="px-6 py-4 border-t flex justify-end gap-3">
+                <button onclick="closeAssignOrgModal()" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">取消</button>
+                <button onclick="doAssignOrg()" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // 分配组织相关变量
+    let assignOrgUserId = null;
+    let allOrganizations = [];
+
+    async function openAssignOrgModal(userId, displayName) {
+        assignOrgUserId = userId;
+        document.getElementById('assignOrgUserLabel').textContent = '为用户「' + displayName + '」分配组织：';
+        document.getElementById('assignOrgModal').classList.remove('hidden');
+        document.getElementById('assignOrgModal').classList.add('flex');
+        // 使用树形组织选择器加载组织列表
+        await loadOrgSelect('assignOrgSelect');
+    }
+
+    function closeAssignOrgModal() {
+        document.getElementById('assignOrgModal').classList.add('hidden');
+        document.getElementById('assignOrgModal').classList.remove('flex');
+        assignOrgUserId = null;
+    }
+
+    async function doAssignOrg() {
+        const orgId = document.getElementById('assignOrgSelect').value;
+        const role = document.getElementById('assignOrgRole').value;
+        if (!orgId) { alert('请选择组织'); return; }
+        try {
+            await apiFetch(`/api/v1/organizations/${orgId}/members`, {
+                method: 'POST',
+                body: { user_id: assignOrgUserId, role: role }
+            });
+            // 同步更新用户的默认组织
+            await apiFetch(`/api/v1/users/${assignOrgUserId}`, {
+                method: 'PUT',
+                body: { org_id: parseInt(orgId) }
+            });
+            closeAssignOrgModal();
+            showToast('分配成功', 'success');
+            loadUsers();
+        } catch(e) {
+            alert('分配失败: ' + (e.message || '未知错误'));
+        }
+    }
+    </script>
     <script defer src="/static/js/tailwindcss.min.js"></script>
 </body>
 </html>

@@ -40,6 +40,15 @@ type Config struct {
 
 	// Diff Line Map 配置
 	DiffLineMap DiffLineMapConfig `yaml:"diff_line_map"`
+
+	// 多租户改造：Feature Flag 开关（6 层渐进式启用）
+	// Layer 0 = 全局关闭（默认，单组织模式）
+	// Layer 1 = 读隔离（查询 WHERE org_id = ?）
+	// Layer 2 = 写拦截（拒绝 org_id=0 的写入）
+	// Layer 3 = 组织管理 API（创建/切换组织）
+	// Layer 4 = 组织切换 UI（前端组织选择器）
+	// Layer 5 = 完全启用（多租户全功能）
+	MultiTenancyLayer int `yaml:"multitenancy_layer"`
 }
 
 // DiffLineMapConfig diff 行号映射系统配置
@@ -161,6 +170,9 @@ func Load() *Config {
 			GrayMode:           getEnv("DIFF_LINE_MAP_GRAY_MODE", "project_hash"),
 			MinFuzzyConfidence: getEnvFloat64("DIFF_LINE_MAP_MIN_FUZZY_CONF", 0.3),
 		},
+
+		// 多租户改造：Feature Flag（默认 Layer 0 = 全局关闭）
+		MultiTenancyLayer: getEnvInt("MULTITENANCY_LAYER", 0),
 	}
 	return cfg
 }

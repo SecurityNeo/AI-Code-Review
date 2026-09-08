@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>登录 - AI Code Guard</title>
@@ -60,6 +60,36 @@
             100% { transform: translateY(110vh) translateX(30px); opacity: 0; }
         }
 
+        /* ===== GitLab 实例选择器（多租户改造） ===== */
+        .gitlab-instance-selector {
+            width: 100%;
+        }
+        .gitlab-instance-select {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 10px;
+            background: rgba(255,255,255,0.03);
+            color: #e2e8f0;
+            font-size: 14px;
+            transition: all 0.2s;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            padding-right: 32px;
+        }
+        .gitlab-instance-select:focus {
+            outline: none;
+            border-color: rgba(59,130,246,0.5);
+            background: rgba(255,255,255,0.05);
+        }
+        .gitlab-instance-select option {
+            background: #1e293b;
+            color: #e2e8f0;
+        }
+        
         /* ===== 数据指标橱窗 ===== */
         /* ===== 能力列表 ===== */
 
@@ -256,7 +286,7 @@
         .card-foot { text-align: center; margin-top: 24px; }
         .card-foot p { font-size: 11px; color: rgba(255,255,255,0.22); }
     </style>
-    <script src="js/auth.js?v=7"></script>
+    <script src="js/auth.js?v=9"></script>
 </head>
 <body>
     <div class="bg-wrap">
@@ -356,10 +386,16 @@
                 <div class="sep-line"></div>
             </div>
 
+            <!-- 多租户改造：GitLab 多实例选择器 -->
+            <div class="gitlab-instance-selector" style="margin-bottom: 12px;">
+                <select id="gitlabInstanceSelect" class="gitlab-instance-select">
+                    <option value="">选择 GitLab 实例...</option>
+                </select>
+            </div>
             <div class="sso-row">
-                <a href="/api/v1/auth/gitlab" class="sso-btn" title="GitLab 单点登录">
+                <button type="button" id="gitlabLoginBtn" class="sso-btn" title="GitLab 单点登录" disabled onclick="doGitLabLogin()">
                     <i class="fab fa-gitlab"></i>
-                </a>
+                </button>
             </div>
 
             <div class="card-foot">
@@ -466,6 +502,64 @@
                 .catch(() => { window.location.href = '/'; });
         })();
 
+        // 多租户改造：加载公开 GitLab 实例列表
+        async function loadGitLabInstances() {
+            try {
+                const resp = await fetch(`${API_BASE}/gitlab-instances/public`);
+                if (!resp.ok) return;
+                const data = await resp.json();
+                const instances = data.data || [];
+                const select = document.getElementById('gitlabInstanceSelect');
+                const btn = document.getElementById('gitlabLoginBtn');
+                
+                if (instances.length === 0) {
+                    select.innerHTML = '';
+                    const opt = document.createElement('option');
+                    opt.value = '';
+                    opt.textContent = '暂无可用 GitLab 实例';
+                    select.appendChild(opt);
+                    btn.disabled = true;
+                    return;
+                }
+                
+                select.innerHTML = '';
+                const placeholder = document.createElement('option');
+                placeholder.value = '';
+                placeholder.textContent = '选择 GitLab 实例...';
+                select.appendChild(placeholder);
+                
+                instances.forEach(inst => {
+                    const opt = document.createElement('option');
+                    opt.value = inst.id;
+                    opt.textContent = inst.name;
+                    if (inst.is_default) opt.selected = true;
+                    select.appendChild(opt);
+                });
+                
+                // 如果有默认实例或只有一个实例，自动启用按钮
+                const defaultInst = instances.find(i => i.is_default);
+                if (defaultInst || instances.length === 1) {
+                    btn.disabled = false;
+                }
+                
+                select.addEventListener('change', () => {
+                    btn.disabled = !select.value;
+                });
+            } catch (e) {
+                console.error('加载 GitLab 实例失败', e);
+            }
+        }
+        
+        function doGitLabLogin() {
+            const instanceID = document.getElementById('gitlabInstanceSelect').value;
+            if (!instanceID) {
+                showToast('请选择 GitLab 实例', 'error');
+                return;
+            }
+            location.href = `/api/v1/auth/gitlab?instance_id=${encodeURIComponent(instanceID)}`;
+        }
+        
+        loadGitLabInstances();
         checkAuth();
     </script>
 </body>

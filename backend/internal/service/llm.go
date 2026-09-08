@@ -497,12 +497,29 @@ func RefreshSysCfgCache() {
 }
 
 // SysCfgMaxDiffFiles 返回当前生效的最大 diff 文件数（从 ReviewAgentConfig batch_review_frame 阶段配置读取）
+// Deprecated: 多租户改造后建议传入 orgID 调用 SysCfgMaxDiffFilesByOrg，以获取组织级配置。
 func SysCfgMaxDiffFiles() int {
+	return SysCfgMaxDiffFilesByOrg(1) // 向后兼容：默认查根组织
+}
+
+// SysCfgMaxDiffFilesByOrg 返回指定 org 生效的最大 diff 文件数
+// 多租户改造：按 org_id 查询 ReviewAgentConfig，替代硬编码 ID=1。
+func SysCfgMaxDiffFilesByOrg(orgID uint) int {
 	var agentCfg model.ReviewAgentConfig
-	if err := model.DB.First(&agentCfg, 1).Error; err == nil {
+	if err := model.DB.Where("org_id = ?", orgID).First(&agentCfg).Error; err == nil {
 		if sc := agentCfg.StageConfig("batch_review_frame"); sc != nil {
 			if v, ok := sc["max_diff_files"].(float64); ok && v > 0 {
 				return int(v)
+			}
+		}
+	}
+	// fallback：根组织
+	if orgID != 1 {
+		if err := model.DB.Where("org_id = 1").First(&agentCfg).Error; err == nil {
+			if sc := agentCfg.StageConfig("batch_review_frame"); sc != nil {
+				if v, ok := sc["max_diff_files"].(float64); ok && v > 0 {
+					return int(v)
+				}
 			}
 		}
 	}
@@ -510,12 +527,29 @@ func SysCfgMaxDiffFiles() int {
 }
 
 // SysCfgMaxTokensPerBatch 返回当前生效的每批最大 token 数（从 ReviewAgentConfig batch_review_frame 阶段配置读取）
+// Deprecated: 多租户改造后建议传入 orgID 调用 SysCfgMaxTokensPerBatchByOrg，以获取组织级配置。
 func SysCfgMaxTokensPerBatch() int {
+	return SysCfgMaxTokensPerBatchByOrg(1) // 向后兼容：默认查根组织
+}
+
+// SysCfgMaxTokensPerBatchByOrg 返回指定 org 生效的每批最大 token 数
+// 多租户改造：按 org_id 查询 ReviewAgentConfig，替代硬编码 ID=1。
+func SysCfgMaxTokensPerBatchByOrg(orgID uint) int {
 	var agentCfg model.ReviewAgentConfig
-	if err := model.DB.First(&agentCfg, 1).Error; err == nil {
+	if err := model.DB.Where("org_id = ?", orgID).First(&agentCfg).Error; err == nil {
 		if sc := agentCfg.StageConfig("batch_review_frame"); sc != nil {
 			if v, ok := sc["max_tokens_per_batch"].(float64); ok && v > 0 {
 				return int(v)
+			}
+		}
+	}
+	// fallback：根组织
+	if orgID != 1 {
+		if err := model.DB.Where("org_id = 1").First(&agentCfg).Error; err == nil {
+			if sc := agentCfg.StageConfig("batch_review_frame"); sc != nil {
+				if v, ok := sc["max_tokens_per_batch"].(float64); ok && v > 0 {
+					return int(v)
+				}
 			}
 		}
 	}

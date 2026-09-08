@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>项目管理 - CodeGuard</title>
-        <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+        <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <style>
@@ -123,6 +124,7 @@
                         <thead class="bg-gray-50 border-b">
                         <tr>
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">项目名称</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">所属组织</th>
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">开发语言</th>
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">项目地址</th>
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">AI审核模版</th>
@@ -182,6 +184,11 @@
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">项目名称</label>
                     <input type="text" id="projectName" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="请输入项目名称">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">所属组织</label>
+                    <select id="orgSelect" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                    </select>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">GitLab 项目 ID</label>
@@ -559,7 +566,7 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             if (!tbody) return;
             
             if (projects.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="9" class="px-6 py-8 text-center text-gray-500">暂无数据</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="10" class="px-6 py-8 text-center text-gray-500">暂无数据</td></tr>';
                 return;
             }
 
@@ -579,6 +586,7 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                             <a href="project-detail.html?id=${p.id}" class="font-medium text-sm text-blue-600 hover:text-blue-700">${escapeHtml(p.name || '-')}</a>
                         </div>
                     </td>
+                    <td class="px-6 py-4 text-sm text-gray-600">${escapeHtml(p.org_name || '根组织')}</td>
                     <td class="px-6 py-4 text-center">
                         ${formatLanguageBadge(p.language)}
                     </td>
@@ -760,6 +768,7 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             document.getElementById('projectTemplateId').value = p.template_id || '';
             document.getElementById('poolId').value = p.pool_id || '';
             document.getElementById('defaultModelId').value = p.default_model_id !== null && p.default_model_id !== undefined ? String(p.default_model_id) : '-1';
+            loadOrgSelect('orgSelect', p.org_id);
             document.getElementById('createModal').classList.add('active');
         }
 
@@ -776,37 +785,39 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
         }
 
         async function saveProject() {
+            const orgHeaders = getOrgOverrideHeaders();
             const templateInput = document.getElementById('projectTemplateId').value;
             const poolInput = document.getElementById('poolId').value;
             const defaultModelInput = document.getElementById('defaultModelId').value;
             const gitlabProjectId = document.getElementById('gitlabProjectId').value;
             
-            const data = {
-                name: document.getElementById('projectName').value,
-                project_path: document.getElementById('projectPath').value,
-                graph_base_branch: document.getElementById('graphBaseBranch').value || 'main',
-                language: document.getElementById('projectLanguage').value,
-                access_token: document.getElementById('projectToken').value,
-                ai_enabled: document.getElementById('aiEnabled').checked
-            };
-
-            // 空模板解绑时传 0，确保能正确清空关联
-            data.template_id = parseInt(templateInput, 10) || 0;
-            data.pool_id = parseInt(poolInput, 10) || 0;
-            if (defaultModelInput === '-1' || !defaultModelInput) {
-                data.default_model_id = null;  // 未选择或“走全局主备链路”均清空
-            } else {
-                data.default_model_id = parseInt(defaultModelInput);
-            }
-            if (gitlabProjectId) data.gitlab_project_id = parseInt(gitlabProjectId);
-            if (!data.access_token) delete data.access_token;
+             const data = {
+                 name: document.getElementById('projectName').value,
+                 project_path: document.getElementById('projectPath').value,
+                 graph_base_branch: document.getElementById('graphBaseBranch').value || 'main',
+                 language: document.getElementById('projectLanguage').value,
+                 access_token: document.getElementById('projectToken').value,
+                 ai_enabled: document.getElementById('aiEnabled').checked
+             };
+ 
+             // 空模板解绑时传 0，确保能正确清空关联
+             data.template_id = parseInt(templateInput, 10) || 0;
+             data.pool_id = parseInt(poolInput, 10) || 0;
+             if (defaultModelInput === '-1' || !defaultModelInput) {
+                 data.default_model_id = null;  // 未选择或"走全局主备链路"均清空
+             } else {
+                 data.default_model_id = parseInt(defaultModelInput);
+             }
+             if (gitlabProjectId) data.gitlab_project_id = parseInt(gitlabProjectId);
+             if (!data.access_token) delete data.access_token;
+             injectOrgId(data, 'orgSelect');
 
             try {
                 const url = editingId ? `${API_BASE}/projects/${editingId}` : `${API_BASE}/projects`;
                 const method = editingId ? 'PUT' : 'POST';
                 const res = await apiFetch(url, {
                     method: method,
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...orgHeaders },
                     body: JSON.stringify(data)
                 });
                 if (!res.ok) throw new Error('保存失败');
@@ -836,6 +847,7 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                 document.getElementById('poolId').value = '';
                 document.getElementById('defaultModelId').value = '';
                 renderTemplateSelect(templatesData);
+                loadOrgSelect('orgSelect');
             }
             document.getElementById(id).classList.add('active');
         }
@@ -1345,20 +1357,21 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                 return;
             }
 
-            const data = {
-                name,
-                description: document.getElementById('tmplDesc').value,
-                custom_instruction: document.getElementById('tmplCustomInstruction').value,
-                dimension_weights: JSON.stringify(dimensionWeights),
-                max_rules_per_review: parseInt(document.getElementById('tmplMaxRules').value) || 5,
-                deduct_score_config: JSON.stringify({
-                    critical: parseInt(document.getElementById('tmplDeductCritical').value) || 0,
-                    high:     parseInt(document.getElementById('tmplDeductHigh').value) || 0,
-                    medium:   parseInt(document.getElementById('tmplDeductMedium').value) || 0,
-                    low:      parseInt(document.getElementById('tmplDeductLow').value) || 0,
-                    info:     parseInt(document.getElementById('tmplDeductInfo').value) || 0,
-                }),
-            };
+             let data = {
+                 name,
+                 description: document.getElementById('tmplDesc').value,
+                 custom_instruction: document.getElementById('tmplCustomInstruction').value,
+                 dimension_weights: JSON.stringify(dimensionWeights),
+                 max_rules_per_review: parseInt(document.getElementById('tmplMaxRules').value) || 5,
+                 deduct_score_config: JSON.stringify({
+                     critical: parseInt(document.getElementById('tmplDeductCritical').value) || 0,
+                     high:     parseInt(document.getElementById('tmplDeductHigh').value) || 0,
+                     medium:   parseInt(document.getElementById('tmplDeductMedium').value) || 0,
+                     low:      parseInt(document.getElementById('tmplDeductLow').value) || 0,
+                     info:     parseInt(document.getElementById('tmplDeductInfo').value) || 0,
+                 }),
+             };
+             injectOrgId(data, 'orgSelect');
 
             try {
                 const url = editingTemplateId

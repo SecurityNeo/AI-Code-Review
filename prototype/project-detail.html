@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,9 +9,9 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>项目详情 - CodeGuard</title>
-    <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+    <script src="js/auth.js?v=9"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <style>
@@ -185,6 +185,7 @@
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">任务ID</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">MR ID</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">作者</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">所属组织</th>
                                 <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500">状态</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">耗时</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">创建时间</th>
@@ -192,7 +193,7 @@
                         </thead>
                         <tbody id="tasksBody" class="divide-y divide-gray-100">
                             <tr>
-                                <td colspan="6" class="px-4 py-8 text-center text-gray-500">加载中...</td>
+                                <td colspan="7" class="px-4 py-8 text-center text-gray-500">加载中...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -1156,7 +1157,7 @@
         const tbody = document.getElementById('tasksBody');
         if (!tbody) return;
         if (tasks.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">暂无任务记录</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">暂无任务记录</td></tr>';
             return;
         }
         tbody.innerHTML = tasks.map(t => `
@@ -1164,6 +1165,7 @@
                 <td class="px-4 py-3 text-sm font-mono">#${t.id}</td>
                 <td class="px-4 py-3 text-sm"><a href="#" class="text-blue-600">${t.mr_iid || '-'}</a></td>
                 <td class="px-4 py-3 text-sm">${t.author || '-'}</td>
+                <td class="px-4 py-3 text-sm">${escapeHtml(t.org_name || '-')}</td>
                 <td class="px-4 py-3 text-center"><span class="status-badge status-${t.status}">${getStatusText(t.status)}</span></td>
                 <td class="px-4 py-3 text-sm">${formatDuration(t.duration_sec)}</td>
                 <td class="px-4 py-3 text-sm text-gray-500">${formatDate(t.created_at)}</td>

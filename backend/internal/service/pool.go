@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"time"
 
 	"github.com/ai-optimizer/backend/internal/model"
@@ -14,9 +15,13 @@ func NewPoolService() *PoolService {
 	return &PoolService{}
 }
 
-func (s *PoolService) List(name string) ([]model.ResourcePool, error) {
+func (s *PoolService) List(scope *model.UserAuthScope, name string) ([]model.ResourcePool, error) {
+	if scope == nil {
+		return nil, errors.New("scope is required")
+	}
+	db := model.DBWithScope(scope)
 	var pools []model.ResourcePool
-	query := model.DB
+	query := db
 	if name != "" {
 		query = query.Where("name LIKE ?", "%"+name+"%")
 	}
@@ -26,15 +31,23 @@ func (s *PoolService) List(name string) ([]model.ResourcePool, error) {
 	return pools, nil
 }
 
-func (s *PoolService) Get(id uint) (*model.ResourcePool, error) {
+func (s *PoolService) Get(scope *model.UserAuthScope, id uint) (*model.ResourcePool, error) {
+	if scope == nil {
+		return nil, errors.New("scope is required")
+	}
+	db := model.DBWithScope(scope)
 	var pool model.ResourcePool
-	if err := model.DB.First(&pool, id).Error; err != nil {
+	if err := db.First(&pool, id).Error; err != nil {
 		return nil, err
 	}
 	return &pool, nil
 }
 
-func (s *PoolService) Create(data map[string]interface{}) (*model.ResourcePool, error) {
+func (s *PoolService) Create(scope *model.UserAuthScope, data map[string]interface{}) (*model.ResourcePool, error) {
+	if scope == nil {
+		return nil, errors.New("scope is required")
+	}
+	db := model.DBWithScope(scope)
 	password, _ := encrypt.Encrypt(data["opencode_password"].(string))
 	pool := model.ResourcePool{
 		Name:             data["name"].(string),
@@ -45,38 +58,60 @@ func (s *PoolService) Create(data map[string]interface{}) (*model.ResourcePool, 
 		CheckIntervalSec: int(data["check_interval_sec"].(float64)),
 		Status:           model.PoolActive,
 	}
-	if err := model.DB.Create(&pool).Error; err != nil {
+	if err := db.Create(&pool).Error; err != nil {
 		return nil, err
 	}
 	return &pool, nil
 }
 
-func (s *PoolService) Update(id uint, data map[string]interface{}) error {
+func (s *PoolService) Update(scope *model.UserAuthScope, id uint, data map[string]interface{}) error {
+	if scope == nil {
+		return errors.New("scope is required")
+	}
+	db := model.DBWithScope(scope)
 	var pool model.ResourcePool
-	if err := model.DB.First(&pool, id).Error; err != nil {
+	if err := db.First(&pool, id).Error; err != nil {
 		return err
 	}
-	return model.DB.Model(&model.ResourcePool{}).Where("id = ?", id).Updates(data).Error
+	return db.Model(&model.ResourcePool{}).Where("id = ?", id).Updates(data).Error
 }
 
-func (s *PoolService) Delete(id uint) error {
+func (s *PoolService) Delete(scope *model.UserAuthScope, id uint) error {
+	if scope == nil {
+		return errors.New("scope is required")
+	}
+	db := model.DBWithScope(scope)
 	var pool model.ResourcePool
-	if err := model.DB.First(&pool, id).Error; err != nil {
+	if err := db.First(&pool, id).Error; err != nil {
 		return err
 	}
-	return model.DB.Delete(&model.ResourcePool{}, id).Error
+	return db.Delete(&model.ResourcePool{}, id).Error
 }
 
-func (s *PoolService) Toggle(id uint, enabled bool) error {
-	status := model.PoolActive
-	if !enabled {
-		status = model.PoolInactive
+func (s *PoolService) Toggle(scope *model.UserAuthScope, id uint) error {
+	if scope == nil {
+		return errors.New("scope is required")
 	}
-	return model.DB.Model(&model.ResourcePool{}).Where("id = ?", id).Update("status", status).Error
+	db := model.DBWithScope(scope)
+	var pool model.ResourcePool
+	if err := db.First(&pool, id).Error; err != nil {
+		return err
+	}
+	var newStatus model.PoolStatus
+	if pool.Status == model.PoolActive {
+		newStatus = model.PoolInactive
+	} else {
+		newStatus = model.PoolActive
+	}
+	return db.Model(&model.ResourcePool{}).Where("id = ?", id).Update("status", newStatus).Error
 }
 
-func (s *PoolService) SetDefault(id uint) error {
-	tx := model.DB.Begin()
+func (s *PoolService) SetDefault(scope *model.UserAuthScope, id uint) error {
+	if scope == nil {
+		return errors.New("scope is required")
+	}
+	db := model.DBWithScope(scope)
+	tx := db.Begin()
 	if err := tx.Model(&model.ResourcePool{}).Where("id = ?", id).Update("is_default", true).Error; err != nil {
 		tx.Rollback()
 		return err
@@ -89,8 +124,12 @@ func (s *PoolService) SetDefault(id uint) error {
 	return nil
 }
 
-func (s *PoolService) UnsetDefault(id uint) error {
-	return model.DB.Model(&model.ResourcePool{}).Where("id = ?", id).Update("is_default", false).Error
+func (s *PoolService) UnsetDefault(scope *model.UserAuthScope) error {
+	if scope == nil {
+		return errors.New("scope is required")
+	}
+	db := model.DBWithScope(scope)
+	return db.Model(&model.ResourcePool{}).Where("is_default = ?", true).Update("is_default", false).Error
 }
 
 func (s *PoolService) CheckConnectivity(id uint) (bool, string, string, error) {
@@ -197,7 +236,8 @@ func (s *PoolService) runPoolHealthChecks() {
 
 		// 恢复通知
 		if statusChanged && newStatus == model.PoolActive && prevStatus == model.PoolError {
-			SendResourcePoolAlert(pool, true, alertDuration, alertCooldown, notifierID, mentionIDs)
+			scope := &model.UserAuthScope{VisibleOrgIDs: []uint{pool.OrgID}}
+			SendResourcePoolAlert(scope, pool, true, alertDuration, alertCooldown, notifierID, mentionIDs)
 			// 恢复时重置告警时间点，下次异常重新开始计时
 			model.DB.Model(&pool).Update("last_alert_at", nil)
 		}
@@ -232,7 +272,8 @@ func (s *PoolService) runPoolHealthChecks() {
 				zap.L().Info("pool alert triggered (first alert)",
 					zap.Uint("pool_id", pool.ID),
 					zap.Int("elapsed_sec", elapsed))
-				SendResourcePoolAlert(pool, false, alertDuration, alertCooldown, notifierID, mentionIDs)
+				scope := &model.UserAuthScope{VisibleOrgIDs: []uint{pool.OrgID}}
+				SendResourcePoolAlert(scope, pool, false, alertDuration, alertCooldown, notifierID, mentionIDs)
 				model.DB.Model(&pool).Update("last_alert_at", now)
 			} else {
 				sinceLastAlert := int(now.Sub(lastAlert).Seconds())
@@ -241,7 +282,8 @@ func (s *PoolService) runPoolHealthChecks() {
 						zap.Uint("pool_id", pool.ID),
 						zap.Int("since_last_alert_sec", sinceLastAlert),
 						zap.Int("cooldown_sec", alertCooldown))
-					SendResourcePoolAlert(pool, false, alertDuration, alertCooldown, notifierID, mentionIDs)
+					scope := &model.UserAuthScope{VisibleOrgIDs: []uint{pool.OrgID}}
+					SendResourcePoolAlert(scope, pool, false, alertDuration, alertCooldown, notifierID, mentionIDs)
 					model.DB.Model(&pool).Update("last_alert_at", now)
 				} else {
 					zap.L().Info("pool alert skipped (in cooldown)",

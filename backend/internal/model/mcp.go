@@ -12,6 +12,8 @@ import (
 //   - 旧 Key user_id = 0 继续兼容共享模式，调用时仍需通过 X-IM-Provider + X-IM-User-ID 传入身份
 type MCPAPIKey struct {
 	ID           uint           `gorm:"primaryKey" json:"id"`
+	OrgID        uint           `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
+	OrgName      string         `gorm:"-" json:"org_name,omitempty"`
 	Name         string         `gorm:"size:100;not null" json:"name"`
 	Prefix       string         `gorm:"size:20;not null" json:"prefix"`        // 密钥前缀（如 sk-cg-wecom）
 	KeyHash      string         `gorm:"size:255;not null" json:"-"`            // 密钥哈希（bcrypt），不返回给前端

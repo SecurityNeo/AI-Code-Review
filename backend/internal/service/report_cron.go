@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -58,18 +59,28 @@ func ReloadReportCron() {
 		// Capture variables for closure
 		reportType := cfg.ReportType
 		shouldSend := isSend
+		orgID := cfg.OrgID
+		cfgSendGroups := cfg.SendGroups
+
+		cronKey := fmt.Sprintf("%s-%d", reportType, cfg.OrgID)
 
 		id, err := reportCron.AddFunc(expr, func() {
 			svc := NewReportService()
 
 			// 解析配置中的发送分组
 			var sendGroups []string
-			if cfg.SendGroups != "" {
-				json.Unmarshal([]byte(cfg.SendGroups), &sendGroups)
+			if cfgSendGroups != "" {
+				json.Unmarshal([]byte(cfgSendGroups), &sendGroups)
 			}
 
-			// Query recipients for logging
-			query := model.DB.Where("enabled = ?", true)
+			// 构造 cron 专用 scope，限定为当前组织
+			cronScope := &model.UserAuthScope{
+				VisibleOrgIDs: []uint{orgID},
+				CurrentOrgID:  orgID,
+			}
+
+			// Query recipients for logging (按组织隔离)
+			query := model.DBWithScope(cronScope).Where("enabled = ?", true)
 			if len(sendGroups) > 0 {
 				query = query.Where("group_name IN ?", sendGroups)
 			}
@@ -77,10 +88,14 @@ func ReloadReportCron() {
 			query.Find(&recipients)
 			recipientsJSON, _ := json.Marshal(recipients)
 
-			html, err := svc.GenerateHTML(reportType)
+			html, err := svc.GenerateHTML(cronScope, reportType)
 			if err != nil {
-				zap.L().Error("report auto generate failed", zap.String("type", reportType), zap.Error(err))
+				zap.L().Error("report auto generate failed",
+					zap.String("type", reportType),
+					zap.Uint("org_id", orgID),
+					zap.Error(err))
 				log := model.ReportLog{
+					OrgID:       orgID,
 					ReportType:  reportType,
 					TriggerType: "auto",
 					Status:      "generated_failed",
@@ -93,12 +108,15 @@ func ReloadReportCron() {
 			}
 
 			if !shouldSend {
-				zap.L().Info("report auto generated (send disabled)", zap.String("type", reportType))
+				zap.L().Info("report auto generated (send disabled)",
+					zap.String("type", reportType),
+					zap.Uint("org_id", orgID))
 				return
 			}
 
-			if err := svc.SendEmail(reportType, html, sendGroups); err != nil {
+			if err := svc.SendEmail(cronScope, reportType, html, sendGroups); err != nil {
 				log := model.ReportLog{
+					OrgID:       orgID,
 					ReportType:  reportType,
 					TriggerType: "auto",
 					Status:      "sent_failed",
@@ -108,11 +126,15 @@ func ReloadReportCron() {
 					SentAt:      time.Now(),
 				}
 				model.DB.Create(&log)
-				zap.L().Error("report auto send failed", zap.String("type", reportType), zap.Error(err))
+				zap.L().Error("report auto send failed",
+					zap.String("type", reportType),
+					zap.Uint("org_id", orgID),
+					zap.Error(err))
 				return
 			}
 
 			log := model.ReportLog{
+				OrgID:       uint(orgID),
 				ReportType:  reportType,
 				TriggerType: "auto",
 				Status:      "sent_success",
@@ -121,14 +143,23 @@ func ReloadReportCron() {
 				SentAt:      time.Now(),
 			}
 			model.DB.Create(&log)
-			zap.L().Info("report auto sent", zap.String("type", reportType))
+			zap.L().Info("report auto sent",
+				zap.String("type", reportType),
+				zap.Uint("org_id", orgID))
 		})
 
 		if err != nil {
-			zap.L().Error("report cron register failed", zap.String("type", reportType), zap.String("expr", expr), zap.Error(err))
+			zap.L().Error("report cron register failed",
+				zap.String("type", reportType),
+				zap.Uint("org_id", orgID),
+				zap.String("expr", expr),
+				zap.Error(err))
 		} else {
-			reportCronIDs[reportType] = id
-			zap.L().Info("report cron registered", zap.String("type", reportType), zap.String("expr", expr))
+			reportCronIDs[cronKey] = id
+			zap.L().Info("report cron registered",
+				zap.String("type", reportType),
+				zap.Uint("org_id", orgID),
+				zap.String("expr", expr))
 		}
 	}
 }

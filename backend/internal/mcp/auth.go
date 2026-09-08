@@ -20,6 +20,7 @@ type AuthContext struct {
 	APIKey     *model.MCPAPIKey
 	User       *model.User // 统一身份源（替换原 TeamMember）
 	UserID     uint        // 对应 users 表 ID
+	OrgID      uint        // 多租户改造：API Key 固定绑定的组织 ID（禁止通过 Header 切换）
 	IMUserID   string
 	IMProvider string
 	Scopes     []string

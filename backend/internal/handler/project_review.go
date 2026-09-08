@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ai-optimizer/backend/internal/middleware"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -18,11 +19,16 @@ func NewProjectReviewHandler() *ProjectReviewHandler {
 
 // ListRules 获取项目评审规则列表（包含所有规则，新增规则自动 fallback 到全局状态）
 func (h *ProjectReviewHandler) ListRules(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	projectID, _ := strconv.Atoi(c.Param("id"))
 
 	// 1. 加载所有规则（全局规则库）
 	var allRules []model.ReviewRule
-	if err := model.DB.Order("sort_order ASC, id ASC").Find(&allRules).Error; err != nil {
+	if err := model.DB.Scopes(model.OrgScope(scope)).Order("sort_order ASC, id ASC").Find(&allRules).Error; err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
@@ -65,6 +71,11 @@ func (h *ProjectReviewHandler) ListRules(c *gin.Context) {
 
 // UpdateRules 批量更新项目规则配置
 func (h *ProjectReviewHandler) UpdateRules(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	projectID, _ := strconv.Atoi(c.Param("id"))
 
 	var req struct {
@@ -119,23 +130,39 @@ func (h *ProjectReviewHandler) UpdateRules(c *gin.Context) {
 
 // ResetRules 重置为默认规则配置
 func (h *ProjectReviewHandler) ResetRules(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	projectID, _ := strconv.Atoi(c.Param("id"))
 
-	// 删除现有配置
-	model.DB.Where("project_id = ?", projectID).Delete(&model.ProjectReviewConfig{})
-
-	// 重新生成
+	// 先查项目确认存在并获取 org_id（scope过滤）
 	var project model.Project
-	if err := model.DB.First(&project, projectID).Error; err != nil {
+	pdb := model.DB
+	if !scope.IsSuperAdmin {
+		pdb = pdb.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	if err := pdb.First(&project, projectID).Error; err != nil {
 		c.JSON(404, gin.H{"error": "project not found"})
 		return
 	}
 
+	// 删除现有配置（按组织过滤）
+	db := model.DB.Where("org_id = ? AND project_id = ?", project.OrgID, projectID)
+	db.Delete(&model.ProjectReviewConfig{})
+
+	// 重新生成
 	var rules []model.ReviewRule
-	model.DB.Where("is_enabled = ? AND (language = 'common' OR language = ?)", true, project.Language).Find(&rules)
+	rdb := model.DB.Where("is_enabled = ? AND (language = 'common' OR language = ?)", true, project.Language)
+	if !scope.IsSuperAdmin {
+		rdb = rdb.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	rdb.Find(&rules)
 
 	for _, rule := range rules {
 		cfg := model.ProjectReviewConfig{
+			OrgID:     project.OrgID,
 			ProjectID: uint(projectID),
 			RuleID:    rule.ID,
 			IsEnabled: true,
@@ -151,7 +178,17 @@ func (h *ProjectReviewHandler) ResetRules(c *gin.Context) {
 
 // QueryStructuredReview 查询 Task 结构化评审结果
 func (h *ProjectReviewHandler) QueryStructuredReview(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	taskID, _ := strconv.Atoi(c.Param("id"))
+	if !CanAccessTask(scope, uint(taskID)) {
+		c.JSON(403, gin.H{"error": "无权访问此任务"})
+		return
+	}
 
 	var task model.Task
 	if err := model.DB.First(&task, taskID).Error; err != nil {
@@ -184,6 +221,12 @@ func (h *ProjectReviewHandler) QueryStructuredReview(c *gin.Context) {
 
 // BatchResolveIssues 批量处理 Issue 状态（已处理/误报/忽略/恢复待处理）
 func (h *ProjectReviewHandler) BatchResolveIssues(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	var req struct {
 		Issues []struct {
 			ID           uint   `json:"id"`
@@ -237,7 +280,7 @@ func (h *ProjectReviewHandler) BatchResolveIssues(c *gin.Context) {
 			updates["reject_reason"] = item.RejectReason
 		}
 
-		if err := model.DB.Model(&model.ReviewIssue{}).Where("id = ?", item.ID).Updates(updates).Error; err != nil {
+		if err := model.DB.Table("review_issues").Joins("JOIN tasks ON tasks.id = review_issues.task_id").Where("review_issues.id = ? AND tasks.org_id IN ?", item.ID, scope.VisibleOrgIDs).Updates(updates).Error; err != nil {
 			zap.L().Warn("update review issue status failed",
 				zap.Uint("issue_id", item.ID),
 				zap.Error(err))

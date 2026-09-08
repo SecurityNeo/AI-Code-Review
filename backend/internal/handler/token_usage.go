@@ -17,24 +17,24 @@ import (
 
 // callerLabelMap 调用方英文标识 → 中文名称
 var callerLabelMap = map[string]string{
-	"score":                        "代码评审",
-	"rule_refine":                  "智能提炼",
-	"sandbox_test":                 "模拟测试",
-	"similar_check":                "相似检测",
-	"rule_incubator":               "规则孵化平台",
-	"retry":                        "解析重试",
-	"runAIReview":                  "AI 评审",
-	"runAIReviewStructured":        "AI 评审（结构化）",
+	"score":                          "代码评审",
+	"rule_refine":                    "智能提炼",
+	"sandbox_test":                   "模拟测试",
+	"similar_check":                  "相似检测",
+	"rule_incubator":                 "规则孵化平台",
+	"retry":                          "解析重试",
+	"runAIReview":                    "AI 评审",
+	"runAIReviewStructured":          "AI 评审（结构化）",
 	"runAIReviewStructuredTruncated": "AI 评审（截断）",
-	"runAIReviewFallback":          "AI 评审（分批）",
-	"callLLMAPI":                   "LLM 调用",
-	"single_batch_structured":      "单批次代码评审",
-	"batch_collection":             "多批次代码评审",
-	"review_arbitration":           "评审仲裁",
-	"secret_scan_verify":           "密钥扫描验证",
-	"security_audit_verify":        "安全审计验证",
-	"test_suggestion_enrich":       "测试建议增强",
-	"impact_analysis_enrich":       "影响分析增强",
+	"runAIReviewFallback":            "AI 评审（分批）",
+	"callLLMAPI":                     "LLM 调用",
+	"single_batch_structured":        "单批次代码评审",
+	"batch_collection":               "多批次代码评审",
+	"review_arbitration":             "评审仲裁",
+	"secret_scan_verify":             "密钥扫描验证",
+	"security_audit_verify":          "安全审计验证",
+	"test_suggestion_enrich":         "测试建议增强",
+	"impact_analysis_enrich":         "影响分析增强",
 }
 
 // incubatorCallers 是规则孵化平台相关的 caller 标识列表
@@ -112,8 +112,9 @@ func scopedQuery(c *gin.Context, callType string) *gorm.DB {
 		Joins("LEFT JOIN tasks t ON t.id = l.task_id").
 		Where("l.call_type = ?", callType).
 		Where("l.created_at >= ? AND l.created_at < ?", start, end)
+	scope := middleware.GetAuthScope(c)
 	if user, ok := middleware.GetUser(c); ok {
-		if user.Role != model.RoleAdmin {
+		if scope == nil || !scope.HasOrgRole("super_admin", "org_admin") {
 			if user.GitlabUsername == "" {
 				// 非 admin 且未绑定 Gitlab 账号 → 无权访问任何数据
 				q = q.Where("1 = 0")
@@ -476,8 +477,9 @@ func (h *TokenUsageHandler) GetByTask(c *gin.Context) {
 	base := model.DB.Table("llm_call_logs l").
 		Joins("LEFT JOIN tasks t ON t.id = l.task_id").
 		Where("l.task_id = ? AND l.call_type = ?", taskID, model.CallTypeScore)
+	scope := middleware.GetAuthScope(c)
 	if user, ok := middleware.GetUser(c); ok {
-		if user.Role != model.RoleAdmin {
+		if scope == nil || !scope.HasOrgRole("super_admin", "org_admin") {
 			if user.GitlabUsername == "" {
 				c.JSON(404, gin.H{"error": "任务不存在或无权访问"})
 				return
@@ -570,12 +572,17 @@ func (h *TokenUsageHandler) GetByTask(c *gin.Context) {
 // GetTokenSummary 首页摘要（今日 KPI + 7 天趋势）
 // GET /api/v1/dashboard/token-summary
 func (h *TokenUsageHandler) GetTokenSummary(c *gin.Context) {
-	user, ok := currentUserOrAbort(c)
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(403, gin.H{"error": "未认证"})
+		return
+	}
+	_, ok := currentUserOrAbort(c)
 	if !ok {
 		return
 	}
 	// 普通用户不展示（首页摘要为成本视图，admin only）
-	if user.Role != model.RoleAdmin {
+	if !scope.HasOrgRole("super_admin", "org_admin") {
 		c.JSON(200, gin.H{"data": nil})
 		return
 	}
@@ -589,7 +596,7 @@ func (h *TokenUsageHandler) GetTokenSummary(c *gin.Context) {
 		AvgDurationMs float64 `json:"avg_duration_ms"`
 	}
 	var today todayRow
-	if err := model.DB.Model(&model.LLMCallLog{}).
+	if err := model.DB.Scopes(model.OrgScope(scope)).Model(&model.LLMCallLog{}).
 		Where("call_type = ? AND created_at >= ?", model.CallTypeScore, todayStart).
 		Select(`COALESCE(SUM(total_tokens), 0) AS total_tokens,
 			COUNT(*)                            AS call_count,
@@ -608,7 +615,7 @@ func (h *TokenUsageHandler) GetTokenSummary(c *gin.Context) {
 	weekStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).
 		AddDate(0, 0, -6)
 	var trends []trendRow
-	if err := model.DB.Model(&model.LLMCallLog{}).
+	if err := model.DB.Scopes(model.OrgScope(scope)).Model(&model.LLMCallLog{}).
 		Where("call_type = ? AND created_at >= ?", model.CallTypeScore, weekStart).
 		Select(`DATE(created_at) AS day,
 			SUM(prompt_tokens)     AS prompt_tokens,
@@ -623,16 +630,16 @@ func (h *TokenUsageHandler) GetTokenSummary(c *gin.Context) {
 	trendOut := make([]gin.H, 0, len(trends))
 	for _, t := range trends {
 		trendOut = append(trendOut, gin.H{
-			"date":             t.Day.Format("01-02"),
-			"prompt_tokens":    t.PromptTokens,
+			"date":              t.Day.Format("01-02"),
+			"prompt_tokens":     t.PromptTokens,
 			"completion_tokens": t.CompletionTokens,
 		})
 	}
 
 	c.JSON(200, gin.H{
-		"today_tokens":     today.TotalTokens,
-		"today_calls":      today.CallCount,
-		"avg_duration_ms":  today.AvgDurationMs,
-		"trend_7d":         trendOut,
+		"today_tokens":    today.TotalTokens,
+		"today_calls":     today.CallCount,
+		"avg_duration_ms": today.AvgDurationMs,
+		"trend_7d":        trendOut,
 	})
 }

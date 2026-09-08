@@ -19,6 +19,7 @@ type DelayedNotificationQueue struct {
 
 type pendingNotifyJob struct {
 	TaskID         uint
+	OrgID          uint
 	FirstEnqueueAt time.Time
 	FireAt         time.Time
 	Payload        notifyPayload
@@ -62,14 +63,19 @@ func GetDelayedNotificationQueue() *DelayedNotificationQueue {
 
 // Enqueue 任务完成时调用，合并重试通知
 // 读取 NotificationRule.delay_minutes 配置：
-//   delay=0：立即执行（不进入队列）
-//   delay>0：按配置延迟执行
-//   无规则：默认 2min（首次）/15min（重试）
-func (q *DelayedNotificationQueue) Enqueue(task model.Task, stats IssueStats) {
-	// 尝试根据 MRAuthor 查找 DisplayName
+//
+//	delay=0：立即执行（不进入队列）
+//	delay>0：按配置延迟执行
+//	无规则：默认 2min（首次）/15min（重试）
+func (q *DelayedNotificationQueue) Enqueue(scope *model.UserAuthScope, task model.Task, stats IssueStats) {
+	// 尝试根据 MRAuthor 查找 DisplayName（带组织范围）
 	devName := task.MRAuthor
 	var user model.User
-	if err := model.DB.Where("gitlab_username = ? AND enabled = ?", task.MRAuthor, true).First(&user).Error; err == nil && user.DisplayName != "" {
+	userDB := model.DB
+	if scope != nil && !scope.IsSuperAdmin && len(scope.VisibleOrgIDs) > 0 {
+		userDB = userDB.Where("default_org_id IN ?", scope.VisibleOrgIDs)
+	}
+	if err := userDB.Where("gitlab_username = ? AND enabled = ?", task.MRAuthor, true).First(&user).Error; err == nil && user.DisplayName != "" {
 		devName = user.DisplayName
 	}
 
@@ -93,11 +99,12 @@ func (q *DelayedNotificationQueue) Enqueue(task model.Task, stats IssueStats) {
 		DeveloperName:     devName,
 	}
 
-	// 读取 NotificationRule 确定延迟策略
+	// 读取 NotificationRule 确定延迟策略（带组织范围）
 	var delay time.Duration
 	var rule model.NotificationRule
 	ruleFound := false
-	if err := model.DB.Where("`trigger` = ? AND enabled = ?", "task.completed", true).Order("id DESC").First(&rule).Error; err == nil {
+	db := model.DBWithScope(scope)
+	if err := db.Where("`trigger` = ? AND enabled = ?", "task.completed", true).Order("id DESC").First(&rule).Error; err == nil {
 		ruleFound = true
 		delay = time.Duration(rule.DelayMinutes) * time.Minute
 		zap.L().Info("notification rule found for delay",
@@ -121,8 +128,9 @@ func (q *DelayedNotificationQueue) Enqueue(task model.Task, stats IssueStats) {
 	// delay=0：立即执行，不进入延迟队列
 	if delay == 0 {
 		zap.L().Info("delay=0, execute notify immediately", zap.Uint("task_id", task.ID))
-		go q.executeJob(task.ID, &pendingNotifyJob{
+		go q.executeJob(scope, task.ID, &pendingNotifyJob{
 			TaskID:         task.ID,
+			OrgID:          task.OrgID,
 			FirstEnqueueAt: time.Now(),
 			FireAt:         time.Now(),
 			Payload:        payload,
@@ -144,6 +152,7 @@ func (q *DelayedNotificationQueue) Enqueue(task model.Task, stats IssueStats) {
 	now := time.Now()
 	q.jobs[task.ID] = &pendingNotifyJob{
 		TaskID:         task.ID,
+		OrgID:          task.OrgID,
 		FirstEnqueueAt: now,
 		FireAt:         now.Add(delay),
 		Payload:        payload,
@@ -172,23 +181,37 @@ func (q *DelayedNotificationQueue) fireDueJobs() {
 		if !job.FireAt.Before(now) && !job.FireAt.Equal(now) {
 			continue
 		}
-		// 到期，执行通知
-		q.executeJob(taskID, job)
+		// 到期，执行通知（构造组织 scope）
+		jobScope := &model.UserAuthScope{VisibleOrgIDs: []uint{job.OrgID}}
+		if job.OrgID == 0 {
+			jobScope = nil // 兼容旧数据：无 org_id 时不过滤
+		}
+		q.executeJob(jobScope, taskID, job)
 		delete(q.jobs, taskID)
 	}
 }
 
-func (q *DelayedNotificationQueue) executeJob(taskID uint, job *pendingNotifyJob) {
+func (q *DelayedNotificationQueue) executeJob(scope *model.UserAuthScope, taskID uint, job *pendingNotifyJob) {
 	payload := job.Payload
 
-	// 加载 task 信息
+	// 加载 task 信息（带 org scope 验证）
+	db := model.DBWithScope(scope)
 	var task model.Task
-	model.DB.First(&task, taskID)
+	if err := db.First(&task, taskID).Error; err != nil {
+		zap.L().Warn("executeJob: task not found or not in scope",
+			zap.Uint("task_id", taskID),
+			zap.Error(err))
+		return
+	}
 
-	// 查找用户 ID 用于站内信（过滤已禁用用户）
+	// 查找用户 ID 用于站内信（过滤已禁用用户，带组织范围）
 	var user model.User
 	ownerID := uint(0)
-	if err := model.DB.Where("gitlab_username = ? AND enabled = ?", payload.MRAuthor, true).First(&user).Error; err == nil {
+	userDB := model.DB
+	if scope != nil && !scope.IsSuperAdmin && len(scope.VisibleOrgIDs) > 0 {
+		userDB = userDB.Where("default_org_id IN ?", scope.VisibleOrgIDs)
+	}
+	if err := userDB.Where("gitlab_username = ? AND enabled = ?", payload.MRAuthor, true).First(&user).Error; err == nil {
 		ownerID = user.ID
 	}
 
@@ -205,7 +228,7 @@ func (q *DelayedNotificationQueue) executeJob(taskID uint, job *pendingNotifyJob
 		notifType = model.NotificationTypeTaskCompletedNoIssue
 		notifTitle = fmt.Sprintf("MR !%d 评审完成：未发现问题", task.MRMergeID)
 	}
-	notifSvc.SendInbox(ownerID, notifType, notifTitle, buildInboxContent(payload), link)
+	notifSvc.SendInbox(task.OrgID, ownerID, notifType, notifTitle, buildInboxContent(payload), link)
 
 	// 注：企微群 IM 推送由 NotifyAIReviewCompleted 负责（使用通知规则模板渲染），
 	// 延迟队列不再发送 IM，避免 delay=0 时与即时通知重复。

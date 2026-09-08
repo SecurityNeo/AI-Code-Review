@@ -19,35 +19,39 @@ func NewNotifierService() *NotifierService {
 	return &NotifierService{}
 }
 
-func (s *NotifierService) List() ([]model.WeComNotifier, error) {
+func (s *NotifierService) List(scope *model.UserAuthScope) ([]model.WeComNotifier, error) {
 	var notifiers []model.WeComNotifier
-	err := model.DB.Order("created_at DESC").Find(&notifiers).Error
+	db := model.DBWithScope(scope)
+	err := db.Order("created_at DESC").Find(&notifiers).Error
 	return notifiers, err
 }
 
-func (s *NotifierService) Get(id uint) (*model.WeComNotifier, error) {
+func (s *NotifierService) Get(scope *model.UserAuthScope, id uint) (*model.WeComNotifier, error) {
 	var notifier model.WeComNotifier
-	if err := model.DB.First(&notifier, id).Error; err != nil {
+	db := model.DBWithScope(scope)
+	if err := db.First(&notifier, id).Error; err != nil {
 		return nil, err
 	}
 	return &notifier, nil
 }
 
-func (s *NotifierService) Create(data map[string]interface{}) (*model.WeComNotifier, error) {
+func (s *NotifierService) Create(scope *model.UserAuthScope, data map[string]interface{}) (*model.WeComNotifier, error) {
 	notifier := model.WeComNotifier{
+		OrgID:           uint(data["org_id"].(float64)),
 		Name:            data["name"].(string),
 		WebhookUrl:      data["webhook_url"].(string),
 		MessageTemplate: "",
 		Enabled:         false, // 新建时未配置模板，默认禁用
 	}
 
-	if err := model.DB.Create(&notifier).Error; err != nil {
+	db := model.DBWithScope(scope)
+	if err := db.Create(&notifier).Error; err != nil {
 		return nil, err
 	}
 	return &notifier, nil
 }
 
-func (s *NotifierService) Update(id uint, data map[string]interface{}) error {
+func (s *NotifierService) Update(scope *model.UserAuthScope, id uint, data map[string]interface{}) error {
 	updates := make(map[string]interface{})
 
 	if v, ok := data["name"].(string); ok {
@@ -61,31 +65,35 @@ func (s *NotifierService) Update(id uint, data map[string]interface{}) error {
 		return nil
 	}
 
-	return model.DB.Model(&model.WeComNotifier{}).Where("id = ?", id).Updates(updates).Error
+	db := model.DBWithScope(scope)
+	return db.Model(&model.WeComNotifier{}).Where("id = ?", id).Updates(updates).Error
 }
 
 // UpdateTemplate 单独更新消息模板
-func (s *NotifierService) UpdateTemplate(id uint, template string) error {
-	return model.DB.Model(&model.WeComNotifier{}).Where("id = ?", id).Update("message_template", template).Error
+func (s *NotifierService) UpdateTemplate(scope *model.UserAuthScope, id uint, template string) error {
+	db := model.DBWithScope(scope)
+	return db.Model(&model.WeComNotifier{}).Where("id = ?", id).Update("message_template", template).Error
 }
 
-func (s *NotifierService) Delete(id uint) error {
-	return model.DB.Delete(&model.WeComNotifier{}, id).Error
+func (s *NotifierService) Delete(scope *model.UserAuthScope, id uint) error {
+	db := model.DBWithScope(scope)
+	return db.Delete(&model.WeComNotifier{}, id).Error
 }
 
-func (s *NotifierService) Toggle(id uint, enabled bool) error {
-	return model.DB.Model(&model.WeComNotifier{}).Where("id = ?", id).Update("enabled", enabled).Error
+func (s *NotifierService) Toggle(scope *model.UserAuthScope, id uint, enabled bool) error {
+	db := model.DBWithScope(scope)
+	return db.Model(&model.WeComNotifier{}).Where("id = ?", id).Update("enabled", enabled).Error
 }
 
-func (s *NotifierService) Test(id uint) (bool, string, error) {
-	notifier, err := s.Get(id)
+func (s *NotifierService) Test(scope *model.UserAuthScope, id uint) (bool, string, error) {
+	notifier, err := s.Get(scope, id)
 	if err != nil {
 		return false, "", err
 	}
 
 	message := "测试消息 - CodeGuard 通知配置成功！"
 	if notifier.MessageTemplate != "" {
-		message = buildMessageFromRule("task.completed", notifier.MessageTemplate, &mockTask, notifier.ID, "")
+		message = buildMessageFromRule(scope, "task.completed", notifier.MessageTemplate, &mockTask, notifier.ID, "")
 	}
 
 	return s.SendMessage(notifier.WebhookUrl, message, "")
@@ -155,16 +163,18 @@ func (s *NotifierService) SendMessage(webhookUrl, message string, mentionUserId 
 }
 
 // NotifyAIReviewCompleted 通知 AI 评审完成
-func (s *NotifierService) NotifyAIReviewCompleted(task model.Task) {
+func (s *NotifierService) NotifyAIReviewCompleted(scope *model.UserAuthScope, task model.Task) {
 	zap.L().Info("notify ai review: start",
 		zap.Uint("task_id", task.ID),
 		zap.Uint("project_id", task.ProjectID),
 		zap.String("mr_author", task.MRAuthor),
 		zap.String("project_name", task.Project.Name))
 
+	db := model.DBWithScope(scope)
+
 	// 获取启用了通知的配置
 	var notifiers []model.WeComNotifier
-	query := model.DB.Where("enabled = ?", true)
+	query := db.Where("enabled = ?", true)
 	if task.ProjectID > 0 {
 		query = query.Where("project_id IS NULL OR project_id = ?", task.ProjectID)
 	}
@@ -187,7 +197,7 @@ func (s *NotifierService) NotifyAIReviewCompleted(task model.Task) {
 	// 查询开发人员的 IM 用户 ID（用于 @）
 	var mentionUserId string
 	var user model.User
-	if err := model.DB.Where("gitlab_username = ? AND im_platform = ? AND enabled = ?", task.MRAuthor, "wecom", true).First(&user).Error; err == nil {
+	if err := db.Where("gitlab_username = ? AND im_platform = ? AND enabled = ?", task.MRAuthor, "wecom", true).First(&user).Error; err == nil {
 		mentionUserId = user.IMUserID
 		zap.L().Info("notify ai review: found user",
 			zap.String("gitlab_username", task.MRAuthor),
@@ -198,7 +208,7 @@ func (s *NotifierService) NotifyAIReviewCompleted(task model.Task) {
 	}
 
 	for _, notifier := range notifiers {
-		message := buildMessageFromRule("task.completed", notifier.MessageTemplate, &task, notifier.ID, mentionUserId)
+		message := buildMessageFromRule(scope, "task.completed", notifier.MessageTemplate, &task, notifier.ID, mentionUserId)
 
 		// @ 行为已统一由模板变量 {{AT_RECIPIENT}} 控制，不再由发送层硬编码追加
 		success, msg, err := s.SendMessage(notifier.WebhookUrl, message, "")
@@ -231,7 +241,7 @@ func (s *NotifierService) NotifyAIReviewCompleted(task model.Task) {
 			Status:         status,
 			ErrorMsg:       errMsg,
 		}
-		if err := model.DB.Create(&log).Error; err != nil {
+		if err := db.Create(&log).Error; err != nil {
 			zap.L().Error("notify ai review: failed to save delivery log",
 				zap.Uint("notifier_id", notifier.ID),
 				zap.Error(err))
@@ -240,8 +250,8 @@ func (s *NotifierService) NotifyAIReviewCompleted(task model.Task) {
 }
 
 // buildMessageFromRule 优先读取通知规则模板，其次 fallback 模板，最后默认模板
-func buildMessageFromRule(trigger string, fallbackTemplate string, task *model.Task, notifierID uint, mentionUserId string) string {
-	templateStr := GetNotificationRuleTemplate(trigger)
+func buildMessageFromRule(scope *model.UserAuthScope, trigger string, fallbackTemplate string, task *model.Task, notifierID uint, mentionUserId string) string {
+	templateStr := GetNotificationRuleTemplate(scope, trigger)
 	source := "notification_rule"
 	if templateStr == "" {
 		templateStr = fallbackTemplate
@@ -258,10 +268,12 @@ func buildMessageFromRule(trigger string, fallbackTemplate string, task *model.T
 		zap.String("source", source),
 		zap.Int("template_len", len(templateStr)))
 
+	db := model.DBWithScope(scope)
+
 	// 查询开发人员展示名映射
 	developer := task.MRAuthor
 	var user model.User
-	if err := model.DB.Where("gitlab_username = ? AND enabled = ?", task.MRAuthor, true).
+	if err := db.Where("gitlab_username = ? AND enabled = ?", task.MRAuthor, true).
 		First(&user).Error; err == nil && user.DisplayName != "" {
 		developer = task.MRAuthor + "(" + user.DisplayName + ")"
 	}
@@ -269,7 +281,7 @@ func buildMessageFromRule(trigger string, fallbackTemplate string, task *model.T
 	// 获取 ReviewLog 的代码变更量
 	additions, deletions := 0, 0
 	var log model.MergeRequestReviewLog
-	if err := model.DB.Where("url = ?", task.MRURL).Order("synced_at DESC").First(&log).Error; err == nil {
+	if err := db.Where("url = ?", task.MRURL).Order("synced_at DESC").First(&log).Error; err == nil {
 		additions = log.Additions
 		deletions = log.Deletions
 	}
@@ -279,12 +291,12 @@ func buildMessageFromRule(trigger string, fallbackTemplate string, task *model.T
 		projectName = "未知项目"
 	}
 
-	stats := CalcIssueStats(task.ID, task.MRMergeID)
+	stats := CalcIssueStats(scope, task.ID, task.MRMergeID)
 
 	// 查询项目默认负责人（用于 {{STEWARD_NAME}}），过滤已禁用用户
 	var stewardName string
 	var resp model.ProjectResponsibility
-	if err := model.DB.Preload("User").Where("project_id = ? AND scope_type = 'default' AND scope_value = ''", task.ProjectID).
+	if err := db.Preload("User").Where("project_id = ? AND scope_type = 'default' AND scope_value = ''", task.ProjectID).
 		Order("priority ASC, created_at ASC").First(&resp).Error; err == nil && resp.UserID > 0 && resp.User.ID > 0 && resp.User.Enabled {
 		stewardName = resp.User.DisplayName
 		if stewardName == "" {
@@ -296,15 +308,15 @@ func buildMessageFromRule(trigger string, fallbackTemplate string, task *model.T
 	}
 
 	ctx := TemplateContext{
-		Task:      *task,
-		Stats:     stats,
-		Project:   task.Project,
-		Developer: developer,
-		Steward:   stewardName,
-		Additions: additions,
-		Deletions: deletions,
+		Task:          *task,
+		Stats:         stats,
+		Project:       task.Project,
+		Developer:     developer,
+		Steward:       stewardName,
+		Additions:     additions,
+		Deletions:     deletions,
 		DeadlineHours: 120 - stats.Pending*2,
-		AtRecipient: mentionUserId,
+		AtRecipient:   mentionUserId,
 	}
 	return RenderMessage(templateStr, ctx)
 }
@@ -332,12 +344,13 @@ func (s *NotifierService) SendMonitorAlert(webhookUrl, message, mentionUserIDs s
 }
 
 // SendResourcePoolAlert 发送资源池告警（异常或恢复）
-func SendResourcePoolAlert(pool model.ResourcePool, isRecovery bool, alertDuration, alertCooldown int, notifierID uint, mentionUserIDs string) {
+func SendResourcePoolAlert(scope *model.UserAuthScope, pool model.ResourcePool, isRecovery bool, alertDuration, alertCooldown int, notifierID uint, mentionUserIDs string) {
 	if notifierID == 0 {
 		return
 	}
 	var notifier model.WeComNotifier
-	if err := model.DB.First(&notifier, notifierID).Error; err != nil {
+	db := model.DBWithScope(scope)
+	if err := db.First(&notifier, notifierID).Error; err != nil {
 		zap.L().Error("send pool alert: notifier not found", zap.Uint("notifier_id", notifierID), zap.Error(err))
 		return
 	}
@@ -384,12 +397,13 @@ func SendResourcePoolAlert(pool model.ResourcePool, isRecovery bool, alertDurati
 }
 
 // SendModelAlert 发送大模型告警（异常或恢复）
-func SendModelAlert(m model.LLMModel, isRecovery bool, alertDuration, alertCooldown int, notifierID uint, mentionUserIDs string) {
+func SendModelAlert(scope *model.UserAuthScope, m model.LLMModel, isRecovery bool, alertDuration, alertCooldown int, notifierID uint, mentionUserIDs string) {
 	if notifierID == 0 {
 		return
 	}
 	var notifier model.WeComNotifier
-	if err := model.DB.First(&notifier, notifierID).Error; err != nil {
+	db := model.DBWithScope(scope)
+	if err := db.First(&notifier, notifierID).Error; err != nil {
 		zap.L().Error("send model alert: notifier not found", zap.Uint("notifier_id", notifierID), zap.Error(err))
 		return
 	}

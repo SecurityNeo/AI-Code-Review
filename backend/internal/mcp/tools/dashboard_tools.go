@@ -21,12 +21,12 @@ func handleGetWorkbench(ctx context.Context, authCtx *mcp.AuthContext, args map[
 		if !authCtx.IsAdmin {
 			return nil, fmt.Errorf("permission denied: admin view requires admin role")
 		}
-		return getAdminWorkbench()
+		return getAdminWorkbench(authCtx)
 	}
 	// 绑定 admin 用户的 Key 没有具体的 developer 业务数据（无 owner_id 关联的 Issue），
 	// 默认切到 admin view 以避免返回全空结果误导智能体
 	if authCtx.IsAdmin {
-		return getAdminWorkbench()
+		return getAdminWorkbench(authCtx)
 	}
 	return getDeveloperWorkbench(authCtx)
 }
@@ -292,13 +292,13 @@ func getDeveloperWorkbench(authCtx *mcp.AuthContext) (interface{}, error) {
 	}, nil
 }
 
-func getAdminWorkbench() (interface{}, error) {
+func getAdminWorkbench(authCtx *mcp.AuthContext) (interface{}, error) {
 	baseline := getNotificationBaseline()
 
 	var todayNew, totalPending, totalPendingBefore, overdue, overdueBefore int64
 	todayStart := time.Now().Truncate(24 * time.Hour)
-	model.DB.Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND created_at >= ?", todayStart).Count(&todayNew)
-	q := model.DB.Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status IN (?)", []string{model.IssueStatusPending, model.IssueStatusPendingInherited})
+	model.DB.Model(&model.ReviewIssue{}).Where("org_id = ? AND deleted_at IS NULL AND created_at >= ?", authCtx.OrgID, todayStart).Count(&todayNew)
+	q := model.DB.Model(&model.ReviewIssue{}).Where("org_id = ? AND deleted_at IS NULL AND status IN (?)", authCtx.OrgID, []string{model.IssueStatusPending, model.IssueStatusPendingInherited})
 	q.Count(&totalPending)
 	if !baseline.IsZero() {
 		q.Where("original_created_at < ?", baseline).Count(&totalPendingBefore)
@@ -306,8 +306,8 @@ func getAdminWorkbench() (interface{}, error) {
 
 	overdueSince := time.Now().AddDate(0, 0, -5)
 	qo := model.DB.Model(&model.ReviewIssue{}).
-		Where("deleted_at IS NULL AND status IN (?) AND original_created_at < ?",
-			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, overdueSince)
+		Where("org_id = ? AND deleted_at IS NULL AND status IN (?) AND original_created_at < ?",
+			authCtx.OrgID, []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, overdueSince)
 	qo.Count(&overdue)
 	if !baseline.IsZero() {
 		qo.Where("original_created_at < ?", baseline).Count(&overdueBefore)
@@ -315,18 +315,18 @@ func getAdminWorkbench() (interface{}, error) {
 
 	var todayArchived, totalArchived, todayEscalated int64
 	model.DB.Model(&model.ReviewIssue{}).
-		Where("deleted_at IS NULL AND status = ? AND updated_at >= ?", model.IssueStatusAutoArchived, todayStart).Count(&todayArchived)
+		Where("org_id = ? AND deleted_at IS NULL AND status = ? AND updated_at >= ?", authCtx.OrgID, model.IssueStatusAutoArchived, todayStart).Count(&todayArchived)
 	model.DB.Model(&model.ReviewIssue{}).
-		Where("deleted_at IS NULL AND status = ?", model.IssueStatusAutoArchived).Count(&totalArchived)
+		Where("org_id = ? AND deleted_at IS NULL AND status = ?", authCtx.OrgID, model.IssueStatusAutoArchived).Count(&totalArchived)
 	model.DB.Model(&model.ReviewIssue{}).
-		Where("deleted_at IS NULL AND escalation_level > 0 AND status != ? AND updated_at >= ?", model.IssueStatusAutoArchived, todayStart).Count(&todayEscalated)
+		Where("org_id = ? AND deleted_at IS NULL AND escalation_level > 0 AND status != ? AND updated_at >= ?", authCtx.OrgID, model.IssueStatusAutoArchived, todayStart).Count(&todayEscalated)
 
 	// 7天闭环率
 	sevenDaysAgo := time.Now().AddDate(0, 0, -7)
 	var weekCreated, weekClosed int64
-	model.DB.Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND created_at >= ?", sevenDaysAgo).Count(&weekCreated)
+	model.DB.Model(&model.ReviewIssue{}).Where("org_id = ? AND deleted_at IS NULL AND created_at >= ?", authCtx.OrgID, sevenDaysAgo).Count(&weekCreated)
 	model.DB.Model(&model.ReviewIssue{}).
-		Where("deleted_at IS NULL AND resolved_at >= ? AND status IN (?)", sevenDaysAgo,
+		Where("org_id = ? AND deleted_at IS NULL AND resolved_at >= ? AND status IN (?)", authCtx.OrgID, sevenDaysAgo,
 			[]string{model.IssueStatusResolved, model.IssueStatusFalsePositive, model.IssueStatusIgnored}).Count(&weekClosed)
 	closeRate := float64(0)
 	if weekCreated > 0 {
@@ -337,8 +337,8 @@ func getAdminWorkbench() (interface{}, error) {
 	thirtyDaysAgo := time.Now().AddDate(0, 0, -30)
 	type ResolveDuration struct{ DurationSec float64 }
 	var durations []ResolveDuration
-	model.DB.Raw(`SELECT TIMESTAMPDIFF(SECOND, original_created_at, resolved_at) AS duration_sec FROM review_issues WHERE deleted_at IS NULL AND status IN (?) AND resolved_at IS NOT NULL AND resolved_at >= ?`,
-		[]string{model.IssueStatusResolved, model.IssueStatusFalsePositive, model.IssueStatusIgnored}, thirtyDaysAgo).Scan(&durations)
+	model.DB.Raw(`SELECT TIMESTAMPDIFF(SECOND, review_issues.original_created_at, review_issues.resolved_at) AS duration_sec FROM review_issues INNER JOIN tasks ON tasks.id = review_issues.task_id WHERE review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND review_issues.resolved_at IS NOT NULL AND review_issues.resolved_at >= ? AND tasks.org_id = ?`,
+		[]string{model.IssueStatusResolved, model.IssueStatusFalsePositive, model.IssueStatusIgnored}, thirtyDaysAgo, authCtx.OrgID).Scan(&durations)
 	medianDays := float64(0)
 	if len(durations) > 0 {
 		vals := make([]float64, len(durations))
@@ -370,8 +370,8 @@ func getAdminWorkbench() (interface{}, error) {
 		OverdueCount int64  `json:"overdue_count"`
 	}
 	var alerts []alertItem
-	model.DB.Raw(`SELECT projects.id AS project_id, projects.name AS project_name, COUNT(review_issues.id) AS pending_count, COUNT(CASE WHEN review_issues.original_created_at < ? THEN 1 END) AS overdue_count FROM projects INNER JOIN tasks ON tasks.project_id = projects.id INNER JOIN review_issues ON review_issues.task_id = tasks.id AND review_issues.deleted_at IS NULL AND review_issues.status IN (?) GROUP BY projects.id, projects.name HAVING pending_count > 0 ORDER BY pending_count DESC LIMIT 10`,
-		overdueSince, []string{model.IssueStatusPending, model.IssueStatusPendingInherited}).Scan(&alerts)
+	model.DB.Raw(`SELECT projects.id AS project_id, projects.name AS project_name, COUNT(review_issues.id) AS pending_count, COUNT(CASE WHEN review_issues.original_created_at < ? THEN 1 END) AS overdue_count FROM projects INNER JOIN tasks ON tasks.project_id = projects.id INNER JOIN review_issues ON review_issues.task_id = tasks.id AND review_issues.deleted_at IS NULL AND review_issues.status IN (?) WHERE projects.org_id = ? GROUP BY projects.id, projects.name HAVING pending_count > 0 ORDER BY pending_count DESC LIMIT 10`,
+		overdueSince, []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, authCtx.OrgID).Scan(&alerts)
 
 	// Top 积压项目
 	type pendingProj struct {
@@ -379,8 +379,8 @@ func getAdminWorkbench() (interface{}, error) {
 		PendingCount int64  `json:"pending_count"`
 	}
 	var topPendingProjects []pendingProj
-	model.DB.Raw(`SELECT projects.name AS name, COUNT(review_issues.id) AS pending_count FROM projects INNER JOIN tasks ON tasks.project_id = projects.id INNER JOIN review_issues ON review_issues.task_id = tasks.id AND review_issues.deleted_at IS NULL AND review_issues.status IN (?) GROUP BY projects.id, projects.name ORDER BY pending_count DESC LIMIT 5`,
-		[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}).Scan(&topPendingProjects)
+	model.DB.Raw(`SELECT projects.name AS name, COUNT(review_issues.id) AS pending_count FROM projects INNER JOIN tasks ON tasks.project_id = projects.id INNER JOIN review_issues ON review_issues.task_id = tasks.id AND review_issues.deleted_at IS NULL AND review_issues.status IN (?) WHERE projects.org_id = ? GROUP BY projects.id, projects.name ORDER BY pending_count DESC LIMIT 5`,
+		[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, authCtx.OrgID).Scan(&topPendingProjects)
 
 	return map[string]interface{}{
 		"view": "admin",
@@ -471,8 +471,8 @@ func handleGetDashboardStats(ctx context.Context, authCtx *mcp.AuthContext, args
 		Success     int64  `json:"success"`
 	}
 	var topProjects []topProject
-	model.DB.Raw(`SELECT projects.name as project_name, COUNT(tasks.id) as total, COUNT(CASE WHEN tasks.status = ? THEN 1 END) as success FROM tasks JOIN projects ON tasks.project_id = projects.id WHERE tasks.created_at >= ? GROUP BY projects.id, projects.name ORDER BY total DESC LIMIT 5`,
-		model.TaskSuccess, startTime).Scan(&topProjects)
+	model.DB.Raw(`SELECT projects.name as project_name, COUNT(tasks.id) as total, COUNT(CASE WHEN tasks.status = ? THEN 1 END) as success FROM tasks JOIN projects ON tasks.project_id = projects.id WHERE tasks.org_id = ? AND tasks.created_at >= ? GROUP BY projects.id, projects.name ORDER BY total DESC LIMIT 5`,
+		model.TaskSuccess, authCtx.OrgID, startTime).Scan(&topProjects)
 
 	return map[string]interface{}{
 		"time_range":  timeRange,
@@ -498,8 +498,8 @@ func handleGetTokenUsage(ctx context.Context, authCtx *mcp.AuthContext, args map
 	}
 
 	var days []usageDay
-	model.DB.Raw(`SELECT DATE(created_at) as date, SUM(prompt_tokens) as input_tokens, SUM(completion_tokens) as output_tokens, SUM(cost_cents)/100.0 as cost FROM llm_call_logs WHERE created_at >= ? GROUP BY DATE(created_at) ORDER BY date DESC LIMIT 30`,
-		time.Now().AddDate(0, 0, -30)).Scan(&days)
+	model.DB.Raw(`SELECT DATE(ll.created_at) as date, SUM(ll.prompt_tokens) as input_tokens, SUM(ll.completion_tokens) as output_tokens, SUM(ll.cost_cents)/100.0 as cost FROM llm_call_logs ll LEFT JOIN tasks t ON t.id = ll.task_id WHERE (t.org_id = ? OR ll.task_id IS NULL) AND ll.created_at >= ? GROUP BY DATE(ll.created_at) ORDER BY date DESC LIMIT 30`,
+		authCtx.OrgID, time.Now().AddDate(0, 0, -30)).Scan(&days)
 
 	var totalInput, totalOutput int64
 	var totalCost float64

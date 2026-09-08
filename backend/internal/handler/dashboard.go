@@ -27,25 +27,48 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 		return
 	}
 
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	var totalProjects, todayTasks, runningTasks, failedTasks24h, activePools int64
 
-	model.DB.Model(&model.Project{}).Count(&totalProjects)
+	dbProjects := model.DB.Model(&model.Project{})
+	if !scope.IsSuperAdmin {
+		dbProjects = dbProjects.Scopes(model.OrgScope(scope))
+	}
+	dbProjects.Count(&totalProjects)
 
 	today := time.Now().Truncate(24 * time.Hour)
 	queryToday := model.DB.Model(&model.Task{}).Where("created_at >= ?", today)
+	if !scope.IsSuperAdmin {
+		queryToday = queryToday.Scopes(model.OrgScope(scope))
+	}
 	queryToday = model.FilterByUser(queryToday, user, "mr_author")
 	queryToday.Count(&todayTasks)
 
 	queryRunning := model.DB.Model(&model.Task{}).Where("status = ?", model.TaskRunning)
+	if !scope.IsSuperAdmin {
+		queryRunning = queryRunning.Scopes(model.OrgScope(scope))
+	}
 	queryRunning = model.FilterByUser(queryRunning, user, "mr_author")
 	queryRunning.Count(&runningTasks)
 
 	yesterday := today.Add(-24 * time.Hour)
 	queryFailed := model.DB.Model(&model.Task{}).Where("status = ? AND updated_at >= ?", model.TaskFailed, yesterday)
+	if !scope.IsSuperAdmin {
+		queryFailed = queryFailed.Scopes(model.OrgScope(scope))
+	}
 	queryFailed = model.FilterByUser(queryFailed, user, "mr_author")
 	queryFailed.Count(&failedTasks24h)
 
-	model.DB.Model(&model.ResourcePool{}).Where("status = ?", "active").Count(&activePools)
+	dbPools := model.DB.Model(&model.ResourcePool{}).Where("status = ?", "active")
+	if !scope.IsSuperAdmin {
+		dbPools = dbPools.Scopes(model.OrgScope(scope))
+	}
+	dbPools.Count(&activePools)
 
 	c.JSON(200, gin.H{
 		"total_projects":   totalProjects,
@@ -59,6 +82,11 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 func (h *DashboardHandler) GetTrends(c *gin.Context) {
 	user, ok := middleware.GetUser(c)
 	if !ok {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
 		c.JSON(401, gin.H{"error": "未登录"})
 		return
 	}
@@ -78,11 +106,17 @@ func (h *DashboardHandler) GetTrends(c *gin.Context) {
 		var successCount, failedCount int64
 		qSuccess := model.DB.Model(&model.Task{}).
 			Where("status = ? AND created_at >= ? AND created_at < ?", model.TaskSuccess, startOfDay, endOfDay)
+		if !scope.IsSuperAdmin {
+			qSuccess = qSuccess.Scopes(model.OrgScope(scope))
+		}
 		qSuccess = model.FilterByUser(qSuccess, user, "mr_author")
 		qSuccess.Count(&successCount)
 
 		qFailed := model.DB.Model(&model.Task{}).
 			Where("status = ? AND created_at >= ? AND created_at < ?", model.TaskFailed, startOfDay, endOfDay)
+		if !scope.IsSuperAdmin {
+			qFailed = qFailed.Scopes(model.OrgScope(scope))
+		}
 		qFailed = model.FilterByUser(qFailed, user, "mr_author")
 		qFailed.Count(&failedCount)
 
@@ -103,31 +137,46 @@ func (h *DashboardHandler) GetRecentProjects(c *gin.Context) {
 		c.JSON(401, gin.H{"error": "未登录"})
 		return
 	}
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 
 	var projects []model.Project
 
 	// user 时：先查自己最近有任务的项目ID，再用这些ID查项目详情
-	if user.Role != model.RoleAdmin {
+	if !scope.HasOrgRole("super_admin", "org_admin") {
 		var projectIDs []uint
-		model.DB.Model(&model.Task{}).
+		dbTask := model.DB.Model(&model.Task{}).
 			Select("DISTINCT project_id").
 			Where("mr_author = ?", user.GitlabUsername).
 			Order("created_at DESC").
-			Limit(5).
-			Pluck("project_id", &projectIDs)
+			Limit(5)
+		if !scope.IsSuperAdmin {
+			dbTask = dbTask.Scopes(model.OrgScope(scope))
+		}
+		dbTask.Pluck("project_id", &projectIDs)
 
 		if len(projectIDs) == 0 {
 			c.JSON(200, gin.H{"data": []any{}})
 			return
 		}
 
-		model.DB.Where("id IN ?", projectIDs).
-			Preload("Tasks", func(db *gorm.DB) *gorm.DB {
-				return db.Where("mr_author = ?", user.GitlabUsername).Order("created_at DESC").Limit(5)
-			}).
+		db := model.DB.Where("id IN ?", projectIDs)
+		if !scope.IsSuperAdmin {
+			db = db.Scopes(model.OrgScope(scope))
+		}
+		db.Preload("Tasks", func(db *gorm.DB) *gorm.DB {
+			return db.Where("mr_author = ?", user.GitlabUsername).Order("created_at DESC").Limit(5)
+		}).
 			Find(&projects)
 	} else {
-		err := model.DB.Preload("Tasks", func(db *gorm.DB) *gorm.DB {
+		db := model.DB
+		if !scope.IsSuperAdmin {
+			db = db.Scopes(model.OrgScope(scope))
+		}
+		err := db.Preload("Tasks", func(db *gorm.DB) *gorm.DB {
 			return db.Order("created_at DESC").Limit(5)
 		}).Order("updated_at DESC").Limit(5).Find(&projects).Error
 
@@ -175,6 +224,11 @@ func (h *DashboardHandler) GetRecentProjects(c *gin.Context) {
 }
 
 func (h *DashboardHandler) GetRecentFailures(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	user, ok := middleware.GetUser(c)
 	if !ok {
 		c.JSON(401, gin.H{"error": "未登录"})
@@ -183,7 +237,7 @@ func (h *DashboardHandler) GetRecentFailures(c *gin.Context) {
 
 	var tasks []model.Task
 
-	query := model.DB.Preload("Project").
+	query := model.DB.Preload("Project").Scopes(model.OrgScope(scope)).
 		Where("status = ?", model.TaskFailed).
 		Order("updated_at DESC").
 		Limit(10)
@@ -231,6 +285,11 @@ func (h *DashboardHandler) GetRecentFailures(c *gin.Context) {
 }
 
 func (h *DashboardHandler) GetTaskDistribution(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	user, ok := middleware.GetUser(c)
 	if !ok {
 		c.JSON(401, gin.H{"error": "未登录"})
@@ -243,7 +302,7 @@ func (h *DashboardHandler) GetTaskDistribution(c *gin.Context) {
 	}
 
 	var counts []ProjectTaskCount
-	query := model.DB.Model(&model.Task{}).
+	query := model.DB.Model(&model.Task{}).Scopes(model.OrgScope(scope)).
 		Select("projects.name as project_name, COUNT(tasks.id) as count").
 		Joins("LEFT JOIN projects ON tasks.project_id = projects.id").
 		Group("tasks.project_id").
@@ -266,7 +325,7 @@ func (h *DashboardHandler) GetTaskDistribution(c *gin.Context) {
 
 	// 如果不足6个，添加"其他"
 	var otherCount int64
-	otherQuery := model.DB.Model(&model.Task{})
+	otherQuery := model.DB.Model(&model.Task{}).Scopes(model.OrgScope(scope))
 	otherQuery = model.FilterByUser(otherQuery, user, "mr_author")
 	otherQuery.Count(&otherCount)
 

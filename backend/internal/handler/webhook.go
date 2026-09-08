@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/ai-optimizer/backend/internal/model"
@@ -180,8 +181,17 @@ func postMRComment(projectPath, gitlabToken string, mrIID int, comment string, n
 }
 
 // GitLabWebhook 统一处理 GitLab Webhook（note / merge_request）
+// 安全约束：
+// 1. Payload 大小限制 10MB，防止 DoS。
+// 2. Webhook Secret 强制非空，且必须校验请求 Header X-Gitlab-Token。
+// 3. Webhook 请求来自 GitLab 服务器，无用户上下文，严禁使用 middleware.GetCurrentOrgID()。
+//    org_id 必须从 GitLabInstance.OrgID 或 Project.OrgID 反查。
 func (h *WebhookHandler) GitLabWebhook(c *gin.Context) {
 	zap.L().Info("========== Webhook received ==========")
+
+	// 安全约束：限制请求体最大 10MB，防止 DoS
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
+
 	var payload map[string]interface{}
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		zap.L().Warn("invalid webhook payload", zap.Error(err))
@@ -190,6 +200,21 @@ func (h *WebhookHandler) GitLabWebhook(c *gin.Context) {
 	}
 
 	zap.L().Debug("webhook payload keys", zap.Any("keys", getMapKeys(payload)))
+
+	// 安全约束：Webhook Secret 强制非空校验
+	project, instance, err := validateWebhookSecret(c, payload)
+	if err != nil {
+		zap.L().Warn("webhook rejected", zap.Error(err))
+		c.JSON(401, gin.H{"error": err.Error()})
+		return
+	}
+	// 将反查到的项目信息存入 context，供子 handler 使用
+	if project != nil {
+		c.Set("webhook_project", project)
+	}
+	if instance != nil {
+		c.Set("webhook_instance", instance)
+	}
 
 	objectKind, _ := payload["object_kind"].(string)
 	switch objectKind {
@@ -203,8 +228,108 @@ func (h *WebhookHandler) GitLabWebhook(c *gin.Context) {
 	}
 }
 
-// ========== Note Hook 处理（评论触发） ==========
+// extractInstanceIDFromRequest 从请求中获取 GitLab 实例 ID
+// 优先级：URL Query > Header > 默认值 1
+func extractInstanceIDFromRequest(c *gin.Context) uint {
+	instanceIDStr := c.Query("instance_id")
+	if instanceIDStr == "" {
+		instanceIDStr = c.GetHeader("X-Gitlab-Instance")
+	}
+	if instanceIDStr == "" {
+		return 1 // fallback 到默认实例
+	}
+	id, err := strconv.ParseUint(instanceIDStr, 10, 64)
+	if err != nil {
+		return 1
+	}
+	return uint(id)
+}
 
+// extractGitlabProjectIDFromPayload 从 payload 中提取 GitLab 项目 ID
+func extractGitlabProjectIDFromPayload(payload map[string]interface{}) int {
+	if proj, ok := payload["project"].(map[string]interface{}); ok {
+		if id, ok := proj["id"].(float64); ok {
+			return int(id)
+		}
+	}
+	return 0
+}
+
+// extractProjectPathFromPayload 从 payload 中提取项目路径
+func extractProjectPathFromPayload(payload map[string]interface{}) string {
+	if proj, ok := payload["project"].(map[string]interface{}); ok {
+		if webURL, ok := proj["web_url"].(string); ok {
+			return webURL
+		}
+		if httpURL, ok := proj["http_url"].(string); ok {
+			return strings.TrimSuffix(httpURL, ".git")
+		}
+	}
+	return ""
+}
+
+// validateWebhookSecret 校验 Webhook Secret
+// 安全约束：严禁使用 middleware.GetCurrentOrgID()，org_id 后续必须从 GitLabInstance.OrgID 或 Project.OrgID 反查。
+// 多租户改造：支持按 (instance_id, gitlab_project_id) 精确匹配项目。
+func validateWebhookSecret(c *gin.Context, payload map[string]interface{}) (*model.Project, *model.GitLabInstance, error) {
+	instanceID := extractInstanceIDFromRequest(c)
+	glProjectID := extractGitlabProjectIDFromPayload(payload)
+	projectPath := extractProjectPathFromPayload(payload)
+
+	var project model.Project
+
+	// 方式1：按 (instance_id, gitlab_project_id) 精确匹配（推荐）
+	if glProjectID > 0 {
+		if err := model.DB.Where("gitlab_instance_id = ? AND gitlab_project_id = ?",
+			instanceID, glProjectID).First(&project).Error; err == nil {
+			return finalizeWebhookValidation(c, project)
+		}
+	}
+
+	// 方式2：按 (instance_id, project_path) 匹配
+	if projectPath != "" {
+		if err := model.DB.Where("gitlab_instance_id = ? AND (project_path = ? OR project_path = ?)",
+			instanceID, projectPath, projectPath+".git").First(&project).Error; err == nil {
+			return finalizeWebhookValidation(c, project)
+		}
+	}
+
+	// 方式3：fallback - 仅按 project_path 匹配（兼容旧 Webhook 配置）
+	if projectPath != "" {
+		if err := model.DB.Where("project_path = ? OR project_path = ?",
+			projectPath, projectPath+".git").First(&project).Error; err == nil {
+			return finalizeWebhookValidation(c, project)
+		}
+	}
+
+	// 所有方式均未找到项目
+	if projectPath == "" && glProjectID == 0 {
+		return nil, nil, nil // 无法定位时放行，由子 handler 返回 404
+	}
+	return nil, nil, fmt.Errorf("project not found")
+}
+
+// finalizeWebhookValidation 完成 Webhook 验证的共同逻辑
+func finalizeWebhookValidation(c *gin.Context, project model.Project) (*model.Project, *model.GitLabInstance, error) {
+	var instance model.GitLabInstance
+	if err := model.DB.First(&instance, project.GitLabInstanceID).Error; err != nil {
+		return nil, nil, fmt.Errorf("gitlab instance not found")
+	}
+
+	if instance.WebhookSecret == "" {
+		return nil, nil, fmt.Errorf("webhook secret not configured")
+	}
+
+	token := c.GetHeader("X-Gitlab-Token")
+	if token != instance.WebhookSecret {
+		return nil, nil, fmt.Errorf("invalid webhook secret")
+	}
+
+	return &project, &instance, nil
+}
+
+// ========== Note Hook 处理（评论触发） ==========
+// 安全约束：Webhook 无用户上下文，严禁使用 middleware.GetCurrentOrgID()，org_id 必须从 Project.OrgID 或 GitLabInstance.OrgID 反查。
 func (h *WebhookHandler) handleNoteHook(c *gin.Context, payload map[string]interface{}) {
 	noteableType := ""
 	if objAttr, ok := payload["object_attributes"].(map[string]interface{}); ok {
@@ -362,7 +487,7 @@ func (h *WebhookHandler) handleNoteHook(c *gin.Context, payload map[string]inter
 }
 
 // ========== Merge Request Hook 处理（代码合并触发 AI 评审） ==========
-
+// 安全约束：Webhook 无用户上下文，严禁使用 middleware.GetCurrentOrgID()，org_id 必须从 Project.OrgID 或 GitLabInstance.OrgID 反查。
 func (h *WebhookHandler) handleMergeRequestHook(c *gin.Context, payload map[string]interface{}) {
 	// 1. 解析 action
 	attrs, ok := payload["object_attributes"].(map[string]interface{})
@@ -474,6 +599,7 @@ func (h *WebhookHandler) handleMergeRequestHook(c *gin.Context, payload map[stri
 
 	// 创建 AI 评审任务（pool_id 不传入，由 Create 方法默认为 0）
 	taskData := map[string]interface{}{
+		"org_id":              float64(project.OrgID),
 		"project_id":          float64(project.ID),
 		"mr_iid":              float64(mrIID),
 		"mr_title":            mrTitle,
@@ -558,7 +684,7 @@ func (h *WebhookHandler) handleMRMergeEvent(c *gin.Context, payload map[string]i
 	}
 	mrTitle, _ := attrs["title"].(string)
 
-	_, err := scanService.TriggerScan(uint64(project.ID), targetBranch,
+	_, err := scanService.TriggerScan(nil, uint64(project.ID), targetBranch,
 		graphscan.WithTriggerType("mr_merge"),
 		graphscan.WithMRInfo(mrIID, mrTitle),
 	)
@@ -591,9 +717,9 @@ func buildTaskFromTrigger(project model.Project, noteableIID, noteID int, projec
 	}
 
 	taskData := map[string]interface{}{
+		"org_id":              float64(project.OrgID),
 		"project_id":          float64(project.ID),
 		"pool_id":             float64(project.PoolID),
-		"model_id":            fmt.Sprintf("%d", *project.DefaultModelID),
 		"mr_iid":              float64(noteableIID),
 		"mr_title":            mrTitle,
 		"mr_url":              mrURL,
@@ -608,6 +734,9 @@ func buildTaskFromTrigger(project model.Project, noteableIID, noteID int, projec
 		"trigger_type":        "webhook",
 		"trigger_source":      triggerSource,
 		"score_value":         float64(score),
+	}
+	if project.DefaultModelID != nil {
+		taskData["model_id"] = fmt.Sprintf("%d", *project.DefaultModelID)
 	}
 
 	return service.NewTaskService().Create(taskData)

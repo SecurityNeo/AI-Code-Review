@@ -17,13 +17,18 @@ func NewNotificationService() *NotificationService {
 }
 
 // SendInbox 发送站内信（100% 可靠，不依赖 IM）
-func (s *NotificationService) SendInbox(userID uint, notifType string, title string, content string, link string) {
+// 多租户改造：显式传入 orgID，避免通过 user.default_org_id 推断导致跨组织数据污染
+func (s *NotificationService) SendInbox(orgID, userID uint, notifType string, title string, content string, link string) {
 	if userID == 0 {
 		return
+	}
+	if orgID == 0 {
+		orgID = 1
 	}
 	// Title 截断：数据库字段 size=200，预留安全余量
 	title = truncateRune(title, 190)
 	n := model.Notification{
+		OrgID:   orgID,
 		UserID:  userID,
 		Type:    notifType,
 		Title:   title,
@@ -33,28 +38,31 @@ func (s *NotificationService) SendInbox(userID uint, notifType string, title str
 	if err := model.DB.Create(&n).Error; err != nil {
 		zap.L().Error("send inbox notification failed",
 			zap.Uint("user_id", userID),
+			zap.Uint("org_id", orgID),
 			zap.String("type", notifType),
 			zap.Error(err))
 	}
 }
 
 // MarkRead 标记已读
-func (s *NotificationService) MarkRead(userID uint, notifID uint) error {
-	return model.DB.Model(&model.Notification{}).
+func (s *NotificationService) MarkRead(scope *model.UserAuthScope, userID uint, notifID uint) error {
+	db := model.DBWithScope(scope)
+	return db.Model(&model.Notification{}).
 		Where("id = ? AND user_id = ?", notifID, userID).
 		Updates(map[string]interface{}{"is_read": true, "read_at": time.Now()}).Error
 }
 
 // MarkAllRead 全部已读
-func (s *NotificationService) MarkAllRead(userID uint) error {
-	return model.DB.Model(&model.Notification{}).
+func (s *NotificationService) MarkAllRead(scope *model.UserAuthScope, userID uint) error {
+	db := model.DBWithScope(scope)
+	return db.Model(&model.Notification{}).
 		Where("user_id = ? AND is_read = ?", userID, false).
 		Updates(map[string]interface{}{"is_read": true, "read_at": time.Now()}).Error
 }
 
 // List 站内信列表
-func (s *NotificationService) List(userID uint, notifType string, isRead *bool, page, pageSize int) ([]model.Notification, int64, error) {
-	db := model.DB.Where("user_id = ?", userID)
+func (s *NotificationService) List(scope *model.UserAuthScope, userID uint, notifType string, isRead *bool, page, pageSize int) ([]model.Notification, int64, error) {
+	db := model.DBWithScope(scope).Where("user_id = ?", userID)
 	if notifType != "" {
 		db = db.Where("type = ?", notifType)
 	}
@@ -70,9 +78,9 @@ func (s *NotificationService) List(userID uint, notifType string, isRead *bool, 
 }
 
 // UnreadCount 未读数
-func (s *NotificationService) UnreadCount(userID uint) int64 {
+func (s *NotificationService) UnreadCount(scope *model.UserAuthScope, userID uint) int64 {
 	var count int64
-	model.DB.Model(&model.Notification{}).Where("user_id = ? AND is_read = ?", userID, false).Count(&count)
+	model.DBWithScope(scope).Model(&model.Notification{}).Where("user_id = ? AND is_read = ?", userID, false).Count(&count)
 	return count
 }
 
@@ -93,12 +101,13 @@ type IssueStats struct {
 }
 
 // CalcIssueStats 计算当前任务的 Issue 统计（含历史对比）
-func CalcIssueStats(taskID uint, mrID int) IssueStats {
+func CalcIssueStats(scope *model.UserAuthScope, taskID uint, mrID int) IssueStats {
 	var stats IssueStats
+	db := model.DBWithScope(scope)
 
 	// 当前版本有效 Issue
 	var currentIssues []model.ReviewIssue
-	model.DB.Where("task_id = ? AND deleted_at IS NULL", taskID).Find(&currentIssues)
+	db.Where("task_id = ? AND deleted_at IS NULL", taskID).Find(&currentIssues)
 	for _, issue := range currentIssues {
 		stats.Total++
 		switch issue.Severity {
@@ -126,10 +135,10 @@ func CalcIssueStats(taskID uint, mrID int) IssueStats {
 	// 与上次成功版本对比（基于指纹精确匹配）
 	if mrID > 0 {
 		var lastTask model.Task
-		if err := model.DB.Where("mr_merge_id = ? AND id < ? AND status = ?", mrID, taskID, model.TaskSuccess).
+		if err := db.Where("mr_merge_id = ? AND id < ? AND status = ?", mrID, taskID, model.TaskSuccess).
 			Order("id DESC").First(&lastTask).Error; err == nil {
 			var lastIssues []model.ReviewIssue
-			model.DB.Unscoped().Where("task_id = ?", lastTask.ID).Find(&lastIssues)
+			db.Unscoped().Where("task_id = ?", lastTask.ID).Find(&lastIssues)
 
 			// 建立指纹集合（排除 auto_filtered，因为它们不算"可见"Issue）
 			lastFPs := make(map[string]bool)
@@ -336,9 +345,9 @@ func RenderIMTemplate(template string, ctx IMTemplateContext) string {
 }
 
 // GetNotificationRuleTemplate 按 trigger 查询启用的通知规则模板
-func GetNotificationRuleTemplate(trigger string) string {
+func GetNotificationRuleTemplate(scope *model.UserAuthScope, trigger string) string {
 	var rule model.NotificationRule
-	if err := model.DB.Where("`trigger` = ? AND enabled = ?", trigger, true).Order("id DESC").First(&rule).Error; err == nil {
+	if err := model.DBWithScope(scope).Where("`trigger` = ? AND enabled = ?", trigger, true).Order("id DESC").First(&rule).Error; err == nil {
 		if rule.Template == "" {
 			zap.L().Warn("notification rule found but template is empty",
 				zap.String("trigger", trigger),

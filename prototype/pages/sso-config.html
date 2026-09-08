@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script src="../js/theme.js?v=14"></script>
+    <style>html{background-color:#1e293b;}</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>单点登录 - CodeGuard</title>
+    <script src="../js/auth.js?v=14"></script>
+    <script src="../js/menu-config.js?v=14"></script>
+    <script src="../js/sidebar.js?v=9"></script>
+    <script src="../js/api-fetch.js?v=14"></script>
+    <script src="../js/org-select.js?v=14"></script>
+    <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="../css/theme.css?v=14">
+    <script src="/static/js/tailwindcss.min.js"></script>
+    <style>
+        .sidebar-item:hover { background-color: rgba(255,255,255,0.1); }
+        .sidebar-item.active { background-color: rgba(255,255,255,0.15); border-left: 3px solid #3b82f6; }
+        .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:200; align-items:center; justify-content:center; }
+        .modal-overlay.active { display:flex; }
+        .modal-box { background:white; border-radius:12px; width:100%; max-width:600px; max-height:90vh; overflow-y:auto; box-shadow:0 20px 25px -5px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans">
+
+<div id="page-transition" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#1e293b;z-index:99999;transition:opacity .25s ease;"></div>
+<script>
+(function(){
+  function hide(){var el=document.getElementById('page-transition');if(el){el.style.opacity='0';setTimeout(function(){el.remove();},250);}}
+  if(document.readyState==='complete'){hide();}else{window.addEventListener('load',hide);}
+})();
+</script>
+
+<div class="flex h-screen">
+    <aside id="sidebar" class="w-64 bg-slate-900 text-white flex-shrink-0 flex flex-col">
+        <nav style="padding: 20px; text-align: center; color: var(--cg-text-tertiary); font-size: 13px;">加载中...</nav>
+    </aside>
+
+    <main class="flex-1 overflow-y-auto">
+        <header class="bg-white border-b px-8 py-4 flex items-center justify-between sticky top-0 z-10">
+            <div>
+                <h1 class="text-xl font-bold text-gray-800">单点登录</h1>
+                <p class="text-sm text-gray-500 mt-1">配置多个 GitLab 实例的 OAuth 单点登录</p>
+            </div>
+            <button onclick="openModal()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 flex items-center gap-2">
+                <i class="fas fa-plus"></i>新建
+            </button>
+        </header>
+
+        <div class="p-8">
+            <div class="bg-white rounded-xl border overflow-hidden">
+            <table class="w-full">
+                <thead class="bg-gray-50 border-b">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">名称</th>
+                        <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">Base URL</th>
+                        <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">OAuth</th>
+                        <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">默认</th>
+                        <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">状态</th>
+                        <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">所属组织</th>
+                        <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="instanceBody" class="divide-y text-sm"></tbody>
+            </table>
+            <div id="emptyState" class="hidden text-center py-12 text-gray-400">
+                <i class="fab fa-gitlab text-4xl mb-3"></i>
+                <p>暂无 GitLab 实例，点击「新建」添加</p>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="editModal">
+    <div class="modal-box">
+        <div class="px-6 py-4 border-b flex items-center justify-between">
+            <h3 class="font-bold text-gray-800" id="modalTitle">新建 GitLab 实例</h3>
+            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="p-6 space-y-4">
+            <input type="hidden" id="editId">
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">实例名称</label>
+                    <input type="text" id="instName" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="如：公司 GitLab">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Base URL</label>
+                    <input type="text" id="instBaseURL" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="https://gitlab.example.com">
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Admin Token</label>
+                    <input type="password" id="instAPIToken" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="留空则不修改">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Webhook Secret</label>
+                    <input type="text" id="instWebhookSecret" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="可选">
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">所属组织</label>
+                <select id="orgSelect" class="w-full px-3 py-2 border rounded-lg text-sm bg-white"></select>
+            </div>
+            <div class="flex items-center gap-4">
+                <label class="flex items-center gap-2 text-sm">
+                    <input type="checkbox" id="instIsDefault" class="w-4 h-4 rounded text-blue-600">
+                    <span>设为默认实例</span>
+                </label>
+                <label class="flex items-center gap-2 text-sm">
+                    <input type="checkbox" id="instOAuthEnabled" class="w-4 h-4 rounded text-blue-600">
+                    <span>启用 OAuth 登录</span>
+                </label>
+                <label class="flex items-center gap-2 text-sm">
+                    <input type="checkbox" id="instSkipVerify" class="w-4 h-4 rounded text-blue-600">
+                    <span>跳过证书校验</span>
+                </label>
+            </div>
+            <div id="oauthFields" class="space-y-4 border-t pt-4 hidden">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Client ID</label>
+                        <input type="text" id="instClientID" class="w-full px-3 py-2 border rounded-lg text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Client Secret</label>
+                        <input type="password" id="instClientSecret" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="留空则不修改">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Redirect URI</label>
+                    <input type="text" id="instRedirectURI" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="https://your-domain.com/api/v1/auth/gitlab/callback">
+                </div>
+                <label class="flex items-center gap-2 text-sm">
+                    <input type="checkbox" id="instAutoCreate" checked class="w-4 h-4 rounded text-blue-600">
+                    <span>自动创建本地用户（首次OAuth登录时）</span>
+                </label>
+            </div>
+        </div>
+        <div class="px-6 py-4 border-t flex justify-end gap-3">
+            <button onclick="closeModal()" class="px-4 py-2 border rounded-lg text-sm text-gray-700 hover:bg-gray-50">取消</button>
+            <button onclick="saveInstance()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">保存</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    window.activePageId = 'settings-sso';
+    const API_BASE = '/api/v1';
+    let instances = [];
+
+    async function loadInstances() {
+        try {
+            const res = await apiFetch(`${API_BASE}/gitlab-instances`);
+            const json = await res.json();
+            instances = json.data || [];
+            renderInstances();
+        } catch (e) {
+            console.error('加载GitLab实例失败', e);
+            showToast('加载失败', 'error');
+        }
+    }
+
+    function renderInstances() {
+        const tbody = document.getElementById('instanceBody');
+        const empty = document.getElementById('emptyState');
+        if (instances.length === 0) {
+            tbody.innerHTML = '';
+            empty.classList.remove('hidden');
+            return;
+        }
+        empty.classList.add('hidden');
+        tbody.innerHTML = instances.map(inst => `
+            <tr class="hover:bg-gray-50">
+                <td class="px-6 py-4 font-medium">${escapeHtml(inst.name)}</td>
+                <td class="px-6 py-4 text-gray-600 text-xs font-mono">${escapeHtml(inst.base_url)}</td>
+                <td class="px-6 py-4">${inst.oauth_enabled ? '<span class="px-2 py-0.5 rounded text-xs bg-green-50 text-green-600">已启用</span>' : '<span class="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500">未启用</span>'}</td>
+                <td class="px-6 py-4">${inst.is_default ? '<i class="fas fa-check text-blue-600"></i>' : '-'}</td>
+                <td class="px-6 py-4"><span class="px-2 py-0.5 rounded text-xs ${inst.status === 'active' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}">${inst.status === 'active' ? '正常' : '禁用'}</span></td>
+                <td class="px-6 py-4 text-gray-600">${escapeHtml(inst.org_name || '根组织')}</td>
+                <td class="px-6 py-4 text-center">
+                    <div class="flex items-center justify-center gap-2">
+                        <button onclick="testInstance(${inst.id})" class="text-teal-600 hover:text-teal-800 text-xs" title="测试连接">测试</button>
+                        <button onclick="editInstance(${inst.id})" class="text-blue-600 hover:text-blue-800 text-xs" title="编辑">编辑</button>
+                        <button onclick="deleteInstance(${inst.id})" class="text-red-600 hover:text-red-800 text-xs" title="删除">删除</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    function openModal(id) {
+        document.getElementById('editModal').classList.add('active');
+        document.getElementById('modalTitle').textContent = id ? '编辑 GitLab 实例' : '新建 GitLab 实例';
+        document.getElementById('editId').value = id || '';
+        if (!id) {
+            document.getElementById('instName').value = '';
+            document.getElementById('instBaseURL').value = '';
+            document.getElementById('instAPIToken').value = '';
+            document.getElementById('instWebhookSecret').value = '';
+            document.getElementById('instIsDefault').checked = false;
+            document.getElementById('instOAuthEnabled').checked = false;
+            document.getElementById('instSkipVerify').checked = false;
+            document.getElementById('instClientID').value = '';
+            document.getElementById('instClientSecret').value = '';
+            document.getElementById('instRedirectURI').value = '';
+            document.getElementById('instAutoCreate').checked = true;
+            toggleOAuthFields();
+        }
+        loadOrgSelect('orgSelect');
+    }
+
+    function closeModal() {
+        document.getElementById('editModal').classList.remove('active');
+    }
+
+    function toggleOAuthFields() {
+        const enabled = document.getElementById('instOAuthEnabled').checked;
+        document.getElementById('oauthFields').classList.toggle('hidden', !enabled);
+    }
+    document.getElementById('instOAuthEnabled').addEventListener('change', toggleOAuthFields);
+
+    async function editInstance(id) {
+        const inst = instances.find(x => x.id === id);
+        if (!inst) return;
+        openModal(id);
+        document.getElementById('instName').value = inst.name || '';
+        document.getElementById('instBaseURL').value = inst.base_url || '';
+        document.getElementById('instWebhookSecret').value = inst.webhook_secret || '';
+        document.getElementById('instIsDefault').checked = inst.is_default;
+        document.getElementById('instOAuthEnabled').checked = inst.oauth_enabled;
+        document.getElementById('instSkipVerify').checked = inst.oauth_skip_verify;
+        document.getElementById('instClientID').value = inst.oauth_client_id || '';
+        document.getElementById('instRedirectURI').value = inst.oauth_redirect_uri || '';
+        document.getElementById('instAutoCreate').checked = inst.oauth_auto_create_user !== false;
+        toggleOAuthFields();
+        await loadOrgSelect('orgSelect', inst.org_id);
+    }
+
+    async function saveInstance() {
+        const id = document.getElementById('editId').value;
+        const payload = {
+            name: document.getElementById('instName').value.trim(),
+            base_url: document.getElementById('instBaseURL').value.trim(),
+            api_token: document.getElementById('instAPIToken').value,
+            webhook_secret: document.getElementById('instWebhookSecret').value.trim(),
+            is_default: document.getElementById('instIsDefault').checked,
+            oauth_enabled: document.getElementById('instOAuthEnabled').checked,
+            oauth_skip_verify: document.getElementById('instSkipVerify').checked,
+            oauth_client_id: document.getElementById('instClientID').value.trim(),
+            oauth_client_secret: document.getElementById('instClientSecret').value,
+            oauth_redirect_uri: document.getElementById('instRedirectURI').value.trim(),
+            oauth_auto_create_user: document.getElementById('instAutoCreate').checked,
+        };
+        if (!payload.name || !payload.base_url) { showToast('名称和 Base URL 不能为空', 'error'); return; }
+        injectOrgId(payload, 'orgSelect');
+        try {
+            if (id) {
+                await apiFetch(`${API_BASE}/gitlab-instances/${id}`, { method: 'PUT', body: payload });
+            } else {
+                await apiFetch(`${API_BASE}/gitlab-instances`, { method: 'POST', body: payload });
+            }
+            closeModal();
+            showToast('保存成功', 'success');
+            loadInstances();
+        } catch (e) {
+            showToast('保存失败', 'error');
+        }
+    }
+
+    async function deleteInstance(id) {
+        if (!confirm('确定删除该 GitLab 实例？')) return;
+        try {
+            await apiFetch(`${API_BASE}/gitlab-instances/${id}`, { method: 'DELETE' });
+            showToast('删除成功', 'success');
+            loadInstances();
+        } catch (e) {
+            showToast('删除失败: ' + (e.message || ''), 'error');
+        }
+    }
+
+    async function testInstance(id) {
+        try {
+            const res = await apiFetch(`${API_BASE}/gitlab-instances/${id}/test`, { method: 'POST' });
+            const data = await res.json();
+            if (data.success) {
+                showToast('连接正常', 'success');
+            } else {
+                showToast('连接失败: ' + (data.error || ''), 'error');
+            }
+        } catch (e) {
+            showToast('测试失败', 'error');
+        }
+    }
+
+    function escapeHtml(t) {
+        if (!t) return '';
+        return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    loadInstances();
+</script>
+</body>
+</html>

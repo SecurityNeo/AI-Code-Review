@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script src="../js/theme.js?v=9"></script>
+    <style>html{background-color:#1e293b;}</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>组织成员管理 - CodeGuard</title>
+    <script src="../js/auth.js?v=9"></script>
+    <script src="../js/menu-config.js?v=9"></script>
+    <script src="../js/sidebar.js?v=9"></script>
+    <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="../css/theme.css?v=1">
+    <script src="/static/js/tailwindcss.min.js"></script>
+    <style>
+        .sidebar-item:hover { background-color: rgba(255,255,255,0.1); }
+        .sidebar-item.active { background-color: rgba(255,255,255,0.15); border-left: 3px solid #3b82f6; }
+        .role-badge {
+            display: inline-block; padding: 2px 8px; border-radius: 4px;
+            font-size: 12px; font-weight: 500;
+        }
+        .role-super_admin { background: #fef3c7; color: #92400e; }
+        .role-org_admin { background: #dbeafe; color: #1e40af; }
+        .role-developer { background: #f3f4f6; color: #374151; }
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; align-items: center; justify-content: center; }
+        .modal-overlay.active { display: flex; }
+        .modal-box { background: white; border-radius: 12px; width: 100%; max-width: 560px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); }
+        .modal-header { padding: 16px 20px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
+        .modal-body { padding: 20px; }
+        .modal-footer { padding: 12px 20px; border-top: 1px solid #e5e7eb; display: flex; justify-content: flex-end; gap: 8px; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 4px; }
+        .form-group input, .form-group select { width: 100%; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box; }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans">
+
+<div id="page-transition" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#1e293b;z-index:99999;transition:opacity .25s ease;"></div>
+<script>
+(function(){
+  function hide(){var el=document.getElementById('page-transition');if(el){el.style.opacity='0';setTimeout(function(){el.remove();},250);}}
+  if(document.readyState==='complete'){hide();}else{window.addEventListener('load',hide);}
+})();
+</script>
+
+<div class="flex h-screen">
+    <aside id="sidebar" class="w-64 bg-slate-900 text-white flex-shrink-0 flex flex-col">
+        <nav style="padding: 20px; text-align: center; color: var(--cg-text-tertiary); font-size: 13px;">加载中...</nav>
+    </aside>
+
+    <main class="flex-1 overflow-y-auto">
+        <div id="toastContainer"></div>
+        <header class="bg-white border-b px-8 py-4 flex items-center justify-between sticky top-0 z-10">
+            <div>
+                <div class="text-sm text-gray-500 mb-1">
+                    <a href="/pages/org-admin.html" class="text-blue-600 hover:underline"><i class="fas fa-arrow-left mr-1"></i>组织管理</a>
+                    <span class="mx-2">/</span>
+                    <span id="orgNameBreadcrumb" class="font-medium text-gray-800">--</span>
+                </div>
+                <h2 class="text-xl font-bold text-gray-800"><i class="fas fa-users text-indigo-600 mr-2"></i>成员管理</h2>
+            </div>
+            <button onclick="openModal()" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700 flex items-center gap-2">
+                <i class="fas fa-plus"></i>添加成员
+            </button>
+        </header>
+
+        <div class="px-8 py-6">
+            <div class="bg-white rounded-xl border p-4 mb-6 flex items-center gap-4">
+                <input type="text" id="searchInput" class="flex-1 px-4 py-2 border rounded-lg text-sm" placeholder="搜索用户名 / 显示名..." oninput="renderMembers()">
+                <select id="roleFilter" class="px-3 py-2 border rounded-lg text-sm" onchange="renderMembers()">
+                    <option value="">全部角色</option>
+                    <option value="super_admin">超级管理员</option>
+                    <option value="org_admin">组织管理员</option>
+                    <option value="developer">开发者</option>
+                </select>
+            </div>
+
+            <div class="bg-white rounded-xl border overflow-hidden">
+                <table class="w-full">
+                    <thead class="bg-gray-50 border-b">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">用户名</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">显示名</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">组织内角色</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">默认组织</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">状态</th>
+                            <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500" style="width:180px">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="membersBody" class="divide-y"></tbody>
+                </table>
+                <div id="emptyState" style="display:none; text-align:center; padding:48px; color:#6b7280;">
+                    <i class="fas fa-search text-4xl mb-3"></i>
+                    <p>未找到匹配的成员</p>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Add Member Modal -->
+<div class="modal-overlay" id="addModal">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3 class="font-bold text-gray-800">添加成员</h3>
+            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>选择用户 <span class="text-red-500">*</span></label>
+                <select id="userSelect"><option value="">加载中...</option></select>
+            </div>
+            <div class="form-group">
+                <label>组织内角色</label>
+                <select id="newRole">
+                    <option value="developer">开发者</option>
+                    <option value="org_admin">组织管理员</option>
+                </select>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50" onclick="closeModal()">取消</button>
+            <button class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700" onclick="saveMember()">保存</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    window.activePageId = 'settings-org';
+    const urlParams = new URLSearchParams(location.search);
+    const orgId = urlParams.get('id');
+    let members = [];
+    let allUsers = [];
+
+    async function init() {
+      if (!orgId) { alert('缺少组织ID'); location.href = 'org-admin.html'; return; }
+      loadOrgInfo();
+      loadMembers();
+      loadAllUsers();
+    }
+
+    async function loadOrgInfo() {
+      try {
+        const res = await apiFetch('/api/v1/organizations');
+        const data = await res.json();
+        const org = (data.data || []).find(o => o.id == orgId);
+        if (org) {
+          document.getElementById('orgNameBreadcrumb').textContent = org.name;
+        }
+      } catch(e) {}
+    }
+
+    async function loadMembers() {
+      try {
+        const res = await apiFetch(`/api/v1/organizations/${orgId}/members`);
+        const data = await res.json();
+        members = data.data || [];
+        renderMembers();
+      } catch(e) {
+        showToast('加载成员列表失败', 'error');
+      }
+    }
+
+    async function loadAllUsers() {
+      try {
+        const res = await apiFetch('/api/v1/users?page_size=1000');
+        const data = await res.json();
+        allUsers = (data.data || []).list || [];
+        const existingIds = new Set(members.map(m => m.id));
+        const candidates = allUsers.filter(u => !existingIds.has(u.id));
+        const sel = document.getElementById('userSelect');
+        sel.innerHTML = '<option value="">请选择用户</option>' + candidates.map(u =>
+          `<option value="${u.id}">${escapeHtml(u.display_name || u.username)} (${u.username})</option>`
+        ).join('');
+      } catch(e) {}
+    }
+
+    function renderMembers() {
+      const keyword = document.getElementById('searchInput').value.toLowerCase();
+      const role = document.getElementById('roleFilter').value;
+      const tbody = document.getElementById('membersBody');
+      const empty = document.getElementById('emptyState');
+
+      const filtered = members.filter(m => {
+        const matchKw = !keyword || (m.username + m.display_name).toLowerCase().includes(keyword);
+        const matchRole = !role || m.org_role === role;
+        return matchKw && matchRole;
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = ''; empty.style.display = 'block'; return;
+      }
+      empty.style.display = 'none';
+
+      tbody.innerHTML = filtered.map(m => `<tr class="hover:bg-gray-50">
+        <td class="px-6 py-4 text-sm font-medium text-gray-800">${escapeHtml(m.username)}</td>
+        <td class="px-6 py-4 text-sm text-gray-600">${escapeHtml(m.display_name || '-')}</td>
+        <td class="px-6 py-4"><span class="role-badge role-${m.org_role}">${roleLabel(m.org_role)}</span></td>
+        <td class="px-6 py-4 text-sm">${m.is_default ? '<i class="fas fa-check text-green-500 mr-1"></i>是' : '-'}</td>
+        <td class="px-6 py-4"><span class="text-xs px-2 py-0.5 rounded ${m.status === 'active' ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-600'}">${m.status === 'active' ? '正常' : '停用'}</span></td>
+        <td class="px-6 py-4 text-center">
+          <div class="flex items-center justify-center gap-2">
+            ${m.org_role === 'super_admin' ? '<span class="text-xs text-gray-500">超级管理员</span>' : `<select class="px-2 py-1 border rounded text-xs" onchange="updateRole(${m.id}, this.value)">
+              <option value="developer" ${m.org_role==='developer'?'selected':''}>开发者</option>
+              <option value="org_admin" ${m.org_role==='org_admin'?'selected':''}>组织管理员</option>
+            </select>`}
+            <button class="text-red-600 hover:text-red-800 text-xs" onclick="removeMember(${m.id})"><i class="fas fa-trash mr-1"></i>移除</button>
+          </div>
+        </td>
+      </tr>`).join('');
+    }
+
+    function openModal() { document.getElementById('addModal').classList.add('active'); }
+    function closeModal() { document.getElementById('addModal').classList.remove('active'); }
+
+    async function saveMember() {
+      const userId = document.getElementById('userSelect').value;
+      const role = document.getElementById('newRole').value;
+      if (!userId) { showToast('请选择用户', 'error'); return; }
+      try {
+        await apiFetch(`/api/v1/organizations/${orgId}/members`, {
+          method: 'POST',
+          body: { user_id: parseInt(userId), role: role }
+        });
+        closeModal(); showToast('添加成功', 'success'); loadMembers(); loadAllUsers();
+      } catch(e) { showToast('添加失败', 'error'); }
+    }
+
+    async function updateRole(userId, newRole) {
+      if (!confirm('确认修改角色为 ' + roleLabel(newRole) + '？')) { renderMembers(); return; }
+      try {
+        await apiFetch(`/api/v1/organizations/${orgId}/members/${userId}/role`, {
+          method: 'PUT', body: { role: newRole }
+        });
+        showToast('修改成功', 'success'); loadMembers();
+      } catch(e) { showToast('修改失败', 'error'); renderMembers(); }
+    }
+
+    async function removeMember(userId) {
+      if (!confirm('确定从组织中移除该成员？')) return;
+      try {
+        await apiFetch(`/api/v1/organizations/${orgId}/members/${userId}`, { method: 'DELETE' });
+        showToast('移除成功', 'success'); loadMembers(); loadAllUsers();
+      } catch(e) { showToast('移除失败', 'error'); }
+    }
+
+    function roleLabel(r) {
+      const map = { super_admin: '超级管理员', org_admin: '组织管理员', developer: '开发者' };
+      return map[r] || r;
+    }
+    function escapeHtml(t) {
+      if (!t) return '';
+      return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function ensureApiFetch(fn, retries) {
+        retries = retries || 0;
+        if (window.apiFetch) { fn(); return; }
+        if (retries >= 50) {
+            showToast('页面加载失败，请刷新重试', 'error');
+            document.getElementById('membersBody').innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center text-gray-500">加载失败，请刷新重试</td></tr>';
+            return;
+        }
+        setTimeout(function() { ensureApiFetch(fn, retries + 1); }, 100);
+    }
+    ensureApiFetch(init);
+</script>
+</body>
+</html>

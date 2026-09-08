@@ -44,7 +44,7 @@ func (e *SecretScanExecutor) Execute(ctx StageContext) error {
 
 	// 读取本阶段可配置参数（均有默认值）
 	llmMaxTokens := 2000
-	llmTimeoutSec := int(getStageLLMEnhanceTimeout("secret_scan").Seconds())
+	llmTimeoutSec := int(getStageLLMEnhanceTimeoutFromCtx(ctx, "secret_scan").Seconds())
 	matchTextMaxLen := 80
 	functionBodyMaxLen := 800
 	confidenceThreshold := 0.5
