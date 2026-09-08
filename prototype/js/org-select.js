@@ -383,6 +383,8 @@
                 expandPath(target);
             }
         }
+        // 触发自定义 change 事件，供外部监听联动
+        sel.dispatchEvent(new CustomEvent('change', { bubbles: true }));
     }
 
     /* ────────────── 数据加载 ────────────── */

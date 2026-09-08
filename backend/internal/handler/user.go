@@ -167,7 +167,30 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 		pageSize = 20
 	}
 
-	users, total, err := h.service.ListUsers(keyword, loginType, page, pageSize)
+	// 支持按 org_id 过滤（MCP 密钥分配等场景使用）
+	var filterOrgID uint
+	if orgIDStr := c.Query("org_id"); orgIDStr != "" {
+		oid, _ := strconv.Atoi(orgIDStr)
+		filterOrgID = uint(oid)
+		if filterOrgID > 0 {
+			scope := middleware.GetAuthScope(c)
+			if scope != nil && !scope.IsSuperAdmin {
+				visible := false
+				for _, vid := range scope.VisibleOrgIDs {
+					if vid == filterOrgID {
+						visible = true
+						break
+					}
+				}
+				if !visible {
+					c.JSON(http.StatusForbidden, gin.H{"error": "无权访问该组织的用户"})
+					return
+				}
+			}
+		}
+	}
+
+	users, total, err := h.service.ListUsers(keyword, loginType, filterOrgID, page, pageSize)
 	if err != nil {
 		zap.L().Error("list users failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

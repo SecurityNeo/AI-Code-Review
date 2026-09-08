@@ -144,13 +144,18 @@ func (s *UserService) GetByID(id uint) (*model.User, error) {
 
 // ListUsers 用户列表（分页、搜索）
 // 不再支持按已废弃的 users.role 筛选
-func (s *UserService) ListUsers(keyword, loginType string, page, pageSize int) ([]model.User, int64, error) {
+// 支持按 org_id 过滤（通过 org_users 关联）
+func (s *UserService) ListUsers(keyword, loginType string, orgID uint, page, pageSize int) ([]model.User, int64, error) {
 	db := model.DB.Model(&model.User{})
 	if keyword != "" {
 		db = db.Where("username LIKE ? OR display_name LIKE ?", "%"+keyword+"%", "%"+keyword+"%")
 	}
 	if loginType != "" {
 		db = db.Where("login_type = ?", loginType)
+	}
+	// 按组织过滤：通过 org_users 关联查询
+	if orgID > 0 {
+		db = db.Where("EXISTS (SELECT 1 FROM org_users WHERE org_users.user_id = users.id AND org_users.org_id = ? AND org_users.status = 'active')", orgID)
 	}
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
