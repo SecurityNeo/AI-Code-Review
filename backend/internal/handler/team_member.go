@@ -149,6 +149,7 @@ type ResponsibilityView struct {
 	ProjectID      uint      `json:"project_id"`
 	ProjectName    string    `json:"project_name,omitempty"`
 	MemberID       uint      `json:"member_id"`
+	Username       string    `json:"username"`
 	GitlabUsername string    `json:"gitlab_username"`
 	DisplayName    string    `json:"display_name"`
 	IMPlatform     string    `json:"im_platform"`
@@ -176,6 +177,7 @@ func toResponsibilityView(r model.ProjectResponsibility) ResponsibilityView {
 	if r.Member != nil && r.Member.ID > 0 {
 		v.GitlabUsername = r.Member.GitlabUsername
 		v.DisplayName = r.Member.DisplayName
+		v.Username = r.Member.Username
 		v.IMPlatform = r.Member.IMPlatform
 		v.IMUserID = r.Member.IMUserID
 	}
@@ -183,6 +185,7 @@ func toResponsibilityView(r model.ProjectResponsibility) ResponsibilityView {
 	if v.DisplayName == "" && r.User.ID > 0 {
 		v.GitlabUsername = r.User.GitlabUsername
 		v.DisplayName = r.User.DisplayName
+		v.Username = r.User.Username
 		v.IMPlatform = r.User.IMPlatform
 		v.IMUserID = r.User.IMUserID
 	}

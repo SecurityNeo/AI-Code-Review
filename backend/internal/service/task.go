@@ -94,7 +94,7 @@ func (s *TaskService) CanViewTask(scope *model.UserAuthScope, user model.User, t
 	return count > 0
 }
 
-func (s *TaskService) List(scope *model.UserAuthScope, user model.User, projectID uint, status string, startTime, endTime time.Time, author, mrIID string, hasPendingIssues bool, page, pageSize int) ([]model.Task, int64, error) {
+func (s *TaskService) List(scope *model.UserAuthScope, user model.User, projectID uint, status string, startTime, endTime time.Time, author, mrIID string, hasPendingIssues bool, page, pageSize int, orgID uint) ([]model.Task, int64, error) {
 	zap.L().Debug("TaskService.List called",
 		zap.Uint("project_id", projectID),
 		zap.String("status", status),
@@ -148,6 +148,9 @@ func (s *TaskService) List(scope *model.UserAuthScope, user model.User, projectI
 	if projectID > 0 {
 		query = query.Where("project_id = ?", projectID)
 	}
+	if orgID > 0 {
+		query = query.Where("org_id = ?", orgID)
+	}
 	if status != "" {
 		query = query.Where("status = ?", status)
 	}
@@ -165,14 +168,14 @@ func (s *TaskService) List(scope *model.UserAuthScope, user model.User, projectI
 	}
 
 	// 子查询：统计每个任务的 pending issue 数量
-	// GORM v2 的 Joins 不支持传入 *gorm.DB 作为子查询，直接内联 SQL
-	pendingSubSQL := "SELECT task_id, COUNT(*) as cnt FROM review_issues WHERE status = 'pending' AND deleted_at IS NULL"
+	// 【修复】通过 JOIN tasks 按任务所属组织过滤，避免 review_issues.org_id 不准确导致计数丢失
+	pendingSubSQL := "SELECT ri.task_id, COUNT(*) as cnt FROM review_issues ri JOIN tasks t ON ri.task_id = t.id WHERE ri.status = 'pending' AND ri.deleted_at IS NULL"
 	var pendingJoinArgs []interface{}
 	if scope != nil && !scope.IsSuperAdmin {
-		pendingSubSQL += " AND org_id IN ?"
+		pendingSubSQL += " AND t.org_id IN ?"
 		pendingJoinArgs = append(pendingJoinArgs, scope.VisibleOrgIDs)
 	}
-	pendingSubSQL += " GROUP BY task_id"
+	pendingSubSQL += " GROUP BY ri.task_id"
 
 	query = query.
 		Select("tasks.*, COALESCE(pending_counts.cnt, 0) as pending_issue_count").
@@ -1832,6 +1835,7 @@ func saveReviewLogFromTask(task model.Task, additions, deletions int, commits []
 
 	log = model.MergeRequestReviewLog{
 		URL:               task.MRURL,
+		OrgID:             task.OrgID,
 		ProjectName:       task.Project.Name,
 		Author:            task.MRAuthor,
 		AuthorDisplayName: task.MRAuthorDisplayName,

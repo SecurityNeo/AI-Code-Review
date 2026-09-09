@@ -483,10 +483,9 @@ function renderRules() {
                 </div>
                 <div class="flex items-center gap-2">
                     ${rule.is_built_in ? '<span class="built-in-badge">内置</span>' : '<span class="text-xs px-2 py-0.5 rounded bg-green-50 text-green-600">自定义</span>'}
-                    <label class="switch" onclick="event.stopPropagation();toggleRuleEnabled(${rule.id}, this)">
-                        <input type="checkbox" ${rule.is_enabled ? 'checked' : ''}>
-                        <span class="slider"></span>
-                    </label>
+                    ${rule.is_built_in && !isSystemAdmin() ? 
+                        `<div class="switch" style="opacity:0.5;cursor:not-allowed;" title="内置规则仅系统管理员可开启/关闭"><input type="checkbox" ${rule.is_enabled ? 'checked' : ''} disabled style="cursor:not-allowed;"><span class="slider"></span></div>` : 
+                        `<label class="switch" onclick="event.stopPropagation();toggleRuleEnabled(${rule.id}, this)" title="${rule.is_enabled ? '点击禁用' : '点击启用'}"><input type="checkbox" ${rule.is_enabled ? 'checked' : ''}><span class="slider"></span></label>`}
                 </div>
             </div>
             <h4 class="font-semibold text-gray-800 text-sm mb-1">${rule.name}</h4>
@@ -514,6 +513,14 @@ function getCategoryName(code) {
 async function toggleRuleEnabled(ruleId, switchEl) {
     const checkbox = switchEl.querySelector('input');
     const newState = checkbox.checked;
+
+    // 内置规则仅系统管理员可操作
+    const rule = rulesData.find(r => r.id === ruleId);
+    if (rule && rule.is_built_in && !isSystemAdmin()) {
+        checkbox.checked = !newState;
+        showToast('内置规则仅系统管理员可开启/关闭', 'error');
+        return;
+    }
 
     try {
         const res = await apiFetch(API_BASE + '/review-rules/batch-enable', {

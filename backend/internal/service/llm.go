@@ -289,6 +289,12 @@ func (s *LLMService) callLLMAPI(ctx context.Context, taskID *uint, llmModel *mod
 			Caller:     caller,
 			DurationMs: int(duration.Milliseconds()),
 		}
+		if taskID != nil && *taskID > 0 {
+			var t model.Task
+			if err := model.DB.Select("org_id").First(&t, *taskID).Error; err == nil {
+				record.OrgID = t.OrgID
+			}
+		}
 		if retErr != nil {
 			record.Status = CallStatusFailed
 			record.ErrorMsg = sanitizeForLog(retErr.Error())

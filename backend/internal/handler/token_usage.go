@@ -105,7 +105,7 @@ func currentUserOrAbort(c *gin.Context) (model.User, bool) {
 
 // scopedQuery 构造带 call_type + 时间 + 用户过滤的基础查询。
 // 通过 LEFT JOIN tasks 把用户过滤下沉到 SQL，避免子查询性能问题。
-// 权限语义：admin 看全部；普通用户必须绑定 GitlabUsername，否则返回空结果（防止越权）。
+// 权限语义：super_admin 看全部；org_admin 看当前组织及后代；普通用户必须绑定 GitlabUsername，否则返回空结果（防止越权）。
 func scopedQuery(c *gin.Context, callType string) *gorm.DB {
 	start, end := parseRange(c)
 	q := model.DB.Table("llm_call_logs l").
@@ -113,6 +113,9 @@ func scopedQuery(c *gin.Context, callType string) *gorm.DB {
 		Where("l.call_type = ?", callType).
 		Where("l.created_at >= ? AND l.created_at < ?", start, end)
 	scope := middleware.GetAuthScope(c)
+	if scope != nil && !scope.IsSuperAdmin {
+		q = q.Where("l.org_id IN ?", scope.VisibleOrgIDs)
+	}
 	if user, ok := middleware.GetUser(c); ok {
 		if scope == nil || !scope.HasOrgRole("super_admin", "org_admin") {
 			if user.GitlabUsername == "" {
@@ -424,6 +427,8 @@ func (h *TokenUsageHandler) ListCalls(c *gin.Context) {
 
 	type row struct {
 		ID               uint      `json:"id"`
+		OrgID            uint      `json:"org_id"`
+		OrgName          string    `json:"org_name"`
 		TaskID           *uint     `json:"task_id"`
 		ModelName        string    `json:"model_name"`
 		Provider         string    `json:"provider"`
@@ -441,7 +446,7 @@ func (h *TokenUsageHandler) ListCalls(c *gin.Context) {
 	// 显式 Select 限定 llm_call_logs 列：LEFT JOIN tasks 后两表都有 status 列，
 	// 默认 SELECT * 会同时返回 l.status 和 t.status，Scan 按列序后者覆盖前者，
 	// 导致列表中所有调用状态被错误显示为 task 最终状态。
-	if err := q.Select(`l.id, l.task_id, l.model_name, l.provider, l.caller, l.call_type,
+	if err := q.Select(`l.id, l.org_id, l.task_id, l.model_name, l.provider, l.caller, l.call_type,
 		l.prompt_tokens, l.completion_tokens, l.total_tokens,
 		l.duration_ms, l.status, l.error_msg, l.created_at`).
 		Order("l.created_at DESC, l.id DESC").
@@ -450,6 +455,21 @@ func (h *TokenUsageHandler) ListCalls(c *gin.Context) {
 		respondDBError(c, "calls list", err)
 		return
 	}
+
+	// 批量填充组织名称
+	orgIDs := make([]uint, 0, len(rows))
+	for _, r := range rows {
+		if r.OrgID > 0 {
+			orgIDs = append(orgIDs, r.OrgID)
+		}
+	}
+	if len(orgIDs) > 0 {
+		orgNameMap := model.BatchOrgNames(orgIDs)
+		for i := range rows {
+			rows[i].OrgName = orgNameMap[rows[i].OrgID]
+		}
+	}
+
 	c.JSON(200, gin.H{
 		"data":      rows,
 		"total":     total,

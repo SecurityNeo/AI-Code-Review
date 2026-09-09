@@ -215,6 +215,7 @@ func (e *Engine) ExecuteTask(taskID uint, inputs map[string]interface{}, broadca
 			// 创建 skipped 执行记录
 			exec := &model.TaskPipelineExecution{
 				TaskID:      task.ID,
+				OrgID:       task.OrgID,
 				StageCode:   stageDef.Code,
 				Status:      model.PipelineStageSkipped,
 				SortOrder:   stageDef.SortOrder,
@@ -230,6 +231,7 @@ func (e *Engine) ExecuteTask(taskID uint, inputs map[string]interface{}, broadca
 		// 创建 execution 记录
 		exec := &model.TaskPipelineExecution{
 			TaskID:    task.ID,
+			OrgID:     task.OrgID,
 			StageCode: stageDef.Code,
 			Status:    model.PipelineStagePending,
 			SortOrder: stageDef.SortOrder,

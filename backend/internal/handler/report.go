@@ -22,11 +22,13 @@ func NewReportHandler() *ReportHandler {
 // ============ SMTP 配置 ============
 
 func (h *ReportHandler) GetSMTPConfig(c *gin.Context) {
-	if _, ok := currentUserOrAbort(c); !ok {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
 		return
 	}
 	var cfg model.SMTPConfig
-	if err := model.DB.First(&cfg).Error; err != nil {
+	if err := model.DB.Where("org_id = ?", scope.CurrentOrgID).First(&cfg).Error; err != nil {
 		c.JSON(200, gin.H{"data": nil})
 		return
 	}
@@ -34,11 +36,11 @@ func (h *ReportHandler) GetSMTPConfig(c *gin.Context) {
 }
 
 func (h *ReportHandler) SaveSMTPConfig(c *gin.Context) {
-	_, ok := currentUserOrAbort(c)
-	if !ok {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
 		return
 	}
-	scope := middleware.GetAuthScope(c)
 	if scope == nil || !scope.HasOrgRole("super_admin", "org_admin") {
 		c.JSON(403, gin.H{"error": "admin required"})
 		return
@@ -58,7 +60,11 @@ func (h *ReportHandler) SaveSMTPConfig(c *gin.Context) {
 	}
 
 	var cfg model.SMTPConfig
-	model.DB.First(&cfg)
+	if err := model.DB.Where("org_id = ?", scope.CurrentOrgID).FirstOrInit(&cfg).Error; err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	cfg.OrgID = scope.CurrentOrgID
 	cfg.Host = req.Host
 	cfg.Port = req.Port
 	cfg.Username = req.Username
@@ -68,17 +74,10 @@ func (h *ReportHandler) SaveSMTPConfig(c *gin.Context) {
 	cfg.UseTLS = req.UseTLS
 	cfg.IsDefault = true
 
-	// 多租户改造：SMTPConfig 无 org_id，使用 Updates 精确更新字段，避免零值覆盖
-	model.DB.Model(&cfg).Updates(map[string]interface{}{
-		"host":       cfg.Host,
-		"port":       cfg.Port,
-		"username":   cfg.Username,
-		"password":   cfg.Password,
-		"from_email": cfg.FromEmail,
-		"from_name":  cfg.FromName,
-		"use_tls":    cfg.UseTLS,
-		"is_default": cfg.IsDefault,
-	})
+	if err := model.DB.Save(&cfg).Error; err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(200, gin.H{"message": "saved"})
 }
 

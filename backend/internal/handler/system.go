@@ -426,20 +426,20 @@ func (h *SystemHandler) Info(c *gin.Context) {
 		c.JSON(401, gin.H{"error": "未登录"})
 		return
 	}
-	var totalProjects, totalTasks, totalPools, totalModels int64
+	var totalProjects, totalTasks, totalUsers, totalModels int64
 	var runningTasks, failedTasks int64
 
 	if scope.IsSuperAdmin {
 		model.DB.Model(&model.Project{}).Count(&totalProjects)
 		model.DB.Model(&model.Task{}).Count(&totalTasks)
-		model.DB.Model(&model.ResourcePool{}).Count(&totalPools)
+		model.DB.Model(&model.User{}).Count(&totalUsers)
 		model.DB.Model(&model.LLMModel{}).Count(&totalModels)
 		model.DB.Model(&model.Task{}).Where("status = ?", "running").Count(&runningTasks)
 		model.DB.Model(&model.Task{}).Where("status = ?", "failed").Count(&failedTasks)
 	} else {
 		model.DB.Model(&model.Project{}).Where("org_id IN ?", scope.VisibleOrgIDs).Count(&totalProjects)
 		model.DB.Model(&model.Task{}).Where("org_id IN ?", scope.VisibleOrgIDs).Count(&totalTasks)
-		model.DB.Model(&model.ResourcePool{}).Where("org_id IN ?", scope.VisibleOrgIDs).Count(&totalPools)
+		model.DB.Model(&model.User{}).Where("EXISTS (SELECT 1 FROM org_users WHERE org_users.user_id = users.id AND org_users.org_id IN ?)", scope.VisibleOrgIDs).Count(&totalUsers)
 		model.DB.Model(&model.LLMModel{}).Where("org_id IN ?", scope.VisibleOrgIDs).Count(&totalModels)
 		model.DB.Model(&model.Task{}).Where("org_id IN ? AND status = ?", scope.VisibleOrgIDs, "running").Count(&runningTasks)
 		model.DB.Model(&model.Task{}).Where("org_id IN ? AND status = ?", scope.VisibleOrgIDs, "failed").Count(&failedTasks)
@@ -451,10 +451,9 @@ func (h *SystemHandler) Info(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"version":        "v1.0.0",
 		"uptime":         uptimeStr,
-		"db_status":      "ok",
 		"total_projects": totalProjects,
 		"total_tasks":    totalTasks,
-		"total_pools":    totalPools,
+		"total_users":    totalUsers,
 		"total_models":   totalModels,
 		"running_tasks":  runningTasks,
 		"failed_tasks":   failedTasks,

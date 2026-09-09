@@ -155,10 +155,11 @@ func (s *ModelService) Update(scope *model.UserAuthScope, id uint, req *UpdateMo
 	}
 
 	db := model.DBWithScope(scope)
+	// 按组织粒度：检查 backup_order 冲突时只查同一组织
 	if req.BackupOrder != nil && *req.BackupOrder > 0 {
 		var conflict int64
 		db.Model(&model.LLMModel{}).
-			Where("backup_order = ? AND id != ? AND status != ?", *req.BackupOrder, id, "inactive").
+			Where("org_id = ? AND backup_order = ? AND id != ? AND status != ?", m.OrgID, *req.BackupOrder, id, "inactive").
 			Count(&conflict)
 		if conflict > 0 {
 			return ErrBackupOrderConflict
@@ -204,9 +205,12 @@ func (s *ModelService) Update(scope *model.UserAuthScope, id uint, req *UpdateMo
 	}
 
 	// Handle primary / backup update (only for LLM type)
+	// 按组织粒度：设置主模型时只清除同一组织内的其他主模型
 	if req.IsPrimary != nil && *req.IsPrimary != m.IsPrimary {
 		if *req.IsPrimary {
-			db.Model(&model.LLMModel{}).Where("is_primary = ?", true).Update("is_primary", false)
+			db.Model(&model.LLMModel{}).
+				Where("org_id = ? AND is_primary = ?", m.OrgID, true).
+				Update("is_primary", false)
 			updates["backup_order"] = 0
 		}
 		updates["is_primary"] = *req.IsPrimary
@@ -249,14 +253,16 @@ func (s *ModelService) Delete(scope *model.UserAuthScope, id uint) error {
 }
 
 func (s *ModelService) SetDefault(scope *model.UserAuthScope, id uint) error {
-	_, err := s.GetForUpdate(scope, id)
+	m, err := s.GetForUpdate(scope, id)
 	if err != nil {
 		return err
 	}
 
 	db := model.DBWithScope(scope)
-	// Unset all other defaults
-	if err := db.Model(&model.LLMModel{}).Where("is_default = ?", true).Update("is_default", false).Error; err != nil {
+	// 按组织粒度：只清除同一组织内的其他默认模型
+	if err := db.Model(&model.LLMModel{}).
+		Where("org_id = ? AND is_default = ?", m.OrgID, true).
+		Update("is_default", false).Error; err != nil {
 		return err
 	}
 

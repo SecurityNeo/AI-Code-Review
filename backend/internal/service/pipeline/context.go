@@ -113,6 +113,7 @@ func (c *stageContextImpl) SetOutput(key string, val interface{}) { c.outputData
 func (c *stageContextImpl) CreateChildExecution(stageCode string, batchIndex int) *model.TaskPipelineExecution {
 	exec := &model.TaskPipelineExecution{
 		TaskID:     c.task.ID,
+		OrgID:      c.task.OrgID,
 		StageCode:  stageCode,
 		Status:     model.PipelineStagePending,
 		ParentID:   &c.executionID,

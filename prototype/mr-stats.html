@@ -7,6 +7,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>代码提交统计 - CodeGuard</title>
         <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
     <script src="js/menu-config.js?v=9"></script>
     <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
@@ -123,6 +124,9 @@
                 <!-- 过滤器 -->
                 <div class="bg-white rounded-xl p-4 border mb-6 flex items-center gap-4 flex-wrap">
                     <div class="flex items-center gap-2">
+                        <select id="orgSelect"></select>
+                    </div>
+                    <div class="flex items-center gap-2">
                         <select id="projectFilter" class="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" onchange="loadMRLogs()">
                             <option value="">所有项目</option>
                         </select>
@@ -145,7 +149,7 @@
                         <span class="text-gray-400">至</span>
                         <input type="date" id="endDate" class="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" onchange="loadMRLogs()">
                     </div>
-                    <div class="flex items-center gap-2 ml-auto">
+                    <div class="flex items-center gap-2">
                         <button onclick="loadMRLogs()" class="bg-blue-50 text-blue-600 px-3 py-2 rounded-lg text-sm hover:bg-blue-100">
                             <i class="fas fa-sync-alt mr-1"></i>刷新
                         </button>
@@ -287,6 +291,8 @@
             const mrState = document.getElementById('mrStateFilter')?.value || '';
             const startDate = document.getElementById('startDate')?.value || '';
             const endDate = document.getElementById('endDate')?.value || '';
+            const orgSel = document.getElementById('orgSelect');
+            const orgId = orgSel ? orgSel.value : '';
 
             let url = `${API_BASE}/mr-review-logs?page=${currentPage}&page_size=${pageSize}`;
             if (projectName) url += `&project_name=${encodeURIComponent(projectName)}`;
@@ -294,6 +300,7 @@
             if (mrState) url += `&mr_state=${encodeURIComponent(mrState)}`;
             if (startDate) url += `&start_date=${startDate}`;
             if (endDate) url += `&end_date=${endDate}`;
+            if (orgId) url += `&org_id=${encodeURIComponent(orgId)}`;
 
             try {
                 const res = await apiFetch(url);
@@ -562,8 +569,11 @@
 
         async function loadFilterOptions() {
             try {
+                const orgSel = document.getElementById('orgSelect');
+                const orgId = orgSel ? orgSel.value : '';
+                const orgParam = orgId ? `?org_id=${encodeURIComponent(orgId)}` : '';
                 // Load project names
-                const projectRes = await apiFetch(`${API_BASE}/mr-review-logs/projects`);
+                const projectRes = await apiFetch(`${API_BASE}/mr-review-logs/projects${orgParam}`);
                 if (projectRes.ok) {
                     const projectJson = await projectRes.json();
                     const projectSelect = document.getElementById('projectFilter');
@@ -574,7 +584,7 @@
                 }
 
                 // Load authors
-                const authorRes = await apiFetch(`${API_BASE}/mr-review-logs/authors`);
+                const authorRes = await apiFetch(`${API_BASE}/mr-review-logs/authors${orgParam}`);
                 if (authorRes.ok) {
                     const authorJson = await authorRes.json();
                     const authorSelect = document.getElementById('authorFilter');
@@ -639,8 +649,19 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             loadFilterOptions();
+            loadOrgSelect('orgSelect');
             loadMRLogs();
             renderSidebar('mr-stats');
+            const orgSel = document.getElementById('orgSelect');
+            if (orgSel) {
+                orgSel.addEventListener('change', () => {
+                    // 切换组织后清空已选的项目和作者，避免旧值在新组织中不存在
+                    document.getElementById('projectFilter').value = '';
+                    document.getElementById('authorFilter').value = '';
+                    loadFilterOptions();
+                    loadMRLogs();
+                });
+            }
             // 普通用户：作者筛选框只显示自己（数据已由后端过滤）
             if (isUser()) {
                 restrictAuthorFilterToSelf();

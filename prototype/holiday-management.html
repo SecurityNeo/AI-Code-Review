@@ -144,9 +144,11 @@
                 <div class="flex items-center gap-2">
                     <button onclick="switchView('calendar')" id="btnViewCal" class="btn btn-outline active"><i class="fas fa-calendar-alt mr-1"></i>日历</button>
                     <button onclick="switchView('list')" id="btnViewList" class="btn btn-outline"><i class="fas fa-list mr-1"></i>列表</button>
-                    <button onclick="openSyncModal()" class="btn btn-outline"><i class="fas fa-sync-alt mr-1"></i>同步</button>
-                    <button onclick="openImportModal()" class="btn btn-outline"><i class="fas fa-file-import mr-1"></i>导入</button>
-                    <button onclick="openHolidayModal()" class="btn btn-primary"><i class="fas fa-plus mr-1"></i>添加</button>
+                    <span id="adminActions" style="display:none;">
+                        <button onclick="openSyncModal()" class="btn btn-outline"><i class="fas fa-sync-alt mr-1"></i>同步</button>
+                        <button onclick="openImportModal()" class="btn btn-outline"><i class="fas fa-file-import mr-1"></i>导入</button>
+                        <button onclick="openHolidayModal()" class="btn btn-primary"><i class="fas fa-plus mr-1"></i>添加</button>
+                    </span>
                 </div>
             </div>
 
@@ -207,10 +209,6 @@
                     <option value="company">公司假期</option>
                     <option value="makeup">调休补班</option>
                 </select>
-            </div>
-            <div class="form-group">
-                <label class="form-label">所属组织</label>
-                <select id="orgSelect" class="form-select"></select>
             </div>
             <div class="form-group">
                 <label class="form-check"><input type="checkbox" id="hRecurring"> 每年重复（忽略年份）</label>
@@ -416,25 +414,24 @@ function renderListView() {
         return;
     }
     let html = `<table class="data-table"><thead><tr>
-        <th style="width:14%">日期</th><th style="width:18%">名称</th><th style="width:14%">所属组织</th><th style="width:14%">类型</th>
-        <th style="width:10%">年份</th><th style="width:10%">重复</th><th style="width:8%">补班</th><th style="width:12%;text-align:right;">操作</th>
+        <th style="width:14%">日期</th><th style="width:18%">名称</th><th style="width:14%">类型</th>
+        <th style="width:10%">年份</th><th style="width:10%">重复</th><th style="width:8%">补班</th>${isSystemAdmin() ? '<th style="width:12%;text-align:right;">操作</th>' : ''}
     </tr></thead><tbody>`;
     holidays.forEach(h => {
         const typeInfo = { national: { label:'法定假日', cls:'national' }, company: { label:'公司假期', cls:'company' }, makeup: { label:'调休补班', cls:'makeup' } }[h.type] || { label:h.type, cls:'national' };
         html += `<tr>
             <td style="font-family:monospace;font-size:0.8125rem;">${h.date}</td>
             <td>${escapeHtml(h.name || '—')}</td>
-            <td>${escapeHtml(h.org_name || '—')}</td>
             <td><span class="type-pill ${typeInfo.cls}">${typeInfo.label}</span></td>
             <td>${h.year || '每年'}</td>
             <td>${h.is_recurring ? '<i class="fas fa-check text-emerald-500"></i>' : '—'}</td>
             <td>${h.is_workday ? '<i class="fas fa-check text-orange-500"></i>' : '—'}</td>
-            <td style="text-align:right;">
+            ${isSystemAdmin() ? `<td style="text-align:right;">
                 <div class="row-actions">
                     <button class="btn-icon-sm" title="编辑" onclick="openEditHoliday(${h.id})"><i class="fas fa-pen"></i></button>
                     <button class="btn-icon-sm danger" title="删除" onclick="openDeleteHoliday(${h.id})"><i class="fas fa-trash-alt"></i></button>
                 </div>
-            </td>
+            </td>` : ''}
         </tr>`;
     });
     html += '</tbody></table>';
@@ -463,7 +460,6 @@ function openHolidayModal(prefillDate) {
     document.getElementById('hWorkday').checked = false;
     onTypeChange();
     showModal('holidayModal');
-    loadOrgSelect('orgSelect');
 }
 
 async function openEditHoliday(id) {
@@ -480,7 +476,6 @@ async function openEditHoliday(id) {
         document.getElementById('hWorkday').checked = h.is_workday;
         onTypeChange();
         showModal('holidayModal');
-        loadOrgSelect('orgSelect', h.org_id);
     } catch (e) { showToast('加载失败', 'error'); }
 }
 
@@ -506,7 +501,6 @@ async function saveHoliday() {
      };
      if (!data.date) { alert('请选择日期'); return; }
      if (!data.name) { alert('请输入名称'); return; }
-     injectOrgId(data, 'orgSelect');
 
     try {
         const url = id ? `${API_BASE}/holidays/${id}` : `${API_BASE}/holidays`;
@@ -576,6 +570,10 @@ document.addEventListener('DOMContentLoaded', () => {
     renderSidebar('settings-holiday');
     document.getElementById('yearLabel').textContent = currentYear;
     document.getElementById('syncYear').value = currentYear;
+    // 仅 super_admin 显示管理操作按钮
+    if (isSystemAdmin()) {
+        document.getElementById('adminActions').style.display = '';
+    }
     loadHolidays();
 });
 </script>

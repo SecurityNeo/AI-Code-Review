@@ -8,6 +8,7 @@
     <title>规则命中统计 - CodeGuard</title>
     <script defer src="/static/js/echarts.min.js"></script>
     <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
     <script src="js/menu-config.js?v=9"></script>
     <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
@@ -78,6 +79,9 @@
         <div class="px-5 py-5 space-y-4">
             <!-- 时间筛选 -->
             <div class="bg-white rounded-xl p-4 border flex items-center gap-4 flex-wrap">
+                <div class="flex items-center gap-2">
+                    <select id="orgSelect"></select>
+                </div>
                 <div class="flex items-center gap-2">
                     <span class="text-sm text-gray-500">时间范围：</span>
                     <select id="rangeFilter" class="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" onchange="loadOverview()">
@@ -304,7 +308,7 @@ function categoryBadge(catName, catCode) {
 async function loadOverview() {
     const range = getRange();
     try {
-        const res = await apiFetch(`${API_BASE}/rule-stats/overview?range=${range}`);
+        const res = await apiFetch(`${API_BASE}/rule-stats/overview?range=${range}`, { headers: getOrgOverrideHeaders('orgSelect') });
         if (!res.ok) {
             showToast(`加载失败（HTTP ${res.status}）`, 'error');
             return;
@@ -462,7 +466,7 @@ async function loadRuleDetail() {
     if (!drawerCurrentRule) return;
     const range = getRange();
     try {
-        const res = await apiFetch(`${API_BASE}/rule-stats/by-rule/${encodeURIComponent(drawerCurrentRule)}?range=${range}`);
+        const res = await apiFetch(`${API_BASE}/rule-stats/by-rule/${encodeURIComponent(drawerCurrentRule)}?range=${range}`, { headers: getOrgOverrideHeaders('orgSelect') });
         if (!res.ok) {
             showToast(`加载失败（HTTP ${res.status}）`, 'error');
             return;
@@ -566,7 +570,7 @@ async function loadDrawerIssues() {
     if (!drawerCurrentRule) return;
     const range = getRange();
     try {
-        const res = await apiFetch(`${API_BASE}/rule-stats/recent-issues?rule_code=${encodeURIComponent(drawerCurrentRule)}&range=${range}&page=${drawerPage}&page_size=${drawerPageSize}`);
+        const res = await apiFetch(`${API_BASE}/rule-stats/recent-issues?rule_code=${encodeURIComponent(drawerCurrentRule)}&range=${range}&page=${drawerPage}&page_size=${drawerPageSize}`, { headers: getOrgOverrideHeaders('orgSelect') });
         if (!res.ok) {
             showToast(`加载命中明细失败（HTTP ${res.status}）`, 'error');
             return;
@@ -661,7 +665,13 @@ window.addEventListener('resize', () => {
 
 // 初始化
 document.addEventListener('DOMContentLoaded', () => {
-    // 支持 ?rule=XXX 自动打开抽屉（从 review-rules.html 跳转过来）
+    loadOrgSelect('orgSelect');
+    const orgSel = document.getElementById('orgSelect');
+    if (orgSel) {
+        orgSel.addEventListener('change', () => {
+            loadOverview();
+        });
+    }
     const params = new URLSearchParams(window.location.search);
     const preselectRule = params.get('rule');
     const preselectRange = params.get('range');

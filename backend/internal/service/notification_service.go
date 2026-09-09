@@ -103,11 +103,10 @@ type IssueStats struct {
 // CalcIssueStats 计算当前任务的 Issue 统计（含历史对比）
 func CalcIssueStats(scope *model.UserAuthScope, taskID uint, mrID int) IssueStats {
 	var stats IssueStats
-	db := model.DBWithScope(scope)
 
 	// 当前版本有效 Issue
 	var currentIssues []model.ReviewIssue
-	db.Where("task_id = ? AND deleted_at IS NULL", taskID).Find(&currentIssues)
+	model.DBWithScope(scope).Where("task_id = ? AND deleted_at IS NULL", taskID).Find(&currentIssues)
 	for _, issue := range currentIssues {
 		stats.Total++
 		switch issue.Severity {
@@ -135,10 +134,10 @@ func CalcIssueStats(scope *model.UserAuthScope, taskID uint, mrID int) IssueStat
 	// 与上次成功版本对比（基于指纹精确匹配）
 	if mrID > 0 {
 		var lastTask model.Task
-		if err := db.Where("mr_merge_id = ? AND id < ? AND status = ?", mrID, taskID, model.TaskSuccess).
+		if err := model.DBWithScope(scope).Where("mr_merge_id = ? AND id < ? AND status = ?", mrID, taskID, model.TaskSuccess).
 			Order("id DESC").First(&lastTask).Error; err == nil {
 			var lastIssues []model.ReviewIssue
-			db.Unscoped().Where("task_id = ?", lastTask.ID).Find(&lastIssues)
+			model.DB.Unscoped().Where("task_id = ?", lastTask.ID).Find(&lastIssues)
 
 			// 建立指纹集合（排除 auto_filtered，因为它们不算"可见"Issue）
 			lastFPs := make(map[string]bool)

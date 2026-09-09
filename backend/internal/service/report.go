@@ -167,9 +167,8 @@ func buildPeriod(reportType string) periodInfo {
 
 func queryKPI(scope *model.UserAuthScope, start, end time.Time) kpiData {
 	var k kpiData
-	db := model.DBWithScope(scope)
 	// MR 总数（不排除 closed）
-	db.Model(&model.MergeRequestReviewLog{}).
+	model.DBWithScope(scope).Model(&model.MergeRequestReviewLog{}).
 		Select("COUNT(*) as total_m_rs").
 		Where("COALESCE(mr_created_at, synced_at) >= ?", start).
 		Where("COALESCE(mr_created_at, synced_at) < ?", end).
@@ -180,7 +179,7 @@ func queryKPI(scope *model.UserAuthScope, start, end time.Time) kpiData {
 		AvgScore     float64 `gorm:"column:avg_score"`
 		ScoreCount   int64   `gorm:"column:score_count"`
 	}
-	db.Model(&model.MergeRequestReviewLog{}).
+	model.DBWithScope(scope).Model(&model.MergeRequestReviewLog{}).
 		Select("COALESCE(SUM(additions + deletions), 0) as total_changes, "+
 			"COALESCE(AVG(CASE WHEN score > 0 THEN score END), 0) as avg_score, "+
 			"COUNT(CASE WHEN score > 0 THEN 1 END) as score_count").
@@ -193,7 +192,7 @@ func queryKPI(scope *model.UserAuthScope, start, end time.Time) kpiData {
 
 	// 低质量 MR（排除 closed）
 	var lq int64
-	db.Model(&model.MergeRequestReviewLog{}).
+	model.DBWithScope(scope).Model(&model.MergeRequestReviewLog{}).
 		Where("score > 0 AND score < 60").
 		Where("mr_state != ?", "closed").
 		Where("COALESCE(mr_created_at, synced_at) >= ?", start).
@@ -203,7 +202,7 @@ func queryKPI(scope *model.UserAuthScope, start, end time.Time) kpiData {
 
 	// -------- 第二行 KPI --------
 	// 新增/删除行数（排除 closed MR）
-	db.Model(&model.MergeRequestReviewLog{}).
+	model.DBWithScope(scope).Model(&model.MergeRequestReviewLog{}).
 		Select("COALESCE(SUM(additions), 0) as additions, COALESCE(SUM(deletions), 0) as deletions").
 		Where("mr_state != ?", "closed").
 		Where("COALESCE(mr_created_at, synced_at) >= ?", start).
@@ -212,7 +211,7 @@ func queryKPI(scope *model.UserAuthScope, start, end time.Time) kpiData {
 
 	// 代码Review次数（不排除 closed）
 	var rc int64
-	db.Model(&model.MergeRequestReviewLog{}).
+	model.DBWithScope(scope).Model(&model.MergeRequestReviewLog{}).
 		Select("COALESCE(SUM(review_count), 0)").
 		Where("COALESCE(mr_created_at, synced_at) >= ?", start).
 		Where("COALESCE(mr_created_at, synced_at) < ?", end).
@@ -315,8 +314,19 @@ func calcMOM(cur, prev kpiData, periodName string) momData {
 
 func queryDevRanks(scope *model.UserAuthScope, start, end time.Time) []devRank {
 	var list []devRank
-	db := model.DBWithScope(scope)
-	db.Raw(`
+	orgClause := ""
+	if scope != nil && !scope.IsSuperAdmin {
+		if len(scope.VisibleOrgIDs) == 0 {
+			orgClause = " AND 1=0"
+		} else {
+			orgIDs := make([]string, 0, len(scope.VisibleOrgIDs))
+			for _, id := range scope.VisibleOrgIDs {
+				orgIDs = append(orgIDs, fmt.Sprintf("%d", id))
+			}
+			orgClause = fmt.Sprintf(" AND org_id IN (%s)", strings.Join(orgIDs, ","))
+		}
+	}
+	model.DB.Raw(`
 		SELECT author, 
 			MAX(author_display_name) as author_display_name,
 			COUNT(*) as mr_count,
@@ -327,7 +337,7 @@ func queryDevRanks(scope *model.UserAuthScope, start, end time.Time) []devRank {
 		WHERE author != ''
 			AND mr_state != 'closed'
 			AND COALESCE(mr_created_at, synced_at) >= ?
-			AND COALESCE(mr_created_at, synced_at) < ?
+			AND COALESCE(mr_created_at, synced_at) < ?`+orgClause+`
 		GROUP BY author
 		HAVING mr_count > 0
 		ORDER BY avg_score DESC, mr_count DESC
@@ -340,15 +350,26 @@ func queryDevRanks(scope *model.UserAuthScope, start, end time.Time) []devRank {
 
 func queryProjectRanks(scope *model.UserAuthScope, start, end time.Time) []projectRank {
 	var list []projectRank
-	db := model.DBWithScope(scope)
-	db.Raw(`
+	orgClause := ""
+	if scope != nil && !scope.IsSuperAdmin {
+		if len(scope.VisibleOrgIDs) == 0 {
+			orgClause = " AND 1=0"
+		} else {
+			orgIDs := make([]string, 0, len(scope.VisibleOrgIDs))
+			for _, id := range scope.VisibleOrgIDs {
+				orgIDs = append(orgIDs, fmt.Sprintf("%d", id))
+			}
+			orgClause = fmt.Sprintf(" AND org_id IN (%s)", strings.Join(orgIDs, ","))
+		}
+	}
+	model.DB.Raw(`
 		SELECT project_name as project, COUNT(*) as count,
 			COALESCE(AVG(CASE WHEN score > 0 THEN score END), 0) as avg_score,
 			SUM(CASE WHEN score > 0 AND score < 60 THEN 1 ELSE 0 END) as low_quality_num
 		FROM merge_request_review_logs
 		WHERE mr_state != 'closed'
 			AND COALESCE(mr_created_at, synced_at) >= ?
-			AND COALESCE(mr_created_at, synced_at) < ?
+			AND COALESCE(mr_created_at, synced_at) < ?`+orgClause+`
 		GROUP BY project_name
 		ORDER BY count DESC
 		LIMIT 5`, start, end).Scan(&list)
@@ -382,8 +403,7 @@ func queryLowQuality(scope *model.UserAuthScope, start, end time.Time) []struct 
 		Additions         int     `json:"additions"`
 		Deletions         int     `json:"deletions"`
 	}
-	db := model.DBWithScope(scope)
-	db.Model(&model.MergeRequestReviewLog{}).
+	model.DBWithScope(scope).Model(&model.MergeRequestReviewLog{}).
 		Select("project_name as project, mr_title as title, author, MAX(author_display_name) as author_display_name, score, additions, deletions").
 		Where("score > 0 AND score < 60").
 		Where("mr_state != ?", "closed").
@@ -400,8 +420,7 @@ func queryLowQuality(scope *model.UserAuthScope, start, end time.Time) []struct 
 
 func queryScoreDist(scope *model.UserAuthScope, start, end time.Time) scoreDist {
 	var d scoreDist
-	db := model.DBWithScope(scope)
-	db.Model(&model.MergeRequestReviewLog{}).
+	model.DBWithScope(scope).Model(&model.MergeRequestReviewLog{}).
 		Select(
 			"SUM(CASE WHEN score >= 90 THEN 1 ELSE 0 END) as excellent, "+
 				"SUM(CASE WHEN score >= 80 AND score < 90 THEN 1 ELSE 0 END) as good, "+
@@ -431,8 +450,7 @@ func queryDevChanges(scope *model.UserAuthScope, start, end time.Time) []struct 
 		Additions         int64  `json:"additions"`
 		Deletions         int64  `json:"deletions"`
 	}
-	db := model.DBWithScope(scope)
-	db.Model(&model.MergeRequestReviewLog{}).
+	model.DBWithScope(scope).Model(&model.MergeRequestReviewLog{}).
 		Select("author, MAX(author_display_name) as author_display_name, COALESCE(SUM(additions + deletions), 0) as changes, COALESCE(SUM(additions), 0) as additions, COALESCE(SUM(deletions), 0) as deletions").
 		Where("author != ''").
 		Where("mr_state != ?", "closed").
@@ -448,8 +466,7 @@ func queryDevChanges(scope *model.UserAuthScope, start, end time.Time) []struct 
 
 func queryStateDist(scope *model.UserAuthScope, start, end time.Time) stateDist {
 	var s stateDist
-	db := model.DBWithScope(scope)
-	db.Model(&model.MergeRequestReviewLog{}).
+	model.DBWithScope(scope).Model(&model.MergeRequestReviewLog{}).
 		Select(
 			"COUNT(*) as total, "+
 				"SUM(CASE WHEN mr_state = 'merged' THEN 1 ELSE 0 END) as merged, "+
@@ -473,8 +490,7 @@ func queryTokenUsage(scope *model.UserAuthScope, start, end time.Time) tokenUsag
 		FailedCount      int64   `gorm:"column:failed_count"`
 		AvgDurationMs    float64 `gorm:"column:avg_duration_ms"`
 	}
-	db := model.DBWithScope(scope)
-	db.Table("llm_call_logs").
+	model.DBWithScope(scope).Table("llm_call_logs").
 		Select(`COALESCE(SUM(total_tokens), 0)            AS total_tokens,
 			COALESCE(SUM(prompt_tokens), 0)               AS prompt_tokens,
 			COALESCE(SUM(completion_tokens), 0)           AS completion_tokens,
@@ -503,14 +519,13 @@ func queryTokenUsage(scope *model.UserAuthScope, start, end time.Time) tokenUsag
 }
 
 func querySysStatus(scope *model.UserAuthScope) sysStatus {
-	db := model.DBWithScope(scope)
+	now := time.Now()
 	// 审查成功率（基于 task 表，排除 stopped 状态）
 	var taskStats struct {
 		Total int64
 		Done  int64
 	}
-	now := time.Now()
-	db.Model(&model.Task{}).
+	model.DBWithScope(scope).Model(&model.Task{}).
 		Select("COUNT(*) as total, COUNT(CASE WHEN status = 'success' THEN 1 END) as done").
 		Where("status != ?", model.TaskStopped).
 		Where("created_at >= ?", now.AddDate(0, 0, -7)).
@@ -525,14 +540,14 @@ func querySysStatus(scope *model.UserAuthScope) sysStatus {
 		Total   int64
 		Healthy int64
 	}
-	db.Model(&model.ResourcePool{}).
+	model.DBWithScope(scope).Model(&model.ResourcePool{}).
 		Select("COUNT(*) as total, COUNT(CASE WHEN status = 'active' THEN 1 END) as healthy").
 		Scan(&poolStats)
 	poolHealth := fmt.Sprintf("%d/%d", poolStats.Healthy, poolStats.Total)
 
 	// 平均审查耗时（使用 duration_sec 字段）
 	var avgTime struct{ AvgSec float64 }
-	db.Model(&model.Task{}).
+	model.DBWithScope(scope).Model(&model.Task{}).
 		Select("COALESCE(AVG(duration_sec), 0) as avg_sec").
 		Where("created_at >= ? AND duration_sec > 0", now.AddDate(0, 0, -7)).
 		Scan(&avgTime)
@@ -548,18 +563,23 @@ func querySysStatus(scope *model.UserAuthScope) sysStatus {
 		Total   int64
 		Healthy int64
 	}
-	db.Model(&model.LLMModel{}).
+	model.DBWithScope(scope).Model(&model.LLMModel{}).
 		Select("COUNT(*) as total, COUNT(CASE WHEN status = 'active' THEN 1 END) as healthy").
 		Scan(&modelStats)
 	modelHealth := fmt.Sprintf("%d/%d", modelStats.Healthy, modelStats.Total)
 
-	// 评审规则总数
+	// 评审规则总数（非super_admin需额外包含全局规则org_id=1）
 	var ruleTotal int64
-	db.Model(&model.ReviewRule{}).Count(&ruleTotal)
+	if scope.IsSuperAdmin {
+		model.DB.Model(&model.ReviewRule{}).Count(&ruleTotal)
+	} else {
+		model.DB.Model(&model.ReviewRule{}).
+			Where("org_id = ? OR org_id = 1", scope.CurrentOrgID).Count(&ruleTotal)
+	}
 
-	// 漏洞库总数
+	// 漏洞库总数（vulnerability_records 无 org_id 列，使用裸 DB）
 	var vulnTotal int64
-	db.Model(&model.VulnerabilityRecord{}).Count(&vulnTotal)
+	model.DB.Model(&model.VulnerabilityRecord{}).Count(&vulnTotal)
 
 	return sysStatus{
 		ReviewSuccessRate: successRate,

@@ -17,7 +17,9 @@ import (
 var DB *gorm.DB
 
 // FilterByUser 按用户角色过滤数据查询
-// admin 不过滤，user 按 authorColumn = gitlab_username 过滤
+// ⚠️ 已废弃：该函数基于已废弃的 users.role 字段判断，逻辑已不准确。
+// 请改为在 handler 层显式检查 scope.CurrentOrgRole == "developer" 后再附加过滤。
+// 保留仅为了兼容尚未迁移的调用点。
 func FilterByUser(db *gorm.DB, user User, authorColumn string) *gorm.DB {
 	if user.Role == RoleAdmin || user.GitlabUsername == "" {
 		return db

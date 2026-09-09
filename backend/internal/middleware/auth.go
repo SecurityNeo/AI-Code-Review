@@ -91,6 +91,10 @@ func Auth() gin.HandlerFunc {
 		if token == "" {
 			token, _ = c.Cookie("auth_token")
 		}
+		// SSE (EventSource) 无法自定义 Header，前端通过 query 参数传 token
+		if token == "" {
+			token = c.Query("token")
+		}
 
 		if token == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "请先登录"})

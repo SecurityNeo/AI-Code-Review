@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"time"
 
 	"github.com/ai-optimizer/backend/internal/model"
@@ -16,7 +17,10 @@ func NewReviewRuleService() *ReviewRuleService {
 
 // List 获取规则库列表（含近 7 天命中次数）
 func (s *ReviewRuleService) List(scope *model.UserAuthScope, category, language, isEnabled, keyword string, page, pageSize int) ([]model.ReviewRule, int64, map[string]int64, error) {
-	db := model.DBWithScope(scope).Model(&model.ReviewRule{})
+	db := model.DB.Model(&model.ReviewRule{})
+	if scope != nil && !scope.IsSuperAdmin {
+		db = db.Where("org_id IN ? OR is_built_in = ?", scope.VisibleOrgIDs, true)
+	}
 	if category != "" {
 		db = db.Where("category = ?", category)
 	}
@@ -68,7 +72,10 @@ func (s *ReviewRuleService) List(scope *model.UserAuthScope, category, language,
 
 // Tree 按语言、维度分组返回规则树
 func (s *ReviewRuleService) Tree(scope *model.UserAuthScope) (map[string]map[string][]model.ReviewRule, error) {
-	db := model.DBWithScope(scope).Where("is_enabled = ?", true).Order("sort_order ASC")
+	db := model.DB.Where("is_enabled = ?", true).Order("sort_order ASC")
+	if scope != nil && !scope.IsSuperAdmin {
+		db = db.Where("org_id IN ? OR is_built_in = ?", scope.VisibleOrgIDs, true)
+	}
 	var rules []model.ReviewRule
 	if err := db.Find(&rules).Error; err != nil {
 		return nil, err
@@ -85,8 +92,29 @@ func (s *ReviewRuleService) Tree(scope *model.UserAuthScope) (map[string]map[str
 	return tree, nil
 }
 
-// BatchEnable 批量更新规则启用状态
+// BatchEnable 批量更新规则启用状态（内置规则仅系统管理员可操作）
 func (s *ReviewRuleService) BatchEnable(scope *model.UserAuthScope, ruleIDs []uint, isEnabled bool) error {
+	var rules []model.ReviewRule
+	if err := model.DB.Where("id IN ?", ruleIDs).Find(&rules).Error; err != nil {
+		return err
+	}
+	if scope != nil && !scope.IsSuperAdmin {
+		for _, r := range rules {
+			if r.IsBuiltIn {
+				return errors.New("内置规则仅系统管理员可开启/关闭")
+			}
+			found := false
+			for _, vid := range scope.VisibleOrgIDs {
+				if r.OrgID == vid {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return errors.New("无权操作该规则")
+			}
+		}
+	}
 	db := model.DBWithScope(scope).Model(&model.ReviewRule{})
 	return db.Where("id IN ?", ruleIDs).Update("is_enabled", isEnabled).Error
 }
@@ -106,8 +134,11 @@ func (s *ReviewRuleService) Create(scope *model.UserAuthScope, rule *model.Revie
 
 // Get 根据 ID 获取规则
 func (s *ReviewRuleService) Get(scope *model.UserAuthScope, id uint) (*model.ReviewRule, error) {
-	db := model.DBWithScope(scope)
 	var rule model.ReviewRule
+	db := model.DB
+	if scope != nil && !scope.IsSuperAdmin {
+		db = db.Where("org_id IN ? OR is_built_in = ?", scope.VisibleOrgIDs, true)
+	}
 	if err := db.First(&rule, id).Error; err != nil {
 		return nil, err
 	}

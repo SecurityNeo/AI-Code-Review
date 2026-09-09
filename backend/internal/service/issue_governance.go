@@ -59,6 +59,7 @@ func (s *IssueGovernanceService) ProcessTaskCompletion(taskID uint, newIssues []
 		for i := range newIssues {
 			issue := &newIssues[i]
 			issue.TaskID = taskID
+			issue.OrgID = task.OrgID
 			// 计算语义指纹
 			issue.Fingerprint = s.fpSvc.Compute(issue)
 

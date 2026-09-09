@@ -667,6 +667,10 @@ func verifyLLMOutput(result *llm.AIReviewResult, promptCtx *engine.PromptContext
 			continue
 		}
 		if !allowedFiles[issue.File] {
+			// 方案三豁免：如果 dependency_scan 发现了漏洞，则 LLM 引用依赖清单文件（如 go.mod）是合法的
+			if len(promptCtx.DependencyVulns) > 0 && isDependencyManifestFile(issue.File) {
+				continue
+			}
 			return fmt.Errorf("LLM 将 issue 关联到了变更范围外的文件 '%s'，疑似编造", issue.File)
 		}
 	}
@@ -739,7 +743,7 @@ func isReviewInputEmpty(
 }
 
 // extractDiffFilePaths 从 PromptContext 中提取已知的合法文件路径集合
-// 来源包括：batch review issues、agent findings（secret_scan / security_audit）
+// 来源包括：batch review issues、agent findings（secret_scan / security_audit）、dependency vulns（PackageName）
 func extractDiffFilePaths(promptCtx *engine.PromptContext) map[string]bool {
 	paths := make(map[string]bool)
 	// 从 batch results 的 issues 中提取
@@ -764,5 +768,36 @@ func extractDiffFilePaths(promptCtx *engine.PromptContext) map[string]bool {
 			paths[f.FilePath] = true
 		}
 	}
+	// 从 dependency vulns 中提取 PackageName（LLM 可能把包名当作 file 输出）
+	for _, dep := range promptCtx.DependencyVulns {
+		if dep.IsRelatedToChange && dep.PackageName != "" {
+			paths[dep.PackageName] = true
+		}
+	}
 	return paths
+}
+
+// isDependencyManifestFile 判定文件路径是否为依赖清单文件
+// 当 dependency_scan 发现漏洞时，LLM 引用这些文件是合法的（即使它们被 file_filter 排除在 batch review 外）
+func isDependencyManifestFile(file string) bool {
+	manifests := []string{
+		"go.mod", "go.sum", "go.work", "go.work.sum",
+		"package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+		"requirements.txt", "requirements-dev.txt", "Pipfile", "Pipfile.lock", "poetry.lock",
+		"pom.xml", "build.gradle", "build.gradle.kts", "gradle.properties",
+		"Cargo.toml", "Cargo.lock",
+		"Gemfile", "Gemfile.lock",
+		"composer.json", "composer.lock",
+		"pubspec.yaml", "pubspec.lock",
+		"mix.exs", "mix.lock",
+		"Package.swift", "Cartfile", "Cartfile.resolved",
+		"pom.xml", "build.gradle",
+	}
+	// 支持子目录中的文件（如 sub/project/go.mod）
+	for _, m := range manifests {
+		if strings.HasSuffix(file, "/"+m) || file == m {
+			return true
+		}
+	}
+	return false
 }

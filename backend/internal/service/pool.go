@@ -49,7 +49,15 @@ func (s *PoolService) Create(scope *model.UserAuthScope, data map[string]interfa
 	}
 	db := model.DBWithScope(scope)
 	password, _ := encrypt.Encrypt(data["opencode_password"].(string))
+	
+	// 多租户改造：从 data 中读取 org_id（handler 层已注入）
+	var orgID uint = 1
+	if oid, ok := data["org_id"]; ok {
+		orgID = uint(oid.(float64))
+	}
+	
 	pool := model.ResourcePool{
+		OrgID:            orgID,
 		Name:             data["name"].(string),
 		OpencodeEndpoint: data["opencode_endpoint"].(string),
 		OpencodeUsername: data["opencode_username"].(string),

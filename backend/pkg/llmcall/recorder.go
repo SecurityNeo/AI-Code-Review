@@ -36,6 +36,7 @@ const (
 type RecordRequest struct {
 	TaskID           *uint
 	ModelID          *uint
+	OrgID            uint
 	Provider         string
 	ModelName        string
 	CallType         string
@@ -179,7 +180,11 @@ func flushBatch(batch []RecordRequest) {
 		if total <= 0 {
 			total = r.PromptTokens + r.CompletionTokens
 		}
+		if r.OrgID == 0 {
+			r.OrgID = 1 // fallback 到根组织
+		}
 		rows[i] = model.LLMCallLog{
+			OrgID:            r.OrgID,
 			TaskID:           r.TaskID,
 			ModelID:          r.ModelID,
 			Provider:         r.Provider,

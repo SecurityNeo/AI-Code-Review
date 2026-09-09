@@ -140,8 +140,8 @@ go.sum"></textarea>
                 </div>
             </div>
 
-            <!-- 所属组织 -->
-            <div class="mb-4">
+            <!-- 所属组织（仅 super_admin 可见） -->
+            <div class="mb-4" id="orgSelectWrap" style="display:none;">
                 <label class="block text-sm font-medium text-gray-700 mb-1">所属组织</label>
                 <select id="orgSelect" class="w-48 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"></select>
             </div>
@@ -342,12 +342,17 @@ const TRIGGER_EVENT_DEFS = [
 // ========== API ==========
 const API_BASE = (typeof window.API_BASE !== 'undefined') ? window.API_BASE : '';
 
-function apiFetch(url, opts = {}) {
+// 使用局部变量避免与全局 window.apiFetch 冲突（后者返回原生 Response）
+const _agentApiFetch = function _agentApiFetch(url, opts = {}) {
     const token = localStorage.getItem('auth_token') || '';
     opts.headers = opts.headers || {};
     opts.headers['Authorization'] = 'Bearer ' + token;
     if (!opts.headers['Content-Type'] && !(opts.body instanceof FormData)) {
         opts.headers['Content-Type'] = 'application/json';
+    }
+    // GET 请求统一禁用浏览器缓存，避免多租户下因缓存导致读到其他组织的配置
+    if ((!opts.method || opts.method.toUpperCase() === 'GET') && !opts.headers['Cache-Control']) {
+        opts.headers['Cache-Control'] = 'no-cache, no-store';
     }
     return fetch(API_BASE + url, opts).then(async r => {
         const data = await r.json().catch(() => ({}));
@@ -700,7 +705,7 @@ function clampParallelMax(el) {
 
 // ========== 加载配置 ==========
 function loadConfig() {
-    apiFetch('/api/v1/review-agent-config')
+    _agentApiFetch('/api/v1/review-agent-config', { headers: getOrgOverrideHeaders() })
         .then(res => {
             const data = res.data || {};
             currentConfig = data;
@@ -740,8 +745,9 @@ function loadConfig() {
             document.getElementById('includePatterns').value = (ffCfg.include_patterns || []).join('\n');
             if (data.updated_at) {
                 const d = new Date(data.updated_at);
+                const updaterText = data.updated_by_name || (data.updated_by ? `by user #${data.updated_by}` : '');
                 document.getElementById('lastUpdateInfo').textContent = 
-                    `最后更新：${d.toLocaleString('zh-CN')}  ${data.updated_by ? 'by admin' : ''}`;
+                    `最后更新：${d.toLocaleString('zh-CN')}  ${updaterText}`;
             }
         })
         .catch(err => {
@@ -881,7 +887,7 @@ function saveConfig() {
 
     injectOrgId(payload, 'orgSelect');
     const orgHeaders = getOrgOverrideHeaders();
-    apiFetch('/api/v1/review-agent-config', {
+    _agentApiFetch('/api/v1/review-agent-config', {
         method: 'PUT',
         headers: orgHeaders,
         body: JSON.stringify(payload)
@@ -953,7 +959,7 @@ function toggleDefaultPatterns() {
 async function loadDefaultFilterPatterns() {
     const contentEl = document.getElementById('defaultPatternsContent');
     try {
-        const res = await apiFetch('/api/v1/review-agent-config/file-filter-defaults');
+        const res = await _agentApiFetch('/api/v1/review-agent-config/file-filter-defaults');
         if (res.code !== 0 || !res.data) {
             contentEl.innerHTML = '<p class="text-red-400">加载失败</p>';
             return;

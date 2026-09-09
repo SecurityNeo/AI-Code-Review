@@ -433,22 +433,11 @@
         var isSuper = userInfo.current_org_role === 'super_admin';
 
         // 只有 super_admin 才显示组织选择器
-        // org_admin / developer 隐藏选择器，自动绑定当前组织
+        // org_admin / developer 完全隐藏（不占空间），自动绑定当前组织
         if (!isSuper) {
-            sel.style.display = 'none';
-            wrapper.querySelector('.' + TRIGGER_CLASS).style.display = 'none';
-            // 如果存在只读标签容器，显示当前组织名称
+            wrapper.style.display = 'none';
             var readOnlyWrap = wrapper.querySelector('.org-picker-readonly');
-            if (!readOnlyWrap) {
-                readOnlyWrap = document.createElement('div');
-                readOnlyWrap.className = 'org-picker-readonly';
-                readOnlyWrap.style.cssText = 'font-size:13px;color:#6b7280;padding:8px 0;';
-                wrapper.insertBefore(readOnlyWrap, wrapper.firstChild);
-            }
-            var orgName = userInfo.current_org_name || '';
-            readOnlyWrap.textContent = orgName ? '当前组织：' + orgName : '当前组织：未分配';
-            readOnlyWrap.style.display = 'block';
-            // 自动设置 select 的值为当前组织
+            if (readOnlyWrap) readOnlyWrap.style.display = 'none';
             if (userInfo.current_org_id) {
                 sel.value = String(userInfo.current_org_id);
             }
@@ -482,16 +471,17 @@
         treeEl.querySelectorAll('.org-picker-node').forEach(function (node) {
             node.addEventListener('click', function () {
                 var id   = this.dataset.id;
-                var path = getNodePath(flatList, id);
-                setPickerValue(sel, id, path);
+                // 只取当前节点名称，不展示完整路径
+                var name = this.querySelector('.org-picker-label').textContent;
+                setPickerValue(sel, id, name);
                 closePopover(wrapper);
             });
         });
 
-        // 回显默认值
+        // 回显默认值（只显示名称）
         if (defaultValue) {
-            var path = getNodePath(flatList, defaultValue);
-            setPickerValue(sel, defaultValue, path);
+            var node = flatList.find(function (n) { return String(n.id) === String(defaultValue); });
+            setPickerValue(sel, defaultValue, node ? node.name : '');
         } else {
             setPickerValue(sel, '', '');
         }
@@ -503,7 +493,31 @@
     window.getOrgOverrideHeaders = function (selectId) {
         selectId = selectId || 'orgSelect';
         var userInfo = getCurrentUserInfo();
-        if (userInfo.current_org_role !== 'super_admin' && userInfo.current_org_id) {
+
+        // super_admin：直接以选择器为准（localStorage 不会随页面选择同步更新）
+        if (userInfo.current_org_role === 'super_admin') {
+            var sel = document.getElementById(selectId);
+            if (sel && sel.value) {
+                return { 'X-Org-Id': String(sel.value) };
+            }
+            // 选择器无值时 fallback 到 localStorage
+            if (window.getCurrentOrg) {
+                var currentOrg = window.getCurrentOrg();
+                if (currentOrg && currentOrg.id) {
+                    return { 'X-Org-Id': String(currentOrg.id) };
+                }
+            }
+            return {};
+        }
+
+        // org_admin / developer：以当前组织上下文为准（页面通常隐藏选择器）
+        if (window.getCurrentOrg) {
+            var currentOrg = window.getCurrentOrg();
+            if (currentOrg && currentOrg.id) {
+                return { 'X-Org-Id': String(currentOrg.id) };
+            }
+        }
+        if (userInfo.current_org_id) {
             return { 'X-Org-Id': String(userInfo.current_org_id) };
         }
         var sel = document.getElementById(selectId);
@@ -522,18 +536,18 @@
         var userInfo = getCurrentUserInfo();
         if (!userInfo.current_org_role) return;
 
-        // org_admin / developer 强制绑定当前组织
-        if (userInfo.current_org_role !== 'super_admin') {
-            if (payload && userInfo.current_org_id) {
-                payload.org_id = parseInt(userInfo.current_org_id);
+        // super_admin：优先从选择器读取
+        if (userInfo.current_org_role === 'super_admin') {
+            var sel = document.getElementById(selectId);
+            if (sel && sel.value) {
+                if (payload) payload.org_id = parseInt(sel.value);
             }
             return;
         }
 
-        // super_admin：从选择器读取（若已选）
-        var sel = document.getElementById(selectId);
-        if (sel && sel.value) {
-            if (payload) payload.org_id = parseInt(sel.value);
+        // org_admin / developer：强制绑定当前组织
+        if (payload && userInfo.current_org_id) {
+            payload.org_id = parseInt(userInfo.current_org_id);
         }
     };
 })();

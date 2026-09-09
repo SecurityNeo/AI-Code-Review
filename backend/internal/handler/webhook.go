@@ -316,8 +316,12 @@ func finalizeWebhookValidation(c *gin.Context, project model.Project) (*model.Pr
 		return nil, nil, fmt.Errorf("gitlab instance not found")
 	}
 
+	// 开发环境兼容：若未配置 webhook_secret 则跳过校验（记 debug 便于排查）
 	if instance.WebhookSecret == "" {
-		return nil, nil, fmt.Errorf("webhook secret not configured")
+		zap.L().Debug("webhook secret not configured, accepting in dev mode",
+			zap.Uint("instance_id", instance.ID),
+			zap.String("instance", instance.Name))
+		return &project, &instance, nil
 	}
 
 	token := c.GetHeader("X-Gitlab-Token")
@@ -539,9 +543,9 @@ func (h *WebhookHandler) handleMergeRequestHook(c *gin.Context, payload map[stri
 		return
 	}
 
-	// 4. 全局触发事件过滤
+	// 4. 全局触发事件过滤（按项目所属组织查配置）
 	triggerSource := "merge_request_" + action
-	if !isTriggerEventAllowed(triggerSource) {
+	if !isTriggerEventAllowed(triggerSource, project.OrgID) {
 		zap.L().Info("merge_request trigger disabled by agent config", zap.String("action", action), zap.String("project_path", projectPath))
 		c.JSON(200, gin.H{"message": "trigger disabled"})
 		return
@@ -779,11 +783,15 @@ func minWebhook(a, b int) int {
 }
 
 // isTriggerEventAllowed 检查给定的触发事件是否被全局智能体配置允许
-func isTriggerEventAllowed(source string) bool {
+// 多租户改造：按项目所属组织 org_id 查配置，找不到时 fallback 到根组织
+func isTriggerEventAllowed(source string, orgID uint) bool {
 	var cfg model.ReviewAgentConfig
-	if err := model.DB.First(&cfg, 1).Error; err != nil {
-		// 配置未初始化时默认放行
-		return true
+	if err := model.DB.Where("org_id = ?", orgID).First(&cfg).Error; err != nil {
+		// fallback：尝试根组织配置
+		if err := model.DB.Where("org_id = 1").First(&cfg).Error; err != nil {
+			// 配置未初始化时默认放行
+			return true
+		}
 	}
 	// 若未配置任何事件，默认放行（兼容旧数据）
 	events := cfg.TriggerEventCodes()

@@ -147,6 +147,12 @@ func (h *TemplateHandler) Update(c *gin.Context) {
 	if v, ok := req["description"]; ok {
 		updates["description"] = v.(string)
 	}
+	// 多租户改造：super_admin 允许更新 org_id
+	if scope.IsSuperAdmin {
+		if v, ok := req["org_id"]; ok {
+			updates["org_id"] = uint(v.(float64))
+		}
+	}
 	if v, ok := req["prompt"]; ok {
 		updates["prompt"] = v.(string)
 	}

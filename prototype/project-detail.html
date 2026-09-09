@@ -1741,7 +1741,7 @@ let ruleTotalPages = 1;
             var s = stewards[i] || {};
             var scopeType = typeLabels[s.scope_type] || s.scope_type || '-';
             var scopeValue = (s.scope_value || '-').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-            var displayName = (s.display_name || s.gitlab_username || '-').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            var displayName = (s.display_name || s.username || s.gitlab_username || '-').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
             var gitlabUserRaw = s.gitlab_username || '-';
             var gitlabUser = gitlabUserRaw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
             // 本地用户虚拟标识处理

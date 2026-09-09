@@ -7,6 +7,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>任务列表 - CodeGuard</title>
         <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
     <script src="js/menu-config.js?v=9"></script>
     <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
@@ -125,6 +126,7 @@
             <div class="p-8 space-y-6">
                 <!-- 筛选区 -->
                 <div class="bg-white rounded-xl p-4 border flex items-center justify-end gap-4 flex-wrap">
+                    <select id="orgSelect" class="px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"></select>
                     <select id="projectFilter" class="px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
                         <option value="">所有项目</option>
                     </select>
@@ -416,6 +418,8 @@ const API_BASE = '/api/v1';
             const authorFilter = document.getElementById('authorFilter').value.trim();
             const mrFilter = document.getElementById('mrFilter').value.trim();
             const pendingIssuesFilter = document.getElementById('pendingIssuesFilter').checked;
+            const orgSel = document.getElementById('orgSelect');
+            const orgId = orgSel ? orgSel.value : '';
             
             let url = `/api/v1/tasks?page=${currentPage}&page_size=${pageSize}`;
             if (statusFilter) url += `&status=${statusFilter}`;
@@ -424,6 +428,7 @@ const API_BASE = '/api/v1';
             if (authorFilter) url += `&author=${encodeURIComponent(authorFilter)}`;
             if (mrFilter) url += `&mr_iid=${encodeURIComponent(mrFilter)}`;
             if (pendingIssuesFilter) url += `&has_pending_issues=true`;
+            if (orgId) url += `&org_id=${encodeURIComponent(orgId)}`;
 
             try {
                 const res = await apiFetch(url);
@@ -1987,6 +1992,14 @@ function renderTasks(tasks) {
             loadStats();
         }
 
+        loadOrgSelect('orgSelect');
+        const orgSel = document.getElementById('orgSelect');
+        if (orgSel) {
+            orgSel.addEventListener('change', () => {
+                currentPage = 1;
+                loadTasks();
+            });
+        }
         loadProjectFilter(); // 先加载项目列表到筛选下拉框
         loadTasks();
         loadStats();

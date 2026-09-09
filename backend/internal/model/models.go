@@ -555,6 +555,7 @@ type Token struct {
 
 type SMTPConfig struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
+	OrgID     uint      `gorm:"column:org_id;not null;default:1;index" json:"org_id"`
 	Host      string    `gorm:"size:255;not null" json:"host"`
 	Port      int       `gorm:"not null;default:587" json:"port"`
 	Username  string    `gorm:"size:255" json:"username"`

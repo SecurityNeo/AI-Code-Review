@@ -84,6 +84,15 @@
                     return res;
                 }
 
+                // 非 2xx 响应统一抛错，避免调用方静默失败
+                if (!res.ok) {
+                    const data = await res.clone().json().catch(() => ({}));
+                    const err = new Error(data.error || ('HTTP ' + res.status));
+                    err.status = res.status;
+                    err.data = data;
+                    throw err;
+                }
+
                 return res;
             } catch (err) {
                 clearTimeout(timeoutId);

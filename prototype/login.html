@@ -465,7 +465,15 @@
                 const data = await res.json();
                 if (res.ok && data.data && data.data.token) {
                     localStorage.setItem('auth_token', data.data.token);
-                    localStorage.setItem('user_info', JSON.stringify(data.data));
+                    // 拉取完整用户信息（包含 current_org_id / current_org_role），确保后续 getOrgOverrideHeaders 能正确推断 X-Org-Id
+                    const userRes = await fetch(`${API_BASE}/users/me`, { headers: { 'Authorization': 'Bearer ' + data.data.token } });
+                    if (userRes.ok) {
+                        const userData = await userRes.json();
+                        const merged = Object.assign({}, userData.data || {}, data.data);
+                        localStorage.setItem('user_info', JSON.stringify(merged));
+                    } else {
+                        localStorage.setItem('user_info', JSON.stringify(data.data));
+                    }
                     window.location.href = '/';
                 } else {
                     errorText.textContent = data.error || '登录失败';

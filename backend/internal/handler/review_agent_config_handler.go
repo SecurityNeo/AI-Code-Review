@@ -7,6 +7,7 @@ import (
 
 	"github.com/ai-optimizer/backend/internal/engine"
 	"github.com/ai-optimizer/backend/internal/middleware"
+	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -40,6 +41,18 @@ func (h *ReviewAgentConfigHandler) Get(c *gin.Context) {
 	// 运行依赖校验，让前端一进入配置页就能看到哪些卡片不满足依赖
 	_, violations := cfg.ValidateEnabledStages()
 
+	// 查询更新者名称（display_name > username）
+	updatedByName := ""
+	if cfg.UpdatedBy > 0 {
+		var u model.User
+		if err := model.DB.Where("id = ?", cfg.UpdatedBy).First(&u).Error; err == nil {
+			updatedByName = u.DisplayName
+			if updatedByName == "" {
+				updatedByName = u.Username
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{"data": map[string]interface{}{
 		"id":                cfg.ID,
 		"enabled_stages":    cfg.EnabledStageCodes(),
@@ -49,6 +62,7 @@ func (h *ReviewAgentConfigHandler) Get(c *gin.Context) {
 		"created_at":        cfg.CreatedAt,
 		"updated_at":        cfg.UpdatedAt,
 		"updated_by":        cfg.UpdatedBy,
+		"updated_by_name":   updatedByName,
 		"violations":        violations,
 	}})
 }

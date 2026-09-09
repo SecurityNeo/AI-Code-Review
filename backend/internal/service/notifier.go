@@ -197,7 +197,8 @@ func (s *NotifierService) NotifyAIReviewCompleted(scope *model.UserAuthScope, ta
 	// 查询开发人员的 IM 用户 ID（用于 @）
 	var mentionUserId string
 	var user model.User
-	if err := db.Where("gitlab_username = ? AND im_platform = ? AND enabled = ?", task.MRAuthor, "wecom", true).First(&user).Error; err == nil {
+	// users 表没有 org_id 列，使用裸 DB 查询（权限通过其他方式保证）
+	if err := model.DB.Where("gitlab_username = ? AND im_platform = ? AND enabled = ?", task.MRAuthor, "wecom", true).First(&user).Error; err == nil {
 		mentionUserId = user.IMUserID
 		zap.L().Info("notify ai review: found user",
 			zap.String("gitlab_username", task.MRAuthor),
@@ -233,6 +234,7 @@ func (s *NotifierService) NotifyAIReviewCompleted(scope *model.UserAuthScope, ta
 
 		// 记录 IM 投递日志
 		log := model.NotificationDeliveryLog{
+			OrgID:          task.OrgID,
 			NotifierID:     &notifier.ID,
 			TaskID:         &task.ID,
 			Channel:        "wecom",
@@ -241,7 +243,7 @@ func (s *NotifierService) NotifyAIReviewCompleted(scope *model.UserAuthScope, ta
 			Status:         status,
 			ErrorMsg:       errMsg,
 		}
-		if err := db.Create(&log).Error; err != nil {
+		if err := model.DBWithScope(scope).Create(&log).Error; err != nil {
 			zap.L().Error("notify ai review: failed to save delivery log",
 				zap.Uint("notifier_id", notifier.ID),
 				zap.Error(err))
@@ -268,12 +270,10 @@ func buildMessageFromRule(scope *model.UserAuthScope, trigger string, fallbackTe
 		zap.String("source", source),
 		zap.Int("template_len", len(templateStr)))
 
-	db := model.DBWithScope(scope)
-
 	// 查询开发人员展示名映射
 	developer := task.MRAuthor
 	var user model.User
-	if err := db.Where("gitlab_username = ? AND enabled = ?", task.MRAuthor, true).
+	if err := model.DB.Where("gitlab_username = ? AND enabled = ?", task.MRAuthor, true).
 		First(&user).Error; err == nil && user.DisplayName != "" {
 		developer = task.MRAuthor + "(" + user.DisplayName + ")"
 	}
@@ -281,7 +281,7 @@ func buildMessageFromRule(scope *model.UserAuthScope, trigger string, fallbackTe
 	// 获取 ReviewLog 的代码变更量
 	additions, deletions := 0, 0
 	var log model.MergeRequestReviewLog
-	if err := db.Where("url = ?", task.MRURL).Order("synced_at DESC").First(&log).Error; err == nil {
+	if err := model.DBWithScope(scope).Where("url = ?", task.MRURL).Order("synced_at DESC").First(&log).Error; err == nil {
 		additions = log.Additions
 		deletions = log.Deletions
 	}
@@ -296,7 +296,7 @@ func buildMessageFromRule(scope *model.UserAuthScope, trigger string, fallbackTe
 	// 查询项目默认负责人（用于 {{STEWARD_NAME}}），过滤已禁用用户
 	var stewardName string
 	var resp model.ProjectResponsibility
-	if err := db.Preload("User").Where("project_id = ? AND scope_type = 'default' AND scope_value = ''", task.ProjectID).
+	if err := model.DBWithScope(scope).Preload("User").Where("project_id = ? AND scope_type = 'default' AND scope_value = ''", task.ProjectID).
 		Order("priority ASC, created_at ASC").First(&resp).Error; err == nil && resp.UserID > 0 && resp.User.ID > 0 && resp.User.Enabled {
 		stewardName = resp.User.DisplayName
 		if stewardName == "" {

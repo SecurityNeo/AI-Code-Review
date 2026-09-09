@@ -824,9 +824,9 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 
 		// AI 评审智能体全局配置
 		agentCfgH := handler.NewReviewAgentConfigHandler()
-		api.GET("/review-agent-config", agentCfgH.Get)                                        // GET 任何人可读
-		api.GET("/review-agent-config/file-filter-defaults", agentCfgH.GetFileFilterDefaults) // GET 默认过滤规则
-		orgAdmin.PUT("/review-agent-config", agentCfgH.Save)                                 // PUT 仅 admin 可写
+		common.GET("/review-agent-config", agentCfgH.Get)
+		common.GET("/review-agent-config/file-filter-defaults", agentCfgH.GetFileFilterDefaults)
+		orgAdmin.PUT("/review-agent-config", agentCfgH.Save)
 
 		// Feature Flag / 组织管理 / 系统管理 已移至 sysAdmin 路由组
 	}

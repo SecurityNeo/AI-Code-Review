@@ -112,10 +112,18 @@ func (s *MRSyncService) SyncOpenedMRs(scope *model.UserAuthScope) {
 	// 缓存项目配置，避免重复查库
 	projectCache := make(map[string]*model.Project)
 
+	successCount, failCount := 0, 0
 	for i := range logs {
 		log := &logs[i]
 		project := s.getProjectFromCache(scope, log.ProjectName, log.OrgID, projectCache)
 		if project == nil || project.GitLabProjectID == 0 {
+			// 项目配置缺失，标记为已同步避免无限重试
+			now := time.Now()
+			log.SyncedAt = now
+			if err := db.Omit("org_id").Save(log).Error; err != nil {
+				zap.L().Error("mr sync: save log failed", zap.Uint("id", log.ID), zap.Error(err))
+			}
+			failCount++
 			continue
 		}
 
@@ -125,12 +133,25 @@ func (s *MRSyncService) SyncOpenedMRs(scope *model.UserAuthScope) {
 		}
 		if token == "" {
 			zap.L().Warn("mr sync: no token available", zap.String("project", log.ProjectName))
+			now := time.Now()
+			log.SyncedAt = now
+			if err := db.Omit("org_id").Save(log).Error; err != nil {
+				zap.L().Error("mr sync: save log failed", zap.Uint("id", log.ID), zap.Error(err))
+			}
+			failCount++
 			continue
 		}
 
 		// 调用 GitLab API 刷新详情
 		if err := gitlab.FetchMRDetails(log, project.GitLabProjectID, token); err != nil {
 			zap.L().Warn("mr sync: fetch details failed", zap.String("url", log.URL), zap.Error(err))
+			// 标记为已同步，避免无限重试同一条永远失败的 MR
+			now := time.Now()
+			log.SyncedAt = now
+			if err := db.Omit("org_id").Save(log).Error; err != nil {
+				zap.L().Error("mr sync: save log failed", zap.Uint("id", log.ID), zap.Error(err))
+			}
+			failCount++
 			continue
 		}
 
@@ -139,8 +160,12 @@ func (s *MRSyncService) SyncOpenedMRs(scope *model.UserAuthScope) {
 		log.SyncedAt = now
 		if err := db.Omit("org_id").Save(log).Error; err != nil { // ⚠️ 多租户改造：Omit org_id 防止零值覆盖
 			zap.L().Error("mr sync: save log failed", zap.Uint("id", log.ID), zap.Error(err))
+			failCount++
+		} else {
+			successCount++
 		}
 	}
+	zap.L().Debug("mr sync completed", zap.Int("total", len(logs)), zap.Int("success", successCount), zap.Int("failed", failCount))
 }
 
 func (s *MRSyncService) getProjectFromCache(scope *model.UserAuthScope, projectName string, orgID uint, cache map[string]*model.Project) *model.Project {

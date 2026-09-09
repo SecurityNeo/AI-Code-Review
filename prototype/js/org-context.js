@@ -32,19 +32,23 @@
 
             const payload = await res.json();
             const data = payload.data || {};
+
+            // 无论后端是否返回 organizations 数组，始终同步当前组织上下文（防止 localStorage 残留旧登录态的 role）
+            if (data.current_org_id) {
+                window.setCurrentOrg({
+                    id:         data.current_org_id,
+                    name:       data.current_org_name || '',
+                    role:       data.current_org_role,
+                    is_default: true
+                });
+            }
+
             if (!data.organizations || !Array.isArray(data.organizations)) {
                 return [];
             }
 
             // 缓存组织列表
             localStorage.setItem(ORG_LIST_KEY, JSON.stringify(data.organizations));
-
-            // 如果没设置当前组织，使用 default_org_id
-            const current = window.getCurrentOrg();
-            if (!current && data.organizations.length > 0) {
-                const defaultOrg = data.organizations.find(o => o.is_default) || data.organizations[0];
-                window.setCurrentOrg(defaultOrg);
-            }
 
             return data.organizations;
         } catch (e) {

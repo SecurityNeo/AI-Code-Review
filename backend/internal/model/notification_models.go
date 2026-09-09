@@ -26,6 +26,7 @@ type Notification struct {
 // NotificationDeliveryLog IM 投递日志
 type NotificationDeliveryLog struct {
 	ID             uint      `gorm:"primaryKey" json:"id"`
+	OrgID          uint      `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
 	NotifierID     *uint     `json:"notifier_id"`
 	TaskID         *uint     `gorm:"index" json:"task_id"`
 	Channel        string    `gorm:"size:32;not null;default:'wecom'" json:"channel"` // wecom / dingtalk / lark

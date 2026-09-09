@@ -45,10 +45,9 @@ const MENU_CONFIG = [
             { id: 'tasks',        name: '评审任务列表', href: 'tasks.html',        icon: 'fa-tasks',             role: ['developer'] },
             { id: 'review-rules', name: '评审规则库', href: 'review-rules.html', icon: 'fa-shield-halved',  role: ['org_admin'] },
             { id: 'vulnerability-db', name: '漏洞数据库', href: 'vulnerability-db.html', icon: 'fa-bug', role: ['developer'] },
-            { id: 'pools',        name: '智能体资源池', href: 'pools.html',        icon: 'fa-server',            role: ['super_admin'] },
             { id: 'models',       name: '大模型管理', href: 'models.html',       icon: 'fa-microchip',         role: ['super_admin'] },
-            { id: 'agent-config', name: '智能体配置', href: 'agent-config.html', icon: 'fa-sliders',           role: ['super_admin'] },
-            { id: 'incubator',    name: '规则孵化台', href: 'incubator.html',    icon: 'fa-flask',             role: ['super_admin'] },
+            { id: 'agent-config', name: '智能体配置', href: 'agent-config.html', icon: 'fa-sliders',           role: ['org_admin'] },
+            { id: 'incubator',    name: '规则孵化台', href: 'incubator.html',    icon: 'fa-flask',             role: ['org_admin'] },
         ]
     },
 
@@ -92,8 +91,6 @@ const MENU_CONFIG = [
         children: [
             { id: 'settings-config', name: '系统配置',     href: 'settings.html?tab=config',         icon: 'fa-sliders' },
             { id: 'settings-storage', name: '对象存储',     href: 'storage-config.html',              icon: 'fa-database' },
-            { id: 'settings-ai',     name: 'AI 对话模板',  href: 'settings.html?tab=aitemplate',     icon: 'fa-robot' },
-            { id: 'settings-review', name: '代码审查模板', href: 'settings.html?tab=reviewtemplate', icon: 'fa-code' },
             { id: 'settings-org',    name: '组织管理',     href: 'pages/org-admin.html',             icon: 'fa-building' },
             { id: 'settings-sso',  name: '单点登录', href: 'pages/sso-config.html',            icon: 'fa-key' },
             { id: 'settings-users',  name: '用户管理',     href: 'settings.html?tab=users',          icon: 'fa-user-cog' },

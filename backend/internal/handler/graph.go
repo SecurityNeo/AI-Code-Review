@@ -498,14 +498,12 @@ func (h *GraphHandler) HandleBuildHistory(c *gin.Context) {
 		pageSize = 20
 	}
 
-	db := model.DBWithScope(scope)
-
 	var total int64
-	db.Model(&model.GraphScanTask{}).Where("project_id = ?", projectID).Count(&total)
+	model.DB.Model(&model.GraphScanTask{}).Where("project_id = ?", projectID).Count(&total)
 
 	var tasks []model.GraphScanTask
 	offset := (page - 1) * pageSize
-	if err := db.Where("project_id = ?", projectID).
+	if err := model.DB.Where("project_id = ?", projectID).
 		Order("created_at DESC").
 		Limit(pageSize).Offset(offset).
 		Find(&tasks).Error; err != nil {

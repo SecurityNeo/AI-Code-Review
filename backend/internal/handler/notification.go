@@ -833,17 +833,11 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 
 	baseline := getNotificationBaseline()
 
-	// 多租户改造：建立统一过滤的db实例（用 Session 隔离防止 Statement 污染）
-	orgDB := model.DB.Session(&gorm.Session{})
-	if !scope.IsSuperAdmin {
-		orgDB = model.DB.Scopes(model.OrgScope(scope))
-	}
-
 	var todayNew, totalPending, totalPendingBefore, overdue, overdueBefore int64
 	todayStart := time.Now().Truncate(24 * time.Hour)
-	orgDB.Model(&model.ReviewIssue{}).
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND created_at >= ?", todayStart).Count(&todayNew)
-	q := orgDB.Model(&model.ReviewIssue{}).
+	q := model.DBWithScope(scope).Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND status IN (?)", []string{model.IssueStatusPending, model.IssueStatusPendingInherited})
 	q.Count(&totalPending)
 	if !baseline.IsZero() {
@@ -853,7 +847,7 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 
 	// overdue: pending > 120 work hours（简化用 5 天）
 	overdueSince := time.Now().AddDate(0, 0, -5)
-	qo := orgDB.Model(&model.ReviewIssue{}).
+	qo := model.DBWithScope(scope).Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND status IN (?) AND original_created_at < ?", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, overdueSince)
 	qo.Count(&overdue)
 	if !baseline.IsZero() {
@@ -863,20 +857,20 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 
 	// 归档统计
 	var todayArchived, totalArchived, todayEscalated int64
-	orgDB.Model(&model.ReviewIssue{}).
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND status = ? AND updated_at >= ?", model.IssueStatusAutoArchived, todayStart).Count(&todayArchived)
-	orgDB.Model(&model.ReviewIssue{}).
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND status = ?", model.IssueStatusAutoArchived).Count(&totalArchived)
 	// 今日升级：escalation_level 今日发生变化（排除已归档）
-	orgDB.Model(&model.ReviewIssue{}).
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND escalation_level > 0 AND status != ? AND updated_at >= ?", model.IssueStatusAutoArchived, todayStart).Count(&todayEscalated)
 
 	// 7 天闭环率
 	sevenDaysAgo := time.Now().AddDate(0, 0, -7)
 	var weekCreated, weekClosed int64
-	orgDB.Model(&model.ReviewIssue{}).
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND created_at >= ?", sevenDaysAgo).Count(&weekCreated)
-	orgDB.Model(&model.ReviewIssue{}).
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND resolved_at >= ? AND status IN (?)", sevenDaysAgo,
 			[]string{model.IssueStatusResolved, model.IssueStatusFalsePositive, model.IssueStatusIgnored}).Count(&weekClosed)
 	closeRate := float64(0)
@@ -921,9 +915,9 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 
 	// IM 投递统计（今日）
 	var imTotal, imSuccess int64
-	orgDB.Model(&model.NotificationDeliveryLog{}).
+	model.DBWithScope(scope).Model(&model.NotificationDeliveryLog{}).
 		Where("created_at >= ?", todayStart).Count(&imTotal)
-	orgDB.Model(&model.NotificationDeliveryLog{}).
+	model.DBWithScope(scope).Model(&model.NotificationDeliveryLog{}).
 		Where("status = ? AND created_at >= ?", "success", todayStart).Count(&imSuccess)
 
 	// 积压项目告警
@@ -980,12 +974,12 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 
 	// Issue 状态分布
 	var distPending, distPendingInherited, distResolved, distFalsePositive, distIgnored, distAutoFiltered int64
-	orgDB.Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusPending).Count(&distPending)
-	orgDB.Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusPendingInherited).Count(&distPendingInherited)
-	orgDB.Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusResolved).Count(&distResolved)
-	orgDB.Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusFalsePositive).Count(&distFalsePositive)
-	orgDB.Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusIgnored).Count(&distIgnored)
-	orgDB.Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusAutoFiltered).Count(&distAutoFiltered)
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusPending).Count(&distPending)
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusPendingInherited).Count(&distPendingInherited)
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusResolved).Count(&distResolved)
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusFalsePositive).Count(&distFalsePositive)
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusIgnored).Count(&distIgnored)
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusAutoFiltered).Count(&distAutoFiltered)
 
 	// 待处理最多的项目 Top 10
 	type pendingProj struct {
@@ -1248,7 +1242,7 @@ func (h *NotificationHandler) ListHolidays(c *gin.Context) {
 	}
 	yearStr := c.Query("year")
 	holidayType := c.Query("type")
-	db := model.DB.Model(&model.Holiday{}).Scopes(model.OrgScope(scope))
+	db := model.DB.Model(&model.Holiday{})
 	if yearStr != "" {
 		db = db.Where("year = ? OR year = 0", yearStr)
 	}
@@ -1258,7 +1252,7 @@ func (h *NotificationHandler) ListHolidays(c *gin.Context) {
 	var holidays []model.Holiday
 	db.Order("date DESC").Find(&holidays)
 
-	// 批量填充组织名称
+	// 批量填充组织名称（节假日全局化过渡：统一展示为全局）
 	orgIDs := make([]uint, 0, len(holidays))
 	for _, h := range holidays {
 		orgIDs = append(orgIDs, h.OrgID)
@@ -1306,11 +1300,7 @@ func (h *NotificationHandler) CreateHoliday(c *gin.Context) {
 		year = 0
 	}
 
-	orgID := scope.CurrentOrgID
-	if req.OrgID > 0 && scope.IsSuperAdmin {
-		orgID = req.OrgID
-	}
-
+	// 节假日全局化：统一使用根组织 org_id=1，前台忽略组织隔离
 	holiday := model.Holiday{
 		Date:        req.Date,
 		Name:        req.Name,
@@ -1318,7 +1308,7 @@ func (h *NotificationHandler) CreateHoliday(c *gin.Context) {
 		IsRecurring: req.IsRecurring,
 		Year:        year,
 		IsWorkday:   req.IsWorkday,
-		OrgID:       orgID,
+		OrgID:       1,
 	}
 	if err := model.DB.Create(&holiday).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -1335,7 +1325,7 @@ func (h *NotificationHandler) UpdateHoliday(c *gin.Context) {
 	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 	var holiday model.Holiday
-	if err := model.DB.Scopes(model.OrgScope(scope)).First(&holiday, id).Error; err != nil {
+	if err := model.DB.First(&holiday, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
@@ -1345,16 +1335,12 @@ func (h *NotificationHandler) UpdateHoliday(c *gin.Context) {
 		Type        *string `json:"type"`
 		IsRecurring *bool   `json:"is_recurring"`
 		IsWorkday   *bool   `json:"is_workday"`
-		OrgID       *uint   `json:"org_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	updates := make(map[string]interface{})
-	if req.OrgID != nil {
-		updates["org_id"] = *req.OrgID
-	}
 	if req.Date != nil {
 		if _, err := time.Parse("2006-01-02", *req.Date); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid date format, expected YYYY-MM-DD"})
@@ -1383,23 +1369,9 @@ func (h *NotificationHandler) UpdateHoliday(c *gin.Context) {
 	if req.IsWorkday != nil {
 		updates["is_workday"] = *req.IsWorkday
 	}
-	// 1. 非 super_admin 禁止修改 org_id
-	if !scope.IsSuperAdmin {
-		delete(updates, "org_id")
-	}
+	// 节假日全局化：禁止修改 org_id
+	delete(updates, "org_id")
 
-	// 2. super_admin 可以修改 org_id：用 UpdateColumn 绕过 GORM hook
-	if scope.IsSuperAdmin {
-		if orgID, ok := extractOrgIDFromMap(updates); ok {
-			zap.L().Info("holiday update: changing org_id", zap.Uint64("id", id), zap.Uint("new_org_id", orgID))
-			if err := model.DB.Model(&model.Holiday{}).Where("id = ?", id).UpdateColumn("org_id", orgID).Error; err != nil {
-				zap.L().Error("holiday update: org_id update failed", zap.Uint64("id", id), zap.Uint("org_id", orgID), zap.Error(err))
-				c.JSON(500, gin.H{"error": "组织归属更新失败: " + err.Error()})
-				return
-			}
-			delete(updates, "org_id")
-		}
-	}
 	if err := model.DB.Model(&holiday).Updates(updates).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -1414,7 +1386,7 @@ func (h *NotificationHandler) DeleteHoliday(c *gin.Context) {
 		return
 	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err := model.DB.Scopes(model.OrgScope(scope)).Delete(&model.Holiday{}, id).Error; err != nil {
+	if err := model.DB.Delete(&model.Holiday{}, id).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -1434,8 +1406,7 @@ func (h *NotificationHandler) BatchDeleteHolidays(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	db := model.DB.Scopes(model.OrgScope(scope))
-	if err := db.Delete(&model.Holiday{}, req.IDs).Error; err != nil {
+	if err := model.DB.Delete(&model.Holiday{}, req.IDs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -1550,7 +1521,7 @@ func (h *NotificationHandler) SyncHolidaysFromAPI(c *gin.Context) {
 		return
 	}
 
-	yearInt, _ := strconv.Atoi(year)
+	 yearInt, _ := strconv.Atoi(year)
 	var toCreate []model.Holiday
 	for _, item := range data.Days {
 		var existing model.Holiday
@@ -1571,6 +1542,7 @@ func (h *NotificationHandler) SyncHolidaysFromAPI(c *gin.Context) {
 			IsRecurring: false,
 			Year:        yearInt,
 			IsWorkday:   isWorkday,
+			OrgID:       1,
 		})
 	}
 	count := len(toCreate)

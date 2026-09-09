@@ -144,7 +144,7 @@
         html += `</nav>`;
 
         // ===== 用户区 =====
-        // 布局：第一行 用户名（角色），第二行 组织名
+        // 设计：参考 Vercel / Linear —— 用户名单行突出，角色+组织合并弱化到第二行
         const displayName = userInfo.display_name || userInfo.username || '用户';
         const roleLabels = {
             super_admin: '系统管理员',
@@ -153,21 +153,25 @@
         };
         const roleLabel = roleLabels[userRole] || userRole;
         const orgName = userInfo.current_org_name || '';
-        // 第一行：用户名（角色），整体单行截断
-        const userLine = escapeHtml(displayName) + '<span style="opacity:0.55;margin-left:4px;font-size:12px;font-weight:400;">（' + escapeHtml(roleLabel) + '）</span>';
-        // 第二行：组织名，超长截断
-        const orgLine = orgName
-            ? `<span style="display:inline-block;vertical-align:bottom;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(orgName)}">${escapeHtml(orgName)}</span>`
-            : '<span style="opacity:0.4;">未分配组织</span>';
+        // 角色小图标（无背景色，纯图标+文字，视觉重量极轻）
+        const roleIcon = userRole === 'super_admin' ? '<i class="fas fa-shield-alt" style="font-size:9px;opacity:0.7;"></i>'
+                        : (userRole === 'org_admin' ? '<i class="fas fa-user-shield" style="font-size:9px;opacity:0.7;"></i>'
+                        : '<i class="fas fa-code" style="font-size:9px;opacity:0.7;"></i>');
+        // 第一行：只放用户名，字号放大加粗，白色高亮
+        const userLine = `<span style="font-weight:600;font-size:15px;letter-spacing:-0.2px;">${escapeHtml(displayName)}</span>`;
+        // 第二行：角色图标+文字 · 组织名，统一小号灰色，超长截断
+        const metaLine = orgName
+            ? `<span style="display:inline-flex;align-items:center;gap:4px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(roleLabel)} · ${escapeHtml(orgName)}">${roleIcon}<span>${escapeHtml(roleLabel)}</span><span style="opacity:0.4;margin:0 3px;">·</span><i class="fas fa-building" style="font-size:9px;opacity:0.4;"></i><span>${escapeHtml(orgName)}</span></span>`
+            : `<span style="opacity:0.4;">${roleIcon} ${escapeHtml(roleLabel)} · 未分配组织</span>`;
         html += `
         <div style="padding: 12px; border-top: 1px solid var(--cg-sidebar-border);">
             <div onclick="toggleUserMenu()" style="display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 8px; cursor: pointer; transition: background var(--cg-transition);" onmouseover="this.style.background='var(--cg-sidebar-item-hover)'" onmouseout="this.style.background='transparent'">
-                <div style="width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #4f46e5, #06b6d4); display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; font-size: 13px; flex-shrink:0;">
+                <div style="width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #4f46e5, #06b6d4); display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; font-size: 14px; flex-shrink:0;">
                     ${escapeHtml(displayName.charAt(0).toUpperCase())}
                 </div>
                 <div style="flex: 1; min-width: 0;">
-                    <div id="currentUser" style="font-size: 13px; font-weight: 500; color: var(--cg-sidebar-text-active); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${userLine}</div>
-                    <div id="currentOrg" style="font-size: 11px; color: var(--cg-text-tertiary); margin-top:1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${orgLine}</div>
+                    <div id="currentUser" style="color: var(--cg-sidebar-text-active); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${userLine}</div>
+                    <div id="currentOrg" style="font-size: 11px; color: var(--cg-text-tertiary); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${metaLine}</div>
                 </div>
                 <i class="fas fa-ellipsis-vertical" style="font-size: 12px; color: var(--cg-text-tertiary); flex-shrink: 0;"></i>
             </div>
@@ -204,7 +208,8 @@
             // 查找消息中心菜单项（href 为 notifications.html）
             const sidebar = document.getElementById('sidebar');
             if (!sidebar) return;
-            const links = sidebar.querySelectorAll('a[href="notifications.html"]');
+            // normalizeHref 会将 notifications.html 转为 /notifications.html，所以 match 后者
+            const links = sidebar.querySelectorAll('a[href="/notifications.html"]');
             links.forEach(link => {
                 let badge = link.querySelector('.notif-badge');
                 if (!badge) {

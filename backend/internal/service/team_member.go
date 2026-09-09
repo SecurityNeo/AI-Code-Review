@@ -186,9 +186,10 @@ func (s *TeamMemberService) ListResponsibilitiesByMember(scope *model.UserAuthSc
 
 // ListResponsibilitiesByProject 列出某项目的所有职责分配（过滤已禁用用户）
 func (s *TeamMemberService) ListResponsibilitiesByProject(scope *model.UserAuthScope, projectID uint) ([]model.ProjectResponsibility, error) {
-	db := model.DBWithScope(scope)
+	// 不使用 DBWithScope：职责的 org_id 可能因历史原因与项目 org_id 不一致。
+	// 权限由调用方（Handler）通过项目可见性校验前置保证。
 	var list []model.ProjectResponsibility
-	if err := db.Preload("User").Preload("Project").
+	if err := model.DB.Preload("User").Preload("Member").Preload("Project").
 		Where("project_id = ?", projectID).
 		Order("scope_type, priority, created_at").
 		Find(&list).Error; err != nil {
@@ -246,7 +247,14 @@ func (s *TeamMemberService) AddResponsibility(scope *model.UserAuthScope, member
 		return nil, err
 	}
 
+	// 查询项目获取 org_id
+	var project model.Project
+	if err := model.DB.Select("org_id").First(&project, projectID).Error; err != nil {
+		return nil, fmt.Errorf("project not found: %w", err)
+	}
+
 	resp := model.ProjectResponsibility{
+		OrgID:          project.OrgID,
 		MemberID:       &memberID,
 		UserID:         linkedUser.ID,
 		ProjectID:      projectID,
@@ -367,9 +375,12 @@ func (s *TeamMemberService) FindStewards(scope *model.UserAuthScope, projectID u
 func filterActiveResponsibilities(list []model.ProjectResponsibility) []model.ProjectResponsibility {
 	var active []model.ProjectResponsibility
 	for _, r := range list {
-		if r.User.Enabled {
-			active = append(active, r)
+		// 若 user_id 有效且 User 关联已加载（ID > 0）且用户被禁用，则过滤掉；
+		// 若 User 关联未加载（ID == 0），不排除，避免 Preload 失败导致数据丢失
+		if r.UserID > 0 && r.User.ID > 0 && !r.User.Enabled {
+			continue
 		}
+		active = append(active, r)
 	}
 	return active
 }
@@ -478,7 +489,14 @@ func (s *TeamMemberService) AddResponsibilityByUser(scope *model.UserAuthScope, 
 		return nil, err
 	}
 
+	// 查询项目获取 org_id
+	var project model.Project
+	if err := model.DB.Select("org_id").First(&project, projectID).Error; err != nil {
+		return nil, fmt.Errorf("project not found: %w", err)
+	}
+
 	resp := model.ProjectResponsibility{
+		OrgID:          project.OrgID,
 		UserID:         userID,
 		ProjectID:      projectID,
 		ScopeType:      scopeType,

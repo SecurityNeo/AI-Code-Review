@@ -46,14 +46,18 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 	if !scope.IsSuperAdmin {
 		queryToday = queryToday.Scopes(model.OrgScope(scope))
 	}
-	queryToday = model.FilterByUser(queryToday, user, "mr_author")
+	if scope.CurrentOrgRole == "developer" && user.GitlabUsername != "" {
+		queryToday = queryToday.Where("mr_author = ?", user.GitlabUsername)
+	}
 	queryToday.Count(&todayTasks)
 
 	queryRunning := model.DB.Model(&model.Task{}).Where("status = ?", model.TaskRunning)
 	if !scope.IsSuperAdmin {
 		queryRunning = queryRunning.Scopes(model.OrgScope(scope))
 	}
-	queryRunning = model.FilterByUser(queryRunning, user, "mr_author")
+	if scope.CurrentOrgRole == "developer" && user.GitlabUsername != "" {
+		queryRunning = queryRunning.Where("mr_author = ?", user.GitlabUsername)
+	}
 	queryRunning.Count(&runningTasks)
 
 	yesterday := today.Add(-24 * time.Hour)
@@ -61,7 +65,9 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 	if !scope.IsSuperAdmin {
 		queryFailed = queryFailed.Scopes(model.OrgScope(scope))
 	}
-	queryFailed = model.FilterByUser(queryFailed, user, "mr_author")
+	if scope.CurrentOrgRole == "developer" && user.GitlabUsername != "" {
+		queryFailed = queryFailed.Where("mr_author = ?", user.GitlabUsername)
+	}
 	queryFailed.Count(&failedTasks24h)
 
 	dbPools := model.DB.Model(&model.ResourcePool{}).Where("status = ?", "active")
@@ -109,7 +115,9 @@ func (h *DashboardHandler) GetTrends(c *gin.Context) {
 		if !scope.IsSuperAdmin {
 			qSuccess = qSuccess.Scopes(model.OrgScope(scope))
 		}
-		qSuccess = model.FilterByUser(qSuccess, user, "mr_author")
+		if scope.CurrentOrgRole == "developer" && user.GitlabUsername != "" {
+			qSuccess = qSuccess.Where("mr_author = ?", user.GitlabUsername)
+		}
 		qSuccess.Count(&successCount)
 
 		qFailed := model.DB.Model(&model.Task{}).
@@ -117,7 +125,9 @@ func (h *DashboardHandler) GetTrends(c *gin.Context) {
 		if !scope.IsSuperAdmin {
 			qFailed = qFailed.Scopes(model.OrgScope(scope))
 		}
-		qFailed = model.FilterByUser(qFailed, user, "mr_author")
+		if scope.CurrentOrgRole == "developer" && user.GitlabUsername != "" {
+			qFailed = qFailed.Where("mr_author = ?", user.GitlabUsername)
+		}
 		qFailed.Count(&failedCount)
 
 		success[6-i] = int(successCount)
@@ -241,7 +251,9 @@ func (h *DashboardHandler) GetRecentFailures(c *gin.Context) {
 		Where("status = ?", model.TaskFailed).
 		Order("updated_at DESC").
 		Limit(10)
-	query = model.FilterByUser(query, user, "mr_author")
+	if scope.CurrentOrgRole == "developer" && user.GitlabUsername != "" {
+		query = query.Where("mr_author = ?", user.GitlabUsername)
+	}
 	err := query.Find(&tasks).Error
 
 	if err != nil {
@@ -308,7 +320,9 @@ func (h *DashboardHandler) GetTaskDistribution(c *gin.Context) {
 		Group("tasks.project_id").
 		Order("count DESC").
 		Limit(6)
-	query = model.FilterByUser(query, user, "mr_author")
+	if scope.CurrentOrgRole == "developer" && user.GitlabUsername != "" {
+		query = query.Where("mr_author = ?", user.GitlabUsername)
+	}
 	query.Scan(&counts)
 
 	labels := make([]string, len(counts))
@@ -326,7 +340,9 @@ func (h *DashboardHandler) GetTaskDistribution(c *gin.Context) {
 	// 如果不足6个，添加"其他"
 	var otherCount int64
 	otherQuery := model.DB.Model(&model.Task{}).Scopes(model.OrgScope(scope))
-	otherQuery = model.FilterByUser(otherQuery, user, "mr_author")
+	if scope.CurrentOrgRole == "developer" && user.GitlabUsername != "" {
+		otherQuery = otherQuery.Where("mr_author = ?", user.GitlabUsername)
+	}
 	otherQuery.Count(&otherCount)
 
 	sum := int64(0)

@@ -320,7 +320,7 @@ func (s *EscalationService) flushAlerts() {
 // 分页处理，避免 OOM
 func (s *EscalationService) RunDailyEscalation(scope *model.UserAuthScope) {
 	now := time.Now()
-	zap.L().Info("RunDailyEscalation started", zap.Time("now", now), zap.Uint("org_id", scope.CurrentOrgID))
+	zap.L().Debug("RunDailyEscalation started", zap.Time("now", now), zap.Uint("org_id", scope.CurrentOrgID))
 	defer func() {
 		if r := recover(); r != nil {
 			zap.L().Error("RunDailyEscalation panic recovered", zap.Any("recover", r))
@@ -329,7 +329,7 @@ func (s *EscalationService) RunDailyEscalation(scope *model.UserAuthScope) {
 
 	if scope != nil && scope.CurrentOrgID > 0 {
 		s.runEscalationForOrg(scope.CurrentOrgID, now)
-		zap.L().Info("RunDailyEscalation completed for org", zap.Uint("org_id", scope.CurrentOrgID))
+		zap.L().Debug("RunDailyEscalation completed for org", zap.Uint("org_id", scope.CurrentOrgID))
 		return
 	}
 
@@ -344,7 +344,7 @@ func (s *EscalationService) RunDailyEscalation(scope *model.UserAuthScope) {
 		s.runEscalationForOrg(org.ID, now)
 	}
 
-	zap.L().Info("RunDailyEscalation completed", zap.Int("org_count", len(orgs)))
+		zap.L().Debug("RunDailyEscalation completed", zap.Int("org_count", len(orgs)))
 }
 
 // runEscalationForOrg 为指定组织运行升级检查
@@ -608,8 +608,16 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 			}
 
 		case EscalationLevel240hAdmin:
+			// 多租户改造：users 表没有 org_id，通过 org_users 查询管理员
+			var adminUserIDs []uint
+			model.DB.Model(&model.OrgUser{}).
+				Select("user_id").
+				Where("org_id = ? AND role IN (?)", project.OrgID, []string{"org_admin", "super_admin"}).
+				Pluck("user_id", &adminUserIDs)
 			var admins []model.User
-			model.DB.Where("org_id = ? AND role = ?", project.OrgID, model.RoleAdmin).Find(&admins)
+			if len(adminUserIDs) > 0 {
+				model.DB.Where("id IN ?", adminUserIDs).Find(&admins)
+			}
 			dur := formatDuration(stage.ThresholdHours)
 			for _, admin := range admins {
 				s.collectAlert(admin.ID, project.OrgID, level, model.NotificationTypeIssueEscalation,
@@ -654,7 +662,9 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 						issue.ID, dur, project.Name, task.MRTitle))
 			}
 			var admins []model.User
-			model.DB.Where("org_id = ? AND role = ?", project.OrgID, model.RoleAdmin).Find(&admins)
+			model.DB.Joins("JOIN org_users ON users.id = org_users.user_id").
+				Where("org_users.org_id = ? AND org_users.role IN ? AND org_users.status = 'active' AND users.enabled = ?", project.OrgID, []string{"super_admin", "org_admin"}, true).
+				Find(&admins)
 			for _, admin := range admins {
 				s.collectAlert(admin.ID, project.OrgID, level, model.NotificationTypeAutoArchived,
 					"【全局通知】Issue 自动归档",
@@ -800,7 +810,9 @@ func (s *EscalationService) checkBatchAlertsForOrg(orgID uint) {
 		}
 		// 通知管理员
 		var admins []model.User
-		model.DB.Where("default_org_id = ? AND role = ?", orgID, model.RoleAdmin).Find(&admins)
+		model.DB.Joins("JOIN org_users ON users.id = org_users.user_id").
+			Where("org_users.org_id = ? AND org_users.role IN ? AND org_users.status = 'active' AND users.enabled = ?", orgID, []string{"super_admin", "org_admin"}, true).
+			Find(&admins)
 		for _, admin := range admins {
 			s.notifSvc.SendInbox(orgID, admin.ID, model.NotificationTypeBatchAlert,
 				fmt.Sprintf("【全局告警】项目 %s 积压 %d 条 Issue", project.Name, r.PendingCount),
@@ -1116,7 +1128,9 @@ func (s *EscalationService) checkDeliveryFailuresForOrg(orgID uint) {
 		return
 	}
 	var admins []model.User
-	model.DB.Where("org_id = ? AND role = ?", orgID, model.RoleAdmin).Find(&admins)
+	model.DB.Joins("JOIN org_users ON users.id = org_users.user_id").
+		Where("org_users.org_id = ? AND org_users.role IN ? AND org_users.status = 'active' AND users.enabled = ?", orgID, []string{"super_admin", "org_admin"}, true).
+		Find(&admins)
 	for _, admin := range admins {
 		s.notifSvc.SendInbox(orgID, admin.ID, model.NotificationTypeBatchAlert,
 			fmt.Sprintf("【系统告警】今日 IM 投递失败 %d 次", failedCount),

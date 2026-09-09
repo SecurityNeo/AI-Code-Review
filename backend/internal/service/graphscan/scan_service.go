@@ -97,6 +97,11 @@ func (s *ScanService) TriggerScan(scope *model.UserAuthScope, projectID uint64, 
 		Branch:    branch,
 		ScanType:  "full",
 	}
+	// 注入正确的 org_id：从项目中查询
+	var proj model.Project
+	if err := model.DB.First(&proj, projectID).Error; err == nil {
+		task.OrgID = proj.OrgID
+	}
 	for _, opt := range opts {
 		opt(task)
 	}
@@ -129,11 +134,11 @@ func (s *ScanService) runScan(scope *model.UserAuthScope, ctx context.Context, t
 	}
 
 	now := time.Now()
-	db.Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
+	model.DBWithScope(scope).Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
 		"status":     "running",
 		"started_at": now,
 	})
-	db.Model(&model.Project{}).Where("id = ?", projectID).Update("graph_scan_status", "running")
+	model.DBWithScope(scope).Model(&model.Project{}).Where("id = ?", projectID).Update("graph_scan_status", "running")
 
 	var project model.Project
 	if err := db.First(&project, projectID).Error; err != nil {
@@ -306,7 +311,7 @@ func (s *ScanService) runScan(scope *model.UserAuthScope, ctx context.Context, t
 		b, _ := json.Marshal(graphResult.Frameworks)
 		frameworksJSON = string(b)
 	}
-	db.Model(&model.Project{}).Where("id = ?", projectID).Updates(map[string]interface{}{
+	model.DBWithScope(scope).Model(&model.Project{}).Where("id = ?", projectID).Updates(map[string]interface{}{
 		"graph_scan_status":    "completed",
 		"graph_built_at":       completedAt,
 		"graph_node_count":     graphResult.NodeCount,
@@ -318,7 +323,7 @@ func (s *ScanService) runScan(scope *model.UserAuthScope, ctx context.Context, t
 	})
 
 	// 完成任务
-	db.Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
+	model.DBWithScope(scope).Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
 		"status":         "completed",
 		"node_count":     graphResult.NodeCount,
 		"relation_count": graphResult.RelCount,
@@ -329,28 +334,26 @@ func (s *ScanService) runScan(scope *model.UserAuthScope, ctx context.Context, t
 }
 
 func (s *ScanService) failTask(scope *model.UserAuthScope, taskID uint64, projectID uint64, message string) {
-	db := model.DBWithScope(scope)
 	now := time.Now()
-	db.Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
+	model.DBWithScope(scope).Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
 		"status":        "failed",
 		"error_message": message,
 		"completed_at":  now,
 	})
-	db.Model(&model.Project{}).Where("id = ?", projectID).Updates(map[string]interface{}{
+	model.DBWithScope(scope).Model(&model.Project{}).Where("id = ?", projectID).Updates(map[string]interface{}{
 		"graph_scan_status": "failed",
 		"graph_scan_error":  message,
 	})
 }
 
 func (s *ScanService) cancelTask(scope *model.UserAuthScope, taskID uint64, projectID uint64, message string) {
-	db := model.DBWithScope(scope)
 	now := time.Now()
-	db.Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
+	model.DBWithScope(scope).Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
 		"status":        "cancelled",
 		"error_message": message,
 		"completed_at":  now,
 	})
-	db.Model(&model.Project{}).Where("id = ? AND graph_scan_status = ?", projectID, "running").Updates(map[string]interface{}{
+	model.DBWithScope(scope).Model(&model.Project{}).Where("id = ? AND graph_scan_status = ?", projectID, "running").Updates(map[string]interface{}{
 		"graph_scan_status": "none",
 		"graph_scan_error":  message,
 	})

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ai-optimizer/backend/internal/model"
 )
@@ -129,7 +130,6 @@ func (s *ReviewAgentConfigService) Save(
 	showStatus bool,
 	userID uint,
 ) error {
-	db := model.DBWithScope(scope)
 	// 保证 batch_review_frame 始终启用（代码评审核心智能体不可禁用）
 	if !contains(stages, "batch_review_frame") {
 		stages = append(stages, "batch_review_frame")
@@ -272,6 +272,7 @@ func (s *ReviewAgentConfigService) Save(
 		return fmt.Errorf("序列化 stage_configs 失败: %w", err)
 	}
 
+	now := time.Now()
 	// 从 stages 数组推导扩展阶段状态，保持模型字段同步
 	cfg := model.ReviewAgentConfig{
 		OrgID:                 orgID,
@@ -283,14 +284,17 @@ func (s *ReviewAgentConfigService) Save(
 		ImpactAnalysisEnabled: contains(stages, "impact_analysis"),
 		LicenseCheckEnabled:   contains(stages, "license_check"),
 		UpdatedBy:             userID,
+		CreatedAt:             now,
+		UpdatedAt:             now,
 	}
 	cfg.SetEnabledStageCodes(stages)
 	cfg.SetTriggerEventCodes(triggerEvents)
 
 	// 多租户改造：按 org_id 查找并更新，不存在则创建
+	// 使用独立 DB 实例，避免 GORM Statement 复用导致条件叠加
 	var existing model.ReviewAgentConfig
-	if err := db.Where("org_id = ?", orgID).First(&existing).Error; err == nil {
-		return db.Model(&existing).
+	if err := model.DBWithScope(scope).Where("org_id = ?", orgID).First(&existing).Error; err == nil {
+		return model.DBWithScope(scope).Model(&existing).
 			Omit("org_id", "created_at").
 			Updates(map[string]interface{}{
 				"enabled_stages":          cfg.EnabledStages,
@@ -303,11 +307,12 @@ func (s *ReviewAgentConfigService) Save(
 				"impact_analysis_enabled": cfg.ImpactAnalysisEnabled,
 				"license_check_enabled":   cfg.LicenseCheckEnabled,
 				"updated_by":              userID,
+				"updated_at":              now,
 			}).Error
 	}
 
 	// 该组织尚无配置，创建默认记录
-	return db.Create(&cfg).Error
+	return model.DBWithScope(scope).Create(&cfg).Error
 }
 
 func defaultReviewAgentConfig(orgID uint) model.ReviewAgentConfig {

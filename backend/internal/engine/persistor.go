@@ -62,6 +62,7 @@ func PersistStructuredReview(taskID uint, result *llm.AIReviewResult) error {
 		// 4. 插入最新 Issue（含指纹计算与状态继承）
 		for _, issue := range result.Issues {
 			reviewIssue := model.ReviewIssue{
+				OrgID:       task.OrgID,
 				TaskID:      taskID,
 				RuleCode:    issue.RuleCode,
 				Category:    issue.Category,

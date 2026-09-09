@@ -378,7 +378,21 @@
         try {
             const info = JSON.parse(localStorage.getItem(USER_KEY) || '{}');
             const el = document.getElementById('currentUser');
-            if (el) el.textContent = info.display_name || info.username || '管理员';
+            if (el) {
+                // sidebar.js 已用 innerHTML 渲染过（含标签）就不再覆盖
+                if (!el.innerHTML.includes('<')) {
+                    el.textContent = info.display_name || info.username || '管理员';
+                }
+            }
+
+            // 更新数据洞察页面的当前组织标签
+            const orgLabel = document.getElementById('currentOrgLabel');
+            if (orgLabel && window.getCurrentOrg) {
+                const org = window.getCurrentOrg();
+                if (org && org.name) {
+                    orgLabel.textContent = org.name;
+                }
+            }
 
             // 角色与页面权限控制：管理员默认进入管理员控制台，非管理员不能访问管理员控制台
             const path = window.location.pathname;

@@ -191,8 +191,8 @@ async function loadData(force = false) {
         // 积压告警
         renderAlerts(d.alerts || []);
 
-        // 历史遗留概览
-        if (d.notification_baseline_at) {
+        // 历史遗留概览（仅系统管理员可见）
+        if (d.notification_baseline_at && isSystemAdmin()) {
             document.getElementById('legacyOverviewCard').style.display = '';
             await loadLegacyOverview(d.notification_baseline_at);
         } else {

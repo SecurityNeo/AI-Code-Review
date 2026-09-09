@@ -24,7 +24,11 @@ func (h *ReviewCategoryHandler) List(c *gin.Context) {
 	}
 	if _, ok := currentUserOrAbort(c); !ok { return }
 	var cats []model.ReviewCategory
-	if err := model.DB.Scopes(model.OrgScope(scope)).Order("sort_order ASC, id ASC").Find(&cats).Error; err != nil {
+	db := model.DB.Order("sort_order ASC, id ASC")
+	if !scope.IsSuperAdmin {
+		db = db.Where("org_id IN ? OR is_built_in = ?", scope.VisibleOrgIDs, true)
+	}
+	if err := db.Find(&cats).Error; err != nil {
 		zap.L().Error("list review categories failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
