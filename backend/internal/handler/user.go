@@ -168,12 +168,12 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 	}
 
 	// 支持按 org_id 过滤（MCP 密钥分配等场景使用）
+	scope := middleware.GetAuthScope(c)
 	var filterOrgID uint
 	if orgIDStr := c.Query("org_id"); orgIDStr != "" {
 		oid, _ := strconv.Atoi(orgIDStr)
 		filterOrgID = uint(oid)
 		if filterOrgID > 0 {
-			scope := middleware.GetAuthScope(c)
 			if scope != nil && !scope.IsSuperAdmin {
 				visible := false
 				for _, vid := range scope.VisibleOrgIDs {
@@ -188,6 +188,9 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 				}
 			}
 		}
+	} else if scope != nil && !scope.IsSuperAdmin {
+		// 非 super_admin 未指定 org_id，强制使用当前组织过滤
+		filterOrgID = scope.CurrentOrgID
 	}
 
 	users, total, err := h.service.ListUsers(keyword, loginType, filterOrgID, page, pageSize)

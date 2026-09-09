@@ -174,20 +174,21 @@ func toResponsibilityView(r model.ProjectResponsibility) ResponsibilityView {
 		Priority:   r.Priority,
 		CreatedAt:  r.CreatedAt,
 	}
-	if r.Member != nil && r.Member.ID > 0 {
-		v.GitlabUsername = r.Member.GitlabUsername
-		v.DisplayName = r.Member.DisplayName
-		v.Username = r.Member.Username
-		v.IMPlatform = r.Member.IMPlatform
-		v.IMUserID = r.Member.IMUserID
-	}
-	// toResponsibilityView falls back to the User association when Member is not preloaded.
-	if v.DisplayName == "" && r.User.ID > 0 {
+	// 1. 优先使用 User（users 表）—— user_id 是当前主访问键
+	if r.User.ID > 0 {
 		v.GitlabUsername = r.User.GitlabUsername
 		v.DisplayName = r.User.DisplayName
 		v.Username = r.User.Username
 		v.IMPlatform = r.User.IMPlatform
 		v.IMUserID = r.User.IMUserID
+	}
+	// 2. User 为空时才回退到已退役的 Member（team_members 表，兼容旧数据）
+	if v.DisplayName == "" && r.Member != nil && r.Member.ID > 0 {
+		v.GitlabUsername = r.Member.GitlabUsername
+		v.DisplayName = r.Member.DisplayName
+		v.Username = r.Member.Username
+		v.IMPlatform = r.Member.IMPlatform
+		v.IMUserID = r.Member.IMUserID
 	}
 	if r.Project.ID > 0 {
 		v.ProjectName = r.Project.Name

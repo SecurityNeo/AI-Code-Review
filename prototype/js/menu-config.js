@@ -82,20 +82,20 @@ const MENU_CONFIG = [
         ]
     },
 
-    // ========== 系统管理（仅 super_admin） ==========
+    // ========== 系统管理（super_admin 全量，org_admin 仅用户管理） ==========
     {
         id: 'settings-group',
         name: '系统管理',
         icon: 'fa-gear',
-        role: ['super_admin'],
+        role: ['org_admin'],
         children: [
-            { id: 'settings-config', name: '系统配置',     href: 'settings.html?tab=config',         icon: 'fa-sliders' },
-            { id: 'settings-storage', name: '对象存储',     href: 'storage-config.html',              icon: 'fa-database' },
-            { id: 'settings-org',    name: '组织管理',     href: 'pages/org-admin.html',             icon: 'fa-building' },
-            { id: 'settings-sso',  name: '单点登录', href: 'pages/sso-config.html',            icon: 'fa-key' },
-            { id: 'settings-users',  name: '用户管理',     href: 'settings.html?tab=users',          icon: 'fa-user-cog' },
-            { id: 'settings-logs',   name: '操作日志',     href: 'settings.html?tab=logs',           icon: 'fa-history' },
-            { id: 'settings-info',   name: '系统信息',     href: 'settings.html?tab=info',           icon: 'fa-circle-info' },
+            { id: 'settings-config', name: '系统配置',     href: 'settings.html?tab=config',         icon: 'fa-sliders', role: ['super_admin'] },
+            { id: 'settings-storage', name: '对象存储',     href: 'storage-config.html',              icon: 'fa-database', role: ['super_admin'] },
+            { id: 'settings-org',    name: '组织管理',     href: 'pages/org-admin.html',             icon: 'fa-building', role: ['super_admin'] },
+            { id: 'settings-sso',  name: '单点登录', href: 'pages/sso-config.html',            icon: 'fa-key', role: ['super_admin'] },
+            { id: 'settings-users',  name: '用户管理',     href: 'settings.html?tab=users',          icon: 'fa-user-cog', role: ['org_admin', 'super_admin'] },
+            { id: 'settings-logs',   name: '操作日志',     href: 'settings.html?tab=logs',           icon: 'fa-history', role: ['super_admin'] },
+            { id: 'settings-info',   name: '系统信息',     href: 'settings.html?tab=info',           icon: 'fa-circle-info', role: ['super_admin'] },
         ]
     },
 ];

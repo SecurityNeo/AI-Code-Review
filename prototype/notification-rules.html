@@ -370,7 +370,7 @@ const STAGE_MEANINGS = [
     '首次提醒（开发者本人）',
     '协助督促（抄送负责人）',
     '正式升级（通知负责人）',
-    '通知管理员',
+    '通知组织管理员',
     '自动归档'
 ];
 
@@ -540,7 +540,7 @@ function renderStages() {
                     <option value="owner" ${s.recipient==='owner'?'selected':''}>开发者</option>
                     <option value="owner+steward" ${s.recipient==='owner+steward'?'selected':''}>开发者+负责人</option>
                     <option value="steward" ${s.recipient==='steward'?'selected':''}>项目负责人</option>
-                    <option value="admin" ${s.recipient==='admin'?'selected':''}>管理员</option>
+                    <option value="admin" ${s.recipient==='admin'?'selected':''}>组织管理员</option>
                 </select>
             </div>
 
@@ -912,11 +912,11 @@ async function showRuleDetail(id) {
                 { role: '开发者', title: 'Issue 已升级给项目负责人', desc: 'Issue #N 已升级给项目负责人\n您的 Issue 因超期 {th} 小时未处理，已升级给项目负责人协助推进。' }
             ],
             4: [
-                { role: '管理员', title: '【全局告警】Issue 超期 {th} 小时', desc: '【全局告警】项目 XXX 有 Issue 超期 {th} 小时未闭环，请关注。\nIssue #N\nMR：XXX\n问题：XXX' }
+                { role: '组织管理员', title: '【全局告警】Issue 超期 {th} 小时', desc: '【全局告警】项目 XXX 有 Issue 超期 {th} 小时未闭环，请关注。\nIssue #N\nMR：XXX\n问题：XXX' }
             ],
             5: [
                 { role: '责任人', title: 'Issue 已自动归档', desc: 'Issue #N 已自动归档\n因超期 {th} 小时未处理，系统已自动归档。\n项目：XXX\nMR：XXX' },
-                { role: '管理员', title: '【全局通知】Issue 自动归档', desc: '【全局通知】项目 XXX 有 Issue 已自动归档\nIssue #N 因超期 {th} 小时未处理，系统已自动归档。\nMR：XXX' }
+                { role: '组织管理员', title: '【全局通知】Issue 自动归档', desc: '【全局通知】项目 XXX 有 Issue 已自动归档\nIssue #N 因超期 {th} 小时未处理，系统已自动归档。\nMR：XXX' }
             ]
         };
         if (r.trigger === 'issue.escalation' && r.escalation_config) {
@@ -932,7 +932,7 @@ async function showRuleDetail(id) {
                         ${cfgStages.map((s, idx) => {
                             const level = s.level || (idx + 1);
                             const label = STAGE_MEANINGS[level - 1] || `Level ${level}`;
-                            const recipientMap = { owner: '开发者', 'owner+steward': '开发者+负责人', steward: '项目负责人', admin: '管理员', auto_archive: '自动归档' };
+                            const recipientMap = { owner: '开发者', 'owner+steward': '开发者+负责人', steward: '项目负责人', admin: '组织管理员', auto_archive: '自动归档' };
                             const recipientLabel = recipientMap[s.recipient] || s.recipient || '-';
                             const imBadge = s.notify_im
                                 ? '<span class="inline-flex items-center gap-1 text-[11px] bg-green-50 text-green-700 px-2 py-0.5 rounded border border-green-200"><i class="fas fa-comment text-[9px]"></i>启用IM</span>'

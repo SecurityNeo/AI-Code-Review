@@ -52,11 +52,11 @@
             <div class="p-8">
                 <!-- Tabs（仅在无 hash 时显示，即直接访问 settings.html） -->
                 <div id="tabBar" class="bg-white rounded-t-xl border-b px-6 flex gap-6">
-                    <div class="tab-btn active" onclick="switchTab('config')">系统配置</div>
-                    <div class="tab-btn" onclick="switchTab('users')">用户管理</div>
-                    <div class="tab-btn" onclick="switchTab('logs')">操作日志</div>
-                    <div class="tab-btn" onclick="switchTab('info')">系统信息</div>
-                    <div class="tab-btn" onclick="switchTab('holiday')">节假日</div>
+                    <div class="tab-btn active" onclick="switchTab('config')" id="tabBtn-config">系统配置</div>
+                    <div class="tab-btn" onclick="switchTab('users')" id="tabBtn-users">用户管理</div>
+                    <div class="tab-btn" onclick="switchTab('logs')" id="tabBtn-logs">操作日志</div>
+                    <div class="tab-btn" onclick="switchTab('info')" id="tabBtn-info">系统信息</div>
+                    <div class="tab-btn" onclick="switchTab('holiday')" id="tabBtn-holiday">节假日</div>
                 </div>
 
                 <!-- 系统配置 -->
@@ -378,7 +378,7 @@
                     <!-- 工具栏卡片 -->
                     <div class="bg-gray-50 rounded-lg p-4 border flex items-center justify-between">
                         <div class="flex items-center gap-3">
-                            <button onclick="openUserModal()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 flex items-center gap-2">
+                            <button onclick="openUserModal()" id="btnCreateUser" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 flex items-center gap-2">
                                 <i class="fas fa-plus"></i>新建用户
                             </button>
                         </div>
@@ -1204,7 +1204,12 @@ function previewTemplate() {
         // ---- 用户管理函数 ----
         async function loadUsers() {
             const keyword = document.getElementById('userKeywordFilter')?.value || '';
-            const url = `${API_BASE}/users?page=${currentUsersPage}&page_size=${usersPageSize}${keyword ? '&keyword=' + encodeURIComponent(keyword) : ''}`;
+            let url = `${API_BASE}/users?page=${currentUsersPage}&page_size=${usersPageSize}${keyword ? '&keyword=' + encodeURIComponent(keyword) : ''}`;
+            // org_admin 自动按当前组织过滤
+            const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+            if (userInfo.current_org_role === 'org_admin' && userInfo.current_org_id) {
+                url += `&org_id=${userInfo.current_org_id}`;
+            }
             try {
                 const res = await apiFetch(url);
                 const data = await res.json();
@@ -1225,9 +1230,21 @@ function previewTemplate() {
             }
             const loginTypeMap = { local: '本地', gitlab: 'GitLab' };
             const imPlatformMap = { wecom: '企业微信' };
+            const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+            const isOrgAdmin = userInfo.current_org_role === 'org_admin';
             tbody.innerHTML = users.map(u => {
                 const imLabel = imPlatformMap[u.im_platform] || u.im_platform || '';
                 const isSuperAdmin = u.current_org_role === 'super_admin';
+                // org_admin 只显示"职责"按钮，其余隐藏
+                const actionButtons = isOrgAdmin
+                    ? `<button onclick="openDutyDrawer(${u.id}, '${escapeHtml(u.display_name || u.username)}', '${escapeHtml(u.username)}', '${escapeHtml(u.im_platform || '')}', '${escapeHtml(u.im_user_id || '')}', ${u.org_id || 'null'})" class="text-teal-600 hover:text-teal-800 text-xs font-medium" title="职责">职责</button>`
+                    : `
+                        <button onclick="openEditUserModal(${u.id}, '${escapeHtml(u.display_name || '')}', '${escapeHtml(u.im_platform || '')}', '${escapeHtml(u.im_user_id || '')}', ${u.org_id || 'null'})" class="text-blue-600 hover:text-blue-800 text-xs font-medium" title="编辑">编辑</button>
+                        ${!isSuperAdmin ? `<button onclick="openAssignOrgModal(${u.id}, '${escapeHtml(u.display_name || u.username)}')" class="text-indigo-600 hover:text-indigo-800 text-xs font-medium" title="分配组织">分配组织</button>` : ''}
+                        <button onclick="openDutyDrawer(${u.id}, '${escapeHtml(u.display_name || u.username)}', '${escapeHtml(u.username)}', '${escapeHtml(u.im_platform || '')}', '${escapeHtml(u.im_user_id || '')}', ${u.org_id || 'null'})" class="text-teal-600 hover:text-teal-800 text-xs font-medium" title="职责">职责</button>
+                        ${u.login_type !== 'gitlab' ? `<button onclick="openResetPasswordModal(${u.id}, '${escapeHtml(u.username)}')" class="text-orange-600 hover:text-orange-800 text-xs font-medium" title="重置密码">重置密码</button>` : ''}
+                        ${!isSuperAdmin ? `<button onclick="deleteUser(${u.id}, '${escapeHtml(u.username)}')" class="text-red-600 hover:text-red-800 text-xs font-medium" title="删除">删除</button>` : ''}
+                    `;
                 return `
                 <tr class="hover:bg-gray-50">
                     <td class="px-4 py-3 font-medium">${escapeHtml(u.username)}</td>
@@ -1242,11 +1259,7 @@ function previewTemplate() {
                     <td class="px-4 py-3 text-gray-500">${formatDate(u.created_at)}</td>
                     <td class="px-4 py-3">
                         <div class="flex items-center gap-3">
-                            <button onclick="openEditUserModal(${u.id}, '${escapeHtml(u.display_name || '')}', '${escapeHtml(u.im_platform || '')}', '${escapeHtml(u.im_user_id || '')}', ${u.org_id || 'null'})" class="text-blue-600 hover:text-blue-800 text-xs font-medium" title="编辑">编辑</button>
-                            ${!isSuperAdmin ? `<button onclick="openAssignOrgModal(${u.id}, '${escapeHtml(u.display_name || u.username)}')" class="text-indigo-600 hover:text-indigo-800 text-xs font-medium" title="分配组织">分配组织</button>` : ''}
-                            <button onclick="openDutyDrawer(${u.id}, '${escapeHtml(u.display_name || u.username)}', '${escapeHtml(u.username)}', '${escapeHtml(u.im_platform || '')}', '${escapeHtml(u.im_user_id || '')}', ${u.org_id || 'null'})" class="text-teal-600 hover:text-teal-800 text-xs font-medium" title="职责">职责</button>
-                            ${u.login_type !== 'gitlab' ? `<button onclick="openResetPasswordModal(${u.id}, '${escapeHtml(u.username)}')" class="text-orange-600 hover:text-orange-800 text-xs font-medium" title="重置密码">重置密码</button>` : ''}
-                            ${!isSuperAdmin ? `<button onclick="deleteUser(${u.id}, '${escapeHtml(u.username)}')" class="text-red-600 hover:text-red-800 text-xs font-medium" title="删除">删除</button>` : ''}
+                            ${actionButtons}
                         </div>
                     </td>
                 </tr>`;
@@ -1556,13 +1569,29 @@ function previewTemplate() {
         function initTabFromHash() {
             const urlParams = new URLSearchParams(window.location.search);
             let tabParam = urlParams.get('tab');
+            const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+            const isOrgAdmin = userInfo.current_org_role === 'org_admin';
+            const isSuperAdmin = userInfo.current_org_role === 'super_admin';
+
+            // org_admin 只能访问 users tab
+            if (isOrgAdmin) {
+                if (tabParam && tabParam !== 'users') {
+                    tabParam = 'users';
+                }
+                // 隐藏非 users 的 tab 按钮
+                ['config', 'logs', 'info', 'holiday'].forEach(t => {
+                    const btn = document.getElementById('tabBtn-' + t);
+                    if (btn) btn.style.display = 'none';
+                });
+            }
+
             // 已移除的 tab 重定向到 config
             const removedTabs = ['aitemplate', 'reviewtemplate'];
             if (removedTabs.includes(tabParam)) {
-                tabParam = 'config';
+                tabParam = isOrgAdmin ? 'users' : 'config';
             }
-            const validTabs = ['config', 'users', 'logs', 'info', 'holiday'];
-            const tab = validTabs.includes(tabParam) ? tabParam : 'config';
+            const validTabs = isOrgAdmin ? ['users'] : ['config', 'users', 'logs', 'info', 'holiday'];
+            const tab = validTabs.includes(tabParam) ? tabParam : (isOrgAdmin ? 'users' : 'config');
             const isSidebarMode = tabParam && validTabs.includes(tabParam);
 
             // Tab 标题和描述映射
@@ -1619,6 +1648,11 @@ function previewTemplate() {
             // 已移除的 tab 重定向到 config
             if (['aitemplate', 'reviewtemplate'].includes(tab)) {
                 tab = 'config';
+            }
+            // org_admin 只允许 users
+            const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+            if (userInfo.current_org_role === 'org_admin') {
+                return 'settings-users';
             }
             const map = {
                 config: 'settings-config',
@@ -1685,7 +1719,13 @@ function previewTemplate() {
 
         function openDutyDrawer(userId, displayName, username, imPlatform, imUserId, userOrgId) {
             currentDutyUserId = userId;
-            currentDutyUserOrgId = userOrgId;
+            const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+            // org_admin 只能分配本组织的项目职责
+            if (userInfo.current_org_role === 'org_admin') {
+                currentDutyUserOrgId = userInfo.current_org_id || null;
+            } else {
+                currentDutyUserOrgId = userOrgId;
+            }
             document.getElementById('dutyDrawerSubtitle').textContent = displayName || username || '';
             loadDutyUserInfo(username, imPlatform, imUserId);
 
@@ -1704,7 +1744,7 @@ function previewTemplate() {
             setTimeout(() => { overlay.classList.remove('opacity-0'); }, 10);
             drawer.classList.remove('translate-x-full');
 
-            // 加载数据（按被分配用户所在组织过滤项目）
+            // 加载数据（按当前组织过滤项目，org_admin强制使用当前组织）
             loadDutyProjects(currentDutyUserOrgId);
             loadUserDuties(userId);
         }
@@ -1972,6 +2012,15 @@ function previewTemplate() {
         });
 
         // 页面加载时根据 query 参数初始化
+        // org_admin 权限控制：隐藏新建用户按钮
+        (function initOrgAdminRestrictions() {
+            const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+            if (userInfo.current_org_role === 'org_admin') {
+                const btnCreate = document.getElementById('btnCreateUser');
+                if (btnCreate) btnCreate.style.display = 'none';
+            }
+        })();
+
         initTabFromHash();
         renderSidebar(getSettingsActiveId());
     </script>
