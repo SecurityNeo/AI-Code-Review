@@ -226,11 +226,6 @@
                     </select>
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">关联资源池</label>
-                    <select id="poolId" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
-                    </select>
-                </div>
-                <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">默认模型</label>
                     <select id="defaultModelId" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
                     </select>
@@ -529,7 +524,6 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
         let projectsData = [];
         let templatesData = [];
         let categoriesData = [];
-        let poolsData = [];
         let modelsData = [];
         let editingId = null;
         let editingTemplateId = null;
@@ -769,10 +763,8 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             document.getElementById('aiEnabled').checked = p.ai_enabled || false;
             // 先渲染下拉选项，再设置选中值
             renderTemplateSelect(templatesData);
-            renderPoolSelect(poolsData);
             renderModelSelect(modelsData);
             document.getElementById('projectTemplateId').value = p.template_id || '';
-            document.getElementById('poolId').value = p.pool_id || '';
             document.getElementById('defaultModelId').value = p.default_model_id !== null && p.default_model_id !== undefined ? String(p.default_model_id) : '-1';
             loadOrgSelect('projectOrgSelect', p.org_id);
             document.getElementById('createModal').classList.add('active');
@@ -793,7 +785,6 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
         async function saveProject() {
             const orgHeaders = getOrgOverrideHeaders();
             const templateInput = document.getElementById('projectTemplateId').value;
-            const poolInput = document.getElementById('poolId').value;
             const defaultModelInput = document.getElementById('defaultModelId').value;
             const gitlabProjectId = document.getElementById('gitlabProjectId').value;
             
@@ -808,7 +799,6 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
  
              // 空模板解绑时传 0，确保能正确清空关联
              data.template_id = parseInt(templateInput, 10) || 0;
-             data.pool_id = parseInt(poolInput, 10) || 0;
              if (defaultModelInput === '-1' || !defaultModelInput) {
                  data.default_model_id = null;  // 未选择或"走全局主备链路"均清空
              } else {
@@ -850,7 +840,6 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                 document.getElementById('tokenEyeIcon').className = 'fas fa-eye';
                 document.getElementById('aiEnabled').checked = false;
                 document.getElementById('projectTemplateId').value = '';
-                document.getElementById('poolId').value = '';
                 document.getElementById('defaultModelId').value = '';
                 renderTemplateSelect(templatesData);
                 loadOrgSelect('projectOrgSelect');
@@ -916,25 +905,6 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             if (!select) return;
             select.innerHTML = '<option value="">请选择AI审核模版</option>' + 
                 templates.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
-        }
-
-        async function loadPools() {
-            try {
-                const res = await apiFetch(`${API_BASE}/pools`);
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                const json = await res.json();
-                poolsData = json.data || [];
-                renderPoolSelect(poolsData);
-            } catch (e) {
-                console.error('加载资源池失败:', e);
-            }
-        }
-
-        function renderPoolSelect(pools) {
-            const select = document.getElementById('poolId');
-            if (!select) return;
-            select.innerHTML = '<option value="">请选择资源池</option>' + 
-                pools.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
         }
 
         async function loadModels() {
@@ -1456,7 +1426,6 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             loadCategories();
             loadProjects();
             loadTemplates();
-            loadPools();
             loadModels();
             renderSidebar('projects');
             bindDimensionInputs();

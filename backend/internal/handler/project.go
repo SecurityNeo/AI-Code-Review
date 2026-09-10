@@ -52,8 +52,8 @@ func (h *ProjectHandler) List(c *gin.Context) {
 			}
 		}
 	} else {
-		// 默认逻辑：非 super_admin 只返回自己负责的项目
-		if !scope.IsSuperAdmin {
+		// 默认逻辑：developer 只返回自己负责的项目；org_admin / super_admin 返回整个组织
+		if !scope.IsSuperAdmin && scope.CurrentOrgRole != "org_admin" {
 			user, _ := middleware.GetUser(c)
 			projectIDs = GetResponsibleProjectIDs(user)
 			if len(projectIDs) == 0 {
