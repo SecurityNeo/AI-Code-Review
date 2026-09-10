@@ -266,6 +266,11 @@ func (h *ModelHandler) Update(c *gin.Context) {
 		return
 	}
 
+	// 多租户改造：非 super_admin 禁止修改 org_id
+	if req.OrgID != nil && !scope.IsSuperAdmin {
+		req.OrgID = nil
+	}
+
 	err = h.service.Update(scope, uint(id), &req)
 	if err != nil {
 		if err == service.ErrModelNotFound {

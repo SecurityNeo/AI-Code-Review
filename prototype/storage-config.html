@@ -544,7 +544,7 @@ async function saveConfig() {
          max_object_size: (parseInt(document.getElementById('cfgMaxSize').value) || 50) * 1048576,
          test_connection: false
      };
-     body = injectOrgId(body, 'orgSelect');
+     injectOrgId(body, 'orgSelect');
     try {
         const url = editingId ? `${API_BASE}/object-storage/configs/${editingId}` : `${API_BASE}/object-storage/configs`;
         const method = editingId ? 'PUT' : 'POST';

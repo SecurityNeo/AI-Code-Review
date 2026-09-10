@@ -168,6 +168,11 @@ func (s *ModelService) Update(scope *model.UserAuthScope, id uint, req *UpdateMo
 
 	updates := map[string]interface{}{}
 
+	// 多租户改造：super_admin 可修改模型的所属组织
+	if req.OrgID != nil && *req.OrgID > 0 {
+		updates["org_id"] = *req.OrgID
+	}
+
 	if req.ModelType != nil && *req.ModelType != "" {
 		updates["model_type"] = *req.ModelType
 	}
@@ -577,6 +582,8 @@ type UpdateModelRequest struct {
 	IsDefault        *bool    `json:"is_default,omitempty"`
 	IsPrimary        *bool    `json:"is_primary,omitempty"`
 	BackupOrder      *int     `json:"backup_order,omitempty"`
+	// 多租户改造：super_admin 可修改模型的所属组织
+	OrgID *uint `json:"org_id,omitempty"`
 }
 
 // NormalizeProvider normalizes provider string to standard format
