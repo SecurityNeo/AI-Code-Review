@@ -1,588 +1,491 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+    <script src="js/theme.js?v=9"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>登录 - AI Code Guard</title>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/theme.css?v=1">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body {
             height: 100%;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #0a0e17;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #0b1121;
             overflow: hidden;
         }
 
-        /* ===== Split Layout ===== */
-        .login-split {
-            display: flex;
-            height: 100vh;
-            width: 100vw;
-            align-items: stretch;
-        }
-
-        /* ===== Left Panel ===== */
-        .left-panel {
-            flex: 0 0 50%;
-            min-width: 420px;
-            background: #0c111f;
-            position: relative;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            padding: 60px 72px;
-            overflow: hidden;
-        }
-
-        /* Subtle aurora background */
-        .aurora-bg {
-            position: absolute;
-            inset: 0;
-            z-index: 0;
-            pointer-events: none;
+        /* ===== 全屏深色背景 ===== */
+        .bg-wrap {
+            position: fixed; inset: 0;
             background:
-                radial-gradient(ellipse 600px 500px at 15% 20%, rgba(59,130,246,0.12), transparent 60%),
-                radial-gradient(ellipse 500px 400px at 85% 80%, rgba(139,92,246,0.09), transparent 60%);
+                radial-gradient(ellipse 80% 50% at 50% -10%, rgba(59,130,246,0.14), transparent),
+                radial-gradient(ellipse 60% 50% at 80% 50%, rgba(99,102,241,0.07), transparent),
+                radial-gradient(ellipse 50% 50% at 20% 90%, rgba(37,99,235,0.06), transparent),
+                linear-gradient(145deg, #0b1121 0%, #0f172a 50%, #0b1121 100%);
+            z-index: 0;
+        }
+        .orb {
+            position: absolute; border-radius: 50%; filter: blur(100px); opacity: 0.30;
+            animation: float 14s ease-in-out infinite, colorShift 20s ease-in-out infinite;
+        }
+        .orb-1 { width: 520px; height: 520px; background: #1e3a5f; top: -180px; left: 8%; }
+        .orb-2 { width: 420px; height: 420px; background: #312e81; bottom: -120px; right: 12%; animation-delay: -5s; }
+        .orb-3 { width: 380px; height: 380px; background: #1e40af; top: 40%; left: 30%; animation-delay: -9s; }
+        @keyframes float {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            33% { transform: translate(25px, -25px) scale(1.03); }
+            66% { transform: translate(-15px, 18px) scale(0.97); }
+        }
+        @keyframes colorShift {
+            0%, 100% { filter: blur(100px) hue-rotate(0deg); }
+            50% { filter: blur(100px) hue-rotate(15deg); }
+        }
+        /* 代码字符飘落 */
+        .code-particle {
+            position: absolute;
+            color: rgba(59,130,246,0.06);
+            font-family: monospace;
+            font-size: 13px;
+            font-weight: 600;
+            pointer-events: none;
+            animation: particleFall linear infinite;
+            z-index: 0;
+        }
+        @keyframes particleFall {
+            0% { transform: translateY(-10vh) translateX(0); opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { transform: translateY(110vh) translateX(30px); opacity: 0; }
         }
 
-        .left-content {
-            position: relative;
-            z-index: 1;
-            max-width: 420px;
-            animation: fadeUp 0.7s ease-out both;
+        /* ===== GitLab 实例选择器（多租户改造） ===== */
+        .gitlab-instance-selector {
+            width: 100%;
         }
-
-        .brand-mark {
-            display: inline-flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 48px;
-        }
-        .brand-mark .logo {
-            width: 36px;
-            height: 36px;
-            background: linear-gradient(135deg, #3b82f6, #7c3aed);
+        .gitlab-instance-select {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid rgba(255,255,255,0.08);
             border-radius: 10px;
+            background: rgba(255,255,255,0.03);
+            color: #e2e8f0;
+            font-size: 14px;
+            transition: all 0.2s;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            padding-right: 32px;
+        }
+        .gitlab-instance-select:focus {
+            outline: none;
+            border-color: rgba(59,130,246,0.5);
+            background: rgba(255,255,255,0.05);
+        }
+        .gitlab-instance-select option {
+            background: #1e293b;
+            color: #e2e8f0;
+        }
+        
+        /* ===== 数据指标橱窗 ===== */
+        /* ===== 能力列表 ===== */
+
+        /* ===== 移动端拦截 ===== */
+        .mobile-block { display: none; }
+        @media (max-width: 1024px) {
+            .login-wrap { display: none !important; }
+            .mobile-block {
+                display: flex !important; position: fixed; inset: 0; z-index: 9999;
+                background: #0b1121; align-items: center; justify-content: center;
+                text-align: center; padding: 32px;
+            }
+            .mobile-block i { font-size: 48px; color: #3b82f6; margin-bottom: 16px; }
+            .mobile-block h2 { color: #fff; font-size: 20px; margin-bottom: 8px; }
+            .mobile-block p { color: rgba(255,255,255,0.5); font-size: 14px; line-height: 1.6; }
+        }
+
+        /* ===== 主布局：两端对齐 ===== */
+        .login-wrap {
+            position: relative; z-index: 1;
+            min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 6px 20px rgba(59,130,246,0.25);
-        }
-        .brand-mark .logo i { font-size: 16px; color: #fff; }
-        .brand-mark span {
-            font-size: 18px;
-            font-weight: 700;
-            color: #f8fafc;
-            letter-spacing: -0.3px;
+            gap: 300px;
+            padding: 0 80px;
         }
 
-        .headline {
-            font-size: 36px;
-            font-weight: 700;
-            color: #f8fafc;
-            line-height: 1.25;
-            letter-spacing: -0.8px;
-            margin-bottom: 18px;
-        }
-        .headline .gradient-text {
-            background: linear-gradient(135deg, #60a5fa, #c084fc);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .subhead {
-            font-size: 16px;
-            color: #64748b;
-            line-height: 1.7;
-            margin-bottom: 48px;
-            max-width: 380px;
-        }
-
-        .capabilities {
+        /* ---- 左侧品牌区 ---- */
+        .brand-side {
+            width: 500px;
             display: flex;
             flex-direction: column;
-            gap: 18px;
-        }
-        .cap-item {
-            display: flex;
-            align-items: flex-start;
-            gap: 14px;
-            animation: fadeUp 0.5s ease-out both;
-        }
-        .cap-item:nth-child(1) { animation-delay: 0.15s; }
-        .cap-item:nth-child(2) { animation-delay: 0.25s; }
-        .cap-item:nth-child(3) { animation-delay: 0.35s; }
-        .cap-item:nth-child(4) { animation-delay: 0.45s; }
-
-        .cap-icon {
-            width: 36px;
-            height: 36px;
-            border-radius: 10px;
-            display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 14px;
-            flex-shrink: 0;
-            margin-top: 2px;
+            text-align: center;
+            color: #fff;
+            animation: fadeLeft 0.7s ease-out;
         }
-        .cap-icon.blue { background: rgba(59,130,246,0.1); color: #60a5fa; }
-        .cap-icon.purple { background: rgba(139,92,246,0.1); color: #a78bfa; }
-        .cap-icon.red { background: rgba(239,68,68,0.1); color: #f87171; }
-        .cap-icon.green { background: rgba(34,197,94,0.1); color: #4ade80; }
+        .brand-side .logo {
+            width: 64px; height: 64px;
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            border-radius: 18px;
+            display: flex; align-items: center; justify-content: center;
+            margin-bottom: 32px;
+            box-shadow: 0 10px 40px rgba(37,99,235,0.30);
+        }
+        .brand-side .logo i { font-size: 28px; color: #fff; }
+        .brand-side h1 {
+            font-size: 48px; font-weight: 700; letter-spacing: -1.5px;
+            margin-bottom: 16px; line-height: 1.1;
+        }
+        .brand-side .slogan {
+            font-size: 15px; color: rgba(255,255,255,0.45);
+            letter-spacing: 0.06em; margin-bottom: 32px;
+        }
 
-        .cap-text h3 {
-            font-size: 14px;
-            font-weight: 600;
-            color: #e2e8f0;
-            margin-bottom: 3px;
+        /* ===== 功能卡片网格 ===== */
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            width: 100%;
         }
-        .cap-text p {
-            font-size: 13px;
-            color: #475569;
+        .feature-card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
+            padding: 16px;
+            text-align: left;
+            transition: all 0.25s;
+        }
+        .feature-card:hover {
+            background: rgba(255,255,255,0.055);
+            border-color: rgba(255,255,255,0.12);
+            transform: translateY(-2px);
+        }
+        .feature-card .card-icon {
+            width: 32px; height: 32px; border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 13px; margin-bottom: 10px;
+        }
+        .feature-card .card-title {
+            font-size: 12px; font-weight: 600;
+            color: rgba(255,255,255,0.90);
+            margin-bottom: 4px;
+        }
+        .feature-card .card-desc {
+            font-size: 11px; color: rgba(255,255,255,0.40);
             line-height: 1.5;
         }
+        .feat-review .card-icon { color: #60a5fa; background: rgba(59,130,246,0.12); }
+        .feat-rules .card-icon { color: #a78bfa; background: rgba(139,92,246,0.12); }
+        .feat-issue .card-icon { color: #fb923c; background: rgba(249,115,22,0.12); }
+        .feat-metrics .card-icon { color: #4ade80; background: rgba(34,197,94,0.12); }
+        .feat-team .card-icon { color: #22d3ee; background: rgba(6,182,212,0.12); }
+        .feat-shield .card-icon { color: #f87171; background: rgba(248,113,113,0.12); }
 
-        /* ===== Right Panel ===== */
-        .right-panel {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 60px 40px;
-            position: relative;
-        }
-        .right-panel .bg-grid {
-            position: absolute;
-            inset: 0;
-            z-index: 0;
-            background-image:
-                linear-gradient(rgba(255,255,255,0.008) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255,255,255,0.008) 1px, transparent 1px);
-            background-size: 48px 48px;
-        }
-
-        /* Login card */
-        .login-wrapper {
-            width: 100%;
-            max-width: 400px;
-            position: relative;
-            z-index: 1;
-            animation: fadeUp 0.6s ease-out 0.1s both;
-        }
-        .login-card {
-            background: rgba(14, 20, 34, 0.75);
-            border: 1px solid rgba(255,255,255,0.06);
-            border-radius: 20px;
-            padding: 40px 36px 32px;
+        /* ---- 右侧登录卡片 ---- */
+        .form-card {
+            width: 400px;
+            background: rgba(15, 23, 42, 0.72);
             backdrop-filter: blur(24px);
             -webkit-backdrop-filter: blur(24px);
-            box-shadow: 0 24px 60px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04);
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-radius: 20px;
+            padding: 40px 36px;
+            box-shadow: 0 24px 48px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.03) inset;
+            animation: fadeRight 0.7s ease-out;
+            flex-shrink: 0;
         }
-        .card-header {
-            margin-bottom: 28px;
-        }
-        .card-title {
-            font-size: 22px;
-            font-weight: 700;
-            color: #f1f5f9;
-            margin-bottom: 6px;
-        }
-        .card-sub {
-            font-size: 14px;
-            color: #475569;
+        @keyframes fadeRight {
+            from { opacity: 0; transform: translateX(20px); }
+            to   { opacity: 1; transform: translateX(0); }
         }
 
-        /* Alert */
-        .alert-err {
-            display: none;
-            align-items: flex-start;
-            gap: 9px;
-            padding: 11px 13px;
-            background: rgba(239,68,68,0.07);
-            border: 1px solid rgba(239,68,68,0.16);
-            border-radius: 10px;
-            color: #f87171;
-            font-size: 13px;
-            margin-bottom: 18px;
-        }
-        .alert-err.show { display: flex; animation: shake 0.35s ease; }
-        .alert-err i { font-size: 13px; margin-top: 2px; flex-shrink: 0; }
-        @keyframes shake {
-            0%, 100% { transform: translateX(0); }
-            25% { transform: translateX(-5px); }
-            75% { transform: translateX(5px); }
-        }
+        .card-title { font-size: 20px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+        .card-sub { font-size: 13px; color: rgba(255,255,255,0.35); margin-bottom: 28px; }
 
-        /* Form */
-        .field { margin-bottom: 17px; }
-        .field-label {
-            display: block;
-            font-size: 13px;
-            font-weight: 500;
-            color: #94a3b8;
-            margin-bottom: 7px;
+        .field { margin-bottom: 16px; }
+        .field label {
+            display: block; font-size: 12px; font-weight: 500;
+            color: rgba(255,255,255,0.55); margin-bottom: 6px;
         }
-        .input-box {
-            position: relative;
-        }
-        .input-box .pre-icon {
-            position: absolute;
-            left: 13px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: #475569;
-            font-size: 13px;
-            pointer-events: none;
-            transition: color 0.2s;
+        .input-box { position: relative; }
+        .input-box i {
+            position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+            color: rgba(255,255,255,0.28); font-size: 13px;
         }
         .input-box input {
-            width: 100%;
-            padding: 11px 13px 11px 38px;
-            background: rgba(255,255,255,0.03);
-            border: 1px solid rgba(255,255,255,0.07);
-            border-radius: 11px;
-            font-size: 14px;
-            color: #f1f5f9;
-            outline: none;
-            transition: all 0.2s;
-            font-family: inherit;
+            width: 100%; padding: 10px 12px 10px 36px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.10);
+            border-radius: 10px; font-size: 13px; color: #fff;
+            transition: all 0.2s; outline: none;
         }
-        .input-box input::placeholder { color: #475569; }
-        .input-box input:hover { border-color: rgba(255,255,255,0.11); }
+        .input-box input::placeholder { color: rgba(255,255,255,0.25); }
         .input-box input:focus {
-            border-color: rgba(59,130,246,0.4);
-            background: rgba(255,255,255,0.04);
-            box-shadow: 0 0 0 3px rgba(59,130,246,0.07);
+            background: rgba(255,255,255,0.07);
+            border-color: rgba(59,130,246,0.50);
+            box-shadow: 0 0 0 3px rgba(59,130,246,0.08);
         }
-        .input-box input:focus ~ .pre-icon { color: #60a5fa; }
-        .input-box input.has-pwd-toggle { padding-right: 38px; }
-        .input-box input.error-input {
-            border-color: rgba(239,68,68,0.45);
-            box-shadow: 0 0 0 3px rgba(239,68,68,0.07);
+        .input-box input.has-toggle {
+            padding-right: 36px;
         }
-
-        .toggle-pwd {
+        .password-toggle {
             position: absolute;
-            right: 11px;
+            right: 12px;
             top: 50%;
             transform: translateY(-50%);
             background: none;
             border: none;
-            color: #475569;
+            color: rgba(255,255,255,0.25);
             cursor: pointer;
-            padding: 4px;
             font-size: 13px;
+            padding: 4px;
         }
-        .toggle-pwd:hover { color: #94a3b8; }
+        .password-toggle:hover { color: rgba(255,255,255,0.45); }
 
-        .form-opts {
+        .form-options {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 22px;
+            margin: 4px 0 16px;
         }
-        .remember-wrap {
+        .remember-me {
             display: flex;
             align-items: center;
-            gap: 7px;
+            gap: 6px;
             cursor: pointer;
-            font-size: 13px;
-            color: #94a3b8;
-            user-select: none;
-        }
-        .remember-wrap input { width: 15px; height: 15px; accent-color: #3b82f6; cursor: pointer; }
-
-        /* Submit */
-        .btn-main {
-            width: 100%;
-            padding: 12px;
-            background: linear-gradient(135deg, #3b82f6, #2563eb);
-            color: #fff;
-            border: none;
-            border-radius: 11px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            transition: all 0.2s;
-        }
-        .btn-main:hover:not(:disabled) {
-            transform: translateY(-1px);
-            box-shadow: 0 8px 24px rgba(37,99,235,0.3);
-        }
-        .btn-main:active:not(:disabled) { transform: translateY(0); }
-        .btn-main:disabled { opacity: 0.55; cursor: not-allowed; }
-        .btn-main .spin { animation: spin 0.9s linear infinite; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        /* Divider */
-        .hr-divider {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            margin: 24px 0 16px;
-        }
-        .hr-line {
-            flex: 1;
-            height: 1px;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
-        }
-        .hr-text {
             font-size: 12px;
-            color: #475569;
-            white-space: nowrap;
+            color: rgba(255,255,255,0.40);
         }
-
-        /* GitLab */
-        .gitlab-select {
-            width: 100%;
-            padding: 10px 13px;
-            background: rgba(255,255,255,0.03);
-            border: 1px solid rgba(255,255,255,0.07);
-            border-radius: 10px;
-            font-size: 13px;
-            color: #f1f5f9;
-            outline: none;
-            margin-bottom: 10px;
-            appearance: none;
-            -webkit-appearance: none;
+        .remember-me input {
+            width: 14px;
+            height: 14px;
+            accent-color: #3b82f6;
             cursor: pointer;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23475569' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
-            background-repeat: no-repeat;
-            background-position: right 13px center;
-            padding-right: 34px;
+        }
+
+        .btn-primary {
+            width: 100%; padding: 11px;
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            color: #fff; border: none; border-radius: 10px;
+            font-size: 13px; font-weight: 500; cursor: pointer;
             transition: all 0.2s;
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+            margin-top: 4px;
         }
-        .gitlab-select:hover { border-color: rgba(255,255,255,0.11); }
-        .gitlab-select:focus { border-color: rgba(59,130,246,0.4); }
-        .gitlab-select option { background: #1e293b; color: #f1f5f9; }
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 24px rgba(37,99,235,0.35);
+        }
+        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
 
-        .btn-gitlab {
-            width: 100%;
-            padding: 11px;
-            background: rgba(252,109,38,0.07);
-            border: 1px solid rgba(252,109,38,0.16);
-            border-radius: 11px;
-            color: #fb923c;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            transition: all 0.2s;
+        .err-msg {
+            display: none; align-items: center; gap: 6px;
+            padding: 9px 12px;
+            background: rgba(220, 38, 38, 0.12);
+            border: 1px solid rgba(220, 38, 38, 0.25);
+            color: #f87171; border-radius: 8px;
+            font-size: 12px; margin-bottom: 14px;
         }
-        .btn-gitlab:hover:not(:disabled) {
-            background: rgba(252,109,38,0.12);
-            border-color: rgba(252,109,38,0.28);
-        }
-        .btn-gitlab:disabled { opacity: 0.3; cursor: not-allowed; }
+        .err-msg.show { display: flex; }
 
-        /* Success overlay */
-        .success-overlay {
-            position: fixed;
-            inset: 0;
-            z-index: 200;
-            background: #0a0e17;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            flex-direction: column;
-            gap: 16px;
-            animation: fadeIn 0.25s ease;
+        .sep {
+            display: flex; align-items: center; gap: 14px;
+            margin: 24px 0 18px;
         }
-        .success-overlay.show { display: flex; }
-        .s-icon {
-            width: 52px;
-            height: 52px;
-            background: linear-gradient(135deg, #22c55e, #16a34a);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 22px;
-            color: #fff;
-            box-shadow: 0 8px 24px rgba(34,197,94,0.22);
-            animation: popIn 0.4s ease 0.05s both;
-        }
-        .s-text {
-            font-size: 18px;
-            font-weight: 600;
-            color: #f1f5f9;
-            animation: fadeUp 0.4s ease 0.15s both;
-        }
-        .s-sub { font-size: 13px; color: #475569; animation: fadeUp 0.4s ease 0.2s both; }
+        .sep-line { flex: 1; height: 1px; background: rgba(255,255,255,0.08); }
+        .sep-text { font-size: 12px; color: rgba(255,255,255,0.30); white-space: nowrap; }
 
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes popIn {
-            from { opacity: 0; transform: scale(0.6); }
-            to { opacity: 1; transform: scale(1); }
+        .sso-row {
+            display: flex; align-items: center; justify-content: center; gap: 14px;
+        }
+        .sso-btn {
+            width: 44px; height: 44px;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(252, 109, 38, 0.08);
+            border: 1px solid rgba(252, 109, 38, 0.20);
+            border-radius: 12px; color: #fb923c;
+            text-decoration: none; transition: all 0.2s; font-size: 18px;
+        }
+        .sso-btn:hover {
+            background: rgba(252, 109, 38, 0.16);
+            border-color: rgba(252, 109, 38, 0.40);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 18px rgba(252,109,38,0.18);
         }
 
-        /* Mobile */
-        @media (max-width: 900px) {
-            .left-panel { display: none; }
-            .right-panel { width: 100%; padding: 40px 20px; }
-            .login-card { padding: 32px 24px 26px; }
-        }
-        @media (max-width: 480px) {
-            .login-card { border-radius: 16px; padding: 28px 22px 24px; }
-        }
+        .card-foot { text-align: center; margin-top: 24px; }
+        .card-foot p { font-size: 11px; color: rgba(255,255,255,0.22); }
     </style>
+    <script src="js/auth.js?v=9"></script>
 </head>
 <body>
-    <div class="success-overlay" id="successOverlay">
-        <div class="s-icon"><i class="fas fa-check"></i></div>
-        <div class="s-text">登录成功</div>
-        <div class="s-sub">正在跳转...</div>
+    <div class="bg-wrap">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
     </div>
 
-    <div class="login-split">
-        <!-- Left -->
-        <div class="left-panel">
-            <div class="aurora-bg"></div>
-            <div class="left-content">
-                <div class="brand-mark">
-                    <div class="logo"><i class="fas fa-shield-alt"></i></div>
-                    <span>AI Code Guard</span>
+    <!-- 移动端拦截 -->
+    <div class="mobile-block">
+        <div>
+            <i class="fas fa-desktop"></i>
+            <h2>请使用电脑访问</h2>
+            <p>AI Code Guard 智能代码门禁系统<br>仅支持电脑桌面端浏览器访问</p>
+        </div>
+    </div>
+
+    <!-- 桌面端登录 -->
+    <div class="login-wrap">
+
+        <!-- ===== 左侧品牌区 ===== -->
+        <div class="brand-side">
+            <div class="logo"><i class="fas fa-robot"></i></div>
+            <h1>AI Code Guard</h1>
+            <div class="slogan">智能代码门禁与质量治理平台</div>
+
+            <div class="feature-grid">
+                <div class="feature-card feat-review">
+                    <div class="card-icon"><i class="fas fa-microscope"></i></div>
+                    <div class="card-title">AI 智能评审</div>
+                    <div class="card-desc">多模型 MR 逐行分析</div>
                 </div>
-
-                <h1 class="headline">
-                    智能化的<br>代码质量<span class="gradient-text">门禁平台</span>
-                </h1>
-                <p class="subhead">
-                    融合多模型 AI 评审、AST 语义分析与规则引擎，在代码合并前自动拦截安全漏洞与质量问题。
-                </p>
-
-                <div class="capabilities">
-                    <div class="cap-item">
-                        <div class="cap-icon blue"><i class="fas fa-robot"></i></div>
-                        <div class="cap-text">
-                            <h3>AI 智能评审</h3>
-                            <p>多模型并行评审，逐行代码质量评分与改进建议</p>
-                        </div>
-                    </div>
-                    <div class="cap-item">
-                        <div class="cap-icon purple"><i class="fas fa-brain"></i></div>
-                        <div class="cap-text">
-                            <h3>AST 语义分析</h3>
-                            <p>基于树解析的符号图构建与跨文件调用链分析</p>
-                        </div>
-                    </div>
-                    <div class="cap-item">
-                        <div class="cap-icon red"><i class="fas fa-shield-virus"></i></div>
-                        <div class="cap-text">
-                            <h3>安全检测</h3>
-                            <p>SQL 注入、密钥泄露、依赖漏洞等多维度安全审计</p>
-                        </div>
-                    </div>
-                    <div class="cap-item">
-                        <div class="cap-icon green"><i class="fas fa-cogs"></i></div>
-                        <div class="cap-text">
-                            <h3>规则引擎与度量</h3>
-                            <p>可定制评审规则库、开发者画像与项目质量看板</p>
-                        </div>
-                    </div>
+                <div class="feature-card feat-rules">
+                    <div class="card-icon"><i class="fas fa-cogs"></i></div>
+                    <div class="card-title">规则引擎</div>
+                    <div class="card-desc">规则库 + 孵化台智能挖掘</div>
+                </div>
+                <div class="feature-card feat-issue">
+                    <div class="card-icon"><i class="fas fa-tasks"></i></div>
+                    <div class="card-title">Issue 治理</div>
+                    <div class="card-desc">多级升级，免打扰冻结</div>
+                </div>
+                <div class="feature-card feat-metrics">
+                    <div class="card-icon"><i class="fas fa-chart-pie"></i></div>
+                    <div class="card-title">质量度量</div>
+                    <div class="card-desc">开发者画像，命中统计</div>
+                </div>
+                <div class="feature-card feat-team">
+                    <div class="card-icon"><i class="fas fa-users"></i></div>
+                    <div class="card-title">团队协同</div>
+                    <div class="card-desc">职责分配，即时通知</div>
+                </div>
+                <div class="feature-card feat-shield">
+                    <div class="card-icon"><i class="fas fa-shield-alt"></i></div>
+                    <div class="card-title">风险拦截</div>
+                    <div class="card-desc">低质量代码自动拦截</div>
                 </div>
             </div>
         </div>
 
-        <!-- Right -->
-        <div class="right-panel">
-            <div class="bg-grid"></div>
-            <div class="login-wrapper">
-                <div class="login-card">
-                    <div class="card-header">
-                        <div class="card-title">欢迎回来</div>
-                        <div class="card-sub">登录您的账号以继续使用</div>
+        <!-- ===== 右侧登录卡片 ===== -->
+        <div class="form-card">
+            <div class="card-title">账号密码登录</div>
+            <div class="card-sub">请输入您的管理员账号信息</div>
+
+            <div id="errorMsg" class="err-msg">
+                <i class="fas fa-exclamation-circle"></i>
+                <span id="errorText"></span>
+            </div>
+
+            <form id="loginForm" onsubmit="return doLogin(event)">
+                <div class="field">
+                    <label>用户名</label>
+                    <div class="input-box">
+                        <i class="fas fa-user"></i>
+                        <input type="text" id="username" placeholder="请输入用户名" autocomplete="username">
                     </div>
+                </div>
 
-                    <div class="alert-err" id="errorAlert">
-                        <i class="fas fa-exclamation-circle"></i>
-                        <span id="errorText"></span>
-                    </div>
-
-                    <form id="loginForm" onsubmit="return handleLogin(event)">
-                        <div class="field">
-                            <label class="field-label">用户名</label>
-                            <div class="input-box">
-                                <i class="fas fa-user pre-icon"></i>
-                                <input type="text" id="username" placeholder="请输入用户名" autocomplete="username" autofocus>
-                            </div>
-                        </div>
-                        <div class="field">
-                            <label class="field-label">密码</label>
-                            <div class="input-box">
-                                <i class="fas fa-lock pre-icon"></i>
-                                <input type="password" id="password" class="has-pwd-toggle" placeholder="请输入密码" autocomplete="current-password">
-                                <button type="button" class="toggle-pwd" onclick="togglePwd()" tabindex="-1">
-                                    <i class="fas fa-eye" id="toggleIcon"></i>
-                                </button>
-                            </div>
-                        </div>
-
-                        <div class="form-opts">
-                            <label class="remember-wrap">
-                                <input type="checkbox" id="rememberMe" checked>
-                                <span>记住我</span>
-                            </label>
-                        </div>
-
-                        <button type="submit" class="btn-main" id="loginBtn">
-                            <span>登 录</span>
-                            <i class="fas fa-arrow-right"></i>
+                <div class="field">
+                    <label>密码</label>
+                    <div class="input-box">
+                        <i class="fas fa-lock"></i>
+                        <input type="password" id="password" class="has-toggle" placeholder="请输入密码" autocomplete="current-password">
+                        <button type="button" class="password-toggle" onclick="togglePassword()" tabindex="-1">
+                            <i class="fas fa-eye" id="toggleIcon"></i>
                         </button>
-                    </form>
-
-                    <div class="hr-divider">
-                        <div class="hr-line"></div>
-                        <span class="hr-text">或使用 SSO 登录</span>
-                        <div class="hr-line"></div>
                     </div>
-
-                    <select id="gitlabInstanceSelect" class="gitlab-select">
-                        <option value="">选择 GitLab 实例...</option>
-                    </select>
-                    <button type="button" id="gitlabLoginBtn" class="btn-gitlab" disabled onclick="handleGitLabLogin()">
-                        <i class="fab fa-gitlab"></i>
-                        <span>GitLab 单点登录</span>
-                    </button>
                 </div>
+
+                <div class="form-options">
+                    <label class="remember-me">
+                        <input type="checkbox" id="rememberMe" checked>
+                        <span>记住我</span>
+                    </label>
+                </div>
+
+                <button type="submit" id="loginBtn" class="btn-primary">
+                    <i class="fas fa-sign-in-alt"></i>
+                    <span>登录</span>
+                </button>
+            </form>
+
+            <div class="sep">
+                <div class="sep-line"></div>
+                <div class="sep-text">其它登录方式</div>
+                <div class="sep-line"></div>
+            </div>
+
+            <!-- 多租户改造：GitLab 多实例选择器 -->
+            <div class="gitlab-instance-selector" style="margin-bottom: 12px;">
+                <select id="gitlabInstanceSelect" class="gitlab-instance-select">
+                    <option value="">选择 GitLab 实例...</option>
+                </select>
+            </div>
+            <div class="sso-row">
+                <button type="button" id="gitlabLoginBtn" class="sso-btn" title="GitLab 单点登录" disabled onclick="doGitLabLogin()">
+                    <i class="fab fa-gitlab"></i>
+                </button>
+            </div>
+
+            <div class="card-foot">
+                <p>AI Code Guard — 智能代码门禁系统</p>
             </div>
         </div>
+
     </div>
 
     <script>
+        // ===== 代码字符飘落 =====
+        (function initParticles() {
+            const chars = ['{', '}', '(', ')', ';', '+', '-', '=', '>', '<', '/', '*', '[', ']', '&', '|', '!', '?', ':', ','];
+            const container = document.querySelector('.bg-wrap');
+            for (let i = 0; i < 40; i++) {
+                const el = document.createElement('div');
+                el.className = 'code-particle';
+                el.textContent = chars[Math.floor(Math.random() * chars.length)];
+                el.style.left = Math.random() * 100 + 'vw';
+                el.style.animationDuration = (15 + Math.random() * 25) + 's';
+                el.style.animationDelay = (Math.random() * 20) + 's';
+                el.style.fontSize = (11 + Math.random() * 8) + 'px';
+                container.appendChild(el);
+            }
+        })();
+
+        // ===== 打字机 Slogan =====
+
         const API_BASE = '/api/v1';
         const TOKEN_KEY = 'auth_token';
         const USER_KEY = 'user_info';
         const REMEMBER_KEY = 'login_remember';
 
-        document.addEventListener('DOMContentLoaded', () => {
-            checkAuth();
-            loadGitLabInstances();
-            restoreUser();
-        });
-
-        function checkAuth() {
-            const token = localStorage.getItem(TOKEN_KEY);
-            if (!token) return;
-            fetch(`${API_BASE}/users/me`, { headers: { 'Authorization': 'Bearer ' + token } })
-                .then(r => { if (r.ok) showSuccess('/'); })
-                .catch(() => {});
+        function togglePassword() {
+            const input = document.getElementById('password');
+            const icon = document.getElementById('toggleIcon');
+            const hidden = input.type === 'password';
+            input.type = hidden ? 'text' : 'password';
+            icon.className = hidden ? 'fas fa-eye-slash' : 'fas fa-eye';
         }
 
-        function restoreUser() {
+        // 恢复记住的用户名
+        (function restoreRememberedUser() {
             const saved = localStorage.getItem(REMEMBER_KEY);
             if (saved) {
                 try {
@@ -591,59 +494,99 @@
                     document.getElementById('password').focus();
                 } catch(e) {}
             }
+        })();
+
+        function checkAuth() {
+            const token = localStorage.getItem('auth_token');
+            if (token) {
+                fetch(`${API_BASE}/users/me`, {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                }).then(res => {
+                    if (res.ok) { window.location.href = '/'; }
+                    else { localStorage.removeItem('auth_token'); localStorage.removeItem('user_info'); }
+                }).catch(() => {});
+            }
         }
 
-        function togglePwd() {
-            const input = document.getElementById('password');
-            const icon = document.getElementById('toggleIcon');
-            const hidden = input.type === 'password';
-            input.type = hidden ? 'text' : 'password';
-            icon.className = hidden ? 'fas fa-eye-slash' : 'fas fa-eye';
-        }
-
-        async function handleLogin(e) {
+        async function doLogin(e) {
             e.preventDefault();
             const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value;
             const remember = document.getElementById('rememberMe').checked;
+            const btn = document.getElementById('loginBtn');
+            const errorMsg = document.getElementById('errorMsg');
+            const errorText = document.getElementById('errorText');
 
-            if (!username) { showError('请输入用户名'); document.getElementById('username').focus(); return false; }
-            if (!password) { showError('请输入密码'); document.getElementById('password').focus(); return false; }
+            if (!username || !password) {
+                errorText.textContent = '请输入用户名和密码';
+                errorMsg.classList.add('show');
+                return false;
+            }
 
-            setLoading(true);
-            hideError();
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>登录中...</span>';
+            errorMsg.classList.remove('show');
 
             try {
-                const res = await fetch(`${API_BASE}/login`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                const res = await apiFetch(`${API_BASE}/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username, password })
                 });
                 const data = await res.json();
-                if (!res.ok || !data.data?.token) {
-                    showError(data.error || '登录失败，请检查用户名和密码');
-                    setLoading(false);
-                    return false;
-                }
-                const token = data.data.token;
-                localStorage.setItem(TOKEN_KEY, token);
-                if (remember) localStorage.setItem(REMEMBER_KEY, JSON.stringify({ username }));
-                else localStorage.removeItem(REMEMBER_KEY);
-
-                const userRes = await fetch(`${API_BASE}/users/me`, { headers: { 'Authorization': 'Bearer ' + token } });
-                if (userRes.ok) {
-                    const userData = await userRes.json();
-                    localStorage.setItem(USER_KEY, JSON.stringify(Object.assign({}, userData.data || {}, data.data)));
+                if (res.ok && data.data && data.data.token) {
+                    localStorage.setItem('auth_token', data.data.token);
+                    if (remember) {
+                        localStorage.setItem(REMEMBER_KEY, JSON.stringify({ username }));
+                    } else {
+                        localStorage.removeItem(REMEMBER_KEY);
+                    }
+                    // 拉取完整用户信息（包含 current_org_id / current_org_role），确保后续 getOrgOverrideHeaders 能正确推断 X-Org-Id
+                    const userRes = await fetch(`${API_BASE}/users/me`, { headers: { 'Authorization': 'Bearer ' + data.data.token } });
+                    if (userRes.ok) {
+                        const userData = await userRes.json();
+                        const merged = Object.assign({}, userData.data || {}, data.data);
+                        localStorage.setItem('user_info', JSON.stringify(merged));
+                    } else {
+                        localStorage.setItem('user_info', JSON.stringify(data.data));
+                    }
+                    window.location.href = '/';
                 } else {
-                    localStorage.setItem(USER_KEY, JSON.stringify(data.data));
+                    errorText.textContent = data.error || '登录失败';
+                    errorMsg.classList.add('show');
                 }
-                showSuccess('/');
-            } catch {
-                showError('网络连接失败，请稍后重试');
-                setLoading(false);
+            } catch (e) {
+                errorText.textContent = '网络错误，请稍后重试';
+                errorMsg.classList.add('show');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-sign-in-alt"></i><span>登录</span>';
             }
             return false;
         }
 
+        // OAuth 回调处理：URL 带有 ?token=xxx 时保存后跳转首页（覆盖 auth.js 在 login.html 的 early return）
+        (function handleOAuthCallback() {
+            const params = new URLSearchParams(window.location.search);
+            const token = params.get('token');
+            if (!token) return;
+            localStorage.setItem('auth_token', token);
+            // 清理 URL 中的 token
+            window.history.replaceState({}, document.title, window.location.pathname);
+            // 用 token 拉取用户信息后再跳转，确保 user_info 已就位
+            fetch(`${API_BASE}/users/me`, { headers: { 'Authorization': 'Bearer ' + token } })
+                .then(res => res.ok ? res.json() : null)
+                .then(data => {
+                    if (data && data.data) {
+                        const merged = Object.assign({}, data.data, { token });
+                        localStorage.setItem('user_info', JSON.stringify(merged));
+                    }
+                    window.location.href = '/';
+                })
+                .catch(() => { window.location.href = '/'; });
+        })();
+
+        // 多租户改造：加载公开 GitLab 实例列表
         async function loadGitLabInstances() {
             try {
                 const resp = await fetch(`${API_BASE}/gitlab-instances/public`);
@@ -652,62 +595,56 @@
                 const instances = data.data || [];
                 const select = document.getElementById('gitlabInstanceSelect');
                 const btn = document.getElementById('gitlabLoginBtn');
+                
                 if (instances.length === 0) {
-                    select.innerHTML = '<option value="">暂无可用 GitLab 实例</option>';
-                    btn.disabled = true; return;
+                    select.innerHTML = '';
+                    const opt = document.createElement('option');
+                    opt.value = '';
+                    opt.textContent = '暂无可用 GitLab 实例';
+                    select.appendChild(opt);
+                    btn.disabled = true;
+                    return;
                 }
-                select.innerHTML = '<option value="">选择 GitLab 实例...</option>';
+                
+                select.innerHTML = '';
+                const placeholder = document.createElement('option');
+                placeholder.value = '';
+                placeholder.textContent = '选择 GitLab 实例...';
+                select.appendChild(placeholder);
+                
                 instances.forEach(inst => {
                     const opt = document.createElement('option');
-                    opt.value = inst.id; opt.textContent = inst.name;
+                    opt.value = inst.id;
+                    opt.textContent = inst.name;
                     if (inst.is_default) opt.selected = true;
                     select.appendChild(opt);
                 });
-                if (instances.some(i => i.is_default) || instances.length === 1) btn.disabled = false;
-                select.addEventListener('change', () => { btn.disabled = !select.value; });
-            } catch (e) { console.error(e); }
+                
+                // 如果有默认实例或只有一个实例，自动启用按钮
+                const defaultInst = instances.find(i => i.is_default);
+                if (defaultInst || instances.length === 1) {
+                    btn.disabled = false;
+                }
+                
+                select.addEventListener('change', () => {
+                    btn.disabled = !select.value;
+                });
+            } catch (e) {
+                console.error('加载 GitLab 实例失败', e);
+            }
         }
-
-        function handleGitLabLogin() {
-            const id = document.getElementById('gitlabInstanceSelect').value;
-            if (!id) { showError('请先选择 GitLab 实例'); return; }
-            window.location.href = `/api/v1/auth/gitlab?instance_id=${encodeURIComponent(id)}`;
+        
+        function doGitLabLogin() {
+            const instanceID = document.getElementById('gitlabInstanceSelect').value;
+            if (!instanceID) {
+                showToast('请选择 GitLab 实例', 'error');
+                return;
+            }
+            location.href = `/api/v1/auth/gitlab?instance_id=${encodeURIComponent(instanceID)}`;
         }
-
-        // OAuth callback
-        (function() {
-            const params = new URLSearchParams(window.location.search);
-            const token = params.get('token');
-            if (!token) return;
-            localStorage.setItem(TOKEN_KEY, token);
-            window.history.replaceState({}, document.title, window.location.pathname);
-            fetch(`${API_BASE}/users/me`, { headers: { 'Authorization': 'Bearer ' + token } })
-                .then(r => r.ok ? r.json() : null)
-                .then(d => {
-                    if (d?.data) localStorage.setItem(USER_KEY, JSON.stringify(Object.assign({}, d.data, { token })));
-                    showSuccess('/');
-                })
-                .catch(() => { window.location.href = '/'; });
-        })();
-
-        function showError(msg) {
-            const el = document.getElementById('errorAlert');
-            document.getElementById('errorText').textContent = msg;
-            el.classList.add('show');
-            el.style.animation = 'none'; el.offsetHeight; el.style.animation = '';
-        }
-        function hideError() { document.getElementById('errorAlert').classList.remove('show'); }
-        function setLoading(v) {
-            const btn = document.getElementById('loginBtn');
-            btn.disabled = v;
-            btn.innerHTML = v
-                ? '<i class="fas fa-circle-notch spin"></i><span>登录中...</span>'
-                : '<span>登 录</span><i class="fas fa-arrow-right"></i>';
-        }
-        function showSuccess(url) {
-            document.getElementById('successOverlay').classList.add('show');
-            setTimeout(() => window.location.href = url, 700);
-        }
+        
+        loadGitLabInstances();
+        checkAuth();
     </script>
 </body>
 </html>
