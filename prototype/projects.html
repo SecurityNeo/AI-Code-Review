@@ -96,27 +96,24 @@
                 <!-- 项目列表 Tab -->
                 <div id="tab-projects" class="tab-content active">
                 <!-- 过滤器 -->
-                <div class="bg-white rounded-xl p-4 border flex items-center gap-4">
-                    <div class="flex items-center gap-4">
-                        <select id="orgSelect" class="w-48 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"></select>
-                        <input type="text" id="searchInput" placeholder="搜索项目..." class="w-48 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" onkeyup="if(event.key==='Enter')loadProjects()">
-                        <select id="statusFilter" class="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" onchange="loadProjects()">
-                            <option value="">所有状态</option>
-                            <option value="active">启用AI</option>
-                            <option value="inactive">未启用AI</option>
-                        </select>
-                        <button onclick="loadProjects()" class="bg-gray-100 text-gray-600 px-3 py-2 rounded-lg text-sm hover:bg-gray-200">
-                            <i class="fas fa-filter mr-1"></i>筛选
-                        </button>
-                    </div>
-                    <div class="flex items-center gap-2 ml-auto">
-                        <button onclick="showModal('createModal')" data-admin-only class="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700">
-                            <i class="fas fa-plus mr-1"></i>新建项目
-                        </button>
-                        <button onclick="loadProjects()" class="bg-gray-100 text-gray-600 px-3 py-2 rounded-lg text-sm hover:bg-gray-200">
-                            <i class="fas fa-redo mr-1"></i>刷新
-                        </button>
-                    </div>
+                <div class="bg-white rounded-xl p-4 border flex flex-wrap items-center gap-3">
+                    <select id="orgSelect" class="w-40 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"></select>
+                    <input type="text" id="searchInput" placeholder="搜索项目..." class="w-40 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" onkeyup="if(event.key==='Enter')loadProjects()">
+                    <select id="statusFilter" class="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" onchange="loadProjects()">
+                        <option value="">所有状态</option>
+                        <option value="active">启用AI</option>
+                        <option value="inactive">未启用AI</option>
+                    </select>
+                    <button onclick="loadProjects()" class="bg-gray-100 text-gray-600 px-3 py-2 rounded-lg text-sm hover:bg-gray-200">
+                        <i class="fas fa-filter mr-1"></i>筛选
+                    </button>
+                    <div class="flex-1"></div>
+                    <button onclick="showModal('createModal')" data-admin-only class="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700">
+                        <i class="fas fa-plus mr-1"></i>新建项目
+                    </button>
+                    <button onclick="loadProjects()" class="bg-gray-100 text-gray-600 px-3 py-2 rounded-lg text-sm hover:bg-gray-200">
+                        <i class="fas fa-redo mr-1"></i>刷新
+                    </button>
                 </div>
 
                 <!-- 项目列表 -->
@@ -175,12 +172,12 @@
 
     <!-- 新建/编辑项目弹窗 -->
     <div id="createModal" class="modal fixed inset-0 bg-black/50 items-center justify-center z-50">
-        <div class="bg-white rounded-xl w-[600px] max-h-[90vh] overflow-y-auto">
-            <div class="px-6 py-4 border-b flex items-center justify-between">
+        <div class="bg-white rounded-xl w-[600px] max-h-[90vh] flex flex-col">
+            <div class="px-6 py-4 border-b flex items-center justify-between flex-shrink-0">
                 <h3 class="font-bold text-lg">新建项目</h3>
                 <button onclick="hideModal('createModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
             </div>
-            <div class="p-6 space-y-4">
+            <div class="p-6 space-y-4 overflow-y-auto flex-1">
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">项目名称</label>
                     <input type="text" id="projectName" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="请输入项目名称">
@@ -246,7 +243,7 @@
                     <span class="text-sm text-gray-700">启用 AI 审核</span>
                 </div>
             </div>
-            <div class="px-6 py-4 border-t flex justify-end gap-3">
+            <div class="px-6 py-4 border-t flex justify-end gap-3 flex-shrink-0">
                 <button onclick="hideModal('createModal')" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">取消</button>
                 <button onclick="saveProject()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">保存</button>
             </div>
@@ -888,6 +885,11 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
         
         function switchTab(tab, evt) {
             const event = evt || window.event;
+            // 非 admin 禁止切换到 AI审核模版
+            if (tab === 'templates') {
+                const isAdmin = typeof isSystemAdmin === 'function' && isSystemAdmin();
+                if (!isAdmin) return;
+            }
             document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
             (event.target || event.srcElement).closest('.tab-btn').classList.add('active');
@@ -1442,6 +1444,13 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                 orgSel.addEventListener('change', () => {
                     currentPage = 1;
                     loadProjects();
+                });
+            }
+            // 非 admin 隐藏 AI审核模版 Tab
+            const isAdmin = typeof isSystemAdmin === 'function' && isSystemAdmin();
+            if (!isAdmin) {
+                document.querySelectorAll('.tab-btn').forEach(el => {
+                    if (el.innerHTML.includes('AI审核模版')) el.style.display = 'none';
                 });
             }
             loadCategories();
