@@ -66,7 +66,7 @@
         const style = document.createElement('style');
         style.id = 'org-picker-styles';
         style.textContent =
-            '.org-picker { position: relative; display: inline-block; width: auto; font-size: 14px; }' +
+            '.org-picker { position: relative; display: inline-block; width: 100%; font-size: 14px; }' +
             '.org-picker-trigger {' +
             '  display: flex; align-items: center; justify-content: space-between;' +
             '  width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 8px;' +
@@ -138,9 +138,9 @@
 
         const wrapper   = document.createElement('div');
         wrapper.className = PICKER_CLASS;
-        if (sel.classList.contains('w-full')) {
-            wrapper.style.width = '100%';
-        }
+        /* 把原始的 w-* 宽度 class 搬运到 wrapper，让弹框/表单里的 w-full、w-48 等生效 */
+        const widthCls = Array.from(sel.classList).find(c => /^w-/.test(c));
+        if (widthCls) wrapper.classList.add(widthCls);
         sel.parentNode.insertBefore(wrapper, sel);
         wrapper.appendChild(sel);
 
