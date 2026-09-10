@@ -187,7 +187,7 @@
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">所属组织</label>
-                    <select id="orgSelect" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                    <select id="projectOrgSelect" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
                     </select>
                 </div>
                 <div>
@@ -777,7 +777,7 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             document.getElementById('projectTemplateId').value = p.template_id || '';
             document.getElementById('poolId').value = p.pool_id || '';
             document.getElementById('defaultModelId').value = p.default_model_id !== null && p.default_model_id !== undefined ? String(p.default_model_id) : '-1';
-            loadOrgSelect('orgSelect', p.org_id);
+            loadOrgSelect('projectOrgSelect', p.org_id);
             document.getElementById('createModal').classList.add('active');
         }
 
@@ -819,7 +819,7 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
              }
              if (gitlabProjectId) data.gitlab_project_id = parseInt(gitlabProjectId);
              if (!data.access_token) delete data.access_token;
-             injectOrgId(data, 'orgSelect');
+             injectOrgId(data, 'projectOrgSelect');
 
             try {
                 const url = editingId ? `${API_BASE}/projects/${editingId}` : `${API_BASE}/projects`;
@@ -856,6 +856,7 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                 document.getElementById('poolId').value = '';
                 document.getElementById('defaultModelId').value = '';
                 renderTemplateSelect(templatesData);
+                loadOrgSelect('projectOrgSelect');
                 loadOrgSelect('tmplOrgSelect');
             }
             document.getElementById(id).classList.add('active');
