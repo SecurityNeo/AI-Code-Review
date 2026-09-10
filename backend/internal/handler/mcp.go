@@ -244,6 +244,8 @@ func (h *MCPKeyHandler) UpdateKey(c *gin.Context) {
 		Status      string   `json:"status"`
 		ExpiresAt   *string  `json:"expires_at"`
 		UserID      *uint    `json:"user_id"` // nil 表示不修改，0 表示解除绑定
+		// 多租户改造：super_admin 可修改所属组织
+		OrgID uint `json:"org_id"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -310,8 +312,14 @@ func (h *MCPKeyHandler) UpdateKey(c *gin.Context) {
 		key.UserID = *req.UserID
 	}
 
+	// 多租户改造：super_admin 可修改所属组织
+	if req.OrgID > 0 && scope.IsSuperAdmin {
+		key.OrgID = req.OrgID
+	}
+
 	// 多租户改造：避免 Save 零值覆盖 org_id
-	if err := model.DB.Omit("org_id").Save(&key).Error; err != nil {
+	// 已由上方权限控制保证非 super_admin 不会修改 org_id
+	if err := model.DB.Save(&key).Error; err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}

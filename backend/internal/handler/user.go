@@ -366,6 +366,8 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 		IMPlatform  *string `json:"im_platform"`
 		IMUserID    *string `json:"im_user_id"`
 		OrgID       uint    `json:"org_id"`
+		// 多租户改造：支持编辑用户在组织内的角色
+		Role string `json:"role"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -377,22 +379,30 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	// 可选：迁移默认组织
+	// 可选：迁移默认组织 + 修改角色
 	if req.OrgID > 0 {
 		// 检查当前用户的 org_users 是否存在目标组织绑定
 		var existingOU model.OrgUser
 		if err := model.DB.Where("org_id = ? AND user_id = ?", req.OrgID, id).First(&existingOU).Error; err == nil {
-			// 已存在绑定：更新 default_org_id + is_default
+			// 已存在绑定：更新 default_org_id + is_default + role（如提供）
 			model.DB.Model(&model.User{}).Where("id = ?", id).Update("default_org_id", req.OrgID)
 			model.DB.Model(&model.OrgUser{}).Where("user_id = ? AND org_id != ?", id, req.OrgID).Update("is_default", false)
-			model.DB.Model(&model.OrgUser{}).Where("user_id = ? AND org_id = ?", id, req.OrgID).Update("is_default", true)
+			updates := map[string]interface{}{"is_default": true}
+			if req.Role != "" {
+				updates["role"] = req.Role
+			}
+			model.DB.Model(&model.OrgUser{}).Where("user_id = ? AND org_id = ?", id, req.OrgID).Updates(updates)
 		} else {
 			// 不存在绑定：新增绑定并设为默认
 			model.DB.Model(&model.User{}).Where("id = ?", id).Update("default_org_id", req.OrgID)
+			role := req.Role
+			if role == "" {
+				role = "developer"
+			}
 			ou := model.OrgUser{
 				OrgID:     req.OrgID,
 				UserID:    uint(id),
-				Role:      "developer",
+				Role:      role,
 				Status:    "active",
 				IsDefault: true,
 			}

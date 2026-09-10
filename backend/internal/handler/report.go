@@ -187,6 +187,8 @@ func (h *ReportHandler) UpdateRecipient(c *gin.Context) {
 		Email     string `json:"email"`
 		GroupName string `json:"group_name"`
 		Enabled   *bool  `json:"enabled"`
+		// 多租户改造：super_admin 可修改所属组织
+		OrgID uint `json:"org_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
@@ -204,8 +206,13 @@ func (h *ReportHandler) UpdateRecipient(c *gin.Context) {
 	if req.Enabled != nil {
 		r.Enabled = *req.Enabled
 	}
-	// 多租户改造：避免 Save 零值覆盖 org_id
-	model.DB.Omit("org_id").Save(&r)
+
+	// 多租户改造：super_admin 可修改所属组织
+	if req.OrgID > 0 && scope.IsSuperAdmin {
+		r.OrgID = req.OrgID
+	}
+
+	model.DB.Save(&r)
 	c.JSON(200, gin.H{"data": r})
 }
 
