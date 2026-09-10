@@ -5,166 +5,213 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>登录 - AI Code Guard</title>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-
         html, body {
             height: 100%;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: #0a0e1a;
-            color: #f1f5f9;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0e17;
             overflow: hidden;
         }
 
-        /* ===== Background ===== */
-        .bg-container {
-            position: fixed;
-            inset: 0;
-            z-index: 0;
-            background:
-                radial-gradient(ellipse 70% 40% at 50% -10%, rgba(59,130,246,0.06), transparent),
-                radial-gradient(ellipse 50% 40% at 80% 80%, rgba(139,92,246,0.04), transparent);
-        }
-        .bg-grid {
-            position: fixed;
-            inset: 0;
-            z-index: 0;
-            background-image:
-                linear-gradient(rgba(255,255,255,0.012) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255,255,255,0.012) 1px, transparent 1px);
-            background-size: 50px 50px;
-            mask-image: radial-gradient(ellipse 60% 50% at 50% 50%, black, transparent);
-            -webkit-mask-image: radial-gradient(ellipse 60% 50% at 50% 50%, black, transparent);
-        }
-        .bg-glow {
-            position: fixed;
-            width: 500px;
-            height: 500px;
-            border-radius: 50%;
-            filter: blur(120px);
-            opacity: 0.12;
-            pointer-events: none;
-            z-index: 0;
-        }
-        .bg-glow-1 { background: #3b82f6; top: -150px; left: 15%; animation: float 18s ease-in-out infinite; }
-        .bg-glow-2 { background: #8b5cf6; bottom: -150px; right: 10%; animation: float 18s ease-in-out infinite reverse; }
-        @keyframes float {
-            0%, 100% { transform: translate(0, 0) scale(1); }
-            33% { transform: translate(30px, -20px) scale(1.03); }
-            66% { transform: translate(-20px, 15px) scale(0.97); }
+        /* ===== Split Layout ===== */
+        .login-split {
+            display: flex;
+            height: 100vh;
+            width: 100vw;
+            align-items: stretch;
         }
 
-        /* Code particles */
-        .code-particles {
-            position: fixed;
-            inset: 0;
-            z-index: 0;
-            pointer-events: none;
-            overflow: hidden;
-        }
-        .particle {
-            position: absolute;
-            font-family: 'SFMono-Regular', Consolas, monospace;
-            font-size: 11px;
-            font-weight: 500;
-            color: rgba(59,130,246,0.07);
-            animation: particleFloat linear infinite;
-            white-space: nowrap;
-        }
-        @keyframes particleFloat {
-            0% { transform: translateY(100vh); opacity: 0; }
-            10% { opacity: 1; }
-            90% { opacity: 1; }
-            100% { transform: translateY(-10vh); opacity: 0; }
-        }
-
-        /* ===== Main Layout ===== */
-        .login-page {
+        /* ===== Left Panel ===== */
+        .left-panel {
+            flex: 0 0 50%;
+            min-width: 420px;
+            background: #0c111f;
             position: relative;
-            z-index: 1;
-            min-height: 100vh;
             display: flex;
             flex-direction: column;
-            align-items: center;
             justify-content: center;
-            padding: 40px 20px;
-            gap: 32px;
+            padding: 60px 72px;
+            overflow: hidden;
         }
 
-        /* ===== Brand Header ===== */
-        .brand-header {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            animation: fadeSlideUp 0.6s ease-out both;
+        /* Subtle aurora background */
+        .aurora-bg {
+            position: absolute;
+            inset: 0;
+            z-index: 0;
+            pointer-events: none;
+            background:
+                radial-gradient(ellipse 600px 500px at 15% 20%, rgba(59,130,246,0.12), transparent 60%),
+                radial-gradient(ellipse 500px 400px at 85% 80%, rgba(139,92,246,0.09), transparent 60%);
         }
-        .brand-logo {
-            width: 44px;
-            height: 44px;
+
+        .left-content {
+            position: relative;
+            z-index: 1;
+            max-width: 420px;
+            animation: fadeUp 0.7s ease-out both;
+        }
+
+        .brand-mark {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 48px;
+        }
+        .brand-mark .logo {
+            width: 36px;
+            height: 36px;
             background: linear-gradient(135deg, #3b82f6, #7c3aed);
-            border-radius: 12px;
+            border-radius: 10px;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 8px 24px rgba(59,130,246,0.25);
+            box-shadow: 0 6px 20px rgba(59,130,246,0.25);
         }
-        .brand-logo i { font-size: 20px; color: #fff; }
-        .brand-name {
-            font-size: 24px;
+        .brand-mark .logo i { font-size: 16px; color: #fff; }
+        .brand-mark span {
+            font-size: 18px;
             font-weight: 700;
+            color: #f8fafc;
             letter-spacing: -0.3px;
         }
-        .brand-name .highlight {
-            background: linear-gradient(135deg, #60a5fa, #a78bfa);
+
+        .headline {
+            font-size: 36px;
+            font-weight: 700;
+            color: #f8fafc;
+            line-height: 1.25;
+            letter-spacing: -0.8px;
+            margin-bottom: 18px;
+        }
+        .headline .gradient-text {
+            background: linear-gradient(135deg, #60a5fa, #c084fc);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
         }
 
-        /* ===== Login Card ===== */
-        .login-card {
-            width: 420px;
-            max-width: 100%;
-            background: rgba(15, 23, 41, 0.85);
-            border: 1px solid rgba(255,255,255,0.06);
-            border-radius: 20px;
-            padding: 36px 32px 28px;
-            backdrop-filter: blur(24px);
-            -webkit-backdrop-filter: blur(24px);
-            box-shadow:
-                0 24px 80px rgba(0,0,0,0.35),
-                inset 0 1px 0 rgba(255,255,255,0.04);
-            animation: fadeSlideUp 0.6s ease-out 0.15s both;
+        .subhead {
+            font-size: 16px;
+            color: #64748b;
+            line-height: 1.7;
+            margin-bottom: 48px;
+            max-width: 380px;
         }
 
-        .login-title {
-            font-size: 20px;
-            font-weight: 700;
-            margin-bottom: 6px;
-            text-align: center;
+        .capabilities {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
         }
-        .login-subtitle {
+        .cap-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            animation: fadeUp 0.5s ease-out both;
+        }
+        .cap-item:nth-child(1) { animation-delay: 0.15s; }
+        .cap-item:nth-child(2) { animation-delay: 0.25s; }
+        .cap-item:nth-child(3) { animation-delay: 0.35s; }
+        .cap-item:nth-child(4) { animation-delay: 0.45s; }
+
+        .cap-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+        .cap-icon.blue { background: rgba(59,130,246,0.1); color: #60a5fa; }
+        .cap-icon.purple { background: rgba(139,92,246,0.1); color: #a78bfa; }
+        .cap-icon.red { background: rgba(239,68,68,0.1); color: #f87171; }
+        .cap-icon.green { background: rgba(34,197,94,0.1); color: #4ade80; }
+
+        .cap-text h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #e2e8f0;
+            margin-bottom: 3px;
+        }
+        .cap-text p {
             font-size: 13px;
-            color: #64748b;
-            text-align: center;
+            color: #475569;
+            line-height: 1.5;
+        }
+
+        /* ===== Right Panel ===== */
+        .right-panel {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 40px;
+            position: relative;
+        }
+        .right-panel .bg-grid {
+            position: absolute;
+            inset: 0;
+            z-index: 0;
+            background-image:
+                linear-gradient(rgba(255,255,255,0.008) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.008) 1px, transparent 1px);
+            background-size: 48px 48px;
+        }
+
+        /* Login card */
+        .login-wrapper {
+            width: 100%;
+            max-width: 400px;
+            position: relative;
+            z-index: 1;
+            animation: fadeUp 0.6s ease-out 0.1s both;
+        }
+        .login-card {
+            background: rgba(14, 20, 34, 0.75);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 20px;
+            padding: 40px 36px 32px;
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            box-shadow: 0 24px 60px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04);
+        }
+        .card-header {
             margin-bottom: 28px;
+        }
+        .card-title {
+            font-size: 22px;
+            font-weight: 700;
+            color: #f1f5f9;
+            margin-bottom: 6px;
+        }
+        .card-sub {
+            font-size: 14px;
+            color: #475569;
         }
 
         /* Alert */
-        .alert-error {
+        .alert-err {
             display: none;
             align-items: flex-start;
-            gap: 10px;
-            padding: 11px 14px;
-            background: rgba(239,68,68,0.08);
-            border: 1px solid rgba(239,68,68,0.18);
+            gap: 9px;
+            padding: 11px 13px;
+            background: rgba(239,68,68,0.07);
+            border: 1px solid rgba(239,68,68,0.16);
             border-radius: 10px;
             color: #f87171;
             font-size: 13px;
             margin-bottom: 18px;
         }
-        .alert-error.show { display: flex; animation: shake 0.35s ease; }
-        .alert-error i { margin-top: 2px; font-size: 13px; flex-shrink: 0; }
+        .alert-err.show { display: flex; animation: shake 0.35s ease; }
+        .alert-err i { font-size: 13px; margin-top: 2px; flex-shrink: 0; }
         @keyframes shake {
             0%, 100% { transform: translateX(0); }
             25% { transform: translateX(-5px); }
@@ -172,54 +219,54 @@
         }
 
         /* Form */
-        .form-group { margin-bottom: 18px; }
-        .form-label {
+        .field { margin-bottom: 17px; }
+        .field-label {
             display: block;
             font-size: 13px;
             font-weight: 500;
             color: #94a3b8;
             margin-bottom: 7px;
         }
-        .input-wrap {
+        .input-box {
             position: relative;
         }
-        .input-wrap .in-icon {
+        .input-box .pre-icon {
             position: absolute;
             left: 13px;
             top: 50%;
             transform: translateY(-50%);
             color: #475569;
             font-size: 13px;
-            transition: color 0.2s;
             pointer-events: none;
+            transition: color 0.2s;
         }
-        .form-input {
+        .input-box input {
             width: 100%;
             padding: 11px 13px 11px 38px;
             background: rgba(255,255,255,0.03);
-            border: 1px solid rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.07);
             border-radius: 11px;
             font-size: 14px;
             color: #f1f5f9;
             outline: none;
             transition: all 0.2s;
+            font-family: inherit;
         }
-        .form-input::placeholder { color: #475569; }
-        .form-input:hover { border-color: rgba(255,255,255,0.12); }
-        .form-input:focus {
-            border-color: rgba(59,130,246,0.45);
-            background: rgba(255,255,255,0.045);
-            box-shadow: 0 0 0 3px rgba(59,130,246,0.08);
+        .input-box input::placeholder { color: #475569; }
+        .input-box input:hover { border-color: rgba(255,255,255,0.11); }
+        .input-box input:focus {
+            border-color: rgba(59,130,246,0.4);
+            background: rgba(255,255,255,0.04);
+            box-shadow: 0 0 0 3px rgba(59,130,246,0.07);
         }
-        .form-input:focus + .in-icon,
-        .input-wrap:focus-within .in-icon { color: #60a5fa; }
-        .form-input.has-toggle { padding-right: 38px; }
-        .form-input.has-error {
-            border-color: rgba(239,68,68,0.5);
-            box-shadow: 0 0 0 3px rgba(239,68,68,0.08);
+        .input-box input:focus ~ .pre-icon { color: #60a5fa; }
+        .input-box input.has-pwd-toggle { padding-right: 38px; }
+        .input-box input.error-input {
+            border-color: rgba(239,68,68,0.45);
+            box-shadow: 0 0 0 3px rgba(239,68,68,0.07);
         }
 
-        .pwd-toggle {
+        .toggle-pwd {
             position: absolute;
             right: 11px;
             top: 50%;
@@ -231,15 +278,15 @@
             padding: 4px;
             font-size: 13px;
         }
-        .pwd-toggle:hover { color: #94a3b8; }
+        .toggle-pwd:hover { color: #94a3b8; }
 
-        .form-options {
+        .form-opts {
             display: flex;
             align-items: center;
             justify-content: space-between;
             margin-bottom: 22px;
         }
-        .remember-label {
+        .remember-wrap {
             display: flex;
             align-items: center;
             gap: 7px;
@@ -248,10 +295,10 @@
             color: #94a3b8;
             user-select: none;
         }
-        .remember-label input { width: 15px; height: 15px; accent-color: #3b82f6; cursor: pointer; }
+        .remember-wrap input { width: 15px; height: 15px; accent-color: #3b82f6; cursor: pointer; }
 
-        /* Submit button */
-        .btn-submit {
+        /* Submit */
+        .btn-main {
             width: 100%;
             padding: 12px;
             background: linear-gradient(135deg, #3b82f6, #2563eb);
@@ -261,267 +308,257 @@
             font-size: 14px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.2s;
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
-            position: relative;
-            overflow: hidden;
+            transition: all 0.2s;
         }
-        .btn-submit:hover:not(:disabled) {
+        .btn-main:hover:not(:disabled) {
             transform: translateY(-1px);
-            box-shadow: 0 8px 28px rgba(37,99,235,0.35);
+            box-shadow: 0 8px 24px rgba(37,99,235,0.3);
         }
-        .btn-submit:active:not(:disabled) { transform: translateY(0); }
-        .btn-submit:disabled { opacity: 0.6; cursor: not-allowed; }
-        .btn-submit .spinner { animation: spin 0.9s linear infinite; }
+        .btn-main:active:not(:disabled) { transform: translateY(0); }
+        .btn-main:disabled { opacity: 0.55; cursor: not-allowed; }
+        .btn-main .spin { animation: spin 0.9s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
         /* Divider */
-        .divider {
+        .hr-divider {
             display: flex;
             align-items: center;
             gap: 14px;
-            margin: 24px 0 18px;
+            margin: 24px 0 16px;
         }
-        .divider-line {
+        .hr-line {
             flex: 1;
             height: 1px;
             background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
         }
-        .divider-text {
+        .hr-text {
             font-size: 12px;
             color: #475569;
             white-space: nowrap;
         }
 
-        /* GitLab SSO */
+        /* GitLab */
         .gitlab-select {
             width: 100%;
             padding: 10px 13px;
             background: rgba(255,255,255,0.03);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 11px;
+            border: 1px solid rgba(255,255,255,0.07);
+            border-radius: 10px;
             font-size: 13px;
             color: #f1f5f9;
             outline: none;
             margin-bottom: 10px;
-            cursor: pointer;
             appearance: none;
             -webkit-appearance: none;
+            cursor: pointer;
             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23475569' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
             background-repeat: no-repeat;
             background-position: right 13px center;
             padding-right: 34px;
             transition: all 0.2s;
         }
-        .gitlab-select:hover { border-color: rgba(255,255,255,0.12); }
-        .gitlab-select:focus { border-color: rgba(59,130,246,0.45); }
+        .gitlab-select:hover { border-color: rgba(255,255,255,0.11); }
+        .gitlab-select:focus { border-color: rgba(59,130,246,0.4); }
         .gitlab-select option { background: #1e293b; color: #f1f5f9; }
 
         .btn-gitlab {
             width: 100%;
             padding: 11px;
-            background: rgba(252,109,38,0.08);
-            border: 1px solid rgba(252,109,38,0.18);
+            background: rgba(252,109,38,0.07);
+            border: 1px solid rgba(252,109,38,0.16);
             border-radius: 11px;
             color: #fb923c;
             font-size: 14px;
             font-weight: 500;
             cursor: pointer;
-            transition: all 0.2s;
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
+            transition: all 0.2s;
         }
         .btn-gitlab:hover:not(:disabled) {
-            background: rgba(252,109,38,0.14);
-            border-color: rgba(252,109,38,0.3);
-            transform: translateY(-1px);
+            background: rgba(252,109,38,0.12);
+            border-color: rgba(252,109,38,0.28);
         }
-        .btn-gitlab:disabled { opacity: 0.35; cursor: not-allowed; }
-
-        /* Feature pills */
-        .feature-pills {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            gap: 8px;
-            max-width: 460px;
-            animation: fadeSlideUp 0.6s ease-out 0.3s both;
-        }
-        .pill {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 7px 14px;
-            background: rgba(255,255,255,0.04);
-            border: 1px solid rgba(255,255,255,0.06);
-            border-radius: 24px;
-            font-size: 12px;
-            color: #94a3b8;
-            transition: all 0.25s ease;
-            cursor: default;
-        }
-        .pill:hover {
-            background: rgba(255,255,255,0.07);
-            border-color: rgba(255,255,255,0.1);
-            color: #e2e8f0;
-            transform: translateY(-1px);
-        }
-        .pill i { font-size: 11px; }
-        .pill.ai i { color: #60a5fa; }
-        .pill.security i { color: #f87171; }
-        .pill.ast i { color: #a78bfa; }
-        .pill.rules i { color: #fbbf24; }
-        .pill.metrics i { color: #4ade80; }
-        .pill.collab i { color: #22d3ee; }
+        .btn-gitlab:disabled { opacity: 0.3; cursor: not-allowed; }
 
         /* Success overlay */
         .success-overlay {
             position: fixed;
             inset: 0;
-            z-index: 100;
-            background: #0a0e1a;
+            z-index: 200;
+            background: #0a0e17;
             display: none;
             align-items: center;
             justify-content: center;
             flex-direction: column;
             gap: 16px;
-            animation: fadeIn 0.3s ease;
+            animation: fadeIn 0.25s ease;
         }
         .success-overlay.show { display: flex; }
-        .success-icon {
-            width: 56px;
-            height: 56px;
+        .s-icon {
+            width: 52px;
+            height: 52px;
             background: linear-gradient(135deg, #22c55e, #16a34a);
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 24px;
+            font-size: 22px;
             color: #fff;
-            box-shadow: 0 8px 28px rgba(34,197,94,0.25);
-            animation: scaleIn 0.4s ease 0.1s both;
+            box-shadow: 0 8px 24px rgba(34,197,94,0.22);
+            animation: popIn 0.4s ease 0.05s both;
         }
-        .success-text {
+        .s-text {
             font-size: 18px;
             font-weight: 600;
-            animation: fadeSlideUp 0.4s ease 0.2s both;
+            color: #f1f5f9;
+            animation: fadeUp 0.4s ease 0.15s both;
         }
-        .success-sub {
-            font-size: 13px;
-            color: #64748b;
-            animation: fadeSlideUp 0.4s ease 0.25s both;
-        }
+        .s-sub { font-size: 13px; color: #475569; animation: fadeUp 0.4s ease 0.2s both; }
 
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes scaleIn {
-            from { opacity: 0; transform: scale(0.5); }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes popIn {
+            from { opacity: 0; transform: scale(0.6); }
             to { opacity: 1; transform: scale(1); }
-        }
-        @keyframes fadeSlideUp {
-            from { opacity: 0; transform: translateY(18px); }
-            to { opacity: 1; transform: translateY(0); }
         }
 
         /* Mobile */
+        @media (max-width: 900px) {
+            .left-panel { display: none; }
+            .right-panel { width: 100%; padding: 40px 20px; }
+            .login-card { padding: 32px 24px 26px; }
+        }
         @media (max-width: 480px) {
-            .login-page { padding: 24px 16px; }
-            .login-card { padding: 28px 22px 22px; border-radius: 16px; }
-            .brand-name { font-size: 20px; }
-            .pill { padding: 6px 11px; font-size: 11px; }
+            .login-card { border-radius: 16px; padding: 28px 22px 24px; }
         }
     </style>
 </head>
 <body>
-    <div class="bg-container"></div>
-    <div class="bg-grid"></div>
-    <div class="bg-glow bg-glow-1"></div>
-    <div class="bg-glow bg-glow-2"></div>
-    <div class="code-particles" id="particles"></div>
-
     <div class="success-overlay" id="successOverlay">
-        <div class="success-icon"><i class="fas fa-check"></i></div>
-        <div class="success-text">登录成功</div>
-        <div class="success-sub">正在跳转...</div>
+        <div class="s-icon"><i class="fas fa-check"></i></div>
+        <div class="s-text">登录成功</div>
+        <div class="s-sub">正在跳转...</div>
     </div>
 
-    <div class="login-page">
-        <!-- Brand -->
-        <div class="brand-header">
-            <div class="brand-logo"><i class="fas fa-shield-alt"></i></div>
-            <div class="brand-name">AI <span class="highlight">Code Guard</span></div>
-        </div>
-
-        <!-- Login Card -->
-        <div class="login-card">
-            <div class="login-title">欢迎回来</div>
-            <div class="login-subtitle">登录您的账号以继续使用</div>
-
-            <div class="alert-error" id="errorAlert">
-                <i class="fas fa-exclamation-circle"></i>
-                <span id="errorText"></span>
-            </div>
-
-            <form id="loginForm" onsubmit="return handleLogin(event)">
-                <div class="form-group">
-                    <label class="form-label">用户名</label>
-                    <div class="input-wrap">
-                        <i class="fas fa-user in-icon"></i>
-                        <input type="text" id="username" class="form-input" placeholder="请输入用户名" autocomplete="username" autofocus>
-                    </div>
+    <div class="login-split">
+        <!-- Left -->
+        <div class="left-panel">
+            <div class="aurora-bg"></div>
+            <div class="left-content">
+                <div class="brand-mark">
+                    <div class="logo"><i class="fas fa-shield-alt"></i></div>
+                    <span>AI Code Guard</span>
                 </div>
 
-                <div class="form-group">
-                    <label class="form-label">密码</label>
-                    <div class="input-wrap">
-                        <i class="fas fa-lock in-icon"></i>
-                        <input type="password" id="password" class="form-input has-toggle" placeholder="请输入密码" autocomplete="current-password">
-                        <button type="button" class="pwd-toggle" onclick="togglePwd()" tabindex="-1">
-                            <i class="fas fa-eye" id="toggleIcon"></i>
+                <h1 class="headline">
+                    智能化的<br>代码质量<span class="gradient-text">门禁平台</span>
+                </h1>
+                <p class="subhead">
+                    融合多模型 AI 评审、AST 语义分析与规则引擎，在代码合并前自动拦截安全漏洞与质量问题。
+                </p>
+
+                <div class="capabilities">
+                    <div class="cap-item">
+                        <div class="cap-icon blue"><i class="fas fa-robot"></i></div>
+                        <div class="cap-text">
+                            <h3>AI 智能评审</h3>
+                            <p>多模型并行评审，逐行代码质量评分与改进建议</p>
+                        </div>
+                    </div>
+                    <div class="cap-item">
+                        <div class="cap-icon purple"><i class="fas fa-brain"></i></div>
+                        <div class="cap-text">
+                            <h3>AST 语义分析</h3>
+                            <p>基于树解析的符号图构建与跨文件调用链分析</p>
+                        </div>
+                    </div>
+                    <div class="cap-item">
+                        <div class="cap-icon red"><i class="fas fa-shield-virus"></i></div>
+                        <div class="cap-text">
+                            <h3>安全检测</h3>
+                            <p>SQL 注入、密钥泄露、依赖漏洞等多维度安全审计</p>
+                        </div>
+                    </div>
+                    <div class="cap-item">
+                        <div class="cap-icon green"><i class="fas fa-cogs"></i></div>
+                        <div class="cap-text">
+                            <h3>规则引擎与度量</h3>
+                            <p>可定制评审规则库、开发者画像与项目质量看板</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right -->
+        <div class="right-panel">
+            <div class="bg-grid"></div>
+            <div class="login-wrapper">
+                <div class="login-card">
+                    <div class="card-header">
+                        <div class="card-title">欢迎回来</div>
+                        <div class="card-sub">登录您的账号以继续使用</div>
+                    </div>
+
+                    <div class="alert-err" id="errorAlert">
+                        <i class="fas fa-exclamation-circle"></i>
+                        <span id="errorText"></span>
+                    </div>
+
+                    <form id="loginForm" onsubmit="return handleLogin(event)">
+                        <div class="field">
+                            <label class="field-label">用户名</label>
+                            <div class="input-box">
+                                <i class="fas fa-user pre-icon"></i>
+                                <input type="text" id="username" placeholder="请输入用户名" autocomplete="username" autofocus>
+                            </div>
+                        </div>
+                        <div class="field">
+                            <label class="field-label">密码</label>
+                            <div class="input-box">
+                                <i class="fas fa-lock pre-icon"></i>
+                                <input type="password" id="password" class="has-pwd-toggle" placeholder="请输入密码" autocomplete="current-password">
+                                <button type="button" class="toggle-pwd" onclick="togglePwd()" tabindex="-1">
+                                    <i class="fas fa-eye" id="toggleIcon"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="form-opts">
+                            <label class="remember-wrap">
+                                <input type="checkbox" id="rememberMe" checked>
+                                <span>记住我</span>
+                            </label>
+                        </div>
+
+                        <button type="submit" class="btn-main" id="loginBtn">
+                            <span>登 录</span>
+                            <i class="fas fa-arrow-right"></i>
                         </button>
+                    </form>
+
+                    <div class="hr-divider">
+                        <div class="hr-line"></div>
+                        <span class="hr-text">或使用 SSO 登录</span>
+                        <div class="hr-line"></div>
                     </div>
+
+                    <select id="gitlabInstanceSelect" class="gitlab-select">
+                        <option value="">选择 GitLab 实例...</option>
+                    </select>
+                    <button type="button" id="gitlabLoginBtn" class="btn-gitlab" disabled onclick="handleGitLabLogin()">
+                        <i class="fab fa-gitlab"></i>
+                        <span>GitLab 单点登录</span>
+                    </button>
                 </div>
-
-                <div class="form-options">
-                    <label class="remember-label">
-                        <input type="checkbox" id="rememberMe" checked>
-                        <span>记住我</span>
-                    </label>
-                </div>
-
-                <button type="submit" class="btn-submit" id="loginBtn">
-                    <span>登 录</span>
-                    <i class="fas fa-arrow-right"></i>
-                </button>
-            </form>
-
-            <div class="divider">
-                <div class="divider-line"></div>
-                <span class="divider-text">或使用 SSO 登录</span>
-                <div class="divider-line"></div>
             </div>
-
-            <select id="gitlabInstanceSelect" class="gitlab-select">
-                <option value="">选择 GitLab 实例...</option>
-            </select>
-            <button type="button" id="gitlabLoginBtn" class="btn-gitlab" disabled onclick="handleGitLabLogin()">
-                <i class="fab fa-gitlab"></i>
-                <span>GitLab 单点登录</span>
-            </button>
-        </div>
-
-        <!-- Feature Pills -->
-        <div class="feature-pills">
-            <div class="pill ai"><i class="fas fa-robot"></i> AI 智能评审</div>
-            <div class="pill ast"><i class="fas fa-brain"></i> AST 语义分析</div>
-            <div class="pill security"><i class="fas fa-shield-virus"></i> 安全检测</div>
-            <div class="pill rules"><i class="fas fa-cogs"></i> 规则引擎</div>
-            <div class="pill metrics"><i class="fas fa-chart-pie"></i> 质量度量</div>
-            <div class="pill collab"><i class="fas fa-users"></i> 团队协同</div>
         </div>
     </div>
 
@@ -532,32 +569,10 @@
         const REMEMBER_KEY = 'login_remember';
 
         document.addEventListener('DOMContentLoaded', () => {
-            initParticles();
             checkAuth();
             loadGitLabInstances();
             restoreUser();
         });
-
-        function initParticles() {
-            const snippets = [
-                'func ReviewCode()', 'import "security"', 'type QualityGate struct',
-                'go mod tidy', 'if err != nil', 'defer cleanup()',
-                'return nil', 'ctx.Done()', 'const MaxDepth = 5',
-                'for _, file := range', 'riskScore < threshold',
-                'LLM.Analyze()', 'break; // fallback',
-            ];
-            const container = document.getElementById('particles');
-            for (let i = 0; i < 18; i++) {
-                const el = document.createElement('div');
-                el.className = 'particle';
-                el.textContent = snippets[Math.floor(Math.random() * snippets.length)];
-                el.style.left = Math.random() * 100 + 'vw';
-                el.style.animationDuration = (22 + Math.random() * 28) + 's';
-                el.style.animationDelay = (Math.random() * 18) + 's';
-                el.style.fontSize = (10 + Math.random() * 4) + 'px';
-                container.appendChild(el);
-            }
-        }
 
         function checkAuth() {
             const token = localStorage.getItem(TOKEN_KEY);
@@ -581,9 +596,9 @@
         function togglePwd() {
             const input = document.getElementById('password');
             const icon = document.getElementById('toggleIcon');
-            const isHidden = input.type === 'password';
-            input.type = isHidden ? 'text' : 'password';
-            icon.className = isHidden ? 'fas fa-eye-slash' : 'fas fa-eye';
+            const hidden = input.type === 'password';
+            input.type = hidden ? 'text' : 'password';
+            icon.className = hidden ? 'fas fa-eye-slash' : 'fas fa-eye';
         }
 
         async function handleLogin(e) {
@@ -600,26 +615,21 @@
 
             try {
                 const res = await fetch(`${API_BASE}/login`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username, password })
                 });
                 const data = await res.json();
-
                 if (!res.ok || !data.data?.token) {
                     showError(data.error || '登录失败，请检查用户名和密码');
                     setLoading(false);
                     return false;
                 }
-
                 const token = data.data.token;
                 localStorage.setItem(TOKEN_KEY, token);
                 if (remember) localStorage.setItem(REMEMBER_KEY, JSON.stringify({ username }));
                 else localStorage.removeItem(REMEMBER_KEY);
 
-                const userRes = await fetch(`${API_BASE}/users/me`, {
-                    headers: { 'Authorization': 'Bearer ' + token }
-                });
+                const userRes = await fetch(`${API_BASE}/users/me`, { headers: { 'Authorization': 'Bearer ' + token } });
                 if (userRes.ok) {
                     const userData = await userRes.json();
                     localStorage.setItem(USER_KEY, JSON.stringify(Object.assign({}, userData.data || {}, data.data)));
@@ -627,7 +637,7 @@
                     localStorage.setItem(USER_KEY, JSON.stringify(data.data));
                 }
                 showSuccess('/');
-            } catch (err) {
+            } catch {
                 showError('网络连接失败，请稍后重试');
                 setLoading(false);
             }
@@ -642,17 +652,14 @@
                 const instances = data.data || [];
                 const select = document.getElementById('gitlabInstanceSelect');
                 const btn = document.getElementById('gitlabLoginBtn');
-
                 if (instances.length === 0) {
                     select.innerHTML = '<option value="">暂无可用 GitLab 实例</option>';
-                    btn.disabled = true;
-                    return;
+                    btn.disabled = true; return;
                 }
                 select.innerHTML = '<option value="">选择 GitLab 实例...</option>';
                 instances.forEach(inst => {
                     const opt = document.createElement('option');
-                    opt.value = inst.id;
-                    opt.textContent = inst.name;
+                    opt.value = inst.id; opt.textContent = inst.name;
                     if (inst.is_default) opt.selected = true;
                     select.appendChild(opt);
                 });
@@ -684,29 +691,23 @@
         })();
 
         function showError(msg) {
-            const alert = document.getElementById('errorAlert');
+            const el = document.getElementById('errorAlert');
             document.getElementById('errorText').textContent = msg;
-            alert.classList.add('show');
-            alert.style.animation = 'none';
-            alert.offsetHeight;
-            alert.style.animation = '';
+            el.classList.add('show');
+            el.style.animation = 'none'; el.offsetHeight; el.style.animation = '';
         }
         function hideError() { document.getElementById('errorAlert').classList.remove('show'); }
         function setLoading(v) {
             const btn = document.getElementById('loginBtn');
             btn.disabled = v;
             btn.innerHTML = v
-                ? '<i class="fas fa-circle-notch spinner"></i><span>登录中...</span>'
+                ? '<i class="fas fa-circle-notch spin"></i><span>登录中...</span>'
                 : '<span>登 录</span><i class="fas fa-arrow-right"></i>';
         }
         function showSuccess(url) {
             document.getElementById('successOverlay').classList.add('show');
             setTimeout(() => window.location.href = url, 700);
         }
-
-        document.getElementById('password')?.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') document.getElementById('loginForm').dispatchEvent(new Event('submit'));
-        });
     </script>
 </body>
 </html>
