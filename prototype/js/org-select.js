@@ -138,6 +138,9 @@
 
         const wrapper   = document.createElement('div');
         wrapper.className = PICKER_CLASS;
+        if (sel.classList.contains('w-full')) {
+            wrapper.style.width = '100%';
+        }
         sel.parentNode.insertBefore(wrapper, sel);
         wrapper.appendChild(sel);
 
