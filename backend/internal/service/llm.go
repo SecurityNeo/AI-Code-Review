@@ -16,6 +16,7 @@ import (
 	"github.com/ai-optimizer/backend/pkg/llm"
 	"github.com/ai-optimizer/backend/pkg/llmcall"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // CallStatus 调用状态常量
@@ -157,7 +158,20 @@ func (s *LLMService) ChatCompletion(ctx context.Context, taskID *uint, modelID u
 // ctx 用于支持调用取消和超时中断传递。
 func (s *LLMService) callSpecificModel(ctx context.Context, taskID *uint, modelID uint, caller, systemPrompt, userPrompt string, responseFormat *llm.ResponseFormat) (*llm.ChatResponse, *model.LLMModel, error) {
 	var m model.LLMModel
-	if err := model.DB.First(&m, modelID).Error; err != nil {
+	db := model.DB
+
+	// 多租户隔离：通过 taskID 反查 org_id，按组织过滤模型
+	if taskID != nil && *taskID > 0 {
+		var t model.Task
+		if err := model.DB.Select("org_id").First(&t, *taskID).Error; err == nil {
+			db = db.Where("org_id = ?", t.OrgID)
+		}
+	}
+
+	if err := db.First(&m, modelID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, fmt.Errorf("指定的模型不存在或无权限访问")
+		}
 		return nil, nil, fmt.Errorf("指定的模型不存在: %w", err)
 	}
 	if m.Status != "active" {
@@ -179,9 +193,22 @@ func (s *LLMService) callSpecificModel(ctx context.Context, taskID *uint, modelI
 func (s *LLMService) tryChain(ctx context.Context, taskID *uint, responseFormat *llm.ResponseFormat, caller, systemPrompt, userPrompt string) (*llm.ChatResponse, *model.LLMModel, error) {
 	attempts := make([]ModelAttempt, 0, 4)
 
-	// ① 主模型
+	// 多租户隔离：通过 taskID 反查 org_id
+	var orgID uint
+	if taskID != nil && *taskID > 0 {
+		var t model.Task
+		if err := model.DB.Select("org_id").First(&t, *taskID).Error; err == nil {
+			orgID = t.OrgID
+		}
+	}
+
+	// ① 主模型（按组织过滤）
 	var primary model.LLMModel
-	if err := model.DB.Where("is_primary = ? AND status = ?", true, "active").First(&primary).Error; err == nil {
+	db := model.DB
+	if orgID > 0 {
+		db = db.Where("org_id = ?", orgID)
+	}
+	if err := db.Where("is_primary = ? AND status = ?", true, "active").First(&primary).Error; err == nil {
 		resp, callErr := s.callLLMAPI(ctx, taskID, &primary, caller, systemPrompt, userPrompt, responseFormat)
 		if callErr == nil && len(resp.Choices) > 0 {
 			zap.L().Info("主模型调用成功",
@@ -209,9 +236,13 @@ func (s *LLMService) tryChain(ctx context.Context, taskID *uint, responseFormat 
 		zap.L().Warn("未找到可用的主模型，直接尝试备用模型", zap.Error(err))
 	}
 
-	// ② 按 backup_order 遍历备用
+	// ② 按 backup_order 遍历备用（按组织过滤）
 	var backups []model.LLMModel
-	model.DB.Where("backup_order > 0 AND status = ?", "active").Order("backup_order ASC, id ASC").Find(&backups)
+	db2 := model.DB
+	if orgID > 0 {
+		db2 = db2.Where("org_id = ?", orgID)
+	}
+	db2.Where("backup_order > 0 AND status = ?", "active").Order("backup_order ASC, id ASC").Find(&backups)
 
 	for i, b := range backups {
 		resp, callErr := s.callLLMAPI(ctx, taskID, &b, caller, systemPrompt, userPrompt, responseFormat)

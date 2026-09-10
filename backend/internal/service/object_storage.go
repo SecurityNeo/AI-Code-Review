@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service/pipeline"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // ObjectStorage 统一接口
@@ -83,6 +85,25 @@ func GetObjectStorageProvider() ObjectStorage {
 		return &noopStorage{}
 	}
 	return storageProvider
+}
+
+// GetObjectStorageProviderForOrg 按组织ID获取对象存储 provider
+// 当该组织没有默认配置时，fallback 到全局 provider
+func GetObjectStorageProviderForOrg(orgID uint) (ObjectStorage, error) {
+	if orgID == 0 {
+		return GetObjectStorageProvider(), nil
+	}
+	var cfg model.ObjectStorageConfig
+	if err := model.DB.Where("org_id = ? AND is_default = ?", orgID, true).First(&cfg).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return GetObjectStorageProvider(), nil
+		}
+		return nil, fmt.Errorf("查询组织对象存储配置失败: %w", err)
+	}
+	if !cfg.Enabled {
+		return &noopStorage{}, nil
+	}
+	return BuildStorageFromConfig(cfg)
 }
 
 // ReloadObjectStorageProvider 重新加载默认对象存储配置（配置变更后调用）

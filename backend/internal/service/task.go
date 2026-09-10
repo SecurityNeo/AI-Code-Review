@@ -1366,7 +1366,14 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 					zap.Uint("task_id", t.ID), zap.Error(err))
 			}
 
-			storage := GetObjectStorageProvider()
+			storage, err := GetObjectStorageProviderForOrg(t.OrgID)
+			if err != nil {
+				zap.L().Warn("按组织获取对象存储 provider 失败，回退到全局 provider",
+					zap.Uint("task_id", t.ID),
+					zap.Uint("org_id", t.OrgID),
+					zap.Error(err))
+				storage = GetObjectStorageProvider()
+			}
 			ds := pipeline.NewDiffStore(pipeline.DefaultDiffStoreConfig, storage)
 			parser := diff.NewParser()
 			parsedFiles, _ := parser.Parse(rd)
