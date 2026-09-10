@@ -66,7 +66,7 @@
         const style = document.createElement('style');
         style.id = 'org-picker-styles';
         style.textContent =
-            '.org-picker { position: relative; display: inline-block; width: 100%; font-size: 14px; }' +
+            '.org-picker { position: relative; display: inline-block; width: auto; font-size: 14px; }' +
             '.org-picker-trigger {' +
             '  display: flex; align-items: center; justify-content: space-between;' +
             '  width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 8px;' +
