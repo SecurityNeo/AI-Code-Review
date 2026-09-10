@@ -253,7 +253,7 @@
         .feature-stats {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 16px;
+            gap: 14px;
         }
         .stat-item {
             background: var(--bg-card);
@@ -280,6 +280,10 @@
         .stat-icon.blue { background: rgba(59, 130, 246, 0.1); color: var(--accent-blue); }
         .stat-icon.purple { background: rgba(139, 92, 246, 0.1); color: var(--accent-purple); }
         .stat-icon.cyan { background: rgba(6, 182, 212, 0.1); color: var(--accent-cyan); }
+        .stat-icon.red { background: rgba(239, 68, 68, 0.1); color: #f87171; }
+        .stat-icon.yellow { background: rgba(245, 158, 11, 0.1); color: #fbbf24; }
+        .stat-icon.green { background: rgba(34, 197, 94, 0.1); color: #4ade80; }
+        .stat-icon.pink { background: rgba(236, 72, 153, 0.1); color: #f472b6; }
         .stat-value {
             font-size: 20px;
             font-weight: 700;
@@ -663,21 +667,6 @@
             color: var(--text-secondary);
         }
 
-        /* Version badge */
-        .version-badge {
-            position: fixed;
-            bottom: 16px;
-            right: 16px;
-            padding: 4px 10px;
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid rgba(255, 255, 255, 0.06);
-            border-radius: 20px;
-            font-size: 11px;
-            color: var(--text-muted);
-            font-family: var(--font-mono);
-            z-index: 2;
-        }
-
         /* ===== Responsive ===== */
         @media (max-width: 1100px) {
             .login-container {
@@ -735,57 +724,40 @@
             </div>
             
             <p class="brand-tagline">
-                基于 AI 的智能代码评审与质量治理平台，通过多模型融合、AST 语义分析与规则引擎，为您的代码库构建全方位的质量门禁。
+                基于多模型 AI 与 AST 语义分析的智能代码评审平台。在代码合并前自动拦截安全漏洞、性能瓶颈与质量问题，为团队构建可信的代码质量门禁。
             </p>
 
-            <!-- Code Review Demo -->
-            <div class="demo-card">
-                <div class="demo-header">
-                    <div class="demo-dot red"></div>
-                    <div class="demo-dot yellow"></div>
-                    <div class="demo-dot green"></div>
-                    <span class="demo-title">main.go · AI Review</span>
-                </div>
-                <div class="code-block">
-                    <div class="code-line">
-                        <span class="line-num">42</span>
-                        <span class="line-content"><span class="keyword">func</span> <span class="function">processUserInput</span>(input <span class="type">string</span>) {</span>
-                    </div>
-                    <div class="code-line">
-                        <span class="line-num">43</span>
-                        <span class="line-content">    query := <span class="string">"SELECT * FROM users WHERE name='"</span> + input + <span class="string">"'"</span></span>
-                    </div>
-                    <div class="code-line">
-                        <span class="line-num">44</span>
-                        <span class="line-content">    db.<span class="function">Exec</span>(query) <span class="comment">// ⚠️ SQL Injection Risk</span></span>
-                    </div>
-                    <div class="code-line">
-                        <span class="line-num">45</span>
-                        <span class="line-content">}</span>
-                    </div>
-                </div>
-                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                    <span class="review-badge security"><i class="fas fa-shield-alt"></i> SQL 注入风险</span>
-                    <span class="review-badge quality"><i class="fas fa-exclamation-triangle"></i> 高危</span>
-                </div>
-            </div>
-
-            <!-- Stats -->
+            <!-- Feature Stats -->
             <div class="feature-stats">
                 <div class="stat-item">
                     <div class="stat-icon blue"><i class="fas fa-robot"></i></div>
-                    <div class="stat-value">AI 评审</div>
-                    <div class="stat-label">多模型智能分析</div>
+                    <div class="stat-value">AI 智能评审</div>
+                    <div class="stat-label">多模型并行分析，逐行评分与改进建议</div>
                 </div>
                 <div class="stat-item">
                     <div class="stat-icon purple"><i class="fas fa-brain"></i></div>
-                    <div class="stat-value">AST 分析</div>
-                    <div class="stat-label">语义级代码理解</div>
+                    <div class="stat-value">AST 语义分析</div>
+                    <div class="stat-label">树解析符号图与跨文件调用链追踪</div>
                 </div>
                 <div class="stat-item">
-                    <div class="stat-icon cyan"><i class="fas fa-shield-virus"></i></div>
-                    <div class="stat-value">安全扫描</div>
-                    <div class="stat-label">漏洞与密钥检测</div>
+                    <div class="stat-icon red"><i class="fas fa-shield-virus"></i></div>
+                    <div class="stat-value">多维安全检测</div>
+                    <div class="stat-label">SQL 注入、密钥泄露、依赖漏洞扫描</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-icon yellow"><i class="fas fa-cogs"></i></div>
+                    <div class="stat-value">规则引擎</div>
+                    <div class="stat-label">可定制评审规则库与智能规则孵化</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-icon green"><i class="fas fa-chart-pie"></i></div>
+                    <div class="stat-value">质量度量</div>
+                    <div class="stat-label">开发者画像、项目质量看板与趋势洞察</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-icon pink"><i class="fas fa-users"></i></div>
+                    <div class="stat-value">团队协同</div>
+                    <div class="stat-label">职责分配、即时通知与 Issue 分级治理</div>
                 </div>
             </div>
         </div>
@@ -867,15 +839,9 @@
 
             <div class="login-footer">
                 <p> AI Code Guard — 智能代码门禁系统</p>
-                <div class="links">
-                    <a href="#" onclick="showHelp(); return false;">帮助中心</a>
-                    <a href="#" onclick="showPrivacy(); return false;">隐私政策</a>
-                </div>
             </div>
         </div>
     </div>
-
-    <div class="version-badge" id="versionBadge">v0.0.3</div>
 
     <script>
         // ===== Configuration =====
@@ -887,7 +853,6 @@
         // ===== Initialize =====
         document.addEventListener('DOMContentLoaded', () => {
             initParticles();
-            loadVersion();
             checkExistingAuth();
             loadGitLabInstances();
             restoreRememberedUser();
@@ -924,18 +889,6 @@
                 el.style.fontSize = (11 + Math.random() * 5) + 'px';
                 container.appendChild(el);
             }
-        }
-
-        // ===== Version Display =====
-        function loadVersion() {
-            fetch(`${API_BASE}/system/info`)
-                .then(r => r.ok ? r.json() : null)
-                .then(data => {
-                    if (data?.data?.version) {
-                        document.getElementById('versionBadge').textContent = `v${data.data.version}`;
-                    }
-                })
-                .catch(() => {});
         }
 
         // ===== Check Existing Auth =====
@@ -1182,13 +1135,6 @@
         };
 
         // Placeholder functions
-        function showHelp() {
-            showToast('帮助中心功能开发中', 'info');
-        }
-        function showPrivacy() {
-            showToast('隐私政策功能开发中', 'info');
-        }
-
         // Enter key on password field submits form
         document.getElementById('password')?.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
