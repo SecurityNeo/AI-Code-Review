@@ -103,8 +103,8 @@
 
     <!-- 新建模型弹窗 -->
     <div id="createModal" class="modal fixed inset-0 bg-black/50 items-center justify-center z-50">
-        <div class="bg-white rounded-xl w-[640px] max-h-[90vh] overflow-y-auto shadow-2xl">
-            <div class="px-6 py-4 border-b flex items-center justify-between bg-gray-50 rounded-t-xl">
+        <div class="bg-white rounded-xl w-[640px] max-h-[90vh] shadow-2xl flex flex-col">
+            <div class="px-6 py-4 border-b flex items-center justify-between bg-gray-50 rounded-t-xl flex-shrink-0">
                 <div class="flex items-center gap-2">
                     <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white">
                         <i class="fas fa-plus text-sm"></i>
@@ -115,14 +115,14 @@
                     <i class="fas fa-times"></i>
                 </button>
             </div>
-            <div class="p-6 space-y-6">
+            <div class="p-6 space-y-6 overflow-y-auto flex-1">
                 <!-- 基础信息 -->
                 <section>
                     <div class="flex items-center gap-2 mb-4">
                         <div class="w-5 h-5 rounded bg-blue-100 text-blue-600 flex items-center justify-center text-[10px]">
                             <i class="fas fa-info"></i>
                         </div>
-                        <span class="text-sm font-semibold text-gray-800">基础信息</span>
+                        <span class="text-sm font-semibold text-gray-800">新建模型</span>
                     </div>
                     <div class="space-y-3 pl-7">
                         <div class="grid grid-cols-3 gap-3">
@@ -264,7 +264,7 @@
                     </div>
                 </section>
             </div>
-            <div class="px-6 py-4 border-t bg-gray-50 rounded-b-xl flex justify-between gap-3">
+            <div class="px-6 py-4 border-t bg-gray-50 rounded-b-xl flex justify-between gap-3 flex-shrink-0">
                 <button onclick="testCreateConfig()" class="px-4 py-2 border-2 border-blue-600 text-blue-600 rounded-lg text-sm hover:bg-blue-50 transition-colors flex items-center gap-2">
                     <i class="fas fa-stethoscope text-xs"></i>测试连接
                 </button>
@@ -280,8 +280,8 @@
 
     <!-- 编辑模型弹窗 -->
     <div id="editModal" class="modal fixed inset-0 bg-black/50 items-center justify-center z-50">
-        <div class="bg-white rounded-xl w-[640px] max-h-[90vh] overflow-y-auto shadow-2xl">
-            <div class="px-6 py-4 border-b flex items-center justify-between bg-gray-50 rounded-t-xl">
+        <div class="bg-white rounded-xl w-[640px] max-h-[90vh] shadow-2xl flex flex-col">
+            <div class="px-6 py-4 border-b flex items-center justify-between bg-gray-50 rounded-t-xl flex-shrink-0">
                 <div class="flex items-center gap-2">
                     <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white">
                         <i class="fas fa-brain text-sm"></i>
@@ -293,7 +293,7 @@
                 </button>
             </div>
             
-            <div class="p-6 space-y-6">
+            <div class="p-6 space-y-6 overflow-y-auto flex-1">
                 <input type="hidden" id="editId">
 
                 <!-- 基础信息 -->
@@ -436,7 +436,7 @@
                 </section>
             </div>
             
-            <div class="px-6 py-4 border-t bg-gray-50 rounded-b-xl flex justify-end gap-3">
+            <div class="px-6 py-4 border-t bg-gray-50 rounded-b-xl flex justify-end gap-3 flex-shrink-0">
                 <button onclick="closeModal('editModal')" class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-white hover:border-gray-400 transition-colors">取消</button>
                 <button onclick="updateModel()" class="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 shadow-sm hover:shadow transition-all flex items-center gap-2">
                     <i class="fas fa-save text-xs"></i>保存修改

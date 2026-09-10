@@ -308,6 +308,8 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		IMPlatform  string `json:"im_platform"`
 		IMUserID    string `json:"im_user_id"`
 		OrgID       uint   `json:"org_id"`
+		// 新用户组织内角色，默认 developer
+		Role string `json:"role"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请提供用户名、密码（至少6位）"})
@@ -321,7 +323,7 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		return
 	}
 
-	// 设置默认组织并创建 org_users 关联（developer 角色）
+	// 设置默认组织并创建 org_users 关联
 	orgID := req.OrgID
 	if orgID == 0 {
 		orgID = middleware.GetCurrentOrgID(c)
@@ -336,10 +338,14 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		if err := model.DB.Model(user).Update("default_org_id", orgID).Error; err != nil {
 			zap.L().Warn("set user default_org_id failed", zap.Uint("user_id", user.ID), zap.Uint("org_id", orgID), zap.Error(err))
 		}
+		role := req.Role
+		if role == "" {
+			role = "developer"
+		}
 		ou := model.OrgUser{
 			OrgID:     orgID,
 			UserID:    user.ID,
-			Role:      "developer",
+			Role:      role,
 			Status:    "active",
 			IsDefault: true,
 		}
