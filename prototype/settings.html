@@ -1329,45 +1329,38 @@ function previewTemplate() {
             modal.id = 'userModal';
             modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
             modal.innerHTML = `
-                <div class="bg-white rounded-xl shadow-xl max-w-lg w-full mx-4 max-h-[85vh] flex flex-col">
+                <div class="bg-white rounded-xl shadow-xl max-w-xl w-full mx-4 max-h-[85vh] flex flex-col">
                     <div class="px-6 py-4 border-b flex items-center justify-between flex-shrink-0">
                         <h3 class="font-bold text-lg">新建用户</h3>
                         <button onclick="document.getElementById('userModal').remove()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
                     </div>
                     <div class="p-6 space-y-4 overflow-y-auto flex-1">
-                        <!-- 用户名 / 显示名 -->
-                        <div class="grid grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">用户名 <span class="text-red-500">*</span></label>
-                                <input type="text" id="newUserUsername" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="请输入用户名">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">显示名</label>
-                                <input type="text" id="newUserDisplayName" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="显示名（可选）">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">用户名 <span class="text-red-500">*</span></label>
+                            <input type="text" id="newUserUsername" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="请输入用户名">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">显示名</label>
+                            <input type="text" id="newUserDisplayName" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="显示名（可选）">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">密码 <span class="text-red-500">*</span></label>
+                            <div class="relative">
+                                <input type="password" id="newUserPassword" class="w-full px-3 py-2 pr-10 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="至少6位">
+                                <button type="button" onclick="togglePw('newUserPassword','newPwEye')" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                    <i id="newPwEye" class="fas fa-eye"></i>
+                                </button>
                             </div>
                         </div>
-                        <!-- 密码 / 确认密码 -->
-                        <div class="grid grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">密码 <span class="text-red-500">*</span></label>
-                                <div class="relative">
-                                    <input type="password" id="newUserPassword" class="w-full px-3 py-2 pr-10 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="至少6位">
-                                    <button type="button" onclick="togglePw('newUserPassword','newPwEye')" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                        <i id="newPwEye" class="fas fa-eye"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">确认密码 <span class="text-red-500">*</span></label>
-                                <div class="relative">
-                                    <input type="password" id="newUserPasswordConfirm" class="w-full px-3 py-2 pr-10 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="再次输入密码">
-                                    <button type="button" onclick="togglePw('newUserPasswordConfirm','newPwConfirmEye')" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                        <i id="newPwConfirmEye" class="fas fa-eye"></i>
-                                    </button>
-                                </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">确认密码 <span class="text-red-500">*</span></label>
+                            <div class="relative">
+                                <input type="password" id="newUserPasswordConfirm" class="w-full px-3 py-2 pr-10 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="再次输入密码">
+                                <button type="button" onclick="togglePw('newUserPasswordConfirm','newPwConfirmEye')" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                    <i id="newPwConfirmEye" class="fas fa-eye"></i>
+                                </button>
                             </div>
                         </div>
-                        <!-- IM 平台 / IM 用户 ID -->
                         <div class="grid grid-cols-2 gap-4">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">IM 平台</label>
@@ -1381,7 +1374,6 @@ function previewTemplate() {
                                 <input type="text" id="newUserIMUserId" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="例如：ZhangSan">
                             </div>
                         </div>
-                        <!-- 组织内角色 / 所属组织 -->
                         <div class="grid grid-cols-2 gap-4">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">组织内角色</label>
@@ -1438,40 +1430,44 @@ function previewTemplate() {
             modal.id = 'editUserModal';
             modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
             modal.innerHTML = `
-                <div class="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
-                    <div class="px-6 py-4 border-b flex items-center justify-between">
+                <div class="bg-white rounded-xl shadow-xl max-w-xl w-full mx-4 max-h-[85vh] flex flex-col">
+                    <div class="px-6 py-4 border-b flex items-center justify-between flex-shrink-0">
                         <h3 class="font-bold text-lg">编辑用户</h3>
                         <button onclick="document.getElementById('editUserModal').remove()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
                     </div>
-                    <div class="p-6 space-y-4">
+                    <div class="p-6 space-y-4 overflow-y-auto flex-1">
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">显示名</label>
                             <input type="text" id="editUserDisplayName" value="${escapeHtml(displayName)}" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">IM 平台</label>
-                            <select id="editUserIMPlatform" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
-                                <option value="">无</option>
-                                <option value="wecom" ${imPlatform === 'wecom' ? 'selected' : ''}>企业微信</option>
-                            </select>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">IM 平台</label>
+                                <select id="editUserIMPlatform" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                    <option value="">无</option>
+                                    <option value="wecom" ${imPlatform === 'wecom' ? 'selected' : ''}>企业微信</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">IM 用户 ID</label>
+                                <input type="text" id="editUserIMUserId" value="${escapeHtml(imUserId || '')}" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="例如：ZhangSan">
+                            </div>
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">IM 用户 ID</label>
-                            <input type="text" id="editUserIMUserId" value="${escapeHtml(imUserId || '')}" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="例如：ZhangSan">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">组织内角色</label>
-                            <select id="editUserRole" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white">
-                                <option value="developer" ${role === 'developer' ? 'selected' : ''}>开发者</option>
-                                <option value="org_admin" ${role === 'org_admin' ? 'selected' : ''}>组织管理员</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">所属组织</label>
-                            <select id="orgSelect" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"></select>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">组织内角色</label>
+                                <select id="editUserRole" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white">
+                                    <option value="developer" ${role === 'developer' ? 'selected' : ''}>开发者</option>
+                                    <option value="org_admin" ${role === 'org_admin' ? 'selected' : ''}>组织管理员</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">所属组织</label>
+                                <select id="orgSelect" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"></select>
+                            </div>
                         </div>
                     </div>
-                    <div class="px-6 py-4 border-t flex justify-end gap-3">
+                    <div class="px-6 py-4 border-t flex justify-end gap-3 flex-shrink-0">
                         <button onclick="document.getElementById('editUserModal').remove()" class="px-4 py-2 border rounded-lg text-sm text-gray-700 hover:bg-gray-50">取消</button>
                         <button onclick="submitEditUser(${id})" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">保存</button>
                     </div>
