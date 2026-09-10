@@ -285,12 +285,12 @@
         .stat-icon.green { background: rgba(34, 197, 94, 0.1); color: #4ade80; }
         .stat-icon.pink { background: rgba(236, 72, 153, 0.1); color: #f472b6; }
         .stat-value {
-            font-size: 20px;
+            font-size: 16px;
             font-weight: 700;
             color: var(--text-primary);
         }
         .stat-label {
-            font-size: 12px;
+            font-size: 11px;
             color: var(--text-muted);
             margin-top: 4px;
         }
@@ -298,6 +298,7 @@
         /* ===== Right Panel: Login Form ===== */
         .login-card {
             width: 420px;
+            margin-left: 40px;
             background: var(--bg-card);
             border: 1px solid var(--border-subtle);
             border-radius: 20px;
@@ -727,12 +728,44 @@
                 基于多模型 AI 与 AST 语义分析的智能代码评审平台。在代码合并前自动拦截安全漏洞、性能瓶颈与质量问题，为团队构建可信的代码质量门禁。
             </p>
 
+            <!-- Code Review Demo -->
+            <div class="demo-card">
+                <div class="demo-header">
+                    <div class="demo-dot red"></div>
+                    <div class="demo-dot yellow"></div>
+                    <div class="demo-dot green"></div>
+                    <span class="demo-title">main.go · AI Review</span>
+                </div>
+                <div class="code-block">
+                    <div class="code-line">
+                        <span class="line-num">42</span>
+                        <span class="line-content"><span class="keyword">func</span> <span class="function">processUserInput</span>(input <span class="type">string</span>) {</span>
+                    </div>
+                    <div class="code-line">
+                        <span class="line-num">43</span>
+                        <span class="line-content">    query := <span class="string">"SELECT * FROM users WHERE name='"</span> + input + <span class="string">"'"</span></span>
+                    </div>
+                    <div class="code-line">
+                        <span class="line-num">44</span>
+                        <span class="line-content">    db.<span class="function">Exec</span>(query) <span class="comment">// ⚠️ SQL Injection Risk</span></span>
+                    </div>
+                    <div class="code-line">
+                        <span class="line-num">45</span>
+                        <span class="line-content">}</span>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <span class="review-badge security"><i class="fas fa-shield-alt"></i> SQL 注入风险</span>
+                    <span class="review-badge quality"><i class="fas fa-exclamation-triangle"></i> 高危</span>
+                </div>
+            </div>
+
             <!-- Feature Stats -->
             <div class="feature-stats">
                 <div class="stat-item">
                     <div class="stat-icon blue"><i class="fas fa-robot"></i></div>
                     <div class="stat-value">AI 智能评审</div>
-                    <div class="stat-label">多模型并行分析，逐行评分与改进建议</div>
+                    <div class="stat-label">多智能体协作全流程评审，逐行评分与改进建议</div>
                 </div>
                 <div class="stat-item">
                     <div class="stat-icon purple"><i class="fas fa-brain"></i></div>
