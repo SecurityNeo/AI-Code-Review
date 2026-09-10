@@ -379,7 +379,20 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	// 可选：迁移默认组织 + 修改角色
+
+	// 多租户改造：支持单独修改组织内角色（不依赖 org_id 变更）
+	if req.Role != "" {
+		var user model.User
+		if err := model.DB.Select("default_org_id").First(&user, id).Error; err == nil && user.DefaultOrgID > 0 {
+			if err := model.DB.Model(&model.OrgUser{}).
+				Where("user_id = ? AND org_id = ?", id, user.DefaultOrgID).
+				Update("role", req.Role).Error; err != nil {
+				zap.L().Error("update user role failed", zap.Error(err))
+			}
+		}
+	}
+
+	// 可选：迁移默认组织
 	if req.OrgID > 0 {
 		// 检查当前用户的 org_users 是否存在目标组织绑定
 		var existingOU model.OrgUser
