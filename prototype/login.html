@@ -249,33 +249,36 @@
             border: 1px solid rgba(245, 158, 11, 0.2);
         }
 
-        /* Feature stats */
+        /* Feature stats - compact horizontal pills */
         .feature-stats {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 14px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
         }
         .stat-item {
-            background: var(--bg-card);
-            border: 1px solid var(--border-subtle);
-            border-radius: 12px;
-            padding: 16px;
-            text-align: center;
-            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 8px;
+            transition: all 0.2s ease;
+            cursor: default;
         }
         .stat-item:hover {
-            border-color: rgba(59, 130, 246, 0.2);
-            transform: translateY(-2px);
+            background: rgba(255,255,255,0.05);
+            border-color: rgba(255,255,255,0.1);
         }
         .stat-icon {
-            width: 36px;
-            height: 36px;
-            border-radius: 10px;
+            width: 24px;
+            height: 24px;
+            border-radius: 6px;
             display: flex;
             align-items: center;
             justify-content: center;
-            margin: 0 auto 10px;
-            font-size: 15px;
+            font-size: 11px;
+            flex-shrink: 0;
         }
         .stat-icon.blue { background: rgba(59, 130, 246, 0.1); color: var(--accent-blue); }
         .stat-icon.purple { background: rgba(139, 92, 246, 0.1); color: var(--accent-purple); }
@@ -285,14 +288,10 @@
         .stat-icon.green { background: rgba(34, 197, 94, 0.1); color: #4ade80; }
         .stat-icon.pink { background: rgba(236, 72, 153, 0.1); color: #f472b6; }
         .stat-value {
-            font-size: 16px;
-            font-weight: 700;
-            color: var(--text-primary);
-        }
-        .stat-label {
-            font-size: 11px;
-            color: var(--text-muted);
-            margin-top: 4px;
+            font-size: 13px;
+            font-weight: 500;
+            color: #cbd5e1;
+            white-space: nowrap;
         }
 
         /* ===== Right Panel: Login Form ===== */
