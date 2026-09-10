@@ -1377,7 +1377,7 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 			ds := pipeline.NewDiffStore(pipeline.DefaultDiffStoreConfig, storage)
 			parser := diff.NewParser()
 			parsedFiles, _ := parser.Parse(rd)
-			_, err := ds.StoreDiff(context.Background(), &t, rd, parsedFiles, baseSha, headSha, startSha)
+            _, err = ds.StoreDiff(context.Background(), &t, rd, parsedFiles, baseSha, headSha, startSha)
 			if err != nil {
 				zap.L().Warn("StoreDiff failed", zap.Uint("task_id", t.ID), zap.Error(err))
 			}
