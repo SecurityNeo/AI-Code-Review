@@ -1468,6 +1468,11 @@ function previewTemplate() {
             try {
                 let payload = { display_name: displayName, im_platform: imPlatform, im_user_id: imUserId, role: role };
                 injectOrgId(payload, 'orgSelect');
+                // fallback：显式读取组织选择器的值，防止 user_info 缺失导致 org_id 未注入
+                const orgSelect = document.getElementById('orgSelect');
+                if (orgSelect && orgSelect.value && !payload.org_id) {
+                    payload.org_id = parseInt(orgSelect.value);
+                }
                 const orgHeaders = getOrgOverrideHeaders();
                 const res = await apiFetch(`${API_BASE}/users/${id}`, {
                     method: 'PUT',

@@ -240,12 +240,14 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 		}
 	}
 
-	// 批量查询 org_users 中的当前组织角色（按 default_org_id）
+	// 批量查询 org_users 中的当前组织角色（按 default_org_id 匹配）
 	orgRoles := make(map[uint]string)
 	if len(users) > 0 {
 		userIDs := make([]uint, len(users))
+		defaultOrgMap := make(map[uint]uint, len(users))
 		for i, u := range users {
 			userIDs[i] = u.ID
+			defaultOrgMap[u.ID] = u.DefaultOrgID
 		}
 		type OrgUserResult struct {
 			UserID uint   `gorm:"column:user_id"`
@@ -257,8 +259,14 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 			Select("user_id, org_id, role").
 			Where("user_id IN ? AND status = ?", userIDs, "active").
 			Scan(&ouResults)
+		// 优先匹配 default_org_id 对应的角色
 		for _, r := range ouResults {
-			// 若用户有多个 active 绑定，以 default_org_id 对应的为准；否则取第一个
+			if defaultOrgMap[r.UserID] == r.OrgID {
+				orgRoles[r.UserID] = r.Role
+			}
+		}
+		// fallback：若找不到 default_org_id 对应的，取第一个 active
+		for _, r := range ouResults {
 			if _, ok := orgRoles[r.UserID]; !ok {
 				orgRoles[r.UserID] = r.Role
 			}
@@ -380,15 +388,31 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 		return
 	}
 
-	// 多租户改造：支持单独修改组织内角色（不依赖 org_id 变更）
+	// 多租户改造：支持编辑用户在组织内的角色
 	if req.Role != "" {
-		var user model.User
-		if err := model.DB.Select("default_org_id").First(&user, id).Error; err == nil && user.DefaultOrgID > 0 {
-			if err := model.DB.Model(&model.OrgUser{}).
-				Where("user_id = ? AND org_id = ?", id, user.DefaultOrgID).
-				Update("role", req.Role).Error; err != nil {
-				zap.L().Error("update user role failed", zap.Error(err))
+		targetOrgID := req.OrgID
+		if targetOrgID == 0 {
+			var user model.User
+			if err := model.DB.Select("default_org_id").First(&user, id).Error; err == nil {
+				targetOrgID = user.DefaultOrgID
+			} else {
+				zap.L().Warn("update user role: cannot find user default_org_id", zap.Int("id", id), zap.Error(err))
 			}
+		}
+		if targetOrgID > 0 {
+			result := model.DB.Model(&model.OrgUser{}).
+				Where("user_id = ? AND org_id = ?", id, targetOrgID).
+				Update("role", req.Role)
+			if result.Error != nil {
+				zap.L().Error("update user role failed", zap.Int("id", id), zap.Uint("org_id", targetOrgID), zap.String("role", req.Role), zap.Error(result.Error))
+			} else if result.RowsAffected == 0 {
+				zap.L().Warn("update user role: no matching org_user record",
+					zap.Int("id", id),
+					zap.Uint("org_id", targetOrgID),
+					zap.String("role", req.Role))
+			}
+		} else {
+			zap.L().Warn("update user role: missing target org_id", zap.Int("id", id), zap.String("role", req.Role))
 		}
 	}
 
@@ -404,10 +428,20 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 			if req.Role != "" {
 				updates["role"] = req.Role
 			}
-			model.DB.Model(&model.OrgUser{}).Where("user_id = ? AND org_id = ?", id, req.OrgID).Updates(updates)
+			result := model.DB.Model(&model.OrgUser{}).Where("user_id = ? AND org_id = ?", id, req.OrgID).Updates(updates)
+			if result.Error != nil {
+				zap.L().Error("update user org role failed", zap.Int("id", id), zap.Uint("org_id", req.OrgID), zap.Error(result.Error))
+			} else if result.RowsAffected == 0 {
+				zap.L().Warn("update user org role: no matching record",
+					zap.Int("id", id),
+					zap.Uint("org_id", req.OrgID),
+					zap.String("role", req.Role))
+			}
 		} else {
 			// 不存在绑定：新增绑定并设为默认
-			model.DB.Model(&model.User{}).Where("id = ?", id).Update("default_org_id", req.OrgID)
+			if err := model.DB.Model(&model.User{}).Where("id = ?", id).Update("default_org_id", req.OrgID).Error; err != nil {
+				zap.L().Error("update user default_org_id failed", zap.Int("id", id), zap.Uint("org_id", req.OrgID), zap.Error(err))
+			}
 			role := req.Role
 			if role == "" {
 				role = "developer"
@@ -419,8 +453,12 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 				Status:    "active",
 				IsDefault: true,
 			}
-			model.DB.Create(&ou)
-			model.DB.Model(&model.OrgUser{}).Where("user_id = ? AND org_id != ?", id, req.OrgID).Update("is_default", false)
+			if err := model.DB.Create(&ou).Error; err != nil {
+				zap.L().Error("create org_user failed", zap.Int("id", id), zap.Uint("org_id", req.OrgID), zap.Error(err))
+			}
+			if err := model.DB.Model(&model.OrgUser{}).Where("user_id = ? AND org_id != ?", id, req.OrgID).Update("is_default", false).Error; err != nil {
+				zap.L().Error("clear other org is_default failed", zap.Int("id", id), zap.Uint("org_id", req.OrgID), zap.Error(err))
+			}
 		}
 	}
 
