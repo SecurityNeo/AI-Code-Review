@@ -189,6 +189,11 @@ func (h *ObjectStorageHandler) UpdateConfig(c *gin.Context) {
 		"max_object_size":  req.MaxObjectSize,
 	}
 
+	// 多租户改造：super_admin 可修改所属组织
+	if req.OrgID > 0 && scope.IsSuperAdmin {
+		updates["org_id"] = req.OrgID
+	}
+
 	// 凭据：如果传入新的则更新
 	if req.AccessKey != "" {
 		encryptedAK, err := service.EncryptString(req.AccessKey)
@@ -257,7 +262,7 @@ func (h *ObjectStorageHandler) UpdateConfig(c *gin.Context) {
 		model.DB.Model(&model.ObjectStorageConfig{}).Scopes(model.OrgScope(scope)).Where("is_default = ? AND id != ?", true, id).Update("is_default", false)
 	}
 
-	if err := model.DB.Model(&cfg).Omit("org_id").Updates(updates).Error; err != nil {
+	if err := model.DB.Model(&cfg).Updates(updates).Error; err != nil {
 		c.JSON(500, gin.H{"error": "更新失败"})
 		return
 	}
