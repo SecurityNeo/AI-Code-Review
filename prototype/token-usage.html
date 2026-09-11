@@ -41,6 +41,24 @@
         .badge-failed { background: #ffebee; color: #c62828; }
         .badge-score { background: #e3f2fd; color: #1565c0; }
         .data-table-wrap { max-height: 480px; overflow-y: auto; }
+
+        /* 组织 Token 用量瀑布图 */
+        .org-row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 6px; cursor: pointer; transition: background .15s; }
+        .org-row:hover { background: #f8fafc; }
+        .org-row-head { font-weight: 600; background: #f1f5f9; }
+        .org-toggle { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 11px; flex-shrink: 0; }
+        .org-toggle.leaf { visibility: hidden; }
+        .org-name { flex: 1; font-size: 13px; color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .org-metric { font-size: 12px; color: #475569; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; text-align: right; min-width: 70px; }
+        .org-metric-total { font-weight: 700; color: #111827; }
+        .org-bar-wrap { width: 160px; height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden; flex-shrink: 0; position: relative; }
+        .org-bar-seg { height: 100%; float: left; }
+        .org-bar-seg:nth-child(1) { background: #3b82f6; } /* 输入-蓝 */
+        .org-bar-seg:nth-child(2) { background: #10b981; } /* 输出-绿 */
+        .org-bar-seg:nth-child(3) { background: #f59e0b; } /* 总量-橙(自身) */
+        .org-children { margin-left: 18px; border-left: 1px solid #e2e8f0; padding-left: 8px; }
+        .org-children.collapsed { display: none; }
+        .org-percent { font-size: 11px; color: #94a3b8; min-width: 40px; text-align: right; }
     </style>
 </head>
 <body class="bg-gray-50 font-sans">
@@ -86,40 +104,40 @@
             </div>
 
             <!-- KPI 区 -->
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-                <div class="kpi-card bg-white rounded-xl p-6 border flex items-center gap-5">
-                    <div class="w-14 h-14 bg-orange-50 rounded-2xl flex items-center justify-center text-2xl">🔥</div>
-                    <div>
-                        <div class="text-3xl font-bold text-gray-800" id="kpiTotalTokens">-</div>
-                        <div class="text-sm text-gray-500 mt-1">总 Tokens</div>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4" id="kpiArea">
+                <div class="bg-white rounded-xl p-5 border flex flex-col justify-between">
+                    <div class="text-xs text-gray-400 font-medium uppercase tracking-wide">总 Tokens</div>
+                    <div class="text-2xl font-mono tabular-nums font-bold text-gray-800 mt-1" id="kpiTotalTokens">-</div>
+                    <div class="mt-3 h-1 w-full bg-gray-100 rounded-full overflow-hidden">
+                        <div id="kpiTotalBar" class="h-full bg-orange-500 rounded-full" style="width:0%"></div>
                     </div>
                 </div>
-                <div class="kpi-card bg-white rounded-xl p-6 border flex items-center gap-5">
-                    <div class="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center text-2xl">📥</div>
-                    <div>
-                        <div class="text-3xl font-bold text-gray-800" id="kpiPromptTokens">-</div>
-                        <div class="text-sm text-gray-500 mt-1">输入 Tokens</div>
+                <div class="bg-white rounded-xl p-5 border flex flex-col justify-between">
+                    <div class="text-xs text-gray-400 font-medium uppercase tracking-wide">输入 Tokens</div>
+                    <div class="text-2xl font-mono tabular-nums font-bold text-gray-800 mt-1" id="kpiPromptTokens">-</div>
+                    <div class="mt-3 h-1 w-full bg-gray-100 rounded-full overflow-hidden">
+                        <div id="kpiPromptBar" class="h-full bg-blue-500 rounded-full" style="width:0%"></div>
                     </div>
                 </div>
-                <div class="kpi-card bg-white rounded-xl p-6 border flex items-center gap-5">
-                    <div class="w-14 h-14 bg-green-50 rounded-2xl flex items-center justify-center text-2xl">📤</div>
-                    <div>
-                        <div class="text-3xl font-bold text-gray-800" id="kpiCompletionTokens">-</div>
-                        <div class="text-sm text-gray-500 mt-1">输出 Tokens</div>
+                <div class="bg-white rounded-xl p-5 border flex flex-col justify-between">
+                    <div class="text-xs text-gray-400 font-medium uppercase tracking-wide">输出 Tokens</div>
+                    <div class="text-2xl font-mono tabular-nums font-bold text-gray-800 mt-1" id="kpiCompletionTokens">-</div>
+                    <div class="mt-3 h-1 w-full bg-gray-100 rounded-full overflow-hidden">
+                        <div id="kpiCompletionBar" class="h-full bg-green-500 rounded-full" style="width:0%"></div>
                     </div>
                 </div>
-                <div class="kpi-card bg-white rounded-xl p-6 border flex items-center gap-5">
-                    <div class="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center text-2xl">🔄</div>
-                    <div>
-                        <div class="text-3xl font-bold text-gray-800" id="kpiCallCount">-</div>
-                        <div class="text-sm text-gray-500 mt-1">LLM 调用次数</div>
+                <div class="bg-white rounded-xl p-5 border flex flex-col justify-between">
+                    <div class="text-xs text-gray-400 font-medium uppercase tracking-wide">LLM 调用次数</div>
+                    <div class="text-2xl font-mono tabular-nums font-bold text-gray-800 mt-1" id="kpiCallCount">-</div>
+                    <div class="mt-3 h-1 w-full bg-gray-100 rounded-full overflow-hidden">
+                        <div id="kpiCallBar" class="h-full bg-purple-500 rounded-full" style="width:0%"></div>
                     </div>
                 </div>
-                <div class="kpi-card bg-white rounded-xl p-6 border flex items-center gap-5">
-                    <div class="w-14 h-14 bg-yellow-50 rounded-2xl flex items-center justify-center text-2xl">⏱️</div>
-                    <div>
-                        <div class="text-3xl font-bold text-gray-800" id="kpiAvgDuration">-</div>
-                        <div class="text-sm text-gray-500 mt-1">平均耗时</div>
+                <div class="bg-white rounded-xl p-5 border flex flex-col justify-between">
+                    <div class="text-xs text-gray-400 font-medium uppercase tracking-wide">平均耗时</div>
+                    <div class="text-2xl font-mono tabular-nums font-bold text-gray-800 mt-1" id="kpiAvgDuration">-</div>
+                    <div class="mt-3 h-1 w-full bg-gray-100 rounded-full overflow-hidden">
+                        <div id="kpiDurationBar" class="h-full bg-yellow-500 rounded-full" style="width:0%"></div>
                     </div>
                 </div>
             </div>
@@ -148,6 +166,16 @@
                     <div id="authorLegend" class="flex flex-wrap gap-x-3 gap-y-1 mb-4 text-xs"></div>
                     <div id="authorChart" style="height: 320px;"></div>
                 </div>
+            </div>
+
+            <!-- 组织 Token 用量分布（仅系统管理员可见） -->
+            <div id="orgTreeSection" class="chart-card bg-white rounded-xl p-6 border" style="display:none;">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-bold text-gray-800">组织 Token 用量分布 <span class="text-xs font-normal text-gray-400">仅系统管理员可见</span></h3>
+                    <button onclick="toggleAllOrgRows(true)" class="text-xs text-blue-600 hover:text-blue-800 mr-2">全部展开</button>
+                    <button onclick="toggleAllOrgRows(false)" class="text-xs text-blue-600 hover:text-blue-800">全部折叠</button>
+                </div>
+                <div id="orgTreeBody" class="space-y-1"></div>
             </div>
 
             <!-- 调用明细表 -->
@@ -287,10 +315,9 @@
     async function loadAll() {
         currentPage = 1;
         document.getElementById('lastUpdate').textContent = '更新中...';
-        // 用 Promise.allSettled + 各函数自己抛错，反映真实失败数
         const results = await Promise.allSettled([
             loadOverview(), loadTrend(), loadByModel(),
-            loadByProject(), loadByAuthor(), loadCalls(1)
+            loadByProject(), loadByAuthor(), loadCalls(1), loadOrgTree()
         ]);
         const failed = results.filter(r => r.status === 'rejected').length;
         document.getElementById('lastUpdate').textContent = failed === 0
@@ -310,12 +337,24 @@
         if (!res.ok) throw new Error('KPI 接口 HTTP ' + res.status);
         const json = await res.json();
         const d = json.data || {};
-        document.getElementById('kpiTotalTokens').textContent = formatNumber(d.total_tokens);
-        document.getElementById('kpiPromptTokens').textContent = formatNumber(d.prompt_tokens);
-        document.getElementById('kpiCompletionTokens').textContent = formatNumber(d.completion_tokens);
-        document.getElementById('kpiCallCount').textContent = formatNumber(d.call_count);
-        const avgSec = (d.avg_duration_ms || 0) / 1000;
-        document.getElementById('kpiAvgDuration').textContent = avgSec.toFixed(1) + 's';
+        const total = d.total_tokens || 0;
+        const prompt = d.prompt_tokens || 0;
+        const completion = d.completion_tokens || 0;
+        const calls = d.call_count || 0;
+        const avgMs = d.avg_duration_ms || 0;
+
+        document.getElementById('kpiTotalTokens').textContent = formatNumber(total);
+        document.getElementById('kpiPromptTokens').textContent = formatNumber(prompt);
+        document.getElementById('kpiCompletionTokens').textContent = formatNumber(completion);
+        document.getElementById('kpiCallCount').textContent = formatNumber(calls);
+        document.getElementById('kpiAvgDuration').textContent = (avgMs / 1000).toFixed(1) + 's';
+
+        // 进度条：token类用总量为100%基准，次数以1万为满格，耗时以10s为满格
+        document.getElementById('kpiTotalBar').style.width = total > 0 ? '100%' : '0%';
+        document.getElementById('kpiPromptBar').style.width = total > 0 ? Math.min((prompt / total) * 100, 100) + '%' : '0%';
+        document.getElementById('kpiCompletionBar').style.width = total > 0 ? Math.min((completion / total) * 100, 100) + '%' : '0%';
+        document.getElementById('kpiCallBar').style.width = Math.min((calls / 10000) * 100, 100) + '%';
+        document.getElementById('kpiDurationBar').style.width = Math.min((avgMs / 10000) * 100, 100) + '%';
     }
 
     async function loadTrend() {
@@ -582,6 +621,109 @@
         document.getElementById('paginationInfo').textContent = `共 ${total} 条，当前 ${start}-${end}`;
         document.getElementById('prevPageBtn').disabled = page <= 1;
         document.getElementById('nextPageBtn').disabled = end >= total;
+    }
+
+    // ---------- 组织瀑布图（仅 super_admin） ----------
+    let orgTreeState = { expanded: new Set(), data: [], totalTokens: 0 };
+
+    async function loadOrgTree() {
+        const userInfo = getCurrentUserInfo();
+        if (!userInfo || userInfo.current_org_role !== 'super_admin') return;
+        const section = document.getElementById('orgTreeSection');
+        if (!section) return;
+        section.style.display = 'block';
+        try {
+            const res = await apiFetch(`${API_BASE}/token-usage/by-org?range=${getRange()}`);
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const json = await res.json();
+            const roots = json.data || [];
+            orgTreeState.data = roots;
+            orgTreeState.totalTokens = roots.reduce((sum, n) => sum + (n.total_tokens || 0), 0);
+            renderOrgTree(roots, document.getElementById('orgTreeBody'), orgTreeState.totalTokens);
+        } catch (e) {
+            console.error('加载组织用量失败:', e);
+            document.getElementById('orgTreeBody').innerHTML = '<div class="text-gray-400 text-sm py-4">加载失败</div>';
+        }
+    }
+
+    function renderOrgTree(nodes, container, totalTokens) {
+        if (!nodes || nodes.length === 0) {
+            container.innerHTML = '<div class="text-gray-400 text-sm py-4">暂无数据</div>';
+            return;
+        }
+        container.innerHTML = '';
+        nodes.forEach((node, idx) => {
+            const rowId = 'org-row-' + node.org_id;
+            const hasChildren = node.children && node.children.length > 0;
+            const isExpanded = orgTreeState.expanded.has(node.org_id);
+            const percent = totalTokens > 0 ? ((node.total_tokens || 0) / totalTokens * 100).toFixed(1) : '0.0';
+            const promptP = node.total_tokens > 0 ? ((node.prompt_tokens || 0) / node.total_tokens * 100).toFixed(1) : '0';
+            const completionP = node.total_tokens > 0 ? ((node.completion_tokens || 0) / node.total_tokens * 100).toFixed(1) : '0';
+            const selfP = node.total_tokens > 0 ? (100 - parseFloat(promptP) - parseFloat(completionP)).toFixed(1) : '0';
+
+            const row = document.createElement('div');
+            row.innerHTML = `
+                <div class="org-row ${hasChildren ? 'org-row-head' : ''}" id="${rowId}" onclick="toggleOrgRow(${node.org_id})">
+                    <div class="org-toggle ${hasChildren ? '' : 'leaf'}">
+                        ${hasChildren ? (isExpanded ? '<i class="fas fa-caret-down"></i>' : '<i class="fas fa-caret-right"></i>') : ''}
+                    </div>
+                    <div class="org-name" style="padding-left:0">${escapeHtml(node.org_name)}</div>
+                    <div class="org-metric">${formatNumber(node.prompt_tokens || 0)}</div>
+                    <div class="org-metric">${formatNumber(node.completion_tokens || 0)}</div>
+                    <div class="org-metric org-metric-total">${formatNumber(node.total_tokens || 0)}</div>
+                    <div class="org-metric">${formatNumber(node.call_count || 0)}</div>
+                    <div class="org-bar-wrap" title="输入 ${promptP}% | 输出 ${completionP}% | 自身 ${selfP}%">
+                        <div class="org-bar-seg" style="width:${promptP}%"></div>
+                        <div class="org-bar-seg" style="width:${completionP}%"></div>
+                        <div class="org-bar-seg" style="width:${Math.max(0, selfP)}%;background:#f59e0b"></div>
+                    </div>
+                    <div class="org-percent">${percent}%</div>
+                </div>
+                <div class="org-children ${isExpanded ? '' : 'collapsed'}" id="children-${node.org_id}"></div>
+            `;
+            container.appendChild(row);
+
+            if (hasChildren) {
+                const childContainer = row.querySelector(`#children-${node.org_id}`);
+                renderOrgTree(node.children, childContainer, totalTokens);
+            }
+        });
+    }
+
+    function toggleOrgRow(orgId) {
+        const childEl = document.getElementById('children-' + orgId);
+        const rowEl = document.getElementById('org-row-' + orgId);
+        if (!childEl) return;
+        const isCollapsed = childEl.classList.contains('collapsed');
+        if (isCollapsed) {
+            childEl.classList.remove('collapsed');
+            orgTreeState.expanded.add(orgId);
+            const icon = rowEl.querySelector('.org-toggle');
+            if (icon) icon.innerHTML = '<i class="fas fa-caret-down"></i>';
+        } else {
+            childEl.classList.add('collapsed');
+            orgTreeState.expanded.delete(orgId);
+            const icon = rowEl.querySelector('.org-toggle');
+            if (icon) icon.innerHTML = '<i class="fas fa-caret-right"></i>';
+        }
+    }
+
+    function toggleAllOrgRows(expand) {
+        orgTreeState.data.forEach(node => {
+            toggleOrgTreeRecursive(node, expand);
+        });
+        renderOrgTree(orgTreeState.data, document.getElementById('orgTreeBody'), orgTreeState.totalTokens);
+    }
+
+    function toggleOrgTreeRecursive(node, expand) {
+        if (expand) {
+            orgTreeState.expanded.add(node.org_id);
+        } else {
+            orgTreeState.expanded.delete(node.org_id);
+        }
+        if (node.children) {
+            node.children.forEach(c => toggleOrgTreeRecursive(c, expand));
+        }
     }
 
     window.addEventListener('resize', () => {

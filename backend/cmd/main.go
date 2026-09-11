@@ -410,6 +410,7 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 
 	// 公共需要认证的API（数据在handler/service层按user过滤）
 	notifH := handler.NewNotificationHandler()
+	th := handler.NewTokenUsageHandler()
 	common := api.Group("")
 	common.Use(middleware.Auth(), middleware.OrgScopeMiddleware())
 	{
@@ -429,7 +430,6 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		}
 
 		// Token 用量监控
-		th := handler.NewTokenUsageHandler()
 		common.GET("/dashboard/token-summary", th.GetTokenSummary)
 		tokenUsage := common.Group("/token-usage")
 		{
@@ -848,6 +848,9 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		sysAdmin.POST("/organizations/:id/members", orgH.AddOrganizationMember)
 		sysAdmin.DELETE("/organizations/:id/members/:userId", orgH.RemoveOrganizationMember)
 		sysAdmin.PUT("/organizations/:id/members/:userId/role", orgH.UpdateMemberRole)
+
+		// Token 用量监控 — 组织维度（仅超管）
+		sysAdmin.GET("/token-usage/by-org", th.GetByOrg)
 
 		// 系统管理
 		sys := sysAdmin.Group("/system")

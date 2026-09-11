@@ -663,3 +663,110 @@ func (h *TokenUsageHandler) GetTokenSummary(c *gin.Context) {
 		"trend_7d":        trendOut,
 	})
 }
+
+// ---------- 组织维度 Token 用量（仅 super_admin） ----------
+
+type orgUsageNode struct {
+	OrgID            uint            `json:"org_id"`
+	OrgName          string          `json:"org_name"`
+	PromptTokens     int64           `json:"prompt_tokens"`
+	CompletionTokens int64           `json:"completion_tokens"`
+	TotalTokens      int64           `json:"total_tokens"`
+	CallCount        int64           `json:"call_count"`
+	Children         []*orgUsageNode `json:"children"`
+}
+
+// GetByOrg 按组织树维度聚合 Token 用量（仅系统管理员可见）
+// GET /api/v1/token-usage/by-org?range=7d
+func (h *TokenUsageHandler) GetByOrg(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil || !scope.IsSuperAdmin {
+		c.JSON(403, gin.H{"error": "权限不足"})
+		return
+	}
+
+	start, end := parseRange(c)
+
+	// 1. 拉取全部 active 组织（用于构建树）
+	var orgs []model.Organization
+	if err := model.DB.Where("status = ?", "active").Order("parent_id ASC, id ASC").Find(&orgs).Error; err != nil {
+		respondDBError(c, "by-org fetch orgs", err)
+		return
+	}
+
+	// 2. 按 org_id 聚合 llm_call_logs（选中时间范围）
+	type aggRow struct {
+		OrgID            uint  `gorm:"column:org_id"`
+		PromptTokens     int64 `gorm:"column:prompt_tokens"`
+		CompletionTokens int64 `gorm:"column:completion_tokens"`
+		TotalTokens      int64 `gorm:"column:total_tokens"`
+		CallCount        int64 `gorm:"column:call_count"`
+	}
+	var aggRows []aggRow
+	if err := model.DB.Model(&model.LLMCallLog{}).
+		Where("created_at >= ? AND created_at < ?", start, end).
+		Select(`org_id,
+			COALESCE(SUM(prompt_tokens), 0)     AS prompt_tokens,
+			COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+			COALESCE(SUM(total_tokens), 0)      AS total_tokens,
+			COUNT(*)                             AS call_count`).
+		Group("org_id").
+		Scan(&aggRows).Error; err != nil {
+		respondDBError(c, "by-org aggregate", err)
+		return
+	}
+
+	// orgID -> 聚合值 映射
+	aggMap := make(map[uint]*aggRow, len(aggRows))
+	for i := range aggRows {
+		aggMap[aggRows[i].OrgID] = &aggRows[i]
+	}
+
+	// 3. 构建组织树并自底向上汇总
+	// 先建立临时节点映射
+	tmpMap := make(map[uint]*orgUsageNode, len(orgs))
+	for _, o := range orgs {
+		n := &orgUsageNode{
+			OrgID:   o.ID,
+			OrgName: o.Name,
+		}
+		if a, ok := aggMap[o.ID]; ok {
+			n.PromptTokens = a.PromptTokens
+			n.CompletionTokens = a.CompletionTokens
+			n.TotalTokens = a.TotalTokens
+			n.CallCount = a.CallCount
+		}
+		tmpMap[o.ID] = n
+	}
+
+	// 构建父子关系
+	var roots []*orgUsageNode
+	for _, o := range orgs {
+		node := tmpMap[o.ID]
+		if o.ParentID == 0 {
+			roots = append(roots, node)
+		} else if parent, ok := tmpMap[o.ParentID]; ok {
+			parent.Children = append(parent.Children, node)
+		} else {
+			// 父组织不存在（可能被删除），降级为根节点
+			roots = append(roots, node)
+		}
+	}
+
+	// 自底向上汇总（后序遍历）
+	var postOrder func(n *orgUsageNode)
+	postOrder = func(n *orgUsageNode) {
+		for _, child := range n.Children {
+			postOrder(child)
+			n.PromptTokens += child.PromptTokens
+			n.CompletionTokens += child.CompletionTokens
+			n.TotalTokens += child.TotalTokens
+			n.CallCount += child.CallCount
+		}
+	}
+	for _, r := range roots {
+		postOrder(r)
+	}
+
+	c.JSON(200, gin.H{"data": roots})
+}
