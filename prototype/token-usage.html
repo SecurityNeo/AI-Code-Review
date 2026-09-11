@@ -677,7 +677,11 @@
         const section = document.getElementById('orgTreeSection');
         if (!section) { console.warn('[orgTree] orgTreeSection DOM 不存在'); return; }
         try {
-            const res = await apiFetch(`${API_BASE}/token-usage/by-org?range=${getRange()}`);
+            const orgSel = document.getElementById('orgSelect');
+            const orgId = orgSel ? orgSel.value : '';
+            let url = `${API_BASE}/token-usage/by-org?range=${getRange()}`;
+            if (orgId) url += `&org_id=${encodeURIComponent(orgId)}`;
+            const res = await apiFetch(url);
             if (res.status === 403) {
                 // 非超管，静默隐藏
                 section.style.display = 'none';

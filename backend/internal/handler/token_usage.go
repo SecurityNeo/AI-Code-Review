@@ -664,7 +664,7 @@ func (h *TokenUsageHandler) GetTokenSummary(c *gin.Context) {
 	})
 }
 
-// ---------- 组织维度 Token 用量（仅 super_admin） ----------
+// ---------- 组织维度 Token 用量（super_admin / org_admin） ----------
 
 type orgUsageNode struct {
 	OrgID            uint            `json:"org_id"`
@@ -676,11 +676,32 @@ type orgUsageNode struct {
 	Children         []*orgUsageNode `json:"children"`
 }
 
-// GetByOrg 按组织树维度聚合 Token 用量（仅系统管理员可见）
-// GET /api/v1/token-usage/by-org?range=7d
+// extractSubTree 从森林中提取以 targetID 为根的子树
+func extractSubTree(roots []*orgUsageNode, targetID uint) []*orgUsageNode {
+	var find func(nodes []*orgUsageNode) *orgUsageNode
+	find = func(nodes []*orgUsageNode) *orgUsageNode {
+		for _, n := range nodes {
+			if n.OrgID == targetID {
+				return n
+			}
+			if found := find(n.Children); found != nil {
+				return found
+			}
+		}
+		return nil
+	}
+	if node := find(roots); node != nil {
+		return []*orgUsageNode{node}
+	}
+	return roots
+}
+
+// GetByOrg 按组织树维度聚合 Token 用量
+// GET /api/v1/token-usage/by-org?range=7d&org_id=4
+// 权限：super_admin 看全部；org_admin 只能看 VisibleOrgIDs 范围内的数据
 func (h *TokenUsageHandler) GetByOrg(c *gin.Context) {
 	scope := middleware.GetAuthScope(c)
-	if scope == nil || !scope.IsSuperAdmin {
+	if scope == nil || !scope.HasOrgRole("super_admin", "org_admin") {
 		c.JSON(403, gin.H{"error": "权限不足"})
 		return
 	}
@@ -703,16 +724,19 @@ func (h *TokenUsageHandler) GetByOrg(c *gin.Context) {
 		CallCount        int64 `gorm:"column:call_count"`
 	}
 	var aggRows []aggRow
-	if err := model.DB.Model(&model.LLMCallLog{}).
+	q := model.DB.Model(&model.LLMCallLog{}).
 		Where("created_at >= ? AND created_at < ?", start, end).
 		Where("call_type = ?", model.CallTypeScore).
 		Select(`org_id,
 			COALESCE(SUM(prompt_tokens), 0)     AS prompt_tokens,
 			COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
 			COALESCE(SUM(total_tokens), 0)      AS total_tokens,
-			COUNT(*)                             AS call_count`).
-		Group("org_id").
-		Scan(&aggRows).Error; err != nil {
+			COUNT(*)                             AS call_count`)
+	// 非超管只能看自己可见组织的汇总
+	if !scope.IsSuperAdmin {
+		q = q.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	if err := q.Group("org_id").Scan(&aggRows).Error; err != nil {
 		respondDBError(c, "by-org aggregate", err)
 		return
 	}
@@ -724,7 +748,6 @@ func (h *TokenUsageHandler) GetByOrg(c *gin.Context) {
 	}
 
 	// 3. 构建组织树并自底向上汇总
-	// 先建立临时节点映射
 	tmpMap := make(map[uint]*orgUsageNode, len(orgs))
 	for _, o := range orgs {
 		n := &orgUsageNode{
@@ -740,7 +763,6 @@ func (h *TokenUsageHandler) GetByOrg(c *gin.Context) {
 		tmpMap[o.ID] = n
 	}
 
-	// 构建父子关系
 	var roots []*orgUsageNode
 	for _, o := range orgs {
 		node := tmpMap[o.ID]
@@ -749,12 +771,10 @@ func (h *TokenUsageHandler) GetByOrg(c *gin.Context) {
 		} else if parent, ok := tmpMap[o.ParentID]; ok {
 			parent.Children = append(parent.Children, node)
 		} else {
-			// 父组织不存在（可能被删除），降级为根节点
 			roots = append(roots, node)
 		}
 	}
 
-	// 自底向上汇总（后序遍历）
 	var postOrder func(n *orgUsageNode)
 	postOrder = func(n *orgUsageNode) {
 		for _, child := range n.Children {
@@ -767,6 +787,20 @@ func (h *TokenUsageHandler) GetByOrg(c *gin.Context) {
 	}
 	for _, r := range roots {
 		postOrder(r)
+	}
+
+	// 4. 根据权限 + 前端选择参数裁剪子树
+	var targetRootID uint
+	requestedOrgIDStr := c.Query("org_id")
+	if requestedOrgIDStr != "" {
+		id, _ := strconv.ParseUint(requestedOrgIDStr, 10, 64)
+		targetRootID = uint(id)
+	} else if !scope.IsSuperAdmin {
+		// org_admin 没指定 org_id，默认从 CurrentOrgID 开始
+		targetRootID = scope.CurrentOrgID
+	}
+	if targetRootID > 0 {
+		roots = extractSubTree(roots, targetRootID)
 	}
 
 	c.JSON(200, gin.H{"data": roots})
