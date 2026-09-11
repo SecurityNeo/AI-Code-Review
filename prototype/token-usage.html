@@ -145,8 +145,7 @@
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="text-lg font-bold text-gray-800">Token 用量分布</h3>
                     <div>
-                        <button onclick="toggleAllOrgRows(true)" class="text-xs text-blue-600 hover:text-blue-800 mr-2">全部展开</button>
-                        <button onclick="toggleAllOrgRows(false)" class="text-xs text-blue-600 hover:text-blue-800">全部折叠</button>
+                        <button id="toggleAllOrgBtn" onclick="toggleAllOrgRowsAuto()" class="text-xs text-blue-600 hover:text-blue-800">全部折叠</button>
                     </div>
                 </div>
                 <div class="flex items-center gap-3 px-3 py-2 text-sm text-gray-500 font-semibold border-b border-gray-100 mb-2 bg-gray-50 rounded">
@@ -755,6 +754,7 @@
                     }
                 }
             });
+            updateToggleAllBtn();
         } catch (renderErr) {
             console.error('[orgTree] renderOrgTree 异常:', renderErr);
             container.innerHTML = '<div class="text-red-400 text-sm py-4">渲染失败</div>';
@@ -777,6 +777,7 @@
             const icon = rowEl.querySelector('.org-toggle');
             if (icon) icon.innerHTML = '<i class="fas fa-caret-right"></i>';
         }
+        updateToggleAllBtn();
     }
 
     function toggleAllOrgRows(expand) {
@@ -804,6 +805,32 @@
                 expandAllNodes(node.children);
             }
         });
+    }
+
+    function isAllExpanded(nodes) {
+        if (!nodes) nodes = orgTreeState.data;
+        for (const node of nodes) {
+            if (!orgTreeState.expanded.has(node.org_id)) return false;
+            if (node.children && node.children.length > 0) {
+                if (!isAllExpanded(node.children)) return false;
+            }
+        }
+        return true;
+    }
+
+    function updateToggleAllBtn() {
+        const btn = document.getElementById('toggleAllOrgBtn');
+        if (!btn) return;
+        const allExpanded = isAllExpanded();
+        btn.textContent = allExpanded ? '全部折叠' : '全部展开';
+    }
+
+    function toggleAllOrgRowsAuto() {
+        const expand = !isAllExpanded();
+        orgTreeState.data.forEach(node => {
+            toggleOrgTreeRecursive(node, expand);
+        });
+        renderOrgTree(orgTreeState.data, document.getElementById('orgTreeBody'), orgTreeState.totalTokens);
     }
 
     window.addEventListener('resize', () => {

@@ -828,6 +828,9 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		common.GET("/review-agent-config/file-filter-defaults", agentCfgH.GetFileFilterDefaults)
 		orgAdmin.PUT("/review-agent-config", agentCfgH.Save)
 
+		// Token 用量监控 — 组织维度（super_admin + org_admin）
+		orgAdmin.GET("/token-usage/by-org", th.GetByOrg)
+
 		// Feature Flag / 组织管理 / 系统管理 已移至 sysAdmin 路由组
 	}
 
@@ -848,9 +851,6 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		sysAdmin.POST("/organizations/:id/members", orgH.AddOrganizationMember)
 		sysAdmin.DELETE("/organizations/:id/members/:userId", orgH.RemoveOrganizationMember)
 		sysAdmin.PUT("/organizations/:id/members/:userId/role", orgH.UpdateMemberRole)
-
-		// Token 用量监控 — 组织维度（仅超管）
-		sysAdmin.GET("/token-usage/by-org", th.GetByOrg)
 
 		// 系统管理
 		sys := sysAdmin.Group("/system")
