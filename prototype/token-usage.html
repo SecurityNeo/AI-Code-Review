@@ -140,6 +140,28 @@
                 </div>
             </div>
 
+            <!-- 组织 Token 用量分布 -->
+            <div id="orgTreeSection" class="chart-card bg-white rounded-xl p-6 border" style="display:none;">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-bold text-gray-800">组织 Token 用量分布</h3>
+                    <div>
+                        <button onclick="toggleAllOrgRows(true)" class="text-xs text-blue-600 hover:text-blue-800 mr-2">全部展开</button>
+                        <button onclick="toggleAllOrgRows(false)" class="text-xs text-blue-600 hover:text-blue-800">全部折叠</button>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3 px-3 py-2 text-sm text-gray-500 font-semibold border-b border-gray-100 mb-2 bg-gray-50 rounded">
+                    <div class="org-toggle" style="visibility:hidden"></div>
+                    <div class="org-name" style="padding-left:0">组织名称</div>
+                    <div class="org-metric">输入 Tokens</div>
+                    <div class="org-metric">输出 Tokens</div>
+                    <div class="org-metric org-metric-total">总量</div>
+                    <div class="org-metric">调用次数</div>
+                    <div class="org-bar-wrap" style="background:transparent"></div>
+                    <div class="org-percent">占比</div>
+                </div>
+                <div id="orgTreeBody" class="space-y-1"></div>
+            </div>
+
             <!-- 图表第 1 行：趋势 + 模型占比 -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div class="chart-card bg-white rounded-xl p-6 border">
@@ -164,28 +186,6 @@
                     <div id="authorLegend" class="flex flex-wrap gap-x-3 gap-y-1 mb-4 text-xs"></div>
                     <div id="authorChart" style="height: 320px;"></div>
                 </div>
-            </div>
-
-            <!-- 组织 Token 用量分布（仅系统管理员可见） -->
-            <div id="orgTreeSection" class="chart-card bg-white rounded-xl p-6 border" style="display:none;">
-                <div class="flex items-center justify-between mb-4">
-                    <h3 class="text-lg font-bold text-gray-800">组织 Token 用量分布 <span class="text-xs font-normal text-gray-400">仅系统管理员可见</span></h3>
-                    <div>
-                        <button onclick="toggleAllOrgRows(true)" class="text-xs text-blue-600 hover:text-blue-800 mr-2">全部展开</button>
-                        <button onclick="toggleAllOrgRows(false)" class="text-xs text-blue-600 hover:text-blue-800">全部折叠</button>
-                    </div>
-                </div>
-                <div class="flex items-center gap-3 px-3 py-2 text-xs text-gray-400 font-medium border-b border-gray-100 mb-2">
-                    <div class="org-toggle" style="visibility:hidden"></div>
-                    <div class="org-name" style="padding-left:0">组织名称</div>
-                    <div class="org-metric">输入 Tokens</div>
-                    <div class="org-metric">输出 Tokens</div>
-                    <div class="org-metric org-metric-total">总量</div>
-                    <div class="org-metric">调用次数</div>
-                    <div class="org-bar-wrap" style="background:transparent"></div>
-                    <div class="org-percent">占比</div>
-                </div>
-                <div id="orgTreeBody" class="space-y-1"></div>
             </div>
 
             <!-- 调用明细表 -->
