@@ -87,6 +87,10 @@ func Auth() gin.HandlerFunc {
 		token := c.GetHeader("Authorization")
 		if len(token) > 7 && token[:7] == "Bearer " {
 			token = token[7:]
+		} else if token != "" {
+			// Authorization header 存在但不是 Bearer 格式（如浏览器自动附加的 Basic auth）
+			// 清空 token，让后续逻辑去查 cookie 和 query 参数
+			token = ""
 		}
 		if token == "" {
 			token, _ = c.Cookie("auth_token")
