@@ -17,8 +17,6 @@
     <style>
         .chart-card { transition: all 0.3s ease; overflow: hidden; }
         .chart-card:hover { box-shadow: 0 10px 25px rgba(0,0,0,0.08); }
-        .kpi-card { transition: transform 0.2s, box-shadow 0.2s; }
-        .kpi-card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,0,0,0.1); }
         .toast { position: fixed; top: 20px; right: 20px; z-index: 9999; animation: slideIn 0.3s ease; }
         @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         .data-table tr:hover { background: #f8f9ff; }
@@ -55,7 +53,6 @@
         .org-bar-seg { height: 100%; float: left; }
         .org-bar-seg:nth-child(1) { background: #3b82f6; } /* 输入-蓝 */
         .org-bar-seg:nth-child(2) { background: #10b981; } /* 输出-绿 */
-        .org-bar-seg:nth-child(3) { background: #f59e0b; } /* 总量-橙(自身) */
         .org-children { margin-left: 18px; border-left: 1px solid #e2e8f0; padding-left: 8px; }
         .org-children.collapsed { display: none; }
         .org-percent { font-size: 11px; color: #94a3b8; min-width: 40px; text-align: right; }
@@ -108,8 +105,9 @@
                 <div class="bg-white rounded-xl p-5 border flex flex-col justify-between">
                     <div class="text-xs text-gray-400 font-medium uppercase tracking-wide">总 Tokens</div>
                     <div class="text-2xl font-mono tabular-nums font-bold text-gray-800 mt-1" id="kpiTotalTokens">-</div>
-                    <div class="mt-3 h-1 w-full bg-gray-100 rounded-full overflow-hidden">
-                        <div id="kpiTotalBar" class="h-full bg-orange-500 rounded-full" style="width:0%"></div>
+                    <div class="mt-3 h-1 w-full bg-gray-100 rounded-full overflow-hidden flex">
+                        <div id="kpiTotalPromptSeg" class="h-full bg-blue-500 rounded-l-full" style="width:0%"></div>
+                        <div id="kpiTotalCompletionSeg" class="h-full bg-green-500 rounded-r-full" style="width:0%"></div>
                     </div>
                 </div>
                 <div class="bg-white rounded-xl p-5 border flex flex-col justify-between">
@@ -172,8 +170,20 @@
             <div id="orgTreeSection" class="chart-card bg-white rounded-xl p-6 border" style="display:none;">
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="text-lg font-bold text-gray-800">组织 Token 用量分布 <span class="text-xs font-normal text-gray-400">仅系统管理员可见</span></h3>
-                    <button onclick="toggleAllOrgRows(true)" class="text-xs text-blue-600 hover:text-blue-800 mr-2">全部展开</button>
-                    <button onclick="toggleAllOrgRows(false)" class="text-xs text-blue-600 hover:text-blue-800">全部折叠</button>
+                    <div>
+                        <button onclick="toggleAllOrgRows(true)" class="text-xs text-blue-600 hover:text-blue-800 mr-2">全部展开</button>
+                        <button onclick="toggleAllOrgRows(false)" class="text-xs text-blue-600 hover:text-blue-800">全部折叠</button>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3 px-3 py-2 text-xs text-gray-400 font-medium border-b border-gray-100 mb-2">
+                    <div class="org-toggle" style="visibility:hidden"></div>
+                    <div class="org-name" style="padding-left:0">组织名称</div>
+                    <div class="org-metric">输入 Tokens</div>
+                    <div class="org-metric">输出 Tokens</div>
+                    <div class="org-metric org-metric-total">总量</div>
+                    <div class="org-metric">调用次数</div>
+                    <div class="org-bar-wrap" style="background:transparent"></div>
+                    <div class="org-percent">占比</div>
                 </div>
                 <div id="orgTreeBody" class="space-y-1"></div>
             </div>
@@ -349,8 +359,12 @@
         document.getElementById('kpiCallCount').textContent = formatNumber(calls);
         document.getElementById('kpiAvgDuration').textContent = (avgMs / 1000).toFixed(1) + 's';
 
-        // 进度条：token类用总量为100%基准，次数以1万为满格，耗时以10s为满格
-        document.getElementById('kpiTotalBar').style.width = total > 0 ? '100%' : '0%';
+        // 总 Tokens 卡：用双色堆叠进度条展示输入/输出构成
+        const promptRatio = total > 0 ? Math.min((prompt / total) * 100, 100) : 0;
+        const completionRatio = total > 0 ? Math.min((completion / total) * 100, 100) : 0;
+        document.getElementById('kpiTotalPromptSeg').style.width = promptRatio + '%';
+        document.getElementById('kpiTotalCompletionSeg').style.width = completionRatio + '%';
+
         document.getElementById('kpiPromptBar').style.width = total > 0 ? Math.min((prompt / total) * 100, 100) + '%' : '0%';
         document.getElementById('kpiCompletionBar').style.width = total > 0 ? Math.min((completion / total) * 100, 100) + '%' : '0%';
         document.getElementById('kpiCallBar').style.width = Math.min((calls / 10000) * 100, 100) + '%';
@@ -657,9 +671,9 @@
             const hasChildren = node.children && node.children.length > 0;
             const isExpanded = orgTreeState.expanded.has(node.org_id);
             const percent = totalTokens > 0 ? ((node.total_tokens || 0) / totalTokens * 100).toFixed(1) : '0.0';
-            const promptP = node.total_tokens > 0 ? ((node.prompt_tokens || 0) / node.total_tokens * 100).toFixed(1) : '0';
-            const completionP = node.total_tokens > 0 ? ((node.completion_tokens || 0) / node.total_tokens * 100).toFixed(1) : '0';
-            const selfP = node.total_tokens > 0 ? (100 - parseFloat(promptP) - parseFloat(completionP)).toFixed(1) : '0';
+            const promptP = node.total_tokens > 0 ? Math.min(100, Math.max(0, (node.prompt_tokens / node.total_tokens) * 100)).toFixed(1) : '0';
+            const completionP = node.total_tokens > 0 ? Math.min(100, Math.max(0, (node.completion_tokens / node.total_tokens) * 100)).toFixed(1) : '0';
+            const selfP = node.total_tokens > 0 ? Math.max(0, (100 - parseFloat(promptP) - parseFloat(completionP))).toFixed(1) : '0';
 
             const row = document.createElement('div');
             row.innerHTML = `

@@ -705,6 +705,7 @@ func (h *TokenUsageHandler) GetByOrg(c *gin.Context) {
 	var aggRows []aggRow
 	if err := model.DB.Model(&model.LLMCallLog{}).
 		Where("created_at >= ? AND created_at < ?", start, end).
+		Where("call_type = ?", model.CallTypeScore).
 		Select(`org_id,
 			COALESCE(SUM(prompt_tokens), 0)     AS prompt_tokens,
 			COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
