@@ -143,7 +143,7 @@
             <!-- 组织 Token 用量分布 -->
             <div id="orgTreeSection" class="chart-card bg-white rounded-xl p-6 border" style="display:none;">
                 <div class="flex items-center justify-between mb-4">
-                    <h3 class="text-lg font-bold text-gray-800">组织 Token 用量分布</h3>
+                    <h3 class="text-lg font-bold text-gray-800">Token 用量分布</h3>
                     <div>
                         <button onclick="toggleAllOrgRows(true)" class="text-xs text-blue-600 hover:text-blue-800 mr-2">全部展开</button>
                         <button onclick="toggleAllOrgRows(false)" class="text-xs text-blue-600 hover:text-blue-800">全部折叠</button>
@@ -691,6 +691,8 @@
             const roots = json.data || [];
             orgTreeState.data = roots;
             orgTreeState.totalTokens = roots.reduce((sum, n) => sum + (n.total_tokens || 0), 0);
+            // 首次加载默认展开全部
+            expandAllNodes(roots);
             const bodyEl = document.getElementById('orgTreeBody');
             if (!bodyEl) { console.warn('[orgTree] orgTreeBody DOM 不存在'); return; }
             renderOrgTree(roots, bodyEl, orgTreeState.totalTokens);
@@ -789,6 +791,15 @@
         if (node.children) {
             node.children.forEach(c => toggleOrgTreeRecursive(c, expand));
         }
+    }
+
+    function expandAllNodes(nodes) {
+        nodes.forEach(node => {
+            orgTreeState.expanded.add(node.org_id);
+            if (node.children && node.children.length > 0) {
+                expandAllNodes(node.children);
+            }
+        });
     }
 
     window.addEventListener('resize', () => {
