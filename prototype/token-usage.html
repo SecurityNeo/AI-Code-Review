@@ -325,11 +325,32 @@
     async function loadAll() {
         currentPage = 1;
         document.getElementById('lastUpdate').textContent = '更新中...';
-        const results = await Promise.allSettled([
-            loadOverview(), loadTrend(), loadByModel(),
-            loadByProject(), loadByAuthor(), loadCalls(1), loadOrgTree()
-        ]);
-        const failed = results.filter(r => r.status === 'rejected').length;
+        const tasks = [
+            ['overview', loadOverview],
+            ['trend', loadTrend],
+            ['model', loadByModel],
+            ['project', loadByProject],
+            ['author', loadByAuthor],
+            ['calls', () => loadCalls(1)],
+            ['orgTree', loadOrgTree]
+        ];
+        const results = await Promise.allSettled(
+            tasks.map(([name, fn]) => {
+                try {
+                    return fn();
+                } catch (syncErr) {
+                    console.error(`[loadAll] ${name} sync throw:`, syncErr);
+                    return Promise.reject(syncErr);
+                }
+            })
+        );
+        let failed = 0;
+        results.forEach((r, i) => {
+            if (r.status === 'rejected') {
+                failed++;
+                console.error(`[loadAll] ${tasks[i][0]} failed:`, r.reason);
+            }
+        });
         document.getElementById('lastUpdate').textContent = failed === 0
             ? '更新于 ' + new Date().toLocaleTimeString('zh-CN')
             : `${failed} 项加载失败，请重试`;

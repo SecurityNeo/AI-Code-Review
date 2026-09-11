@@ -29,6 +29,7 @@
         try { return JSON.parse(localStorage.getItem('user_info') || '{}'); }
         catch (e) { return {}; }
     }
+    window.getCurrentUserInfo = getCurrentUserInfo;
 
     async function waitForApiReady() {
         for (let i = 0; i < 50; i++) {
