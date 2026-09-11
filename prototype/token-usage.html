@@ -353,22 +353,34 @@
         const calls = d.call_count || 0;
         const avgMs = d.avg_duration_ms || 0;
 
-        document.getElementById('kpiTotalTokens').textContent = formatNumber(total);
-        document.getElementById('kpiPromptTokens').textContent = formatNumber(prompt);
-        document.getElementById('kpiCompletionTokens').textContent = formatNumber(completion);
-        document.getElementById('kpiCallCount').textContent = formatNumber(calls);
-        document.getElementById('kpiAvgDuration').textContent = (avgMs / 1000).toFixed(1) + 's';
+        const elTotal = document.getElementById('kpiTotalTokens');
+        const elPrompt = document.getElementById('kpiPromptTokens');
+        const elCompletion = document.getElementById('kpiCompletionTokens');
+        const elCall = document.getElementById('kpiCallCount');
+        const elDuration = document.getElementById('kpiAvgDuration');
+        if (elTotal) elTotal.textContent = formatNumber(total);
+        if (elPrompt) elPrompt.textContent = formatNumber(prompt);
+        if (elCompletion) elCompletion.textContent = formatNumber(completion);
+        if (elCall) elCall.textContent = formatNumber(calls);
+        if (elDuration) elDuration.textContent = (avgMs / 1000).toFixed(1) + 's';
 
-        // 总 Tokens 卡：用双色堆叠进度条展示输入/输出构成
-        const promptRatio = total > 0 ? Math.min((prompt / total) * 100, 100) : 0;
-        const completionRatio = total > 0 ? Math.min((completion / total) * 100, 100) : 0;
-        document.getElementById('kpiTotalPromptSeg').style.width = promptRatio + '%';
-        document.getElementById('kpiTotalCompletionSeg').style.width = completionRatio + '%';
+        const totalPromptSeg = document.getElementById('kpiTotalPromptSeg');
+        const totalCompletionSeg = document.getElementById('kpiTotalCompletionSeg');
+        if (totalPromptSeg && totalCompletionSeg) {
+            const promptRatio = total > 0 ? Math.min((prompt / total) * 100, 100) : 0;
+            const completionRatio = total > 0 ? Math.min((completion / total) * 100, 100) : 0;
+            totalPromptSeg.style.width = promptRatio + '%';
+            totalCompletionSeg.style.width = completionRatio + '%';
+        }
 
-        document.getElementById('kpiPromptBar').style.width = total > 0 ? Math.min((prompt / total) * 100, 100) + '%' : '0%';
-        document.getElementById('kpiCompletionBar').style.width = total > 0 ? Math.min((completion / total) * 100, 100) + '%' : '0%';
-        document.getElementById('kpiCallBar').style.width = Math.min((calls / 10000) * 100, 100) + '%';
-        document.getElementById('kpiDurationBar').style.width = Math.min((avgMs / 10000) * 100, 100) + '%';
+        const promptBar = document.getElementById('kpiPromptBar');
+        const completionBar = document.getElementById('kpiCompletionBar');
+        const callBar = document.getElementById('kpiCallBar');
+        const durationBar = document.getElementById('kpiDurationBar');
+        if (promptBar) promptBar.style.width = total > 0 ? Math.min((prompt / total) * 100, 100) + '%' : '0%';
+        if (completionBar) completionBar.style.width = total > 0 ? Math.min((completion / total) * 100, 100) + '%' : '0%';
+        if (callBar) callBar.style.width = Math.min((calls / 10000) * 100, 100) + '%';
+        if (durationBar) durationBar.style.width = Math.min((avgMs / 10000) * 100, 100) + '%';
     }
 
     async function loadTrend() {
@@ -642,66 +654,87 @@
 
     async function loadOrgTree() {
         const userInfo = getCurrentUserInfo();
-        if (!userInfo || userInfo.current_org_role !== 'super_admin') return;
+        // 使用 is_super_admin（全局身份），而非 current_org_role（当前组织角色）
+        if (!userInfo || !userInfo.is_super_admin) {
+            console.log('[orgTree] 非超管，跳过加载');
+            return;
+        }
         const section = document.getElementById('orgTreeSection');
-        if (!section) return;
+        if (!section) {
+            console.warn('[orgTree] orgTreeSection DOM 不存在');
+            return;
+        }
         section.style.display = 'block';
         try {
             const res = await apiFetch(`${API_BASE}/token-usage/by-org?range=${getRange()}`);
-            if (!res.ok) throw new Error('HTTP ' + res.status);
+            if (!res.ok) {
+                const errText = await res.text().catch(() => 'unknown');
+                throw new Error('HTTP ' + res.status + ': ' + errText);
+            }
             const json = await res.json();
             const roots = json.data || [];
             orgTreeState.data = roots;
             orgTreeState.totalTokens = roots.reduce((sum, n) => sum + (n.total_tokens || 0), 0);
-            renderOrgTree(roots, document.getElementById('orgTreeBody'), orgTreeState.totalTokens);
+            const bodyEl = document.getElementById('orgTreeBody');
+            if (!bodyEl) { console.warn('[orgTree] orgTreeBody DOM 不存在'); return; }
+            renderOrgTree(roots, bodyEl, orgTreeState.totalTokens);
         } catch (e) {
-            console.error('加载组织用量失败:', e);
-            document.getElementById('orgTreeBody').innerHTML = '<div class="text-gray-400 text-sm py-4">加载失败</div>';
+            console.error('[orgTree] 加载组织用量失败:', e);
+            const bodyEl = document.getElementById('orgTreeBody');
+            if (bodyEl) bodyEl.innerHTML = '<div class="text-gray-400 text-sm py-4">加载失败，请刷新页面重试</div>';
         }
     }
 
     function renderOrgTree(nodes, container, totalTokens) {
-        if (!nodes || nodes.length === 0) {
-            container.innerHTML = '<div class="text-gray-400 text-sm py-4">暂无数据</div>';
-            return;
-        }
-        container.innerHTML = '';
-        nodes.forEach((node, idx) => {
-            const rowId = 'org-row-' + node.org_id;
-            const hasChildren = node.children && node.children.length > 0;
-            const isExpanded = orgTreeState.expanded.has(node.org_id);
-            const percent = totalTokens > 0 ? ((node.total_tokens || 0) / totalTokens * 100).toFixed(1) : '0.0';
-            const promptP = node.total_tokens > 0 ? Math.min(100, Math.max(0, (node.prompt_tokens / node.total_tokens) * 100)).toFixed(1) : '0';
-            const completionP = node.total_tokens > 0 ? Math.min(100, Math.max(0, (node.completion_tokens / node.total_tokens) * 100)).toFixed(1) : '0';
-            const selfP = node.total_tokens > 0 ? Math.max(0, (100 - parseFloat(promptP) - parseFloat(completionP))).toFixed(1) : '0';
-
-            const row = document.createElement('div');
-            row.innerHTML = `
-                <div class="org-row ${hasChildren ? 'org-row-head' : ''}" id="${rowId}" onclick="toggleOrgRow(${node.org_id})">
-                    <div class="org-toggle ${hasChildren ? '' : 'leaf'}">
-                        ${hasChildren ? (isExpanded ? '<i class="fas fa-caret-down"></i>' : '<i class="fas fa-caret-right"></i>') : ''}
-                    </div>
-                    <div class="org-name" style="padding-left:0">${escapeHtml(node.org_name)}</div>
-                    <div class="org-metric">${formatNumber(node.prompt_tokens || 0)}</div>
-                    <div class="org-metric">${formatNumber(node.completion_tokens || 0)}</div>
-                    <div class="org-metric org-metric-total">${formatNumber(node.total_tokens || 0)}</div>
-                    <div class="org-metric">${formatNumber(node.call_count || 0)}</div>
-                    <div class="org-bar-wrap" title="输入 ${promptP}% | 输出 ${completionP}% | 自身 ${selfP}%">
-                        <div class="org-bar-seg" style="width:${promptP}%"></div>
-                        <div class="org-bar-seg" style="width:${completionP}%"></div>
-                        <div class="org-bar-seg" style="width:${Math.max(0, selfP)}%;background:#f59e0b"></div>
-                    </div>
-                    <div class="org-percent">${percent}%</div>
-                </div>
-                <div class="org-children ${isExpanded ? '' : 'collapsed'}" id="children-${node.org_id}"></div>
-            `;
-            container.appendChild(row);
-
-            if (hasChildren) {
-                const childContainer = row.querySelector(`#children-${node.org_id}`);
-                renderOrgTree(node.children, childContainer, totalTokens);
+        if (!container) { console.warn('[orgTree] renderOrgTree: container is null'); return; }
+        try {
+            if (!nodes || nodes.length === 0) {
+                container.innerHTML = '<div class="text-gray-400 text-sm py-4">暂无数据</div>';
+                return;
             }
-        });
+            container.innerHTML = '';
+            nodes.forEach((node, idx) => {
+                const rowId = 'org-row-' + node.org_id;
+                const hasChildren = node.children && node.children.length > 0;
+                const isExpanded = orgTreeState.expanded.has(node.org_id);
+                const percent = totalTokens > 0 ? ((node.total_tokens || 0) / totalTokens * 100).toFixed(1) : '0.0';
+                const promptP = node.total_tokens > 0 ? Math.min(100, Math.max(0, (node.prompt_tokens / node.total_tokens) * 100)).toFixed(1) : '0';
+                const completionP = node.total_tokens > 0 ? Math.min(100, Math.max(0, (node.completion_tokens / node.total_tokens) * 100)).toFixed(1) : '0';
+                const selfP = node.total_tokens > 0 ? Math.max(0, (100 - parseFloat(promptP) - parseFloat(completionP))).toFixed(1) : '0';
+
+                const row = document.createElement('div');
+                row.innerHTML = `
+                    <div class="org-row ${hasChildren ? 'org-row-head' : ''}" id="${rowId}" onclick="toggleOrgRow(${node.org_id})">
+                        <div class="org-toggle ${hasChildren ? '' : 'leaf'}">
+                            ${hasChildren ? (isExpanded ? '<i class="fas fa-caret-down"></i>' : '<i class="fas fa-caret-right"></i>') : ''}
+                        </div>
+                        <div class="org-name" style="padding-left:0">${escapeHtml(node.org_name || '')}</div>
+                        <div class="org-metric">${formatNumber(node.prompt_tokens || 0)}</div>
+                        <div class="org-metric">${formatNumber(node.completion_tokens || 0)}</div>
+                        <div class="org-metric org-metric-total">${formatNumber(node.total_tokens || 0)}</div>
+                        <div class="org-metric">${formatNumber(node.call_count || 0)}</div>
+                        <div class="org-bar-wrap" title="输入 ${promptP}% | 输出 ${completionP}% | 自身 ${selfP}%">
+                            <div class="org-bar-seg" style="width:${promptP}%"></div>
+                            <div class="org-bar-seg" style="width:${completionP}%"></div>
+                            <div class="org-bar-seg" style="width:${Math.max(0, selfP)}%;background:#f59e0b"></div>
+                        </div>
+                        <div class="org-percent">${percent}%</div>
+                    </div>
+                    <div class="org-children ${isExpanded ? '' : 'collapsed'}" id="children-${node.org_id}"></div>
+                `;
+                container.appendChild(row);
+
+                if (hasChildren) {
+                    const childContainer = row.querySelector('#children-' + node.org_id);
+                    if (childContainer) {
+                        renderOrgTree(node.children, childContainer, totalTokens);
+                    }
+                }
+            });
+        } catch (renderErr) {
+            console.error('[orgTree] renderOrgTree 异常:', renderErr);
+            container.innerHTML = '<div class="text-red-400 text-sm py-4">渲染失败</div>';
+        }
     }
 
     function toggleOrgRow(orgId) {
