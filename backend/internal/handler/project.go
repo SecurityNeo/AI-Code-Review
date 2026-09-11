@@ -63,7 +63,7 @@ func (h *ProjectHandler) List(c *gin.Context) {
 		}
 	}
 
-	projects, total, err := service.NewProjectService().List(page, pageSize, keyword, status, source, projectIDs, filterOrgID)
+	projects, total, err := service.NewProjectService().List(scope, page, pageSize, keyword, status, source, projectIDs, filterOrgID)
 	if err != nil {
 		zap.L().Error("list projects failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})

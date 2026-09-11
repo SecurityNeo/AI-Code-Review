@@ -13,11 +13,11 @@ func NewProjectService() *ProjectService {
 	return &ProjectService{}
 }
 
-func (s *ProjectService) List(page, pageSize int, keyword, status, source string, projectIDs []uint, filterOrgID uint) ([]model.Project, int64, error) {
+func (s *ProjectService) List(scope *model.UserAuthScope, page, pageSize int, keyword, status, source string, projectIDs []uint, filterOrgID uint) ([]model.Project, int64, error) {
 	var projects []model.Project
 	var total int64
 
-	db := model.DB.Model(&model.Project{})
+	db := model.DBWithScope(scope).Model(&model.Project{})
 	if keyword != "" {
 		db = db.Where("name LIKE ? OR project_path LIKE ?", "%"+keyword+"%", "%"+keyword+"%")
 	}
