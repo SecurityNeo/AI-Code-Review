@@ -674,20 +674,15 @@
     let orgTreeState = { expanded: new Set(), data: [], totalTokens: 0 };
 
     async function loadOrgTree() {
-        const userInfo = getCurrentUserInfo();
-        // 使用 is_super_admin（全局身份），而非 current_org_role（当前组织角色）
-        if (!userInfo || !userInfo.is_super_admin) {
-            console.log('[orgTree] 非超管，跳过加载');
-            return;
-        }
         const section = document.getElementById('orgTreeSection');
-        if (!section) {
-            console.warn('[orgTree] orgTreeSection DOM 不存在');
-            return;
-        }
-        section.style.display = 'block';
+        if (!section) { console.warn('[orgTree] orgTreeSection DOM 不存在'); return; }
         try {
             const res = await apiFetch(`${API_BASE}/token-usage/by-org?range=${getRange()}`);
+            if (res.status === 403) {
+                // 非超管，静默隐藏
+                section.style.display = 'none';
+                return;
+            }
             if (!res.ok) {
                 const errText = await res.text().catch(() => 'unknown');
                 throw new Error('HTTP ' + res.status + ': ' + errText);
@@ -699,10 +694,12 @@
             const bodyEl = document.getElementById('orgTreeBody');
             if (!bodyEl) { console.warn('[orgTree] orgTreeBody DOM 不存在'); return; }
             renderOrgTree(roots, bodyEl, orgTreeState.totalTokens);
+            section.style.display = 'block';
         } catch (e) {
             console.error('[orgTree] 加载组织用量失败:', e);
             const bodyEl = document.getElementById('orgTreeBody');
             if (bodyEl) bodyEl.innerHTML = '<div class="text-gray-400 text-sm py-4">加载失败，请刷新页面重试</div>';
+            section.style.display = 'block';
         }
     }
 
