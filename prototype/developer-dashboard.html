@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>工作台 - CodeGuard</title>
-    <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+    <script src="js/auth.js?v=9"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <style>
@@ -215,19 +215,25 @@ async function loadDashboard(force = false) {
         // 存储当前用户ID，用于Issue操作权限判断
         currentUserId = d.current_user_id || null;
 
-        // Toggle visibility based on baseline
+        // Toggle visibility based on baseline（历史遗留概览仅系统管理员可见）
         const hasBaseline = !!d.notification_baseline_at;
+        const isSysAdmin = isSystemAdmin();
         const toggleWrap = document.getElementById('legacyToggleWrap');
         const activeModeHint = document.getElementById('activeModeHint');
         const issueListTips = document.getElementById('issueListTips');
-        if (hasBaseline) {
+        if (hasBaseline && isSysAdmin) {
             toggleWrap.classList.remove('hidden');
             activeModeHint.classList.toggle('hidden', showLegacy);
             issueListTips.classList.add('hidden');
         } else {
             toggleWrap.classList.add('hidden');
             activeModeHint.classList.add('hidden');
-            issueListTips.classList.remove('hidden');
+            // 非系统管理员不显示历史遗留提示
+            if (!isSysAdmin && issueListTips) {
+                issueListTips.classList.add('hidden');
+            } else {
+                issueListTips.classList.remove('hidden');
+            }
         }
         document.getElementById('showLegacyToggle').checked = showLegacy;
 

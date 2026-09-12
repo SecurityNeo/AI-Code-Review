@@ -35,8 +35,9 @@ func (h *GraphHandler) ProjectAccessCheck() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		scope := middleware.GetAuthScope(c)
 		// admin 直接放行
-		if user.Role == model.RoleAdmin {
+		if scope != nil && scope.HasOrgRole("super_admin", "org_admin") {
 			c.Next()
 			return
 		}
@@ -94,11 +95,21 @@ func (h *GraphHandler) RegisterRoutes(common, adminOnly *gin.RouterGroup) {
 
 // HandleBuildGraph 触发全量扫描
 func (h *GraphHandler) HandleBuildGraph(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	h.startScan(c, false)
 }
 
 // HandleRefreshGraph 重新全量扫描
 func (h *GraphHandler) HandleRefreshGraph(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	h.startScan(c, true)
 }
 
@@ -108,6 +119,9 @@ func (h *GraphHandler) startScan(c *gin.Context, isRefresh bool) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project_id"})
 		return
 	}
+
+	scope := middleware.GetAuthScope(c)
+	db := model.DBWithScope(scope)
 
 	var req struct {
 		Branch string `json:"branch"`
@@ -120,7 +134,7 @@ func (h *GraphHandler) startScan(c *gin.Context, isRefresh bool) {
 
 	if req.Branch == "" {
 		var project model.Project
-		if err := h.db.First(&project, projectID).Error; err == nil && project.GraphBaseBranch != "" {
+		if err := db.First(&project, projectID).Error; err == nil && project.GraphBaseBranch != "" {
 			req.Branch = project.GraphBaseBranch
 		} else {
 			req.Branch = "main"
@@ -130,9 +144,9 @@ func (h *GraphHandler) startScan(c *gin.Context, isRefresh bool) {
 	var task *model.GraphScanTask
 	var scanErr error
 	if isRefresh {
-		task, scanErr = h.scanService.RefreshScan(projectID, req.Branch, graphscan.WithTriggerType("manual"))
+		task, scanErr = h.scanService.RefreshScan(scope, projectID, req.Branch, graphscan.WithTriggerType("manual"))
 	} else {
-		task, scanErr = h.scanService.TriggerScan(projectID, req.Branch, graphscan.WithTriggerType("manual"))
+		task, scanErr = h.scanService.TriggerScan(scope, projectID, req.Branch, graphscan.WithTriggerType("manual"))
 	}
 	if scanErr != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": scanErr.Error()})
@@ -149,17 +163,24 @@ func (h *GraphHandler) startScan(c *gin.Context, isRefresh bool) {
 
 // HandleGraphStatus 获取扫描状态
 func (h *GraphHandler) HandleGraphStatus(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	projectID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project_id"})
 		return
 	}
 
-	task, err := h.scanService.GetScanStatus(projectID)
+	db := model.DBWithScope(scope)
+
+	task, err := h.scanService.GetScanStatus(scope, projectID)
 	if err != nil {
 		// 没有扫描任务，从项目表读取
 		var project model.Project
-		if err := h.db.First(&project, projectID).Error; err == nil {
+		if err := db.First(&project, projectID).Error; err == nil {
 			frameworks := []string{}
 			if project.GraphFrameworks != "" {
 				json.Unmarshal([]byte(project.GraphFrameworks), &frameworks)
@@ -195,6 +216,11 @@ func (h *GraphHandler) HandleGraphStatus(c *gin.Context) {
 
 // HandleGraphOverview 获取图谱概览
 func (h *GraphHandler) HandleGraphOverview(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	projectID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project_id"})
@@ -212,11 +238,22 @@ func (h *GraphHandler) HandleGraphOverview(c *gin.Context) {
 
 // HandleUpdateGraphConfig 更新图谱配置
 func (h *GraphHandler) HandleUpdateGraphConfig(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
 	projectID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project_id"})
 		return
 	}
+	if !CanAccessProject(scope, uint(projectID)) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问该项目"})
+		return
+	}
+
+	db := model.DBWithScope(scope)
 
 	var req struct {
 		GraphBaseBranch string `json:"graph_base_branch,omitempty"`
@@ -232,7 +269,7 @@ func (h *GraphHandler) HandleUpdateGraphConfig(c *gin.Context) {
 	}
 
 	if len(updates) > 0 {
-		if err := h.db.Model(&model.Project{}).Where("id = ?", projectID).Updates(updates).Error; err != nil {
+		if err := db.Model(&model.Project{}).Where("id = ?", projectID).Updates(updates).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -243,6 +280,11 @@ func (h *GraphHandler) HandleUpdateGraphConfig(c *gin.Context) {
 
 // HandleGraphVisualization 获取图可视化数据（分层加载）
 func (h *GraphHandler) HandleGraphVisualization(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	projectID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project_id"})
@@ -265,6 +307,11 @@ func (h *GraphHandler) HandleGraphVisualization(c *gin.Context) {
 
 // HandleNodeDetail 获取节点详情（支持路径参数和 query 参数）
 func (h *GraphHandler) HandleNodeDetail(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	projectID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project_id"})
@@ -287,6 +334,11 @@ func (h *GraphHandler) HandleNodeDetail(c *gin.Context) {
 
 // HandleGraphFiles 获取文件列表及文件级指标
 func (h *GraphHandler) HandleGraphFiles(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	projectID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project_id"})
@@ -304,6 +356,11 @@ func (h *GraphHandler) HandleGraphFiles(c *gin.Context) {
 
 // HandleFileContent 读取指定文件内容（用于代码片段展示）
 func (h *GraphHandler) HandleFileContent(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	projectID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project_id"})
@@ -330,6 +387,11 @@ func (h *GraphHandler) HandleFileContent(c *gin.Context) {
 
 // HandleGraphMetrics 获取度量仪表盘数据
 func (h *GraphHandler) HandleGraphMetrics(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	projectID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project_id"})
@@ -347,6 +409,11 @@ func (h *GraphHandler) HandleGraphMetrics(c *gin.Context) {
 
 // HandleGraphDependencies 获取依赖网络数据
 func (h *GraphHandler) HandleGraphDependencies(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	projectID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project_id"})
@@ -364,6 +431,11 @@ func (h *GraphHandler) HandleGraphDependencies(c *gin.Context) {
 
 // HandleGraphSecurity 获取安全分析数据
 func (h *GraphHandler) HandleGraphSecurity(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	projectID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project_id"})
@@ -381,6 +453,11 @@ func (h *GraphHandler) HandleGraphSecurity(c *gin.Context) {
 
 // HandleCancelGraphScan 取消指定的扫描任务
 func (h *GraphHandler) HandleCancelGraphScan(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	projectID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project_id"})
@@ -392,7 +469,7 @@ func (h *GraphHandler) HandleCancelGraphScan(c *gin.Context) {
 		return
 	}
 
-	if err := h.scanService.CancelScan(projectID, taskID); err != nil {
+	if err := h.scanService.CancelScan(scope, projectID, taskID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -401,6 +478,11 @@ func (h *GraphHandler) HandleCancelGraphScan(c *gin.Context) {
 
 // HandleBuildHistory 获取代码地图构建历史
 func (h *GraphHandler) HandleBuildHistory(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	projectID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project_id"})
@@ -417,11 +499,11 @@ func (h *GraphHandler) HandleBuildHistory(c *gin.Context) {
 	}
 
 	var total int64
-	h.db.Model(&model.GraphScanTask{}).Where("project_id = ?", projectID).Count(&total)
+	model.DB.Model(&model.GraphScanTask{}).Where("project_id = ?", projectID).Count(&total)
 
 	var tasks []model.GraphScanTask
 	offset := (page - 1) * pageSize
-	if err := h.db.Where("project_id = ?", projectID).
+	if err := model.DB.Where("project_id = ?", projectID).
 		Order("created_at DESC").
 		Limit(pageSize).Offset(offset).
 		Find(&tasks).Error; err != nil {

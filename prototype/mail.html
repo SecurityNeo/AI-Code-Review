@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>邮件通知 - CodeGuard</title>
-        <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+        <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <style>
@@ -120,6 +121,7 @@
                             <thead>
                                 <tr class="bg-gray-50 text-gray-600">
                                     <th class="px-4 py-2 text-left font-medium">姓名</th>
+                                    <th class="px-4 py-2 text-left font-medium">所属组织</th>
                                     <th class="px-4 py-2 text-left font-medium">邮箱</th>
                                     <th class="px-4 py-2 text-left font-medium">分组</th>
                                     <th class="px-4 py-2 text-center font-medium" style="width: 80px;">状态</th>
@@ -127,7 +129,7 @@
                                 </tr>
                             </thead>
                             <tbody id="recipientTable">
-                                <tr><td colspan="5" class="text-center text-gray-400 py-6">暂无接收人</td></tr>
+                                <tr><td colspan="6" class="text-center text-gray-400 py-6">暂无接收人</td></tr>
                             </tbody>
                         </table>
                         <div class="mt-3">
@@ -272,13 +274,14 @@
             }
             html += '<tr id="addRecipientRow" style="display:none;" class="bg-blue-50">' +
                 '<td class="px-2 py-2"><input type="text" id="newRecName" placeholder="姓名" class="w-full px-2 py-1 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"></td>' +
+                '<td class="px-2 py-2"><select id="orgSelectAdd" class="px-2 py-1 border rounded text-xs bg-white"></select></td>' +
                 '<td class="px-2 py-2"><input type="email" id="newRecEmail" placeholder="email@example.com" class="w-full px-2 py-1 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"></td>' +
                 '<td class="px-2 py-2">' + createGroupComboboxHTML('newRecGroup', '') + '</td>' +
                 '<td class="px-2 py-2 text-center"><select id="newRecEnabled" class="px-2 py-1 border rounded text-xs"><option value="true">启用</option><option value="false">禁用</option></select></td>' +
                 '<td class="px-2 py-2 text-center"><button onclick="submitAddRecipient()" class="text-green-600 hover:text-green-800 text-xs mr-2 font-medium">保存</button><button onclick="cancelAddRecipient()" class="text-gray-500 hover:text-gray-700 text-xs">取消</button></td></tr>';
             if (filtered.length === 0) {
                 var emptyMsg = currentGroupFilter === '' ? '暂无接收人，点击下方按钮添加' : '该分组下暂无接收人';
-                html = '<tr id="noRecHint"><td colspan="5" class="text-center text-gray-400 py-6">' + emptyMsg + '</td></tr>' + html;
+                html = '<tr id="noRecHint"><td colspan="6" class="text-center text-gray-400 py-6">' + emptyMsg + '</td></tr>' + html;
             }
             tbody.innerHTML = html;
         }
@@ -288,6 +291,7 @@
                 var selFalse = (!r.enabled ? ' selected' : '');
                 return '<tr id="editRow-' + r.id + '" class="bg-blue-50">' +
                     '<td class="px-2 py-2"><input type="text" id="editRecName-' + r.id + '" value="' + (r.name || '') + '" class="w-full px-2 py-1 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"></td>' +
+                    '<td class="px-2 py-2 text-sm text-gray-600">' + escapeHtml(r.org_name || '根组织') + '</td>' +
                     '<td class="px-2 py-2"><input type="email" id="editRecEmail-' + r.id + '" value="' + r.email + '" class="w-full px-2 py-1 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"></td>' +
                     '<td class="px-2 py-2">' + createGroupComboboxHTML('editRecGroup-' + r.id, r.group_name) + '</td>' +
                     '<td class="px-2 py-2 text-center"><select id="editRecEnabled-' + r.id + '" class="px-2 py-1 border rounded text-xs"><option value="true"' + selTrue + '>启用</option><option value="false"' + selFalse + '>禁用</option></select></td>' +
@@ -297,6 +301,7 @@
             var statusLabel = r.enabled ? '启用' : '禁用';
             return '<tr class="border-b">' +
                 '<td class="px-4 py-2">' + (r.name || '') + '</td>' +
+                '<td class="px-4 py-2 text-sm text-gray-600">' + escapeHtml(r.org_name || '根组织') + '</td>' +
                 '<td class="px-4 py-2">' + r.email + '</td>' +
                 '<td class="px-4 py-2"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-600 border border-blue-200">' + (r.group_name || '默认分组') + '</span></td>' +
                 '<td class="px-4 py-2 text-center"><button onclick="toggleRecipientEnabled(' + r.id + ',' + !r.enabled + ')" title="点击切换" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs ' + statusColor + ' cursor-pointer hover:opacity-80">' + statusLabel + '</button></td>' +
@@ -306,6 +311,7 @@
             var hint = document.getElementById('noRecHint');
             if (hint) hint.remove();
             document.getElementById('addRecipientRow').style.display = '';
+            loadOrgSelect('orgSelectAdd');
             document.getElementById('newRecName').focus();
         }
         function cancelAddRecipient() { document.getElementById('addRecipientRow').style.display = 'none'; }
@@ -315,8 +321,11 @@
             var group_name = document.getElementById('newRecGroup').value.trim();
             var enabled = document.getElementById('newRecEnabled').value === 'true';
             if (!email) return showToast('邮箱不能为空', 'error');
+            let payload = { name, email, group_name, enabled };
+            injectOrgId(payload, 'orgSelectAdd');
             try {
-                const res = await apiFetch(API_BASE + '/reports/recipients', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, group_name, enabled }) });
+                var orgHeaders = getOrgOverrideHeaders('orgSelectAdd');
+                const res = await apiFetch(API_BASE + '/reports/recipients', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, orgHeaders), body: JSON.stringify(payload) });
                 const result = await res.json();
                 if (!res.ok) throw new Error(result.error);
                 document.getElementById('newRecName').value = '';
@@ -334,17 +343,20 @@
             if (!row) return;
             var cells = row.querySelectorAll('td');
             var name = cells[0].textContent;
-            var email = cells[1].textContent;
-            var group = cells[2].textContent.trim();
-            var isEnabled = cells[3].textContent.trim() === '启用';
+            var email = cells[2].textContent;
+            var group = cells[3].textContent.trim();
+            var isEnabled = cells[4].textContent.trim() === '启用';
+            var rec = allRecipients.find(function(x) { return x.id === id; });
             row.insertAdjacentHTML('afterend',
                 '<tr id="editRow-' + id + '" class="bg-blue-50">' +
                 '<td class="px-2 py-2"><input type="text" id="editRecName-' + id + '" value="' + name + '" class="w-full px-2 py-1 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"></td>' +
+                '<td class="px-2 py-2"><select id="orgSelectEdit" class="px-2 py-1 border rounded text-xs bg-white"></select></td>' +
                 '<td class="px-2 py-2"><input type="email" id="editRecEmail-' + id + '" value="' + email + '" class="w-full px-2 py-1 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"></td>' +
                 '<td class="px-2 py-2">' + createGroupComboboxHTML('editRecGroup-' + id, group) + '</td>' +
                 '<td class="px-2 py-2 text-center"><select id="editRecEnabled-' + id + '" class="px-2 py-1 border rounded text-xs"><option value="true"' + (isEnabled ? ' selected' : '') + '>启用</option><option value="false"' + (!isEnabled ? ' selected' : '') + '>禁用</option></select></td>' +
                 '<td class="px-2 py-2 text-center"><button onclick="submitEditRecipient(' + id + ')" class="text-green-600 hover:text-green-800 text-xs mr-2 font-medium">保存</button><button onclick="cancelEditRecipient(' + id + ')" class="text-gray-500 hover:text-gray-700 text-xs">取消</button></td></tr>');
             row.style.display = 'none';
+            loadOrgSelect('orgSelectEdit', rec ? rec.org_id : '');
         }
         function cancelEditRecipient(id) {
             var el = document.getElementById('editRow-' + id);
@@ -357,7 +369,10 @@
             var group_name = document.getElementById('editRecGroup-' + id).value.trim();
             var enabled = document.getElementById('editRecEnabled-' + id).value === 'true';
             try {
-                const res = await apiFetch(API_BASE + '/reports/recipients/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, group_name, enabled }) });
+                let payload = { name, email, group_name, enabled };
+                injectOrgId(payload, 'orgSelectEdit');
+                var orgHeaders = getOrgOverrideHeaders('orgSelectEdit');
+                const res = await apiFetch(API_BASE + '/reports/recipients/' + id, { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, orgHeaders), body: JSON.stringify(payload) });
                 if (!res.ok) throw new Error((await res.json()).error);
                 showToast('修改成功', 'success');
                 loadRecipients();

@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ai-optimizer/backend/internal/middleware"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
 	"github.com/gin-gonic/gin"
@@ -23,32 +24,35 @@ func NewSystemHandler() *SystemHandler {
 }
 
 func (h *SystemHandler) GetConfig(c *gin.Context) {
+	if _, ok := currentUserOrAbort(c); !ok {
+		return
+	}
 	var cfg model.SystemConfig
 	if err := model.DB.First(&cfg).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-		cfg = model.SystemConfig{
-			TaskTimeoutMin:             30,
-			MaxParallelTask:            20,
-			LogRetentionDay:            90,
-			DiffTruncationThreshold:    5000,
-			LLMRetryMaxAttempts:        3,
-			LLMRetryInitialDelayMs:     1000,
-			LLMRetryBackoffMultiplier:  2.0,
-			LLMRetryMaxDelayMs:         30000,
-			ScoreThreshold:             60,
-			DeepReviewEnabled:          false,
-			AlertDurationSec:           300,
-			AlertCooldownSec:           3600,
-			AlertNotifierID:            0,
-			AlertMentionUserIDs:        "",
-			JSONRetryMaxAttempts:       3,
-			JSONRetryInitialDelaySec:   2,
-			JSONRetryBackoffMultiplier: 2.0,
-			JSONRetryMaxDelaySec:       30,
-			JSONRetryFallbackStrategy:  "regex",
-			DefaultDimensionWeights:    `{"security":30,"code_quality":25,"readability":20,"maintainability":15,"test_coverage":10}`,
-			AILogTemplate:              "请先执行以下命令拉取代码：\ngit clone {{CLONE_URL}}\n\n变更摘要：\n{{MR_DIFF}}\n\n{{USER_INPUT}}\n\n请审查以上代码变更，给出审查意见。",
-		}
+			cfg = model.SystemConfig{
+				TaskTimeoutMin:             30,
+				MaxParallelTask:            20,
+				LogRetentionDay:            90,
+				DiffTruncationThreshold:    5000,
+				LLMRetryMaxAttempts:        3,
+				LLMRetryInitialDelayMs:     1000,
+				LLMRetryBackoffMultiplier:  2.0,
+				LLMRetryMaxDelayMs:         30000,
+				ScoreThreshold:             60,
+				DeepReviewEnabled:          false,
+				AlertDurationSec:           300,
+				AlertCooldownSec:           3600,
+				AlertNotifierID:            0,
+				AlertMentionUserIDs:        "",
+				JSONRetryMaxAttempts:       3,
+				JSONRetryInitialDelaySec:   2,
+				JSONRetryBackoffMultiplier: 2.0,
+				JSONRetryMaxDelaySec:       30,
+				JSONRetryFallbackStrategy:  "regex",
+				DefaultDimensionWeights:    `{"security":30,"code_quality":25,"readability":20,"maintainability":15,"test_coverage":10}`,
+				AILogTemplate:              "请先执行以下命令拉取代码：\ngit clone {{CLONE_URL}}\n\n变更摘要：\n{{MR_DIFF}}\n\n{{USER_INPUT}}\n\n请审查以上代码变更，给出审查意见。",
+			}
 			if err := model.DB.Create(&cfg).Error; err != nil {
 				zap.L().Error("create system config failed", zap.Error(err))
 				c.JSON(500, gin.H{"error": err.Error()})
@@ -74,6 +78,15 @@ func (h *SystemHandler) GetConfig(c *gin.Context) {
 }
 
 func (h *SystemHandler) UpdateConfig(c *gin.Context) {
+	_, ok := currentUserOrAbort(c)
+	if !ok {
+		return
+	}
+	scope := middleware.GetAuthScope(c)
+	if scope == nil || !scope.HasOrgRole("super_admin", "org_admin") {
+		c.JSON(403, gin.H{"error": "admin required"})
+		return
+	}
 	var data map[string]interface{}
 	if err := c.ShouldBindJSON(&data); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
@@ -222,22 +235,30 @@ func (h *SystemHandler) UpdateConfig(c *gin.Context) {
 	// JSON Retry 配置字段
 	if v, ok := data["json_retry_max_attempts"]; ok {
 		val := int(v.(float64))
-		if val < 0 { val = 0 }
+		if val < 0 {
+			val = 0
+		}
 		updates["json_retry_max_attempts"] = val
 	}
 	if v, ok := data["json_retry_initial_delay_sec"]; ok {
 		val := int(v.(float64))
-		if val < 0 { val = 0 }
+		if val < 0 {
+			val = 0
+		}
 		updates["json_retry_initial_delay_sec"] = val
 	}
 	if v, ok := data["json_retry_backoff_multiplier"]; ok {
 		val := v.(float64)
-		if val < 1.0 { val = 1.0 }
+		if val < 1.0 {
+			val = 1.0
+		}
 		updates["json_retry_backoff_multiplier"] = val
 	}
 	if v, ok := data["json_retry_max_delay_sec"]; ok {
 		val := int(v.(float64))
-		if val < 0 { val = 0 }
+		if val < 0 {
+			val = 0
+		}
 		updates["json_retry_max_delay_sec"] = val
 	}
 	if v, ok := data["json_retry_fallback_strategy"]; ok {
@@ -283,7 +304,7 @@ func (h *SystemHandler) UpdateConfig(c *gin.Context) {
 
 	// 如果 MR 同步间隔有变更，重建定时任务
 	if _, ok := data["mr_sync_interval_sec"]; ok {
-		service.RebuildMRSyncCron()
+		service.RebuildMRSyncCron(nil)
 	}
 
 	// 主动刷新 sysCfg 缓存：task_timeout_min / llm_retry_* 变更后无需等待 cron（1m）即可立即生效
@@ -303,6 +324,12 @@ func (h *SystemHandler) UpdateConfig(c *gin.Context) {
 }
 
 func (h *SystemHandler) OperationLogs(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	opType := c.Query("type")
@@ -313,6 +340,9 @@ func (h *SystemHandler) OperationLogs(c *gin.Context) {
 	var total int64
 
 	query := model.DB.Model(&model.OperationLog{})
+	if !scope.IsSuperAdmin {
+		query = query.Scopes(model.OrgScope(scope))
+	}
 
 	if opType != "" {
 		query = query.Where("op_type = ?", opType)
@@ -365,6 +395,11 @@ func (h *SystemHandler) OperationLogs(c *gin.Context) {
 }
 
 func (h *SystemHandler) ClearLogs(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var cfg model.SystemConfig
 	if err := model.DB.First(&cfg).Error; err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -377,7 +412,7 @@ func (h *SystemHandler) ClearLogs(c *gin.Context) {
 	}
 
 	cutoff := time.Now().AddDate(0, 0, -days)
-	result := model.DB.Where("created_at < ?", cutoff).Delete(&model.OperationLog{})
+	result := model.DB.Scopes(model.OrgScope(scope)).Where("created_at < ?", cutoff).Delete(&model.OperationLog{})
 
 	c.JSON(200, gin.H{
 		"message":      "清理完成",
@@ -386,15 +421,29 @@ func (h *SystemHandler) ClearLogs(c *gin.Context) {
 }
 
 func (h *SystemHandler) Info(c *gin.Context) {
-	var totalProjects, totalTasks, totalPools, totalModels int64
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+	var totalProjects, totalTasks, totalUsers, totalModels int64
 	var runningTasks, failedTasks int64
 
-	model.DB.Model(&model.Project{}).Count(&totalProjects)
-	model.DB.Model(&model.Task{}).Count(&totalTasks)
-	model.DB.Model(&model.ResourcePool{}).Count(&totalPools)
-	model.DB.Model(&model.LLMModel{}).Count(&totalModels)
-	model.DB.Model(&model.Task{}).Where("status = ?", "running").Count(&runningTasks)
-	model.DB.Model(&model.Task{}).Where("status = ?", "failed").Count(&failedTasks)
+	if scope.IsSuperAdmin {
+		model.DB.Model(&model.Project{}).Count(&totalProjects)
+		model.DB.Model(&model.Task{}).Count(&totalTasks)
+		model.DB.Model(&model.User{}).Count(&totalUsers)
+		model.DB.Model(&model.LLMModel{}).Count(&totalModels)
+		model.DB.Model(&model.Task{}).Where("status = ?", "running").Count(&runningTasks)
+		model.DB.Model(&model.Task{}).Where("status = ?", "failed").Count(&failedTasks)
+	} else {
+		model.DB.Model(&model.Project{}).Where("org_id IN ?", scope.VisibleOrgIDs).Count(&totalProjects)
+		model.DB.Model(&model.Task{}).Where("org_id IN ?", scope.VisibleOrgIDs).Count(&totalTasks)
+		model.DB.Model(&model.User{}).Where("EXISTS (SELECT 1 FROM org_users WHERE org_users.user_id = users.id AND org_users.org_id IN ?)", scope.VisibleOrgIDs).Count(&totalUsers)
+		model.DB.Model(&model.LLMModel{}).Where("org_id IN ?", scope.VisibleOrgIDs).Count(&totalModels)
+		model.DB.Model(&model.Task{}).Where("org_id IN ? AND status = ?", scope.VisibleOrgIDs, "running").Count(&runningTasks)
+		model.DB.Model(&model.Task{}).Where("org_id IN ? AND status = ?", scope.VisibleOrgIDs, "failed").Count(&failedTasks)
+	}
 
 	uptime := time.Since(h.startTime)
 	uptimeStr := uptime.Round(time.Minute).String()
@@ -402,10 +451,9 @@ func (h *SystemHandler) Info(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"version":        "v1.0.0",
 		"uptime":         uptimeStr,
-		"db_status":      "ok",
 		"total_projects": totalProjects,
 		"total_tasks":    totalTasks,
-		"total_pools":    totalPools,
+		"total_users":    totalUsers,
 		"total_models":   totalModels,
 		"running_tasks":  runningTasks,
 		"failed_tasks":   failedTasks,

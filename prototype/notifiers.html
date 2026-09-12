@@ -1,15 +1,16 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>企业微信通知 - CodeGuard</title>
         <script src="/static/js/marked.min.js"></script>
-    <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+    <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <style>
@@ -70,12 +71,13 @@
                                 <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">配置名称</th>
                                 <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">Webhook Url</th>
                                 <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">适用项目</th>
+                                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">所属组织</th>
                                 <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">启用状态</th>
                                 <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">操作</th>
                             </tr>
                         </thead>
                         <tbody id="notifierTable" class="divide-y divide-gray-100">
-                            <tr><td colspan="5" class="px-6 py-8 text-center text-gray-400">加载中...</td></tr>
+                            <tr><td colspan="6" class="px-6 py-8 text-center text-gray-400">加载中...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -95,6 +97,11 @@
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">配置名称 <span class="text-red-500">*</span></label>
                     <input type="text" id="notifierName" placeholder="如：CodeGuard 通知群" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">所属组织</label>
+                    <select id="orgSelect" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                    </select>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Webhook Url <span class="text-red-500">*</span></label>
@@ -159,7 +166,7 @@
                 const tbody = document.getElementById('notifierTable');
                 
                 if (data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-8 text-center text-gray-400">暂无通知配置</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center text-gray-400">暂无通知配置</td></tr>';
                     return;
                 }
 
@@ -175,6 +182,7 @@
                             <td class="px-6 py-4 text-sm font-medium">${n.name}</td>
                             <td class="px-6 py-4 text-sm font-mono text-gray-600">${displayUrl}</td>
                             <td class="px-6 py-4">${projectBadge}</td>
+                            <td class="px-6 py-4 text-sm text-gray-600">${escapeHtml(n.org_name || '根组织')}</td>
                             <td class="px-6 py-4 text-center">
                                 <label class="switch">
                                     <input type="checkbox" ${n.enabled ? 'checked' : ''} onchange="toggleNotifier(${n.id}, this.checked)">
@@ -191,7 +199,7 @@
                 }).join('');
             } catch (e) {
                 console.error('loadNotifiers failed:', e);
-                document.getElementById('notifierTable').innerHTML = '<tr><td colspan="5" class="px-6 py-8 text-center text-red-400">加载失败</td></tr>';
+                document.getElementById('notifierTable').innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center text-red-400">加载失败</td></tr>';
             }
         }
 
@@ -220,6 +228,7 @@
             document.getElementById('notifierName').value = '';
             document.getElementById('notifierUrl').value = '';
             document.getElementById('notifierProject').value = '';
+            loadOrgSelect('orgSelect');
             showModal('notifierModal');
         }
 
@@ -238,6 +247,7 @@
                 document.getElementById('notifierUrl').type = 'password';
                 document.getElementById('urlEyeIcon').className = 'fas fa-eye';
                 document.getElementById('notifierProject').value = n.project_id || '';
+                loadOrgSelect('orgSelect', n.org_id);
                 showModal('notifierModal');
             } catch (e) {
                 alert('加载失败: ' + e.message);
@@ -257,12 +267,14 @@
                 return;
             }
 
-            const data = {
-                name: name,
-                webhook_url: key,
-                project_id: document.getElementById('notifierProject').value ? parseInt(document.getElementById('notifierProject').value) : null,
-            };
-
+             let data = {
+                 name: name,
+                 webhook_url: key,
+                 project_id: document.getElementById('notifierProject').value ? parseInt(document.getElementById('notifierProject').value) : null,
+             };
+             injectOrgId(data, 'orgSelect');
+ 
+             const orgHeaders = getOrgOverrideHeaders();
             try {
                 let url = '/api/v1/notifiers';
                 let method = 'POST';
@@ -273,7 +285,7 @@
 
                 const resp = await apiFetch(url, {
                     method: method,
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...orgHeaders },
                     body: JSON.stringify(data)
                 });
 

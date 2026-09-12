@@ -47,7 +47,7 @@ func (e *TestSuggestionExecutor) Execute(ctx StageContext) error {
 	functionBodyMaxLen := 2000
 	contextLinesBefore := 3
 	contextLinesAfter := 10
-	llmTimeoutSec := int(getStageLLMEnhanceTimeout("test_suggestion").Seconds())
+	llmTimeoutSec := int(getStageLLMEnhanceTimeoutFromCtx(ctx, "test_suggestion").Seconds())
 	if cfg != nil {
 		llmMaxTokens = cfg.GetStageParam("test_suggestion", "llm_max_tokens", llmMaxTokens)
 		llmTimeoutSec = cfg.GetStageParam("test_suggestion", "llm_enhance_timeout", llmTimeoutSec)
@@ -405,7 +405,7 @@ func (e *ImpactAnalysisExecutor) Execute(ctx StageContext) error {
 	llmMaxTokens := 3000
 	callerSnippetMaxLen := 500
 	maxCallersPerFinding := 3
-	llmTimeoutSec := int(getStageLLMEnhanceTimeout("impact_analysis").Seconds())
+	llmTimeoutSec := int(getStageLLMEnhanceTimeoutFromCtx(ctx, "impact_analysis").Seconds())
 	if cfg != nil {
 		llmMaxTokens = cfg.GetStageParam("impact_analysis", "llm_max_tokens", llmMaxTokens)
 		llmTimeoutSec = cfg.GetStageParam("impact_analysis", "llm_enhance_timeout", llmTimeoutSec)

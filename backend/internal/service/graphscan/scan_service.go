@@ -60,8 +60,8 @@ func NewScanService(db *gorm.DB, workspace string) *ScanService {
 }
 
 // RefreshScan 重新全量扫描（同build）
-func (s *ScanService) RefreshScan(projectID uint64, branch string, opts ...ScanOption) (*model.GraphScanTask, error) {
-	return s.TriggerScan(projectID, branch, opts...)
+func (s *ScanService) RefreshScan(scope *model.UserAuthScope, projectID uint64, branch string, opts ...ScanOption) (*model.GraphScanTask, error) {
+	return s.TriggerScan(scope, projectID, branch, opts...)
 }
 
 // ScanOption 扫描配置选项
@@ -83,9 +83,10 @@ func WithMRInfo(iid int, title string) ScanOption {
 }
 
 // TriggerScan 触发项目全量扫描（后台异步）
-func (s *ScanService) TriggerScan(projectID uint64, branch string, opts ...ScanOption) (*model.GraphScanTask, error) {
+func (s *ScanService) TriggerScan(scope *model.UserAuthScope, projectID uint64, branch string, opts ...ScanOption) (*model.GraphScanTask, error) {
+	db := model.DBWithScope(scope)
 	var runningCount int64
-	s.db.Model(&model.GraphScanTask{}).Where("project_id = ? AND status = ?", projectID, "running").Count(&runningCount)
+	db.Model(&model.GraphScanTask{}).Where("project_id = ? AND status = ?", projectID, "running").Count(&runningCount)
 	if runningCount > 0 {
 		return nil, fmt.Errorf("project %d already has a running scan task", projectID)
 	}
@@ -96,10 +97,15 @@ func (s *ScanService) TriggerScan(projectID uint64, branch string, opts ...ScanO
 		Branch:    branch,
 		ScanType:  "full",
 	}
+	// 注入正确的 org_id：从项目中查询
+	var proj model.Project
+	if err := model.DB.First(&proj, projectID).Error; err == nil {
+		task.OrgID = proj.OrgID
+	}
 	for _, opt := range opts {
 		opt(task)
 	}
-	if err := s.db.Create(task).Error; err != nil {
+	if err := db.Create(task).Error; err != nil {
 		return nil, fmt.Errorf("create scan task failed: %w", err)
 	}
 
@@ -108,13 +114,14 @@ func (s *ScanService) TriggerScan(projectID uint64, branch string, opts ...ScanO
 	s.runningTasks[projectID] = cancel
 	s.mu.Unlock()
 
-	go s.runScan(ctx, task.ID, projectID, branch)
+	go s.runScan(scope, ctx, task.ID, projectID, branch)
 
 	return task, nil
 }
 
 // runScan 执行扫描（后台goroutine）
-func (s *ScanService) runScan(ctx context.Context, taskID uint64, projectID uint64, branch string) {
+func (s *ScanService) runScan(scope *model.UserAuthScope, ctx context.Context, taskID uint64, projectID uint64, branch string) {
+	db := model.DBWithScope(scope)
 	defer func() {
 		s.mu.Lock()
 		delete(s.runningTasks, projectID)
@@ -122,21 +129,21 @@ func (s *ScanService) runScan(ctx context.Context, taskID uint64, projectID uint
 	}()
 
 	if ctx.Err() != nil {
-		s.cancelTask(taskID, projectID, "cancelled before start")
+		s.cancelTask(scope, taskID, projectID, "cancelled before start")
 		return
 	}
 
 	now := time.Now()
-	s.db.Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
+	model.DBWithScope(scope).Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
 		"status":     "running",
 		"started_at": now,
 	})
-	s.db.Model(&model.Project{}).Where("id = ?", projectID).Update("graph_scan_status", "running")
+	model.DBWithScope(scope).Model(&model.Project{}).Where("id = ?", projectID).Update("graph_scan_status", "running")
 
 	var project model.Project
-	if err := s.db.First(&project, projectID).Error; err != nil {
+	if err := db.First(&project, projectID).Error; err != nil {
 		s.logger.Error("scan failed: project not found", zap.Uint64("project_id", projectID), zap.Error(err))
-		s.failTask(taskID, projectID, "project not found")
+		s.failTask(scope, taskID, projectID, "project not found")
 		return
 	}
 
@@ -144,7 +151,7 @@ func (s *ScanService) runScan(ctx context.Context, taskID uint64, projectID uint
 	repoDir, err := s.repoMgr.EnsureRepo(project.ProjectPath, project.AccessToken, branch, uint(projectID))
 	if err != nil {
 		s.logger.Error("scan failed: repo ensure failed", zap.Uint64("project_id", projectID), zap.String("branch", branch), zap.Error(err))
-		s.failTask(taskID, projectID, "repo clone/update failed: "+err.Error())
+		s.failTask(scope, taskID, projectID, "repo clone/update failed: "+err.Error())
 		return
 	}
 
@@ -198,7 +205,7 @@ func (s *ScanService) runScan(ctx context.Context, taskID uint64, projectID uint
 		processedCount++
 
 		if processedCount%100 == 0 {
-			s.db.Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
+			db.Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
 				"file_count": processedCount,
 			})
 		}
@@ -209,7 +216,7 @@ func (s *ScanService) runScan(ctx context.Context, taskID uint64, projectID uint
 	if err != nil {
 		if ctx.Err() == context.Canceled {
 			s.logger.Info("scan cancelled during walk", zap.Uint64("project_id", projectID))
-			s.cancelTask(taskID, projectID, "cancelled by user")
+			s.cancelTask(scope, taskID, projectID, "cancelled by user")
 			return
 		}
 		s.logger.Error("walk repo failed", zap.Error(err))
@@ -219,7 +226,7 @@ func (s *ScanService) runScan(ctx context.Context, taskID uint64, projectID uint
 
 	if ctx.Err() != nil {
 		s.logger.Info("scan cancelled before graph build", zap.Uint64("project_id", projectID))
-		s.cancelTask(taskID, projectID, "cancelled by user")
+		s.cancelTask(scope, taskID, projectID, "cancelled by user")
 		return
 	}
 
@@ -243,13 +250,13 @@ func (s *ScanService) runScan(ctx context.Context, taskID uint64, projectID uint
 	graphResult, err := sg.BuildFromASTs(projectID, allASTs, activeAdapters, nil)
 	if err != nil {
 		s.logger.Error("build graph failed", zap.Error(err))
-		s.failTask(taskID, projectID, err.Error())
+		s.failTask(scope, taskID, projectID, err.Error())
 		return
 	}
 
 	if err := sg.SaveBaseline(projectID, graphResult.Graph); err != nil {
 		s.logger.Error("save baseline failed", zap.Error(err))
-		s.failTask(taskID, projectID, err.Error())
+		s.failTask(scope, taskID, projectID, err.Error())
 		return
 	}
 
@@ -304,7 +311,7 @@ func (s *ScanService) runScan(ctx context.Context, taskID uint64, projectID uint
 		b, _ := json.Marshal(graphResult.Frameworks)
 		frameworksJSON = string(b)
 	}
-	s.db.Model(&model.Project{}).Where("id = ?", projectID).Updates(map[string]interface{}{
+	model.DBWithScope(scope).Model(&model.Project{}).Where("id = ?", projectID).Updates(map[string]interface{}{
 		"graph_scan_status":    "completed",
 		"graph_built_at":       completedAt,
 		"graph_node_count":     graphResult.NodeCount,
@@ -316,7 +323,7 @@ func (s *ScanService) runScan(ctx context.Context, taskID uint64, projectID uint
 	})
 
 	// 完成任务
-	s.db.Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
+	model.DBWithScope(scope).Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
 		"status":         "completed",
 		"node_count":     graphResult.NodeCount,
 		"relation_count": graphResult.RelCount,
@@ -326,36 +333,37 @@ func (s *ScanService) runScan(ctx context.Context, taskID uint64, projectID uint
 	})
 }
 
-func (s *ScanService) failTask(taskID uint64, projectID uint64, message string) {
+func (s *ScanService) failTask(scope *model.UserAuthScope, taskID uint64, projectID uint64, message string) {
 	now := time.Now()
-	s.db.Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
+	model.DBWithScope(scope).Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
 		"status":        "failed",
 		"error_message": message,
 		"completed_at":  now,
 	})
-	s.db.Model(&model.Project{}).Where("id = ?", projectID).Updates(map[string]interface{}{
+	model.DBWithScope(scope).Model(&model.Project{}).Where("id = ?", projectID).Updates(map[string]interface{}{
 		"graph_scan_status": "failed",
 		"graph_scan_error":  message,
 	})
 }
 
-func (s *ScanService) cancelTask(taskID uint64, projectID uint64, message string) {
+func (s *ScanService) cancelTask(scope *model.UserAuthScope, taskID uint64, projectID uint64, message string) {
 	now := time.Now()
-	s.db.Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
+	model.DBWithScope(scope).Model(&model.GraphScanTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
 		"status":        "cancelled",
 		"error_message": message,
 		"completed_at":  now,
 	})
-	s.db.Model(&model.Project{}).Where("id = ? AND graph_scan_status = ?", projectID, "running").Updates(map[string]interface{}{
+	model.DBWithScope(scope).Model(&model.Project{}).Where("id = ? AND graph_scan_status = ?", projectID, "running").Updates(map[string]interface{}{
 		"graph_scan_status": "none",
 		"graph_scan_error":  message,
 	})
 }
 
 // CancelScan 取消指定项目的正在运行的扫描任务
-func (s *ScanService) CancelScan(projectID uint64, taskID uint64) error {
+func (s *ScanService) CancelScan(scope *model.UserAuthScope, projectID uint64, taskID uint64) error {
+	db := model.DBWithScope(scope)
 	var task model.GraphScanTask
-	if err := s.db.Where("id = ? AND project_id = ?", taskID, projectID).First(&task).Error; err != nil {
+	if err := db.Where("id = ? AND project_id = ?", taskID, projectID).First(&task).Error; err != nil {
 		return fmt.Errorf("task not found: %w", err)
 	}
 	if task.Status != "running" && task.Status != "pending" {
@@ -371,15 +379,16 @@ func (s *ScanService) CancelScan(projectID uint64, taskID uint64) error {
 
 	// 对于 pending 状态的任务（尚未启动 goroutine），直接更新状态
 	if task.Status == "pending" {
-		s.cancelTask(taskID, projectID, "cancelled by user")
+		s.cancelTask(scope, taskID, projectID, "cancelled by user")
 	}
 	return nil
 }
 
 // GetScanStatus 获取扫描状态
-func (s *ScanService) GetScanStatus(projectID uint64) (*model.GraphScanTask, error) {
+func (s *ScanService) GetScanStatus(scope *model.UserAuthScope, projectID uint64) (*model.GraphScanTask, error) {
+	db := model.DBWithScope(scope)
 	var task model.GraphScanTask
-	if err := s.db.Where("project_id = ?", projectID).Order("created_at DESC").First(&task).Error; err != nil {
+	if err := db.Where("project_id = ?", projectID).Order("created_at DESC").First(&task).Error; err != nil {
 		return nil, err
 	}
 	return &task, nil

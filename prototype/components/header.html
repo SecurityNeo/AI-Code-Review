@@ -1,0 +1,163 @@
+<style>
+  .global-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 24px;
+    height: 56px;
+    background: #111827;
+    border-bottom: 1px solid #1f2937;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .header-logo {
+    font-size: 18px;
+    font-weight: 600;
+    color: #60a5fa;
+    text-decoration: none;
+  }
+  .header-nav {
+    display: flex;
+    gap: 20px;
+  }
+  .header-nav a {
+    font-size: 14px;
+    color: #9ca3af;
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+  .header-nav a:hover, .header-nav a.active {
+    color: #e5e7eb;
+  }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .header-org-badge {
+    font-size: 12px;
+    padding: 2px 8px;
+    background: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 4px;
+    color: #9ca3af;
+  }
+  .header-user {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: #d1d5db;
+  }
+  .header-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #374151;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: #9ca3af;
+  }
+</style>
+
+<header class="global-header">
+  <div class="header-left">
+    <a href="/" class="header-logo">🔒 CodeGuard</a>
+    <nav class="header-nav">
+      <a href="/dashboard.html" class="active">Dashboard</a>
+      <a href="/projects.html">项目</a>
+      <a href="/tasks.html">任务</a>
+      <a href="/rules.html">规则</a>
+      <a href="/incubator.html">孵化台</a>
+    </nav>
+  </div>
+  <div class="header-right">
+    <div id="orgSwitcherPlaceholder"></div>
+    <span class="header-org-badge" id="headerOrgBadge">org-1</span>
+    <div class="header-user" id="headerUser">
+      <div class="header-avatar" id="headerAvatar">U</div>
+      <span id="headerUsername">加载中...</span>
+    </div>
+    <a href="/logout" style="font-size:13px;color:#9ca3af;text-decoration:none;">退出</a>
+  </div>
+</header>
+
+<script>
+(function() {
+  function initHeader() {
+    var user = window.currentUser;
+    if (!user && window.loadUserInfo) {
+      window.loadUserInfo().then(function(u) {
+        updateHeader(u);
+      });
+    } else if (user) {
+      updateHeader(user);
+    }
+
+    var org = window.getCurrentOrg ? window.getCurrentOrg() : null;
+    var badge = document.getElementById('headerOrgBadge');
+    if (badge && org) {
+      badge.textContent = 'org-' + org.id;
+    }
+  }
+
+  function updateHeader(user) {
+    var usernameEl = document.getElementById('headerUsername');
+    var avatarEl = document.getElementById('headerAvatar');
+    var orgBadgeEl = document.getElementById('headerOrgBadge');
+
+    if (usernameEl && user) {
+      var orgRole = user.current_org_role || '';
+      var roleLabel = '开发者';
+      if (orgRole === 'super_admin') roleLabel = '系统管理员';
+      else if (orgRole === 'org_admin') roleLabel = '组织管理员';
+
+      var orgName = user.current_org_name || '';
+      var display = escapeHtml(user.display_name || user.username || 'User');
+      if (orgName) {
+        display += ' <span style="font-size:12px;color:#9ca3af;margin-left:4px;">[' + escapeHtml(orgName) + '·' + roleLabel + ']</span>';
+      } else {
+        display += ' <span style="font-size:12px;color:#9ca3af;margin-left:4px;">[' + roleLabel + ']</span>';
+      }
+      usernameEl.innerHTML = display;
+    }
+    if (avatarEl && user) {
+      var initial = (user.display_name || user.username || 'U').charAt(0).toUpperCase();
+      avatarEl.textContent = initial;
+    }
+    if (orgBadgeEl && user) {
+      var orgName = user.current_org_name || '未分配';
+      orgBadgeEl.textContent = escapeHtml(orgName);
+    }
+
+    // 仅管理员显示组织管理入口（基于当前组织角色，兼容旧字段）
+    if (user) {
+      const orgRole = user.current_org_role || '';
+      if (orgRole === 'super_admin' || orgRole === 'org_admin' || user.role === 'admin' || user.role === 'org_admin') {
+        var manageLinks = document.querySelectorAll('.header-org-manage');
+        manageLinks.forEach(function(el) { el.style.display = 'inline-block'; });
+      }
+    }
+  }
+
+  function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initHeader);
+  } else {
+    initHeader();
+  }
+})();
+</script>

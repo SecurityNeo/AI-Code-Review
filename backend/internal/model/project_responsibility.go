@@ -6,6 +6,7 @@ import "time"
 // user_id 为主访问键，member_id 已退役仅保留兼容
 type ProjectResponsibility struct {
 	ID             uint      `gorm:"primaryKey" json:"id"`
+	OrgID          uint      `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
 	MemberID       *uint     `gorm:"index:idx_member_project" json:"member_id,omitempty"` // 退役字段，nullable
 	// ⚠️ uniqueIndex 不在 GORM tag 中定义，而是在 migration 脚本 Step 10 创建，
 	//    避免 AutoMigrate 为现有数据（user_id 默认值 0）创建索引时因重复而失败。

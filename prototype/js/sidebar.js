@@ -5,6 +5,13 @@
 (function () {
     'use strict';
 
+    // 统一将相对路径转为绝对路径（避免在 /pages/ 下时路径错乱）
+    function normalizeHref(href) {
+        if (!href) return href;
+        if (href.startsWith('http') || href.startsWith('/') || href.startsWith('#')) return href;
+        return '/' + href;
+    }
+
     // 折叠组状态持久化
     const EXPANDED_KEY = 'sidebar_expanded_groups';
 
@@ -55,8 +62,8 @@
             try { return JSON.parse(localStorage.getItem('user_info') || '{}'); }
             catch (e) { return {}; }
         })();
-        const rawRole = userInfo != null ? userInfo.role : null;
-        const userRole = (typeof rawRole === 'string' ? rawRole : String(rawRole || 'admin')).trim().toLowerCase();
+        // 直接使用 current_org_role 进行菜单权限判断
+        const userRole = (userInfo.current_org_role || 'developer').trim().toLowerCase();
         // 直接使用持久化的 expanded 列表，不再每次 renderSidebar 时强制展开当前 active 的组
         // —— 否则用户手动折叠后会被立即重新展开，看起来"无法折叠"
         const expandedGroups = getExpandedGroups();
@@ -110,8 +117,9 @@
                     if (!isMenuVisible(child.role, userRole)) return;
                     const isActive = child.id === activeId ||
                         isMenuItemActive(child.href, currentPath, currentSearch);
+                    const href = normalizeHref(child.href);
                     html += `
-                    <a href="${child.href}" class="cg-sidebar-child ${isActive ? 'active' : ''}">
+                    <a href="${href}" class="cg-sidebar-child ${isActive ? 'active' : ''}">
                         <i class="fas ${child.icon}"></i>
                         <span>${child.name}</span>
                     </a>
@@ -123,8 +131,9 @@
                 // 普通菜单项
                 const isActive = menu.id === activeId ||
                     isMenuItemActive(menu.href, currentPath, currentSearch);
+                const href = normalizeHref(menu.href);
                 html += `
-                <a href="${menu.href}" class="cg-sidebar-item ${isActive ? 'active' : ''}">
+                <a href="${href}" class="cg-sidebar-item ${isActive ? 'active' : ''}">
                     <i class="fas ${menu.icon}"></i>
                     <span>${menu.name}</span>
                 </a>
@@ -135,27 +144,42 @@
         html += `</nav>`;
 
         // ===== 用户区 =====
+        // 设计：参考 Vercel / Linear —— 用户名单行突出，角色+组织合并弱化到第二行
         const displayName = userInfo.display_name || userInfo.username || '用户';
-        const roleLabel = userRole === 'admin' ? '管理员' : '开发者';
+        const roleLabels = {
+            super_admin: '系统管理员',
+            org_admin:   '组织管理员',
+            developer:   '开发者'
+        };
+        const roleLabel = roleLabels[userRole] || userRole;
+        const orgName = userInfo.current_org_name || '';
+        // 角色小图标（无背景色，纯图标+文字，视觉重量极轻）
+        const roleIcon = userRole === 'super_admin' ? '<i class="fas fa-shield-alt" style="font-size:9px;opacity:0.7;"></i>'
+                        : (userRole === 'org_admin' ? '<i class="fas fa-user-shield" style="font-size:9px;opacity:0.7;"></i>'
+                        : '<i class="fas fa-code" style="font-size:9px;opacity:0.7;"></i>');
+        // 第一行：只放用户名，字号放大加粗，白色高亮
+        const userLine = `<span style="font-weight:600;font-size:15px;letter-spacing:-0.2px;">${escapeHtml(displayName)}</span>`;
+        // 第二行：角色图标+文字 · 组织名，统一小号灰色，超长截断
+        const metaLine = orgName
+            ? `<span style="display:inline-flex;align-items:center;gap:4px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(roleLabel)} · ${escapeHtml(orgName)}">${roleIcon}<span>${escapeHtml(roleLabel)}</span><span style="opacity:0.4;margin:0 3px;">·</span><i class="fas fa-building" style="font-size:9px;opacity:0.4;"></i><span>${escapeHtml(orgName)}</span></span>`
+            : `<span style="opacity:0.4;">${roleIcon} ${escapeHtml(roleLabel)} · 未分配组织</span>`;
         html += `
         <div style="padding: 12px; border-top: 1px solid var(--cg-sidebar-border);">
             <div onclick="toggleUserMenu()" style="display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 8px; cursor: pointer; transition: background var(--cg-transition);" onmouseover="this.style.background='var(--cg-sidebar-item-hover)'" onmouseout="this.style.background='transparent'">
-                <div style="width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #4f46e5, #06b6d4); display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; font-size: 13px;">
+                <div style="width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #4f46e5, #06b6d4); display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; font-size: 14px; flex-shrink:0;">
                     ${escapeHtml(displayName.charAt(0).toUpperCase())}
                 </div>
                 <div style="flex: 1; min-width: 0;">
-                    <div id="currentUser" style="font-size: 13px; font-weight: 500; color: var(--cg-sidebar-text-active); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(displayName)}</div>
-                    <div id="currentRole" style="font-size: 11px; color: var(--cg-text-tertiary);">${roleLabel}</div>
+                    <div id="currentUser" style="color: var(--cg-sidebar-text-active); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${userLine}</div>
+                    <div id="currentOrg" style="font-size: 11px; color: var(--cg-text-tertiary); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${metaLine}</div>
                 </div>
-                <i class="fas fa-ellipsis-vertical" style="font-size: 12px; color: var(--cg-text-tertiary);"></i>
+                <i class="fas fa-ellipsis-vertical" style="font-size: 12px; color: var(--cg-text-tertiary); flex-shrink: 0;"></i>
             </div>
             <div id="userMenu" class="hidden" style="margin-top: 8px; background: var(--cg-bg-surface); border-radius: 8px; padding: 4px; border: 1px solid var(--cg-border-default); box-shadow: var(--cg-shadow-md);">
-                ${userRole === 'admin' ? `
                 <button onclick="showChangePasswordModal()" style="display: flex; align-items: center; gap: 12px; width: 100%; background: transparent; border: none; padding: 8px 12px; font-size: 13px; color: var(--cg-text-primary); border-radius: 6px; cursor: pointer; transition: background var(--cg-transition);" onmouseover="this.style.background='var(--cg-bg-elevated)'" onmouseout="this.style.background='transparent'">
                     <i class="fas fa-key" style="width: 18px; text-align: center; color: var(--cg-text-secondary);"></i>
                     <span>修改密码</span>
                 </button>
-                ` : ''}
                 <button onclick="logout()" style="display: flex; align-items: center; gap: 12px; width: 100%; background: transparent; border: none; padding: 8px 12px; font-size: 13px; color: var(--cg-text-primary); border-radius: 6px; cursor: pointer; transition: background var(--cg-transition);" onmouseover="this.style.background='var(--cg-bg-elevated)'" onmouseout="this.style.background='transparent'">
                     <i class="fas fa-sign-out-alt" style="width: 18px; text-align: center; color: var(--cg-text-secondary);"></i>
                     <span>退出登录</span>
@@ -184,7 +208,8 @@
             // 查找消息中心菜单项（href 为 notifications.html）
             const sidebar = document.getElementById('sidebar');
             if (!sidebar) return;
-            const links = sidebar.querySelectorAll('a[href="notifications.html"]');
+            // normalizeHref 会将 notifications.html 转为 /notifications.html，所以 match 后者
+            const links = sidebar.querySelectorAll('a[href="/notifications.html"]');
             links.forEach(link => {
                 let badge = link.querySelector('.notif-badge');
                 if (!badge) {

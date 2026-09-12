@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/ai-optimizer/backend/internal/middleware"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
 	"github.com/gin-gonic/gin"
@@ -22,7 +23,14 @@ func NewModelHandler() *ModelHandler {
 
 // List 获取模型列表
 // GET /api/v1/models?page=1&page_size=20&keyword=gpt&type=llm
+// 多租户改造：叠加 OrgScope 过滤
 func (h *ModelHandler) List(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	keyword := c.Query("keyword")
@@ -32,14 +40,43 @@ func (h *ModelHandler) List(c *gin.Context) {
 	var total int64
 	var err error
 	if modelType != "" {
-		models, total, err = h.service.ListByType(page, pageSize, keyword, modelType)
+		models, total, err = h.service.ListByType(scope, page, pageSize, keyword, modelType)
 	} else {
-		models, total, err = h.service.List(page, pageSize, keyword)
+		models, total, err = h.service.List(scope, page, pageSize, keyword)
 	}
 	if err != nil {
 		zap.L().Error("list models failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
+	}
+
+	// 多租户改造：非super_admin只返回当前组织可见的模型
+	if !scope.IsSuperAdmin {
+		var filtered []model.LLMModel
+		for _, m := range models {
+			for _, orgID := range scope.VisibleOrgIDs {
+				if m.OrgID == orgID || m.IsShared {
+					filtered = append(filtered, m)
+					break
+				}
+			}
+		}
+		models = filtered
+	}
+
+	// 清理敏感字段
+	for i := range models {
+		models[i].APIKey = ""
+	}
+
+	// 批量填充组织名称
+	orgIDs := make([]uint, 0, len(models))
+	for _, m := range models {
+		orgIDs = append(orgIDs, m.OrgID)
+	}
+	orgNameMap := model.BatchOrgNames(orgIDs)
+	for i := range models {
+		models[i].OrgName = orgNameMap[models[i].OrgID]
 	}
 
 	c.JSON(200, gin.H{
@@ -52,14 +89,21 @@ func (h *ModelHandler) List(c *gin.Context) {
 
 // Get 获取模型详情
 // GET /api/v1/models/:id
+// 多租户改造：校验模型是否属于当前组织或共享
 func (h *ModelHandler) Get(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(400, gin.H{"error": "无效的模型ID"})
 		return
 	}
 
-	m, err := h.service.Get(uint(id))
+	m, err := h.service.Get(scope, uint(id))
 	if err != nil {
 		if err == service.ErrModelNotFound {
 			c.JSON(404, gin.H{"error": "模型不存在"})
@@ -70,19 +114,42 @@ func (h *ModelHandler) Get(c *gin.Context) {
 		return
 	}
 
+	// 多租户改造：非super_admin需校验org_id或is_shared
+	if !scope.IsSuperAdmin {
+		found := false
+		for _, orgID := range scope.VisibleOrgIDs {
+			if m.OrgID == orgID || m.IsShared {
+				found = true
+				break
+			}
+		}
+		if !found {
+			c.JSON(403, gin.H{"error": "无权访问该模型"})
+			return
+		}
+	}
+
+	// 清理敏感字段
+	m.APIKey = ""
+
 	c.JSON(200, gin.H{"data": m})
 }
 
 // GetForUpdate 获取模型编辑数据（包含原始 API Key）
 // GET /api/v1/models/:id/edit
 func (h *ModelHandler) GetForUpdate(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(400, gin.H{"error": "无效的模型ID"})
 		return
 	}
 
-	m, err := h.service.GetForUpdate(uint(id))
+	m, err := h.service.GetForUpdate(scope, uint(id))
 	if err != nil {
 		if err == service.ErrModelNotFound {
 			c.JSON(404, gin.H{"error": "模型不存在"})
@@ -99,10 +166,21 @@ func (h *ModelHandler) GetForUpdate(c *gin.Context) {
 // Create 创建模型
 // POST /api/v1/models
 func (h *ModelHandler) Create(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	var req service.CreateModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "参数错误: " + err.Error()})
 		return
+	}
+
+	// 多租户改造：注入 org_id（非 super_admin 禁止客户端传入）
+	if req.OrgID == 0 || !scope.IsSuperAdmin {
+		req.OrgID = middleware.GetCurrentOrgID(c)
 	}
 
 	// Normalize provider
@@ -122,7 +200,7 @@ func (h *ModelHandler) Create(c *gin.Context) {
 		req.ModelType = "llm"
 	}
 
-	llmModel, err := h.service.Create(&req)
+	llmModel, err := h.service.Create(scope, &req)
 	if err != nil {
 		if err == service.ErrModelExists {
 			c.JSON(400, gin.H{"error": "该提供商下已存在相同模型ID"})
@@ -145,13 +223,19 @@ func (h *ModelHandler) Create(c *gin.Context) {
 // Update 更新模型
 // PUT /api/v1/models/:id
 func (h *ModelHandler) Update(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(400, gin.H{"error": "无效的模型ID"})
 		return
 	}
 
-	m, err := h.service.Get(uint(id))
+	m, err := h.service.Get(scope, uint(id))
 	if err != nil {
 		if err == service.ErrModelNotFound {
 			c.JSON(404, gin.H{"error": "模型不存在"})
@@ -161,13 +245,33 @@ func (h *ModelHandler) Update(c *gin.Context) {
 		return
 	}
 
+	// 多租户改造：校验模型归属
+	if !scope.IsSuperAdmin {
+		found := false
+		for _, orgID := range scope.VisibleOrgIDs {
+			if m.OrgID == orgID || m.IsShared {
+				found = true
+				break
+			}
+		}
+		if !found {
+			c.JSON(403, gin.H{"error": "无权访问该模型"})
+			return
+		}
+	}
+
 	var req service.UpdateModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "参数错误: " + err.Error()})
 		return
 	}
 
-	err = h.service.Update(uint(id), &req)
+	// 多租户改造：非 super_admin 禁止修改 org_id
+	if req.OrgID != nil && !scope.IsSuperAdmin {
+		req.OrgID = nil
+	}
+
+	err = h.service.Update(scope, uint(id), &req)
 	if err != nil {
 		if err == service.ErrModelNotFound {
 			c.JSON(404, gin.H{"error": "模型不存在"})
@@ -195,19 +299,40 @@ func (h *ModelHandler) Update(c *gin.Context) {
 // Delete 删除模型
 // DELETE /api/v1/models/:id
 func (h *ModelHandler) Delete(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(400, gin.H{"error": "无效的模型ID"})
 		return
 	}
 
-	m, err := h.service.Get(uint(id))
+	m, err := h.service.Get(scope, uint(id))
 	if err != nil {
 		c.JSON(404, gin.H{"error": "模型不存在"})
 		return
 	}
 
-	err = h.service.Delete(uint(id))
+	// 多租户改造：校验模型归属
+	if !scope.IsSuperAdmin {
+		found := false
+		for _, orgID := range scope.VisibleOrgIDs {
+			if m.OrgID == orgID || m.IsShared {
+				found = true
+				break
+			}
+		}
+		if !found {
+			c.JSON(403, gin.H{"error": "无权访问该模型"})
+			return
+		}
+	}
+
+	err = h.service.Delete(scope, uint(id))
 	if err != nil {
 		if err == service.ErrModelNotFound {
 			c.JSON(404, gin.H{"error": "模型不存在"})
@@ -231,13 +356,18 @@ func (h *ModelHandler) Delete(c *gin.Context) {
 // SetDefault 设为默认模型
 // PUT /api/v1/models/:id/default
 func (h *ModelHandler) SetDefault(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(400, gin.H{"error": "无效的模型ID"})
 		return
 	}
 
-	m, err := h.service.Get(uint(id))
+	m, err := h.service.Get(scope, uint(id))
 	if err != nil {
 		if err == service.ErrModelNotFound {
 			c.JSON(404, gin.H{"error": "模型不存在"})
@@ -247,7 +377,7 @@ func (h *ModelHandler) SetDefault(c *gin.Context) {
 		return
 	}
 
-	err = h.service.SetDefault(uint(id))
+	err = h.service.SetDefault(scope, uint(id))
 	if err != nil {
 		if err == service.ErrModelNotFound {
 			c.JSON(404, gin.H{"error": "模型不存在"})
@@ -267,13 +397,18 @@ func (h *ModelHandler) SetDefault(c *gin.Context) {
 // UnsetDefault 取消默认模型
 // DELETE /api/v1/models/:id/default
 func (h *ModelHandler) UnsetDefault(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(400, gin.H{"error": "无效的模型ID"})
 		return
 	}
 
-	m, err := h.service.Get(uint(id))
+	m, err := h.service.Get(scope, uint(id))
 	if err != nil {
 		if err == service.ErrModelNotFound {
 			c.JSON(404, gin.H{"error": "模型不存在"})
@@ -283,7 +418,7 @@ func (h *ModelHandler) UnsetDefault(c *gin.Context) {
 		return
 	}
 
-	err = h.service.UnsetDefault(uint(id))
+	err = h.service.UnsetDefault(scope, uint(id))
 	if err != nil {
 		if err == service.ErrModelNotFound {
 			c.JSON(404, gin.H{"error": "模型不存在"})
@@ -303,13 +438,18 @@ func (h *ModelHandler) UnsetDefault(c *gin.Context) {
 // CheckAPI 测试 API 连通性
 // POST /api/v1/models/:id/check
 func (h *ModelHandler) CheckAPI(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(400, gin.H{"error": "无效的模型ID"})
 		return
 	}
 
-	success, err := h.service.CheckConnectivity(uint(id))
+	success, err := h.service.CheckConnectivity(scope, uint(id))
 	if err != nil {
 		zap.L().Error("model API check failed",
 			zap.Uint("id", uint(id)),
@@ -330,13 +470,18 @@ func (h *ModelHandler) CheckAPI(c *gin.Context) {
 // Disable 禁用模型
 // PUT /api/v1/models/:id/disable
 func (h *ModelHandler) Disable(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(400, gin.H{"error": "无效的模型ID"})
 		return
 	}
 
-	m, err := h.service.Get(uint(id))
+	m, err := h.service.Get(scope, uint(id))
 	if err != nil {
 		if err == service.ErrModelNotFound {
 			c.JSON(404, gin.H{"error": "模型不存在"})
@@ -346,7 +491,7 @@ func (h *ModelHandler) Disable(c *gin.Context) {
 		return
 	}
 
-	err = h.service.Disable(uint(id))
+	err = h.service.Disable(scope, uint(id))
 	if err != nil {
 		if err == service.ErrCannotDisablePrimary {
 			c.JSON(400, gin.H{"error": "不能禁用主模型，请先取消主模型后再禁用"})
@@ -370,13 +515,18 @@ func (h *ModelHandler) Disable(c *gin.Context) {
 // Enable 启用模型
 // PUT /api/v1/models/:id/enable
 func (h *ModelHandler) Enable(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(400, gin.H{"error": "无效的模型ID"})
 		return
 	}
 
-	m, err := h.service.Get(uint(id))
+	m, err := h.service.Get(scope, uint(id))
 	if err != nil {
 		if err == service.ErrModelNotFound {
 			c.JSON(404, gin.H{"error": "模型不存在"})
@@ -386,7 +536,7 @@ func (h *ModelHandler) Enable(c *gin.Context) {
 		return
 	}
 
-	err = h.service.Enable(uint(id))
+	err = h.service.Enable(scope, uint(id))
 	if err != nil {
 		zap.L().Error("enable model failed", zap.Error(err), zap.Uint("id", uint(id)))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -402,7 +552,12 @@ func (h *ModelHandler) Enable(c *gin.Context) {
 // GetDefault 获取默认模型
 // GET /api/v1/models/default
 func (h *ModelHandler) GetDefault(c *gin.Context) {
-	model, err := h.service.GetDefault()
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+	model, err := h.service.GetDefault(scope)
 	if err != nil {
 		if err == service.ErrModelNotFound {
 			c.JSON(404, gin.H{"error": "未设置默认模型"})
@@ -419,6 +574,11 @@ func (h *ModelHandler) GetDefault(c *gin.Context) {
 // CreateTest 测试请求（不保存）
 // POST /api/v1/models/test
 func (h *ModelHandler) CreateTest(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var req struct {
 		ModelType   string  `json:"model_type"`
 		Provider    string  `json:"provider" binding:"required"`

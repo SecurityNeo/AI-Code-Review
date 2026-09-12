@@ -49,7 +49,7 @@ func (e *SecurityAuditExecutor) Execute(ctx StageContext) error {
 	functionBodyMaxLen := 1500
 	triggerSnippetMaxLen := 300
 	confidenceThreshold := 0.5
-	llmTimeoutSec := int(getStageLLMEnhanceTimeout("security_audit").Seconds())
+	llmTimeoutSec := int(getStageLLMEnhanceTimeoutFromCtx(ctx, "security_audit").Seconds())
 	if cfg != nil {
 		llmMaxTokens = cfg.GetStageParam("security_audit", "llm_max_tokens", llmMaxTokens)
 		llmTimeoutSec = cfg.GetStageParam("security_audit", "llm_enhance_timeout", llmTimeoutSec)

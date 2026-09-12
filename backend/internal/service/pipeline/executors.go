@@ -57,9 +57,19 @@ func (e *TriggerCheckExecutor) Execute(ctx StageContext) error {
 		return fmt.Errorf("%s", reason)
 	}
 
-	// 检查 2：触发事件是否在全局配置白名单中
-	var agentCfg model.ReviewAgentConfig
-	if err := model.DB.First(&agentCfg, 1).Error; err == nil {
+	// 检查 2：触发事件是否在配置白名单中
+	// 多租户改造：从配置快照读取触发事件配置，不再实时查库 model.DB.First(&agentCfg, 1)
+	var agentCfg *model.ReviewAgentConfig
+	if snap := GetOrgConfigSnapshotFromCtx(ctx); snap != nil && snap.AgentConfig.ID > 0 {
+		agentCfg = &snap.AgentConfig
+	} else {
+		// 向后兼容 fallback
+		var cfg model.ReviewAgentConfig
+		if err := model.DB.First(&cfg, 1).Error; err == nil {
+			agentCfg = &cfg
+		}
+	}
+	if agentCfg != nil {
 		allowedEvents := agentCfg.TriggerEventCodes()
 		if len(allowedEvents) > 0 {
 			matched := false
@@ -654,7 +664,13 @@ func (e *DependencyScanExecutor) Execute(ctx StageContext) error {
 
 	if len(allDeps) > 0 {
 		querier := NewVulnerabilityQuerier()
-		depVulnMatches, depVulnCount, _ = querier.QueryByDependencies(allDeps, ecofilter)
+		// 多租户改造：从 task 获取 org_id 传入白名单查询
+		task := ctx.Task()
+		var orgID uint = 1
+		if task != nil {
+			orgID = task.OrgID
+		}
+		depVulnMatches, depVulnCount, _ = querier.QueryByDependencies(orgID, allDeps, ecofilter)
 		dependencyRiskScore = querier.CalculateDependencyRiskScore(depVulnMatches)
 	}
 
@@ -1058,7 +1074,7 @@ func (e *BatchReviewFrameExecutor) executeBatchPlan(ctx StageContext, task *mode
 	}
 
 	overhead := BuildBatchContext(ctx)
-	configuredBudget := SysCfgMaxTokensPerBatch()
+	configuredBudget := SysCfgMaxTokensPerBatchFromSnapshot(GetOrgConfigSnapshotFromCtx(ctx))
 	estimator := NewTokenEstimator()
 
 	// 【新增】估算系统开销
@@ -1166,7 +1182,9 @@ func (e *BatchReviewFrameExecutor) executeBatchPlan(ctx StageContext, task *mode
 	exec.LLMInputBudget = configuredBudget
 	exec.EffectiveBudget = effectiveBudget
 	exec.BudgetWarning = budgetWarning
-	if err := model.DB.Model(exec).Updates(map[string]interface{}{
+	taskScope := &model.UserAuthScope{VisibleOrgIDs: []uint{task.OrgID}}
+	db := model.DBWithScope(taskScope)
+	if err := db.Model(exec).Updates(map[string]interface{}{
 		"estimated_overhead": estimatedOverhead,
 		"actual_overhead":    0, // batch_plan 阶段无实际开销
 		"llm_input_budget":   configuredBudget,
@@ -1276,7 +1294,9 @@ func (e *BatchReviewFrameExecutor) executeSingleBatchStructured(ctx StageContext
 
 	// 【新增】保存实际开销到 execution 记录，并异步保存校准数据
 	exec.ActualOverhead = result.InputTokens - calcDiffTokens(fileDetails)
-	if err := model.DB.Model(exec).Update("actual_overhead", exec.ActualOverhead).Error; err != nil {
+	taskScope := &model.UserAuthScope{VisibleOrgIDs: []uint{task.OrgID}}
+	db := model.DBWithScope(taskScope)
+	if err := db.Model(exec).Update("actual_overhead", exec.ActualOverhead).Error; err != nil {
 		zap.L().Error("更新 actual_overhead 失败", zap.Error(err), zap.Uint("task_id", task.ID))
 	}
 	go func() {
@@ -1506,7 +1526,9 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 		actualOH = 0
 	}
 	exec.ActualOverhead = actualOH
-	if err := model.DB.Model(exec).Update("actual_overhead", actualOH).Error; err != nil {
+	taskScope := &model.UserAuthScope{VisibleOrgIDs: []uint{task.OrgID}}
+	db := model.DBWithScope(taskScope)
+	if err := db.Model(exec).Update("actual_overhead", actualOH).Error; err != nil {
 		zap.L().Error("更新 actual_overhead 失败", zap.Error(err), zap.Uint("task_id", task.ID))
 	}
 	go func() {
@@ -1616,10 +1638,12 @@ func (e *PostProcessExecutor) Execute(ctx StageContext) error {
 		updates["model_id"] = modelID
 		zap.L().Info("Pipeline: 更新任务实际使用模型", zap.Uint("task_id", task.ID), zap.Uint("model_id", modelID))
 	}
-	model.DB.Model(&model.Task{}).Where("id = ?", task.ID).Updates(updates)
+	taskScope := &model.UserAuthScope{VisibleOrgIDs: []uint{task.OrgID}}
+	db := model.DBWithScope(taskScope)
+	db.Model(&model.Task{}).Where("id = ?", task.ID).Updates(updates)
 
 	// 更新 AIResponse（Markdown 报告）
-	model.DB.Model(&model.Task{}).Where("id = ?", task.ID).Update("ai_response", report)
+	db.Model(&model.Task{}).Where("id = ?", task.ID).Update("ai_response", report)
 
 	// 将报告写入 Pipeline 共享输出，供 engine markTaskSuccess 读取（防止被覆盖为空）
 	ctx.SetOutput("final_report", report)

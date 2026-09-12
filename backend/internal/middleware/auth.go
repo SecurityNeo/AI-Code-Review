@@ -12,19 +12,20 @@ import (
 )
 
 // GenerateToken 生成新 token（数据库持久化）
-func GenerateToken(userID uint, username string) string {
+func GenerateToken(userID uint, username string) (string, error) {
 	token := generateRandomToken()
 
-	// 保存到数据库
 	tokenModel := model.Token{
 		UserID:    userID,
 		Token:     token,
 		Username:  username,
 		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
 	}
-	model.DB.Create(&tokenModel)
+	if err := model.DB.Create(&tokenModel).Error; err != nil {
+		return "", err
+	}
 
-	return token
+	return token, nil
 }
 
 // ValidateToken 验证 token（从数据库查询）
@@ -34,7 +35,6 @@ func ValidateToken(token string) (uint, bool) {
 	}
 
 	var tokenModel model.Token
-	// 使用当前时间（带系统时区）与数据库比较
 	if err := model.DB.Where("token = ? AND expires_at > ?", token, time.Now()).First(&tokenModel).Error; err != nil {
 		return 0, false
 	}
@@ -66,6 +66,7 @@ func Auth() gin.HandlerFunc {
 			"/api/v1/logout",
 			"/api/v1/auth/gitlab",
 			"/api/v1/auth/gitlab/callback",
+			"/api/v1/gitlab-instances/public",
 			"/health",
 		}
 
@@ -82,15 +83,20 @@ func Auth() gin.HandlerFunc {
 			return
 		}
 
-		// 从 Header / Cookie / Query 获取 token
+		// 从 Header / Cookie 获取 token
 		token := c.GetHeader("Authorization")
 		if len(token) > 7 && token[:7] == "Bearer " {
 			token = token[7:]
+		} else if token != "" {
+			// Authorization header 存在但不是 Bearer 格式（如浏览器自动附加的 Basic auth）
+			// 清空 token，让后续逻辑去查 cookie 和 query 参数
+			token = ""
 		}
 		if token == "" {
 			token, _ = c.Cookie("auth_token")
 		}
-		if c.Query("token") != "" {
+		// SSE (EventSource) 无法自定义 Header，前端通过 query 参数传 token
+		if token == "" {
 			token = c.Query("token")
 		}
 
@@ -111,7 +117,7 @@ func Auth() gin.HandlerFunc {
 			return
 		}
 
-		// 加载完整User对象到Context
+		// 加载完整User对象到Context（users.role 已废弃，不再用于权限判定）
 		var user model.User
 		if err := model.DB.First(&user, userID).Error; err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "用户不存在"})
@@ -119,7 +125,7 @@ func Auth() gin.HandlerFunc {
 			return
 		}
 
-		// 校验用户是否被禁用（enabled=false 的用户不应继续访问）
+		// 校验用户是否被禁用
 		if !user.Enabled {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "用户已被禁用"})
 			c.Abort()
@@ -128,24 +134,70 @@ func Auth() gin.HandlerFunc {
 
 		c.Set("user_id", userID)
 		c.Set("user", user)
-		c.Set("role", user.Role)
-		c.Set("gitlab_username", user.GitlabUsername)
 		c.Set("token", token)
+
+		// 构建用户认证范围（基于 org_users.role，废弃 users.role）
+		scope, err := model.BuildAuthScope(user.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "构建用户认证范围失败"})
+			c.Abort()
+			return
+		}
+
+		// 如果用户无组织归属，返回403（super_admin豁免）
+		if len(scope.VisibleOrgIDs) == 0 && !scope.IsSuperAdmin {
+			c.JSON(http.StatusForbidden, gin.H{"error": "用户未分配组织，请联系管理员"})
+			c.Abort()
+			return
+		}
+
+		c.Set("auth_scope", scope)
+		// 保留 role 字段兼容旧代码，但值为 CurrentOrgRole
+		c.Set("role", scope.CurrentOrgRole)
 		c.Next()
 	}
 }
 
-// AdminOnly 仅管理员可访问
-func AdminOnly() gin.HandlerFunc {
+// RequireOrgAdmin 要求组织管理员及以上角色（super_admin / org_admin）
+func RequireOrgAdmin() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		role, exists := c.Get("role")
-		if !exists || role != model.RoleAdmin {
-			c.JSON(http.StatusForbidden, gin.H{"error": "权限不足，仅管理员可访问"})
+		scope := GetAuthScope(c)
+		if scope == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+			c.Abort()
+			return
+		}
+		if !scope.HasOrgRole("super_admin", "org_admin") {
+			c.JSON(http.StatusForbidden, gin.H{"error": "权限不足，仅组织管理员可访问"})
 			c.Abort()
 			return
 		}
 		c.Next()
 	}
+}
+
+// RequireSystemAdmin 要求系统管理员角色（super_admin）
+func RequireSystemAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		scope := GetAuthScope(c)
+		if scope == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+			c.Abort()
+			return
+		}
+		if scope.CurrentOrgRole != "super_admin" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "权限不足，仅系统管理员可访问"})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// AdminOnly 废弃：保留函数签名但内部转发到 RequireOrgAdmin，逐步替换
+// Deprecated: 使用 RequireOrgAdmin 或 RequireSystemAdmin 替代
+func AdminOnly() gin.HandlerFunc {
+	return RequireOrgAdmin()
 }
 
 // GetUser 从Context中获取当前登录用户

@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>智能体资源池 - CodeGuard</title>
-        <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+        <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <style>
@@ -65,6 +66,7 @@
                         <thead class="bg-gray-50 border-b">
                             <tr>
                                 <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">名称</th>
+                                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">所属组织</th>
                                 <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">OpenCode Endpoint</th>
                                 <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">OpenCode版本</th>
                                 <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">最大并行</th>
@@ -104,6 +106,11 @@
                         <label class="block text-sm font-medium text-gray-700 mb-1">OpenCode Endpoint *</label>
                         <input type="text" id="poolEndpoint" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="http://localhost:4096">
                     </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">所属组织</label>
+                    <select id="orgSelect" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                    </select>
                 </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
@@ -260,7 +267,7 @@
             document.getElementById('totalCount').textContent = `共 ${pools.length} 条记录`;
             
             if (pools.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="9" class="px-6 py-8 text-center text-gray-500">暂无数据</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="10" class="px-6 py-8 text-center text-gray-500">暂无数据</td></tr>';
                 return;
             }
 
@@ -274,6 +281,7 @@
                             <a href="pool-detail.html?id=${p.id}" class="font-medium text-sm text-blue-600 hover:text-blue-800 hover:underline">${p.name || '-'}</a>
                         </div>
                     </td>
+                    <td class="px-6 py-4 text-sm text-gray-600">${p.org_name || '根组织'}</td>
                     <td class="px-6 py-4 text-sm text-gray-600">${p.opencode_endpoint || '-'}</td>
                     <td class="px-6 py-4 text-sm text-gray-600">${p.opencode_version || '-'}</td>
                     <td class="px-6 py-4 text-sm text-gray-600">${p.max_parallel || '-'}</td>
@@ -326,6 +334,7 @@
             document.getElementById('poolAPIKey').value = '';
             document.getElementById('poolMaxParallel').value = '5';
             document.getElementById('poolCheckInterval').value = '5';
+            loadOrgSelect('orgSelect');
             showModal('createModal');
         }
 
@@ -344,6 +353,7 @@
                 document.getElementById('poolAPIKey').value = p.opencode_api_key || '';
                 document.getElementById('poolMaxParallel').value = p.max_parallel || 5;
                 document.getElementById('poolCheckInterval').value = p.check_interval_sec || 5;
+                loadOrgSelect('orgSelect', p.org_id);
                 showModal('createModal');
             } catch (e) {
                 showToast('加载失败: ' + e.message, 'error');
@@ -351,32 +361,34 @@
         }
 
         async function savePool() {
-            const data = {
-                name: document.getElementById('poolName').value,
-                opencode_endpoint: document.getElementById('poolEndpoint').value,
-                opencode_username: document.getElementById('poolUsername').value,
-                opencode_password: document.getElementById('poolPassword').value,
-                opencode_api_key: document.getElementById('poolAPIKey').value,
-                max_parallel: parseInt(document.getElementById('poolMaxParallel').value) || 5,
-                check_interval_sec: parseInt(document.getElementById('poolCheckInterval').value) || 5
-            };
-
-            if (!data.name || !data.opencode_endpoint) {
-                showToast('请填写所有必填字段', 'error');
-                return;
-            }
-
-            // 移除空字符串的字段
-            if (!data.opencode_username) delete data.opencode_username;
-            if (!data.opencode_password) delete data.opencode_password;
-            if (!data.opencode_api_key) delete data.opencode_api_key;
+            const orgHeaders = getOrgOverrideHeaders();
+             let data = {
+                 name: document.getElementById('poolName').value,
+                 opencode_endpoint: document.getElementById('poolEndpoint').value,
+                 opencode_username: document.getElementById('poolUsername').value,
+                 opencode_password: document.getElementById('poolPassword').value,
+                 opencode_api_key: document.getElementById('poolAPIKey').value,
+                 max_parallel: parseInt(document.getElementById('poolMaxParallel').value) || 5,
+                 check_interval_sec: parseInt(document.getElementById('poolCheckInterval').value) || 5
+             };
+ 
+             if (!data.name || !data.opencode_endpoint) {
+                 showToast('请填写所有必填字段', 'error');
+                 return;
+             }
+ 
+             // 移除空字符串的字段
+             if (!data.opencode_username) delete data.opencode_username;
+             if (!data.opencode_password) delete data.opencode_password;
+             if (!data.opencode_api_key) delete data.opencode_api_key;
+             injectOrgId(data, 'orgSelect');
 
             try {
                 const url = editingId ? `${API_BASE}/pools/${editingId}` : `${API_BASE}/pools`;
                 const method = editingId ? 'PUT' : 'POST';
                 const res = await apiFetch(url, {
                     method: method,
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...orgHeaders },
                     body: JSON.stringify(data)
                 });
                 

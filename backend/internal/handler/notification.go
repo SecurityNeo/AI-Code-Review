@@ -7,9 +7,11 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ai-optimizer/backend/internal/middleware"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -35,6 +37,11 @@ func getNotificationBaseline() time.Time {
 
 // List 站内信列表
 func (h *NotificationHandler) List(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	user := c.MustGet("user").(model.User)
 	notifType := c.Query("type")
 	isReadStr := c.Query("is_read")
@@ -51,10 +58,20 @@ func (h *NotificationHandler) List(c *gin.Context) {
 	}
 
 	svc := service.NewNotificationService()
-	list, total, err := svc.List(user.ID, notifType, isRead, page, pageSize)
+	list, total, err := svc.List(scope, user.ID, notifType, isRead, page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	// 批量填充组织名称
+	orgIDs := make([]uint, 0, len(list))
+	for _, n := range list {
+		orgIDs = append(orgIDs, n.OrgID)
+	}
+	orgNameMap := model.BatchOrgNames(orgIDs)
+	for i := range list {
+		list[i].OrgName = orgNameMap[list[i].OrgID]
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -67,18 +84,28 @@ func (h *NotificationHandler) List(c *gin.Context) {
 
 // UnreadCount 未读数
 func (h *NotificationHandler) UnreadCount(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	user := c.MustGet("user").(model.User)
 	svc := service.NewNotificationService()
-	count := svc.UnreadCount(user.ID)
+	count := svc.UnreadCount(scope, user.ID)
 	c.JSON(http.StatusOK, gin.H{"data": count})
 }
 
 // MarkRead 单条已读
 func (h *NotificationHandler) MarkRead(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	user := c.MustGet("user").(model.User)
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 	svc := service.NewNotificationService()
-	if err := svc.MarkRead(user.ID, uint(id)); err != nil {
+	if err := svc.MarkRead(scope, user.ID, uint(id)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -87,9 +114,14 @@ func (h *NotificationHandler) MarkRead(c *gin.Context) {
 
 // MarkAllRead 全部已读
 func (h *NotificationHandler) MarkAllRead(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	user := c.MustGet("user").(model.User)
 	svc := service.NewNotificationService()
-	if err := svc.MarkAllRead(user.ID); err != nil {
+	if err := svc.MarkAllRead(scope, user.ID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -98,6 +130,11 @@ func (h *NotificationHandler) MarkAllRead(c *gin.Context) {
 
 // TestRule 测试通知规则模板
 func (h *NotificationHandler) TestRule(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var body struct {
 		Template     string `json:"template"`
 		TemplateType string `json:"template_type"` // "im_escalation" 或空
@@ -110,7 +147,11 @@ func (h *NotificationHandler) TestRule(c *gin.Context) {
 		id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 		if id > 0 {
 			var rule model.NotificationRule
-			if err := model.DB.First(&rule, id).Error; err != nil {
+			db := model.DB
+			if !scope.IsSuperAdmin {
+				db = db.Where("org_id IN ?", scope.VisibleOrgIDs)
+			}
+			if err := db.First(&rule, id).Error; err != nil {
 				c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 				return
 			}
@@ -123,10 +164,16 @@ func (h *NotificationHandler) TestRule(c *gin.Context) {
 		return
 	}
 
-	// 构造测试上下文（使用最近一条任务）
+	// 构造测试上下文（使用当前组织最近一条任务）
 	var task model.Task
-	model.DB.Order("id DESC").First(&task)
-	model.DB.First(&task.Project, task.ProjectID)
+	taskQuery := model.DB.Order("id DESC")
+	if !scope.IsSuperAdmin {
+		taskQuery = taskQuery.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	taskQuery.First(&task)
+	if task.ID > 0 {
+		model.DB.First(&task.Project, task.ProjectID)
+	}
 
 	var rendered string
 	if body.TemplateType == "im_escalation" {
@@ -148,7 +195,7 @@ func (h *NotificationHandler) TestRule(c *gin.Context) {
 		rendered = service.RenderIMTemplate(template, ctx)
 	} else {
 		// 通用模板
-		stats := service.CalcIssueStats(task.ID, task.MRMergeID)
+		stats := service.CalcIssueStats(scope, task.ID, task.MRMergeID)
 		ctx := service.TemplateContext{
 			Task:          task,
 			Stats:         stats,
@@ -164,9 +211,18 @@ func (h *NotificationHandler) TestRule(c *gin.Context) {
 
 // GetRule 获取单条通知规则
 func (h *NotificationHandler) GetRule(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 	var rule model.NotificationRule
-	if err := model.DB.First(&rule, id).Error; err != nil {
+	db := model.DB
+	if !scope.IsSuperAdmin {
+		db = db.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	if err := db.First(&rule, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
@@ -176,6 +232,12 @@ func (h *NotificationHandler) GetRule(c *gin.Context) {
 // ProjectOwnerDashboard 项目负责人工作台（项目治理视图）
 // 管理员可查看所有项目，普通用户仅查看自己负责的项目
 func (h *NotificationHandler) ProjectOwnerDashboard(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	user := c.MustGet("user").(model.User)
 	baseline := getNotificationBaseline()
 
@@ -195,10 +257,14 @@ func (h *NotificationHandler) ProjectOwnerDashboard(c *gin.Context) {
 		"role":                    user.Role,
 	}
 
-	if user.Role == model.RoleAdmin {
-		// 管理员：返回所有项目
+	if scope.HasOrgRole("super_admin", "org_admin") {
+		// 管理员：返回当前组织可见的所有项目
 		var allProjects []model.Project
-		model.DB.Select("id").Find(&allProjects)
+		db := model.DB.Select("id")
+		if !scope.IsSuperAdmin {
+			db = db.Scopes(model.OrgScope(scope))
+		}
+		db.Find(&allProjects)
 		projectIDs = make([]uint, 0, len(allProjects))
 		for _, p := range allProjects {
 			projectIDs = append(projectIDs, p.ID)
@@ -307,7 +373,7 @@ func (h *NotificationHandler) ProjectOwnerDashboard(c *gin.Context) {
 			}
 		}
 
-		qp := model.DB.Model(&model.ReviewIssue{}).
+		qp := model.DB.Table("review_issues").
 			Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?)", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}).
 			Joins("INNER JOIN tasks ON tasks.id = review_issues.task_id").
 			Where("tasks.project_id = ?", p.ID)
@@ -315,7 +381,7 @@ func (h *NotificationHandler) ProjectOwnerDashboard(c *gin.Context) {
 		if !baseline.IsZero() {
 			qp.Where("review_issues.original_created_at < ?", baseline).Count(&p.PendingBeforeBaseline)
 		}
-		qc := model.DB.Model(&model.ReviewIssue{}).
+		qc := model.DB.Table("review_issues").
 			Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND review_issues.severity = ?", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "critical").
 			Joins("INNER JOIN tasks ON tasks.id = review_issues.task_id").
 			Where("tasks.project_id = ?", p.ID)
@@ -323,7 +389,7 @@ func (h *NotificationHandler) ProjectOwnerDashboard(c *gin.Context) {
 		if !baseline.IsZero() {
 			qc.Where("review_issues.original_created_at < ?", baseline).Count(&p.CriticalBeforeBaseline)
 		}
-		qh := model.DB.Model(&model.ReviewIssue{}).
+		qh := model.DB.Table("review_issues").
 			Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND review_issues.severity = ?", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "high").
 			Joins("INNER JOIN tasks ON tasks.id = review_issues.task_id").
 			Where("tasks.project_id = ?", p.ID)
@@ -331,7 +397,7 @@ func (h *NotificationHandler) ProjectOwnerDashboard(c *gin.Context) {
 		if !baseline.IsZero() {
 			qh.Where("review_issues.original_created_at < ?", baseline).Count(&p.HighBeforeBaseline)
 		}
-		qo := model.DB.Model(&model.ReviewIssue{}).
+		qo := model.DB.Table("review_issues").
 			Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND review_issues.original_created_at < ?", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, overdueSince).
 			Joins("INNER JOIN tasks ON tasks.id = review_issues.task_id").
 			Where("tasks.project_id = ?", p.ID)
@@ -341,11 +407,11 @@ func (h *NotificationHandler) ProjectOwnerDashboard(c *gin.Context) {
 		}
 
 		var weekCreated, weekClosed int64
-		model.DB.Model(&model.ReviewIssue{}).
+		model.DB.Table("review_issues").
 			Joins("INNER JOIN tasks ON tasks.id = review_issues.task_id").
 			Where("tasks.project_id = ? AND review_issues.deleted_at IS NULL AND review_issues.created_at >= ?", p.ID, sevenDaysAgo).
 			Count(&weekCreated)
-		model.DB.Model(&model.ReviewIssue{}).
+		model.DB.Table("review_issues").
 			Where("review_issues.deleted_at IS NULL AND review_issues.resolved_at >= ? AND review_issues.status IN (?)", sevenDaysAgo,
 				[]string{model.IssueStatusResolved, model.IssueStatusFalsePositive, model.IssueStatusIgnored}).
 			Joins("INNER JOIN tasks ON tasks.id = review_issues.task_id").
@@ -392,6 +458,20 @@ func (h *NotificationHandler) ProjectOwnerDashboard(c *gin.Context) {
 // DeveloperDashboard 开发者工作台数据
 func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 	user := c.MustGet("user").(model.User)
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+	// 每次查询独立起 Session，彻底避免 GORM Statement 链式污染
+	// GORM 在共享 *gorm.DB 根上做 Table()/Joins() 会导致条件叠加（重复 JOIN），不可再复用 riDB 根
+	newRiDB := func() *gorm.DB {
+		db := model.DB.Session(&gorm.Session{}).Table("review_issues")
+		if !scope.IsSuperAdmin {
+			db = db.Where("review_issues.org_id IN ?", scope.VisibleOrgIDs)
+		}
+		return db
+	}
 	baseline := getNotificationBaseline()
 
 	// show_legacy: 0=仅活跃(默认) 1=展示全部
@@ -406,7 +486,7 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 	}
 	if !baseline.IsZero() {
 		activeStatQ = func(db *gorm.DB) *gorm.DB {
-			return db.Where("original_created_at >= ?", baseline)
+			return db.Where("review_issues.original_created_at >= ?", baseline)
 		}
 	}
 
@@ -416,39 +496,39 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 	}
 	if !showLegacy && !baseline.IsZero() {
 		listFilter = func(db *gorm.DB) *gorm.DB {
-			return db.Where("original_created_at >= ?", baseline)
+			return db.Where("review_issues.original_created_at >= ?", baseline)
 		}
 	}
 
 	// 待处理统计（包含 pending 和 pending_inherited）- 仅活跃
 	var pendingCount, pendingBefore, criticalCount, criticalBefore, highCount, highBefore int64
-	qp := activeStatQ(model.DB.Model(&model.ReviewIssue{}).
-		Where("deleted_at IS NULL AND status IN (?) AND (owner_id = ? OR current_owner_id = ?)",
+	qp := activeStatQ(newRiDB().
+		Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?)",
 			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID))
 	qp.Count(&pendingCount)
 	if !baseline.IsZero() {
-		model.DB.Model(&model.ReviewIssue{}).
-			Where("deleted_at IS NULL AND status IN (?) AND (owner_id = ? OR current_owner_id = ?) AND original_created_at < ?",
+		newRiDB().
+			Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?) AND review_issues.original_created_at < ?",
 				[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID, baseline).
 			Count(&pendingBefore)
 	}
-	qc := activeStatQ(model.DB.Model(&model.ReviewIssue{}).
-		Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?)",
+	qc := activeStatQ(newRiDB().
+		Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND review_issues.severity = ? AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?)",
 			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "critical", user.ID, user.ID))
 	qc.Count(&criticalCount)
 	if !baseline.IsZero() {
-		model.DB.Model(&model.ReviewIssue{}).
-			Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?) AND original_created_at < ?",
+		newRiDB().
+			Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND review_issues.severity = ? AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?) AND review_issues.original_created_at < ?",
 				[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "critical", user.ID, user.ID, baseline).
 			Count(&criticalBefore)
 	}
-	qh := activeStatQ(model.DB.Model(&model.ReviewIssue{}).
-		Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?)",
+	qh := activeStatQ(newRiDB().
+		Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND review_issues.severity = ? AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?)",
 			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "high", user.ID, user.ID))
 	qh.Count(&highCount)
 	if !baseline.IsZero() {
-		model.DB.Model(&model.ReviewIssue{}).
-			Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?) AND original_created_at < ?",
+		newRiDB().
+			Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND review_issues.severity = ? AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?) AND review_issues.original_created_at < ?",
 				[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "high", user.ID, user.ID, baseline).
 			Count(&highBefore)
 	}
@@ -456,12 +536,12 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 	// 本周统计（简化：近7天）
 	var weekReceived, weekResolved int64
 	since := time.Now().AddDate(0, 0, -7)
-	model.DB.Model(&model.ReviewIssue{}).
-		Where("deleted_at IS NULL AND (owner_id = ? OR current_owner_id = ?) AND created_at >= ?",
+	newRiDB().
+		Where("review_issues.deleted_at IS NULL AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?) AND review_issues.created_at >= ?",
 			user.ID, user.ID, since).
 		Count(&weekReceived)
-	model.DB.Model(&model.ReviewIssue{}).
-		Where("deleted_at IS NULL AND (owner_id = ? OR current_owner_id = ?) AND resolved_at >= ? AND status IN (?)",
+	newRiDB().
+		Where("review_issues.deleted_at IS NULL AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?) AND review_issues.resolved_at >= ? AND review_issues.status IN (?)",
 			user.ID, user.ID, since, []string{model.IssueStatusResolved, model.IssueStatusFalsePositive, model.IssueStatusIgnored}).
 		Count(&weekResolved)
 
@@ -479,7 +559,7 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 	// 待处理列表（增强：携带项目信息、任务MR信息）
 	// 列表查询受 owner_type 控制：all=owner_id OR current_owner_id, mine=仅 owner_id
 	var totalIssues int64
-	baseListQ := model.DB.Model(&model.ReviewIssue{}).
+	baseListQ := newRiDB().
 		Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?)",
 			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited})
 	if ownerType == "mine" {
@@ -497,7 +577,7 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 		OwnerUsername    string `json:"owner_username"`
 		OwnerDisplayName string `json:"owner_display_name"`
 	}
-	baseListJoinQ := model.DB.Model(&model.ReviewIssue{}).
+	baseListJoinQ := newRiDB().
 		Select("review_issues.*, projects.name as project_name, tasks.mr_title as mr_title, owners.username as owner_username, owners.display_name as owner_display_name").
 		Joins("LEFT JOIN tasks ON tasks.id = review_issues.task_id").
 		Joins("LEFT JOIN projects ON projects.id = tasks.project_id").
@@ -589,31 +669,31 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 
 	// 待处理 Issue severity 分组统计 + 最早未处理距今
 	var mediumCount, mediumBefore, lowCount, lowBefore int64
-	qm := activeStatQ(model.DB.Model(&model.ReviewIssue{}).
-		Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?)",
+	qm := activeStatQ(newRiDB().
+		Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND review_issues.severity = ? AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?)",
 			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "medium", user.ID, user.ID))
 	qm.Count(&mediumCount)
 	if !baseline.IsZero() {
-		model.DB.Model(&model.ReviewIssue{}).
-			Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?) AND original_created_at < ?",
+		newRiDB().
+			Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND review_issues.severity = ? AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?) AND review_issues.original_created_at < ?",
 				[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "medium", user.ID, user.ID, baseline).
 			Count(&mediumBefore)
 	}
-	ql := activeStatQ(model.DB.Model(&model.ReviewIssue{}).
-		Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?)",
+	ql := activeStatQ(newRiDB().
+		Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND review_issues.severity = ? AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?)",
 			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "low", user.ID, user.ID))
 	ql.Count(&lowCount)
 	if !baseline.IsZero() {
-		model.DB.Model(&model.ReviewIssue{}).
-			Where("deleted_at IS NULL AND status IN (?) AND severity = ? AND (owner_id = ? OR current_owner_id = ?) AND original_created_at < ?",
+		newRiDB().
+			Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND review_issues.severity = ? AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?) AND review_issues.original_created_at < ?",
 				[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, "low", user.ID, user.ID, baseline).
 			Count(&lowBefore)
 	}
 
 	// 最早未处理距今（始终使用活跃数据统计）
 	var earliestPending model.ReviewIssue
-	err := activeStatQ(model.DB.Model(&model.ReviewIssue{}).
-		Where("deleted_at IS NULL AND status IN (?) AND (owner_id = ? OR current_owner_id = ?)",
+	err := activeStatQ(newRiDB().
+		Where("review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?)",
 			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID)).
 		Order("original_created_at ASC").First(&earliestPending).Error
 
@@ -631,12 +711,14 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 	// 平均闭环天数（近30天已闭环的）
 	var avgCloseDays float64
 	var closeData []struct{ DurationSec float64 }
-	model.DB.Raw(`SELECT TIMESTAMPDIFF(SECOND, original_created_at, resolved_at) AS duration_sec
+	model.DB.Raw(`SELECT TIMESTAMPDIFF(SECOND, review_issues.original_created_at, review_issues.resolved_at) AS duration_sec
 		FROM review_issues
-		WHERE deleted_at IS NULL AND status IN (?) AND resolved_at IS NOT NULL
-			AND resolved_at >= ? AND (owner_id = ? OR current_owner_id = ?)`,
+		INNER JOIN tasks ON tasks.id = review_issues.task_id
+		WHERE review_issues.deleted_at IS NULL AND review_issues.status IN (?) AND review_issues.resolved_at IS NOT NULL
+			AND review_issues.resolved_at >= ? AND (review_issues.owner_id = ? OR review_issues.current_owner_id = ?)
+			AND tasks.org_id IN ?`,
 		[]string{model.IssueStatusResolved, model.IssueStatusFalsePositive, model.IssueStatusIgnored},
-		time.Now().AddDate(0, 0, -30), user.ID, user.ID).Scan(&closeData)
+		time.Now().AddDate(0, 0, -30), user.ID, user.ID, scope.VisibleOrgIDs).Scan(&closeData)
 	if len(closeData) > 0 {
 		var total float64
 		for _, d := range closeData {
@@ -653,15 +735,17 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 	}
 	var ranks []userRank
 	model.DB.Raw(`SELECT 
-			owner_id AS user_id,
+			review_issues.owner_id AS user_id,
 			COUNT(*) AS total_created,
-			COUNT(CASE WHEN status IN (?) THEN 1 END) AS total_closed
+			COUNT(CASE WHEN review_issues.status IN (?) THEN 1 END) AS total_closed
 		FROM review_issues
-		WHERE deleted_at IS NULL AND created_at >= ?
-		GROUP BY owner_id
+		INNER JOIN tasks ON tasks.id = review_issues.task_id
+		WHERE review_issues.deleted_at IS NULL AND review_issues.created_at >= ?
+			AND tasks.org_id IN ?
+		GROUP BY review_issues.owner_id
 		HAVING total_created > 0`,
 		[]string{model.IssueStatusResolved, model.IssueStatusFalsePositive, model.IssueStatusIgnored},
-		time.Now().AddDate(0, 0, -30)).Scan(&ranks)
+		time.Now().AddDate(0, 0, -30), scope.VisibleOrgIDs).Scan(&ranks)
 	teamRank := 0
 	position := 0
 	totalRankers := len(ranks)
@@ -690,14 +774,14 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 			weekEnd = time.Now()
 		}
 		var wRecv, wClose, wPending int64
-		model.DB.Model(&model.ReviewIssue{}).
+		newRiDB().
 			Where("deleted_at IS NULL AND (owner_id = ? OR current_owner_id = ?) AND created_at >= ? AND created_at < ?", user.ID, user.ID, weekStart, weekEnd).
 			Count(&wRecv)
-		model.DB.Model(&model.ReviewIssue{}).
+		newRiDB().
 			Where("deleted_at IS NULL AND (owner_id = ? OR current_owner_id = ?) AND resolved_at >= ? AND resolved_at < ? AND status IN (?)", user.ID, user.ID, weekStart, weekEnd,
 				[]string{model.IssueStatusResolved, model.IssueStatusFalsePositive, model.IssueStatusIgnored}).
 			Count(&wClose)
-		model.DB.Model(&model.ReviewIssue{}).
+		newRiDB().
 			Where("deleted_at IS NULL AND status IN (?) AND (owner_id = ? OR current_owner_id = ?) AND created_at <= ?", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, user.ID, user.ID, weekEnd).
 			Count(&wPending)
 		trends = append(trends, trendItem{Week: weekStart.Format("01/02") + "-" + weekEnd.Format("01/02"), Received: wRecv, Closed: wClose, StillPending: wPending})
@@ -736,8 +820,13 @@ func (h *NotificationHandler) DeveloperDashboard(c *gin.Context) {
 
 // AdminDashboard 管理员全局大盘
 func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
-	user := c.MustGet("user").(model.User)
-	if user.Role != model.RoleAdmin {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
+	if !scope.HasOrgRole("super_admin", "org_admin") {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
@@ -746,9 +835,9 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 
 	var todayNew, totalPending, totalPendingBefore, overdue, overdueBefore int64
 	todayStart := time.Now().Truncate(24 * time.Hour)
-	model.DB.Model(&model.ReviewIssue{}).
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND created_at >= ?", todayStart).Count(&todayNew)
-	q := model.DB.Model(&model.ReviewIssue{}).
+	q := model.DBWithScope(scope).Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND status IN (?)", []string{model.IssueStatusPending, model.IssueStatusPendingInherited})
 	q.Count(&totalPending)
 	if !baseline.IsZero() {
@@ -758,7 +847,7 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 
 	// overdue: pending > 120 work hours（简化用 5 天）
 	overdueSince := time.Now().AddDate(0, 0, -5)
-	qo := model.DB.Model(&model.ReviewIssue{}).
+	qo := model.DBWithScope(scope).Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND status IN (?) AND original_created_at < ?", []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, overdueSince)
 	qo.Count(&overdue)
 	if !baseline.IsZero() {
@@ -768,20 +857,20 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 
 	// 归档统计
 	var todayArchived, totalArchived, todayEscalated int64
-	model.DB.Model(&model.ReviewIssue{}).
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND status = ? AND updated_at >= ?", model.IssueStatusAutoArchived, todayStart).Count(&todayArchived)
-	model.DB.Model(&model.ReviewIssue{}).
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND status = ?", model.IssueStatusAutoArchived).Count(&totalArchived)
 	// 今日升级：escalation_level 今日发生变化（排除已归档）
-	model.DB.Model(&model.ReviewIssue{}).
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND escalation_level > 0 AND status != ? AND updated_at >= ?", model.IssueStatusAutoArchived, todayStart).Count(&todayEscalated)
 
 	// 7 天闭环率
 	sevenDaysAgo := time.Now().AddDate(0, 0, -7)
 	var weekCreated, weekClosed int64
-	model.DB.Model(&model.ReviewIssue{}).
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND created_at >= ?", sevenDaysAgo).Count(&weekCreated)
-	model.DB.Model(&model.ReviewIssue{}).
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).
 		Where("deleted_at IS NULL AND resolved_at >= ? AND status IN (?)", sevenDaysAgo,
 			[]string{model.IssueStatusResolved, model.IssueStatusFalsePositive, model.IssueStatusIgnored}).Count(&weekClosed)
 	closeRate := float64(0)
@@ -795,12 +884,26 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 		DurationSec float64
 	}
 	var durations []ResolveDuration
-	model.DB.Raw(`
-		SELECT TIMESTAMPDIFF(SECOND, original_created_at, resolved_at) AS duration_sec
-		FROM review_issues
-		WHERE deleted_at IS NULL AND status IN (?) AND resolved_at IS NOT NULL
-			AND resolved_at >= ?
-	`, []string{model.IssueStatusResolved, model.IssueStatusFalsePositive, model.IssueStatusIgnored}, thirtyDaysAgo).Scan(&durations)
+	// 多租户改造：原始SQL连接tasks表通过project_id关联org
+	if scope.IsSuperAdmin {
+		model.DB.Raw(`
+			SELECT TIMESTAMPDIFF(SECOND, review_issues.original_created_at, review_issues.resolved_at) AS duration_sec
+			FROM review_issues
+			WHERE deleted_at IS NULL AND status IN (?) AND resolved_at IS NOT NULL
+				AND resolved_at >= ?
+			`, []string{model.IssueStatusResolved, model.IssueStatusFalsePositive, model.IssueStatusIgnored}, thirtyDaysAgo).Scan(&durations)
+	} else {
+		model.DB.Raw(`
+			SELECT TIMESTAMPDIFF(SECOND, review_issues.original_created_at, review_issues.resolved_at) AS duration_sec
+			FROM review_issues
+			INNER JOIN tasks ON tasks.id = review_issues.task_id
+			INNER JOIN projects ON projects.id = tasks.project_id
+			WHERE review_issues.deleted_at IS NULL AND review_issues.status IN (?)
+				AND review_issues.resolved_at IS NOT NULL
+				AND review_issues.resolved_at >= ?
+				AND projects.org_id IN ?
+			`, []string{model.IssueStatusResolved, model.IssueStatusFalsePositive, model.IssueStatusIgnored}, thirtyDaysAgo, scope.VisibleOrgIDs).Scan(&durations)
+	}
 	medianDays := float64(0)
 	if len(durations) > 0 {
 		vals := make([]float64, len(durations))
@@ -812,9 +915,9 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 
 	// IM 投递统计（今日）
 	var imTotal, imSuccess int64
-	model.DB.Model(&model.NotificationDeliveryLog{}).
+	model.DBWithScope(scope).Model(&model.NotificationDeliveryLog{}).
 		Where("created_at >= ?", todayStart).Count(&imTotal)
-	model.DB.Model(&model.NotificationDeliveryLog{}).
+	model.DBWithScope(scope).Model(&model.NotificationDeliveryLog{}).
 		Where("status = ? AND created_at >= ?", "success", todayStart).Count(&imSuccess)
 
 	// 积压项目告警
@@ -827,34 +930,56 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 		OverdueBeforeBaseline int64  `json:"overdue_before_baseline"`
 	}
 	var alerts []alertItem
-	model.DB.Raw(`
-		SELECT 
-			projects.id AS project_id,
-			projects.name AS project_name,
-			COUNT(review_issues.id) AS pending_count,
-			COUNT(CASE WHEN review_issues.original_created_at < ? THEN 1 END) AS overdue_count,
-			COUNT(CASE WHEN review_issues.original_created_at < ? THEN 1 END) AS pending_before_baseline,
-			COUNT(CASE WHEN review_issues.original_created_at < ? AND review_issues.original_created_at < ? THEN 1 END) AS overdue_before_baseline
-		FROM projects
-		INNER JOIN tasks ON tasks.project_id = projects.id
-		INNER JOIN review_issues ON review_issues.task_id = tasks.id
-			AND review_issues.deleted_at IS NULL
-			AND review_issues.status IN (?)
-		GROUP BY projects.id, projects.name
-		HAVING pending_count > 0
-		ORDER BY pending_count DESC
-		LIMIT 10
-	`, overdueSince, baseline, overdueSince, baseline, []string{model.IssueStatusPending, model.IssueStatusPendingInherited}).Scan(&alerts)
+	// 多租户改造：RAW SQL 也加入 org_id 过滤
+	if scope.IsSuperAdmin {
+		model.DB.Raw(`
+			SELECT 
+				projects.id AS project_id,
+				projects.name AS project_name,
+				COUNT(review_issues.id) AS pending_count,
+				COUNT(CASE WHEN review_issues.original_created_at < ? THEN 1 END) AS overdue_count,
+				COUNT(CASE WHEN review_issues.original_created_at < ? THEN 1 END) AS pending_before_baseline,
+				COUNT(CASE WHEN review_issues.original_created_at < ? AND review_issues.original_created_at < ? THEN 1 END) AS overdue_before_baseline
+			FROM projects
+			INNER JOIN tasks ON tasks.project_id = projects.id
+			INNER JOIN review_issues ON review_issues.task_id = tasks.id
+				AND review_issues.deleted_at IS NULL
+				AND review_issues.status IN (?)
+			GROUP BY projects.id, projects.name
+			HAVING pending_count > 0
+			ORDER BY pending_count DESC
+			LIMIT 10
+		`, overdueSince, baseline, overdueSince, baseline, []string{model.IssueStatusPending, model.IssueStatusPendingInherited}).Scan(&alerts)
+	} else {
+		model.DB.Raw(`
+			SELECT 
+				projects.id AS project_id,
+				projects.name AS project_name,
+				COUNT(review_issues.id) AS pending_count,
+				COUNT(CASE WHEN review_issues.original_created_at < ? THEN 1 END) AS overdue_count,
+				COUNT(CASE WHEN review_issues.original_created_at < ? THEN 1 END) AS pending_before_baseline,
+				COUNT(CASE WHEN review_issues.original_created_at < ? AND review_issues.original_created_at < ? THEN 1 END) AS overdue_before_baseline
+			FROM projects
+			INNER JOIN tasks ON tasks.project_id = projects.id
+			INNER JOIN review_issues ON review_issues.task_id = tasks.id
+				AND review_issues.deleted_at IS NULL
+				AND review_issues.status IN (?)
+			WHERE projects.org_id IN ?
+			GROUP BY projects.id, projects.name
+			HAVING pending_count > 0
+			ORDER BY pending_count DESC
+			LIMIT 10
+		`, overdueSince, baseline, overdueSince, baseline, []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, scope.VisibleOrgIDs).Scan(&alerts)
+	}
 
 	// Issue 状态分布
-
 	var distPending, distPendingInherited, distResolved, distFalsePositive, distIgnored, distAutoFiltered int64
-	model.DB.Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusPending).Count(&distPending)
-	model.DB.Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusPendingInherited).Count(&distPendingInherited)
-	model.DB.Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusResolved).Count(&distResolved)
-	model.DB.Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusFalsePositive).Count(&distFalsePositive)
-	model.DB.Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusIgnored).Count(&distIgnored)
-	model.DB.Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusAutoFiltered).Count(&distAutoFiltered)
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusPending).Count(&distPending)
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusPendingInherited).Count(&distPendingInherited)
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusResolved).Count(&distResolved)
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusFalsePositive).Count(&distFalsePositive)
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusIgnored).Count(&distIgnored)
+	model.DBWithScope(scope).Model(&model.ReviewIssue{}).Where("deleted_at IS NULL AND status = ?", model.IssueStatusAutoFiltered).Count(&distAutoFiltered)
 
 	// 待处理最多的项目 Top 10
 	type pendingProj struct {
@@ -863,18 +988,34 @@ func (h *NotificationHandler) AdminDashboard(c *gin.Context) {
 		PendingBeforeBaseline   int64  `json:"pending_before_baseline"`
 	}
 	var topPendingProjects []pendingProj
-	model.DB.Raw(`
-		SELECT projects.name AS name, COUNT(review_issues.id) AS pending_count,
-			COUNT(CASE WHEN review_issues.original_created_at < ? THEN 1 END) AS pending_before_baseline
-		FROM projects
-		INNER JOIN tasks ON tasks.project_id = projects.id
-		INNER JOIN review_issues ON review_issues.task_id = tasks.id
-			AND review_issues.deleted_at IS NULL
-			AND review_issues.status IN (?)
-		GROUP BY projects.id, projects.name
-		ORDER BY pending_count DESC
-		LIMIT 10
-	`, baseline, []string{model.IssueStatusPending, model.IssueStatusPendingInherited}).Scan(&topPendingProjects)
+	if scope.IsSuperAdmin {
+		model.DB.Raw(`
+			SELECT projects.name AS name, COUNT(review_issues.id) AS pending_count,
+				COUNT(CASE WHEN review_issues.original_created_at < ? THEN 1 END) AS pending_before_baseline
+			FROM projects
+			INNER JOIN tasks ON tasks.project_id = projects.id
+			INNER JOIN review_issues ON review_issues.task_id = tasks.id
+				AND review_issues.deleted_at IS NULL
+				AND review_issues.status IN (?)
+			GROUP BY projects.id, projects.name
+			ORDER BY pending_count DESC
+			LIMIT 10
+		`, baseline, []string{model.IssueStatusPending, model.IssueStatusPendingInherited}).Scan(&topPendingProjects)
+	} else {
+		model.DB.Raw(`
+			SELECT projects.name AS name, COUNT(review_issues.id) AS pending_count,
+				COUNT(CASE WHEN review_issues.original_created_at < ? THEN 1 END) AS pending_before_baseline
+			FROM projects
+			INNER JOIN tasks ON tasks.project_id = projects.id
+			INNER JOIN review_issues ON review_issues.task_id = tasks.id
+				AND review_issues.deleted_at IS NULL
+				AND review_issues.status IN (?)
+			WHERE projects.org_id IN ?
+			GROUP BY projects.id, projects.name
+			ORDER BY pending_count DESC
+			LIMIT 10
+		`, baseline, []string{model.IssueStatusPending, model.IssueStatusPendingInherited}, scope.VisibleOrgIDs).Scan(&topPendingProjects)
+	}
 
 	baselineStr := ""
 	if !baseline.IsZero() {
@@ -942,22 +1083,46 @@ func (h *NotificationHandler) DeleteOldRead(c *gin.Context) {
 
 // ListRules 通知规则列表
 func (h *NotificationHandler) ListRules(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var rules []model.NotificationRule
-	model.DB.Order("id DESC").Find(&rules)
+	model.DB.Scopes(model.OrgScope(scope)).Order("id DESC").Find(&rules)
+
+	// 批量填充组织名称
+	orgIDs := make([]uint, 0, len(rules))
+	for _, r := range rules {
+		orgIDs = append(orgIDs, r.OrgID)
+	}
+	orgNameMap := model.BatchOrgNames(orgIDs)
+	for i := range rules {
+		rules[i].OrgName = orgNameMap[rules[i].OrgID]
+	}
+
 	c.JSON(http.StatusOK, gin.H{"data": rules})
 }
 
 // CreateRule 创建通知规则
 func (h *NotificationHandler) CreateRule(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var rule model.NotificationRule
 	if err := c.ShouldBindJSON(&rule); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	// issue.escalation 规则唯一性校验
+	if rule.OrgID == 0 || !scope.IsSuperAdmin {
+		rule.OrgID = middleware.GetCurrentOrgID(c)
+	}
+	// issue.escalation 规则唯一性校验（按组织）
 	if rule.Trigger == "issue.escalation" {
 		var existing model.NotificationRule
-		if err := model.DB.Where("`trigger` = ? AND enabled = ?", "issue.escalation", true).First(&existing).Error; err == nil {
+		if err := model.DB.Where("`trigger` = ? AND enabled = ? AND org_id = ?", "issue.escalation", true, rule.OrgID).First(&existing).Error; err == nil {
 			c.JSON(http.StatusConflict, gin.H{"error": "已存在启用的 Issue 升级规则，请先禁用或删除现有规则"})
 			return
 		}
@@ -981,9 +1146,18 @@ func (h *NotificationHandler) CreateRule(c *gin.Context) {
 
 // UpdateRule 更新通知规则
 func (h *NotificationHandler) UpdateRule(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 	var rule model.NotificationRule
-	if err := model.DB.First(&rule, id).Error; err != nil {
+	db := model.DB
+	if !scope.IsSuperAdmin {
+		db = db.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	if err := db.First(&rule, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
@@ -992,18 +1166,33 @@ func (h *NotificationHandler) UpdateRule(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	// issue.escalation 规则唯一性校验（排除自身）
+	if !scope.IsSuperAdmin {
+		delete(updates, "org_id")
+	}
+	// super_admin 可以修改 org_id：用 UpdateColumn 绕过 GORM hook
+	if scope.IsSuperAdmin {
+		if orgID, ok := extractOrgIDFromMap(updates); ok {
+			zap.L().Info("notification rule update: changing org_id", zap.Uint("id", rule.ID), zap.Uint("new_org_id", orgID))
+			if err := model.DB.Model(&model.NotificationRule{}).Where("id = ?", rule.ID).UpdateColumn("org_id", orgID).Error; err != nil {
+				zap.L().Error("notification rule update: org_id update failed", zap.Uint("id", rule.ID), zap.Uint("org_id", orgID), zap.Error(err))
+				c.JSON(500, gin.H{"error": "组织归属更新失败: " + err.Error()})
+				return
+			}
+			zap.L().Info("notification rule update: org_id updated successfully", zap.Uint("id", rule.ID), zap.Uint("new_org_id", orgID))
+			delete(updates, "org_id")
+		}
+	}
+	// issue.escalation 规则唯一性校验（排除自身，按组织）
 	trigger, _ := updates["trigger"].(string)
 	enabled, enabledOK := updates["enabled"].(bool)
 	if (trigger == "issue.escalation") || (trigger == "" && rule.Trigger == "issue.escalation") {
-		// 如果更新后仍为 issue.escalation 且 enabled=true（或未传 enabled 但原规则已启用）
 		willBeEnabled := enabled
 		if !enabledOK {
 			willBeEnabled = rule.Enabled
 		}
 		if willBeEnabled {
 			var existing model.NotificationRule
-			if err := model.DB.Where("`trigger` = ? AND enabled = ? AND id != ?", "issue.escalation", true, rule.ID).First(&existing).Error; err == nil {
+			if err := model.DB.Where("`trigger` = ? AND enabled = ? AND id != ? AND org_id = ?", "issue.escalation", true, rule.ID, rule.OrgID).First(&existing).Error; err == nil {
 				c.JSON(http.StatusConflict, gin.H{"error": "已存在启用的 Issue 升级规则，请先禁用或删除现有规则"})
 				return
 			}
@@ -1017,7 +1206,7 @@ func (h *NotificationHandler) UpdateRule(c *gin.Context) {
 			}
 		}
 	}
-	if err := model.DB.Model(&rule).Updates(updates).Error; err != nil {
+	if err := model.DB.Model(&rule).Omit("org_id").Updates(updates).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -1026,8 +1215,17 @@ func (h *NotificationHandler) UpdateRule(c *gin.Context) {
 
 // DeleteRule 删除通知规则
 func (h *NotificationHandler) DeleteRule(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err := model.DB.Delete(&model.NotificationRule{}, id).Error; err != nil {
+	db := model.DB
+	if !scope.IsSuperAdmin {
+		db = db.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	if err := db.Delete(&model.NotificationRule{}, id).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -1037,6 +1235,11 @@ func (h *NotificationHandler) DeleteRule(c *gin.Context) {
 // ========== Holiday CRUD ==========
 
 func (h *NotificationHandler) ListHolidays(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	yearStr := c.Query("year")
 	holidayType := c.Query("type")
 	db := model.DB.Model(&model.Holiday{})
@@ -1048,16 +1251,33 @@ func (h *NotificationHandler) ListHolidays(c *gin.Context) {
 	}
 	var holidays []model.Holiday
 	db.Order("date DESC").Find(&holidays)
+
+	// 批量填充组织名称（节假日全局化过渡：统一展示为全局）
+	orgIDs := make([]uint, 0, len(holidays))
+	for _, h := range holidays {
+		orgIDs = append(orgIDs, h.OrgID)
+	}
+	orgNameMap := model.BatchOrgNames(orgIDs)
+	for i := range holidays {
+		holidays[i].OrgName = orgNameMap[holidays[i].OrgID]
+	}
+
 	c.JSON(http.StatusOK, gin.H{"data": holidays})
 }
 
 func (h *NotificationHandler) CreateHoliday(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var req struct {
 		Date        string `json:"date" binding:"required"`
 		Name        string `json:"name"`
 		Type        string `json:"type"`
 		IsRecurring bool   `json:"is_recurring"`
 		IsWorkday   bool   `json:"is_workday"`
+		OrgID       uint   `json:"org_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -1080,6 +1300,7 @@ func (h *NotificationHandler) CreateHoliday(c *gin.Context) {
 		year = 0
 	}
 
+	// 节假日全局化：统一使用根组织 org_id=1，前台忽略组织隔离
 	holiday := model.Holiday{
 		Date:        req.Date,
 		Name:        req.Name,
@@ -1087,6 +1308,7 @@ func (h *NotificationHandler) CreateHoliday(c *gin.Context) {
 		IsRecurring: req.IsRecurring,
 		Year:        year,
 		IsWorkday:   req.IsWorkday,
+		OrgID:       1,
 	}
 	if err := model.DB.Create(&holiday).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -1096,6 +1318,11 @@ func (h *NotificationHandler) CreateHoliday(c *gin.Context) {
 }
 
 func (h *NotificationHandler) UpdateHoliday(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 	var holiday model.Holiday
 	if err := model.DB.First(&holiday, id).Error; err != nil {
@@ -1142,6 +1369,9 @@ func (h *NotificationHandler) UpdateHoliday(c *gin.Context) {
 	if req.IsWorkday != nil {
 		updates["is_workday"] = *req.IsWorkday
 	}
+	// 节假日全局化：禁止修改 org_id
+	delete(updates, "org_id")
+
 	if err := model.DB.Model(&holiday).Updates(updates).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -1150,6 +1380,11 @@ func (h *NotificationHandler) UpdateHoliday(c *gin.Context) {
 }
 
 func (h *NotificationHandler) DeleteHoliday(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err := model.DB.Delete(&model.Holiday{}, id).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -1159,6 +1394,11 @@ func (h *NotificationHandler) DeleteHoliday(c *gin.Context) {
 }
 
 func (h *NotificationHandler) BatchDeleteHolidays(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var req struct {
 		IDs []uint `json:"ids" binding:"required"`
 	}
@@ -1175,6 +1415,17 @@ func (h *NotificationHandler) BatchDeleteHolidays(c *gin.Context) {
 
 // ImportHolidays 批量导入（JSON 数组）
 func (h *NotificationHandler) ImportHolidays(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+	_, ok := currentUserOrAbort(c)
+	if !ok { return }
+	if !scope.HasOrgRole("super_admin", "org_admin") {
+		c.JSON(403, gin.H{"error": "admin required"})
+		return
+	}
 	var req []struct {
 		Date        string `json:"date" binding:"required"`
 		Name        string `json:"name"`
@@ -1223,6 +1474,17 @@ func (h *NotificationHandler) ImportHolidays(c *gin.Context) {
 
 // SyncHolidaysFromAPI 从 holiday-cn 同步中国法定节假日与调休数据
 func (h *NotificationHandler) SyncHolidaysFromAPI(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+	_, ok := currentUserOrAbort(c)
+	if !ok { return }
+	if !scope.HasOrgRole("super_admin", "org_admin") {
+		c.JSON(403, gin.H{"error": "admin required"})
+		return
+	}
 	year := c.Query("year")
 	if year == "" {
 		year = strconv.Itoa(time.Now().Year())
@@ -1259,7 +1521,7 @@ func (h *NotificationHandler) SyncHolidaysFromAPI(c *gin.Context) {
 		return
 	}
 
-	yearInt, _ := strconv.Atoi(year)
+	 yearInt, _ := strconv.Atoi(year)
 	var toCreate []model.Holiday
 	for _, item := range data.Days {
 		var existing model.Holiday
@@ -1280,6 +1542,7 @@ func (h *NotificationHandler) SyncHolidaysFromAPI(c *gin.Context) {
 			IsRecurring: false,
 			Year:        yearInt,
 			IsWorkday:   isWorkday,
+			OrgID:       1,
 		})
 	}
 	count := len(toCreate)
@@ -1296,8 +1559,12 @@ func (h *NotificationHandler) SyncHolidaysFromAPI(c *gin.Context) {
 
 // GetGlobalSettings 获取通知规则生效起点
 func (h *NotificationHandler) GetGlobalSettings(c *gin.Context) {
-	user := c.MustGet("user").(model.User)
-	if user.Role != model.RoleAdmin {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+	if !scope.HasOrgRole("super_admin", "org_admin") {
 		c.JSON(http.StatusForbidden, gin.H{"error": "admin required"})
 		return
 	}
@@ -1335,8 +1602,13 @@ func (h *NotificationHandler) GetGlobalSettings(c *gin.Context) {
 
 // UpdateGlobalSettings 修改通知规则生效起点
 func (h *NotificationHandler) UpdateGlobalSettings(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	user := c.MustGet("user").(model.User)
-	if user.Role != model.RoleAdmin {
+	if !scope.HasOrgRole("super_admin", "org_admin") {
 		c.JSON(http.StatusForbidden, gin.H{"error": "admin required"})
 		return
 	}
@@ -1410,8 +1682,12 @@ func (h *NotificationHandler) UpdateGlobalSettings(c *gin.Context) {
 
 // PreviewBaseline 预览指定生效起点的影响范围
 func (h *NotificationHandler) PreviewBaseline(c *gin.Context) {
-	user := c.MustGet("user").(model.User)
-	if user.Role != model.RoleAdmin {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+	if !scope.IsSuperAdmin {
 		c.JSON(http.StatusForbidden, gin.H{"error": "admin required"})
 		return
 	}

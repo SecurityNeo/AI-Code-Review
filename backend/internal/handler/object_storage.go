@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ai-optimizer/backend/internal/middleware"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
 	"github.com/gin-gonic/gin"
@@ -18,19 +19,40 @@ func NewObjectStorageHandler() *ObjectStorageHandler {
 
 // ListConfigs 列表
 func (h *ObjectStorageHandler) ListConfigs(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var configs []model.ObjectStorageConfig
-	if err := model.DB.Order("id ASC").Find(&configs).Error; err != nil {
+	if err := model.DB.Scopes(model.OrgScope(scope)).Order("id ASC").Find(&configs).Error; err != nil {
 		c.JSON(500, gin.H{"error": "查询失败"})
 		return
 	}
+
+	// 批量填充组织名称
+	orgIDs := make([]uint, 0, len(configs))
+	for _, cfg := range configs {
+		orgIDs = append(orgIDs, cfg.OrgID)
+	}
+	orgNameMap := model.BatchOrgNames(orgIDs)
+	for i := range configs {
+		configs[i].OrgName = orgNameMap[configs[i].OrgID]
+	}
+
 	c.JSON(200, configs)
 }
 
 // GetConfig 详情
 func (h *ObjectStorageHandler) GetConfig(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 	var cfg model.ObjectStorageConfig
-	if err := model.DB.First(&cfg, id).Error; err != nil {
+	if err := model.DB.Scopes(model.OrgScope(scope)).First(&cfg, id).Error; err != nil {
 		c.JSON(404, gin.H{"error": "配置不存在"})
 		return
 	}
@@ -39,13 +61,24 @@ func (h *ObjectStorageHandler) GetConfig(c *gin.Context) {
 
 // CreateConfig 创建（含连接测试）
 func (h *ObjectStorageHandler) CreateConfig(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var req storageConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
 
+	orgID := middleware.GetCurrentOrgID(c)
+	if req.OrgID > 0 && scope.IsSuperAdmin {
+		orgID = req.OrgID
+	}
+
 	cfg := model.ObjectStorageConfig{
+		OrgID:     orgID,
 		Name:      req.Name,
 		Enabled:   req.Enabled,
 		IsDefault: req.IsDefault,
@@ -102,7 +135,7 @@ func (h *ObjectStorageHandler) CreateConfig(c *gin.Context) {
 
 	// 如果设为默认，取消其他默认
 	if cfg.IsDefault {
-		model.DB.Model(&model.ObjectStorageConfig{}).Where("is_default = ?", true).Update("is_default", false)
+		model.DB.Model(&model.ObjectStorageConfig{}).Scopes(model.OrgScope(scope)).Where("is_default = ?", true).Update("is_default", false)
 	}
 
 	if err := model.DB.Create(&cfg).Error; err != nil {
@@ -112,7 +145,7 @@ func (h *ObjectStorageHandler) CreateConfig(c *gin.Context) {
 
 	// 如果设为默认，立即生效
 	if cfg.IsDefault {
-		_ = service.InitObjectStorageProvider()
+		_ = service.InitObjectStorageProvider(scope)
 	}
 
 	c.JSON(200, cfg)
@@ -120,9 +153,18 @@ func (h *ObjectStorageHandler) CreateConfig(c *gin.Context) {
 
 // UpdateConfig 更新
 func (h *ObjectStorageHandler) UpdateConfig(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 	var cfg model.ObjectStorageConfig
-	if err := model.DB.First(&cfg, id).Error; err != nil {
+	db := model.DB
+	if !scope.IsSuperAdmin {
+		db = db.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	if err := db.First(&cfg, id).Error; err != nil {
 		c.JSON(404, gin.H{"error": "配置不存在"})
 		return
 	}
@@ -145,6 +187,11 @@ func (h *ObjectStorageHandler) UpdateConfig(c *gin.Context) {
 		"use_ssl":          req.UseSSL,
 		"retention_days":   req.RetentionDays,
 		"max_object_size":  req.MaxObjectSize,
+	}
+
+	// 多租户改造：super_admin 可修改所属组织
+	if req.OrgID > 0 && scope.IsSuperAdmin {
+		updates["org_id"] = req.OrgID
 	}
 
 	// 凭据：如果传入新的则更新
@@ -212,7 +259,7 @@ func (h *ObjectStorageHandler) UpdateConfig(c *gin.Context) {
 
 	// 默认配置互斥
 	if req.IsDefault {
-		model.DB.Model(&model.ObjectStorageConfig{}).Where("is_default = ? AND id != ?", true, id).Update("is_default", false)
+		model.DB.Model(&model.ObjectStorageConfig{}).Scopes(model.OrgScope(scope)).Where("is_default = ? AND id != ?", true, id).Update("is_default", false)
 	}
 
 	if err := model.DB.Model(&cfg).Updates(updates).Error; err != nil {
@@ -222,7 +269,7 @@ func (h *ObjectStorageHandler) UpdateConfig(c *gin.Context) {
 
 	// 如果更新的是当前默认配置且 enabled 变化，可能需要重新初始化 provider
 	if cfg.IsDefault {
-		_ = service.InitObjectStorageProvider()
+		_ = service.InitObjectStorageProvider(scope)
 	}
 
 	// 重新查询返回（脱敏）
@@ -232,27 +279,45 @@ func (h *ObjectStorageHandler) UpdateConfig(c *gin.Context) {
 
 // DeleteConfig 删除
 func (h *ObjectStorageHandler) DeleteConfig(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 	var cfg model.ObjectStorageConfig
 	wasDefault := false
-	if err := model.DB.First(&cfg, id).Error; err == nil {
+	db := model.DB
+	if !scope.IsSuperAdmin {
+		db = db.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	if err := db.First(&cfg, id).Error; err == nil {
 		wasDefault = cfg.IsDefault
 	}
-	if err := model.DB.Delete(&model.ObjectStorageConfig{}, id).Error; err != nil {
+	if err := db.Delete(&model.ObjectStorageConfig{}, id).Error; err != nil {
 		c.JSON(500, gin.H{"error": "删除失败"})
 		return
 	}
 	if wasDefault {
-		_ = service.InitObjectStorageProvider()
+		_ = service.InitObjectStorageProvider(scope)
 	}
 	c.JSON(200, gin.H{"message": "删除成功"})
 }
 
 // TestConfig 测试连接（不保存）
 func (h *ObjectStorageHandler) TestConfig(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 	var cfg model.ObjectStorageConfig
-	if err := model.DB.First(&cfg, id).Error; err != nil {
+	db := model.DB
+	if !scope.IsSuperAdmin {
+		db = db.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	if err := db.First(&cfg, id).Error; err != nil {
 		c.JSON(404, gin.H{"error": "配置不存在"})
 		return
 	}
@@ -275,49 +340,64 @@ func (h *ObjectStorageHandler) TestConfig(c *gin.Context) {
 		"last_error":        msg,
 		"last_checked_at":   time.Now(),
 	}
-	model.DB.Model(&cfg).Updates(updates)
+	db.Model(&cfg).Omit("org_id").Updates(updates)
 
 	c.JSON(200, gin.H{"success": ok, "message": msg})
 }
 
 // SetDefault 设为默认
 func (h *ObjectStorageHandler) SetDefault(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 	var cfg model.ObjectStorageConfig
-	if err := model.DB.First(&cfg, id).Error; err != nil {
+	db := model.DB
+	if !scope.IsSuperAdmin {
+		db = db.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	if err := db.First(&cfg, id).Error; err != nil {
 		c.JSON(404, gin.H{"error": "配置不存在"})
 		return
 	}
 
-	model.DB.Model(&model.ObjectStorageConfig{}).Where("is_default = ?", true).Update("is_default", false)
+	model.DB.Model(&model.ObjectStorageConfig{}).Where("is_default = ? AND org_id = ?", true, cfg.OrgID).Update("is_default", false)
 	model.DB.Model(&cfg).Update("is_default", true)
 
 	// 重新初始化 provider
-	_ = service.InitObjectStorageProvider()
+	_ = service.InitObjectStorageProvider(scope)
 
 	c.JSON(200, gin.H{"message": "已设为默认"})
 }
 
 // storageConfigRequest 请求体
 type storageConfigRequest struct {
-	Name          string `json:"name" binding:"required"`
-	Enabled       bool   `json:"enabled"`
-	IsDefault     bool   `json:"is_default"`
-	Type          string `json:"type" binding:"required"`
-	Region        string `json:"region"`
-	Bucket        string `json:"bucket" binding:"required"`
-	Endpoint      string `json:"endpoint"`
-	Prefix        string `json:"prefix"`
-	UseSSL        bool   `json:"use_ssl"`
-	AccessKey     string `json:"access_key"`
-	SecretKey     string `json:"secret_key"`
-	RetentionDays int    `json:"retention_days"`
-	MaxObjectSize int64  `json:"max_object_size"`
-	TestConnection bool  `json:"test_connection"`
+	Name           string `json:"name" binding:"required"`
+	Enabled        bool   `json:"enabled"`
+	IsDefault      bool   `json:"is_default"`
+	Type           string `json:"type" binding:"required"`
+	Region         string `json:"region"`
+	Bucket         string `json:"bucket" binding:"required"`
+	Endpoint       string `json:"endpoint"`
+	Prefix         string `json:"prefix"`
+	UseSSL         bool   `json:"use_ssl"`
+	AccessKey      string `json:"access_key"`
+	SecretKey      string `json:"secret_key"`
+	RetentionDays  int    `json:"retention_days"`
+	MaxObjectSize  int64  `json:"max_object_size"`
+	TestConnection bool   `json:"test_connection"`
+	OrgID          uint   `json:"org_id"`
 }
 
 // TestConfigWithBody 用请求体中的参数测试连接（不保存到数据库）
 func (h *ObjectStorageHandler) TestConfigWithBody(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var req storageConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})

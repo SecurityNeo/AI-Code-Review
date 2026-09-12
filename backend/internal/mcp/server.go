@@ -691,10 +691,10 @@ func (s *Server) AuthMiddleware() func(http.Handler) http.Handler {
 				_ = json.Unmarshal([]byte(matchedKey.Scopes), &scopes)
 			}
 
-			// 更新最后使用时间
-			now := time.Now()
-			matchedKey.LastUsedAt = &now
-			model.DB.Save(matchedKey)
+		// 更新最后使用时间
+		// 多租户改造：单字段更新，避免 Save 零值覆盖 org_id
+		now := time.Now()
+		model.DB.Model(matchedKey).Update("last_used_at", now)
 
 			clientIP := getClientIP(r)
 			var authCtx *AuthContext
@@ -707,6 +707,7 @@ func (s *Server) AuthMiddleware() func(http.Handler) http.Handler {
 						APIKey:     matchedKey,
 						User:       &user,
 						UserID:     user.ID,
+						OrgID:      matchedKey.OrgID, // 多租户改造：固定绑定到 API Key 的组织
 						IMUserID:   user.IMUserID,
 						IMProvider: user.IMPlatform,
 						Scopes:     scopes,
@@ -717,6 +718,7 @@ func (s *Server) AuthMiddleware() func(http.Handler) http.Handler {
 					// 绑定用户已删除或被禁用：降级为共享模式，留待 tools/call 时从 Header 补充身份
 					authCtx = &AuthContext{
 						APIKey:   matchedKey,
+						OrgID:    matchedKey.OrgID, // 多租户改造：固定绑定
 						Scopes:   scopes,
 						ClientIP: clientIP,
 					}
@@ -728,6 +730,7 @@ func (s *Server) AuthMiddleware() func(http.Handler) http.Handler {
 				// -- 共享模式（旧 Key 兼容）-- 仅通道认证，用户身份在 tools/call 时从 Header 获取
 				authCtx = &AuthContext{
 					APIKey:   matchedKey,
+					OrgID:    matchedKey.OrgID, // 多租户改造：固定绑定
 					Scopes:   scopes,
 					ClientIP: clientIP,
 				}

@@ -42,7 +42,12 @@ func (h *UserHandler) Login(c *gin.Context) {
 	}
 
 	// 生成 token
-	token := middleware.GenerateToken(user.ID, user.Username)
+	token, err := middleware.GenerateToken(user.ID, user.Username)
+	if err != nil {
+		zap.L().Error("generate token failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成Token失败"})
+		return
+	}
 
 	model.RecordOpLog("用户登录", user.Username, user.ID, user.ID, "success", "", c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{
@@ -110,28 +115,47 @@ func (h *UserHandler) GetCurrentUser(c *gin.Context) {
 		return
 	}
 
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+
+	// 查询当前组织名称
+	var currentOrgName string
+	if scope.CurrentOrgID > 0 {
+		var org model.Organization
+		if err := model.DB.Select("name").First(&org, scope.CurrentOrgID).Error; err == nil {
+			currentOrgName = org.Name
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
-			"id":              user.ID,
-			"username":        user.Username,
-			"display_name":    user.DisplayName,
-			"role":            user.Role,
-			"login_type":      user.LoginType,
-			"gitlab_username": user.GitlabUsername,
-			"gitlab_email":    user.GitlabEmail,
-			"im_platform":     user.IMPlatform,
-			"im_user_id":      user.IMUserID,
-			"enabled":         user.Enabled,
-			"avatar_url":      user.AvatarURL,
+			"id":               user.ID,
+			"username":         user.Username,
+			"display_name":     user.DisplayName,
+			"current_org_id":   scope.CurrentOrgID,
+			"current_org_role": scope.CurrentOrgRole,
+			"current_org_name": currentOrgName,
+			"is_super_admin":   scope.IsSuperAdmin,
+			"default_org_id":   user.DefaultOrgID,
+			"login_type":       user.LoginType,
+			"gitlab_username":  user.GitlabUsername,
+			"gitlab_email":     user.GitlabEmail,
+			"im_platform":      user.IMPlatform,
+			"im_user_id":       user.IMUserID,
+			"enabled":          user.Enabled,
+			"avatar_url":       user.AvatarURL,
 		},
 	})
 }
 
 // ListUsers 用户列表（管理员）
 // GET /api/v1/users
+// 不再返回已废弃的 users.role 字段
 func (h *UserHandler) ListUsers(c *gin.Context) {
 	keyword := c.Query("keyword")
-	role := c.Query("role")
 	loginType := c.Query("login_type")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
@@ -143,7 +167,33 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 		pageSize = 20
 	}
 
-	users, total, err := h.service.ListUsers(keyword, role, loginType, page, pageSize)
+	// 支持按 org_id 过滤（MCP 密钥分配等场景使用）
+	scope := middleware.GetAuthScope(c)
+	var filterOrgID uint
+	if orgIDStr := c.Query("org_id"); orgIDStr != "" {
+		oid, _ := strconv.Atoi(orgIDStr)
+		filterOrgID = uint(oid)
+		if filterOrgID > 0 {
+			if scope != nil && !scope.IsSuperAdmin {
+				visible := false
+				for _, vid := range scope.VisibleOrgIDs {
+					if vid == filterOrgID {
+						visible = true
+						break
+					}
+				}
+				if !visible {
+					c.JSON(http.StatusForbidden, gin.H{"error": "无权访问该组织的用户"})
+					return
+				}
+			}
+		}
+	} else if scope != nil && !scope.IsSuperAdmin {
+		// 非 super_admin 未指定 org_id，强制使用当前组织过滤
+		filterOrgID = scope.CurrentOrgID
+	}
+
+	users, total, err := h.service.ListUsers(keyword, loginType, filterOrgID, page, pageSize)
 	if err != nil {
 		zap.L().Error("list users failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -172,6 +222,57 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 		}
 	}
 
+	// 批量查询组织名称
+	orgNames := make(map[uint]string)
+	if len(users) > 0 {
+		orgIDs := make([]uint, 0, len(users))
+		for _, u := range users {
+			if u.DefaultOrgID > 0 {
+				orgIDs = append(orgIDs, u.DefaultOrgID)
+			}
+		}
+		if len(orgIDs) > 0 {
+			var orgs []model.Organization
+			model.DB.Select("id, name").Where("id IN ?", orgIDs).Find(&orgs)
+			for _, o := range orgs {
+				orgNames[o.ID] = o.Name
+			}
+		}
+	}
+
+	// 批量查询 org_users 中的当前组织角色（按 default_org_id 匹配）
+	orgRoles := make(map[uint]string)
+	if len(users) > 0 {
+		userIDs := make([]uint, len(users))
+		defaultOrgMap := make(map[uint]uint, len(users))
+		for i, u := range users {
+			userIDs[i] = u.ID
+			defaultOrgMap[u.ID] = u.DefaultOrgID
+		}
+		type OrgUserResult struct {
+			UserID uint   `gorm:"column:user_id"`
+			OrgID  uint   `gorm:"column:org_id"`
+			Role   string `gorm:"column:role"`
+		}
+		var ouResults []OrgUserResult
+		model.DB.Table("org_users").
+			Select("user_id, org_id, role").
+			Where("user_id IN ? AND status = ?", userIDs, "active").
+			Scan(&ouResults)
+		// 优先匹配 default_org_id 对应的角色
+		for _, r := range ouResults {
+			if defaultOrgMap[r.UserID] == r.OrgID {
+				orgRoles[r.UserID] = r.Role
+			}
+		}
+		// fallback：若找不到 default_org_id 对应的，取第一个 active
+		for _, r := range ouResults {
+			if _, ok := orgRoles[r.UserID]; !ok {
+				orgRoles[r.UserID] = r.Role
+			}
+		}
+	}
+
 	// 不返回密码字段
 	list := make([]gin.H, 0, len(users))
 	for _, u := range users {
@@ -179,7 +280,6 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 			"id":                   u.ID,
 			"username":             u.Username,
 			"display_name":         u.DisplayName,
-			"role":                 u.Role,
 			"login_type":           u.LoginType,
 			"gitlab_username":      u.GitlabUsername,
 			"gitlab_email":         u.GitlabEmail,
@@ -189,6 +289,9 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 			"responsibility_count": respCounts[u.ID],
 			"avatar_url":           u.AvatarURL,
 			"created_at":           u.CreatedAt,
+			"org_id":               u.DefaultOrgID,
+			"org_name":             orgNames[u.DefaultOrgID],
+			"current_org_role":     orgRoles[u.ID],
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": list, "total": total, "page": page, "page_size": pageSize})
@@ -196,25 +299,59 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 
 // CreateUser 创建用户（管理员）
 // POST /api/v1/users
+// 已废弃的 users.role 不再由前端指定，新用户默认绑定组织角色为 developer
 func (h *UserHandler) CreateUser(c *gin.Context) {
 	var req struct {
 		Username    string `json:"username" binding:"required"`
 		DisplayName string `json:"display_name"`
 		Password    string `json:"password" binding:"required,min=6"`
-		Role        string `json:"role" binding:"required,oneof=admin user"`
 		IMPlatform  string `json:"im_platform"`
 		IMUserID    string `json:"im_user_id"`
+		OrgID       uint   `json:"org_id"`
+		// 新用户组织内角色，默认 developer
+		Role string `json:"role"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请提供用户名、密码（至少6位）和角色(admin/user)"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请提供用户名、密码（至少6位）"})
 		return
 	}
 
-	user, err := h.service.CreateUser(req.Username, req.DisplayName, req.Password, req.Role, req.IMPlatform, req.IMUserID)
+	user, err := h.service.CreateUser(req.Username, req.DisplayName, req.Password, req.IMPlatform, req.IMUserID)
 	if err != nil {
 		zap.L().Error("create user failed", zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	// 设置默认组织并创建 org_users 关联
+	orgID := req.OrgID
+	if orgID == 0 {
+		orgID = middleware.GetCurrentOrgID(c)
+	}
+	if orgID > 0 {
+		// 校验组织是否存在（防止 super_admin 传入不存在的 org_id）
+		var org model.Organization
+		if err := model.DB.First(&org, orgID).Error; err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "指定的组织不存在"})
+			return
+		}
+		if err := model.DB.Model(user).Update("default_org_id", orgID).Error; err != nil {
+			zap.L().Warn("set user default_org_id failed", zap.Uint("user_id", user.ID), zap.Uint("org_id", orgID), zap.Error(err))
+		}
+		role := req.Role
+		if role == "" {
+			role = "developer"
+		}
+		ou := model.OrgUser{
+			OrgID:     orgID,
+			UserID:    user.ID,
+			Role:      role,
+			Status:    "active",
+			IsDefault: true,
+		}
+		if err := model.DB.Create(&ou).Error; err != nil {
+			zap.L().Warn("create org_users record failed", zap.Uint("user_id", user.ID), zap.Uint("org_id", orgID), zap.Error(err))
+		}
 	}
 
 	currentUserID, exists := c.Get("user_id")
@@ -229,30 +366,106 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 			"id":           user.ID,
 			"username":     user.Username,
 			"display_name": user.DisplayName,
-			"role":         user.Role,
 		},
 	})
 }
 
 // UpdateUser 更新用户信息（管理员）
 // PUT /api/v1/users/:id
+// 已废弃的 users.role 不再可更新
 func (h *UserHandler) UpdateUser(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	var req struct {
-		DisplayName string `json:"display_name"`
-		Role        string `json:"role" binding:"omitempty,oneof=admin user"`
-		IMPlatform  string `json:"im_platform"`
-		IMUserID    string `json:"im_user_id"`
+		DisplayName *string `json:"display_name"`
+		IMPlatform  *string `json:"im_platform"`
+		IMUserID    *string `json:"im_user_id"`
+		OrgID       uint    `json:"org_id"`
+		// 多租户改造：支持编辑用户在组织内的角色
+		Role string `json:"role"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	if err := h.service.UpdateUser(uint(id), req.DisplayName, req.Role, req.IMPlatform, req.IMUserID); err != nil {
+	if err := h.service.UpdateUser(uint(id), req.DisplayName, req.IMPlatform, req.IMUserID, 0); err != nil {
 		zap.L().Error("update user failed", zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	// 多租户改造：支持编辑用户在组织内的角色
+	if req.Role != "" {
+		targetOrgID := req.OrgID
+		if targetOrgID == 0 {
+			var user model.User
+			if err := model.DB.Select("default_org_id").First(&user, id).Error; err == nil {
+				targetOrgID = user.DefaultOrgID
+			} else {
+				zap.L().Warn("update user role: cannot find user default_org_id", zap.Int("id", id), zap.Error(err))
+			}
+		}
+		if targetOrgID > 0 {
+			result := model.DB.Model(&model.OrgUser{}).
+				Where("user_id = ? AND org_id = ?", id, targetOrgID).
+				Update("role", req.Role)
+			if result.Error != nil {
+				zap.L().Error("update user role failed", zap.Int("id", id), zap.Uint("org_id", targetOrgID), zap.String("role", req.Role), zap.Error(result.Error))
+			} else if result.RowsAffected == 0 {
+				zap.L().Warn("update user role: no matching org_user record",
+					zap.Int("id", id),
+					zap.Uint("org_id", targetOrgID),
+					zap.String("role", req.Role))
+			}
+		} else {
+			zap.L().Warn("update user role: missing target org_id", zap.Int("id", id), zap.String("role", req.Role))
+		}
+	}
+
+	// 可选：迁移默认组织
+	if req.OrgID > 0 {
+		// 检查当前用户的 org_users 是否存在目标组织绑定
+		var existingOU model.OrgUser
+		if err := model.DB.Where("org_id = ? AND user_id = ?", req.OrgID, id).First(&existingOU).Error; err == nil {
+			// 已存在绑定：更新 default_org_id + is_default + role（如提供）
+			model.DB.Model(&model.User{}).Where("id = ?", id).Update("default_org_id", req.OrgID)
+			model.DB.Model(&model.OrgUser{}).Where("user_id = ? AND org_id != ?", id, req.OrgID).Update("is_default", false)
+			updates := map[string]interface{}{"is_default": true}
+			if req.Role != "" {
+				updates["role"] = req.Role
+			}
+			result := model.DB.Model(&model.OrgUser{}).Where("user_id = ? AND org_id = ?", id, req.OrgID).Updates(updates)
+			if result.Error != nil {
+				zap.L().Error("update user org role failed", zap.Int("id", id), zap.Uint("org_id", req.OrgID), zap.Error(result.Error))
+			} else if result.RowsAffected == 0 {
+				zap.L().Warn("update user org role: no matching record",
+					zap.Int("id", id),
+					zap.Uint("org_id", req.OrgID),
+					zap.String("role", req.Role))
+			}
+		} else {
+			// 不存在绑定：新增绑定并设为默认
+			if err := model.DB.Model(&model.User{}).Where("id = ?", id).Update("default_org_id", req.OrgID).Error; err != nil {
+				zap.L().Error("update user default_org_id failed", zap.Int("id", id), zap.Uint("org_id", req.OrgID), zap.Error(err))
+			}
+			role := req.Role
+			if role == "" {
+				role = "developer"
+			}
+			ou := model.OrgUser{
+				OrgID:     req.OrgID,
+				UserID:    uint(id),
+				Role:      role,
+				Status:    "active",
+				IsDefault: true,
+			}
+			if err := model.DB.Create(&ou).Error; err != nil {
+				zap.L().Error("create org_user failed", zap.Int("id", id), zap.Uint("org_id", req.OrgID), zap.Error(err))
+			}
+			if err := model.DB.Model(&model.OrgUser{}).Where("user_id = ? AND org_id != ?", id, req.OrgID).Update("is_default", false).Error; err != nil {
+				zap.L().Error("clear other org is_default failed", zap.Int("id", id), zap.Uint("org_id", req.OrgID), zap.Error(err))
+			}
+		}
 	}
 
 	currentUserID, exists := c.Get("user_id")
@@ -260,7 +473,7 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
 		return
 	}
-	model.RecordOpLog("用户更新", "用户ID:"+c.Param("id"), uint(id), currentUserID.(uint), "success", "", c.ClientIP())
+	model.RecordOpLog("用户更新", "", uint(id), currentUserID.(uint), "success", "", c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{"message": "用户更新成功"})
 }
 
@@ -329,7 +542,7 @@ func (h *UserHandler) GetUserResponsibilities(c *gin.Context) {
 		return
 	}
 
-	list, err := service.NewTeamMemberService().ListResponsibilitiesByUser(user.ID)
+	list, err := service.NewTeamMemberService().ListResponsibilitiesByUser(nil, user.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -358,7 +571,23 @@ func (h *UserHandler) AddUserResponsibility(c *gin.Context) {
 		return
 	}
 
-	resp, err := service.NewTeamMemberService().AddResponsibilityByUser(user.ID, data)
+	// 多租户改造：校验项目是否属于被分配用户的默认组织
+	if projectIDFloat, ok := data["project_id"].(float64); ok && projectIDFloat > 0 {
+		var project model.Project
+		if err := model.DB.Select("org_id").First(&project, uint(projectIDFloat)).Error; err == nil {
+			// 检查用户是否有该组织的 active 绑定（或 default_org_id 匹配）
+			if user.DefaultOrgID != project.OrgID {
+				var ouCount int64
+				model.DB.Model(&model.OrgUser{}).Where("user_id = ? AND org_id = ? AND status = ?", user.ID, project.OrgID, "active").Count(&ouCount)
+				if ouCount == 0 {
+					c.JSON(http.StatusForbidden, gin.H{"error": "该项目不属于用户所在组织，无法分配职责"})
+					return
+				}
+			}
+		}
+	}
+
+	resp, err := service.NewTeamMemberService().AddResponsibilityByUser(nil, user.ID, data)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -388,7 +617,7 @@ func (h *UserHandler) UpdateUserResponsibility(c *gin.Context) {
 		return
 	}
 
-	if err := service.NewTeamMemberService().UpdateResponsibility(uint(rid), data); err != nil {
+	if err := service.NewTeamMemberService().UpdateResponsibility(nil, uint(rid), data); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -417,7 +646,7 @@ func (h *UserHandler) DeleteUserResponsibility(c *gin.Context) {
 		return
 	}
 
-	if err := service.NewTeamMemberService().DeleteResponsibility(uint(rid)); err != nil {
+	if err := service.NewTeamMemberService().DeleteResponsibility(nil, uint(rid)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

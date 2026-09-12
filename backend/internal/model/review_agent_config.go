@@ -12,6 +12,7 @@ import (
 // ReviewAgentConfig AI评审智能体全局配置
 type ReviewAgentConfig struct {
 	ID              uint   `gorm:"primaryKey" json:"id"`
+	OrgID           uint   `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
 	EnabledStages   string `gorm:"type:json;not null;column:enabled_stages" json:"enabled_stages"`
 	StageConfigs    string `gorm:"type:json;column:stage_configs" json:"stage_configs"`
 	TriggerEvents   string `gorm:"type:json;column:trigger_events" json:"trigger_events"`

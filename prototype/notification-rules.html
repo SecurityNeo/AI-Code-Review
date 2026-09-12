@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>通知规则管理 - CodeGuard</title>
-    <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+    <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <script src="/static/js/marked.min.js"></script>
@@ -75,6 +76,7 @@
                     <thead class="bg-gray-50 border-b">
                         <tr>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">规则名称</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">所属组织</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">触发器</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">供应商</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">通知机器人</th>
@@ -83,7 +85,7 @@
                         </tr>
                     </thead>
                     <tbody id="ruleTableBody" class="divide-y">
-                        <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">加载中...</td></tr>
+                        <tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">加载中...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -120,6 +122,10 @@
                             <i class="fas fa-exclamation-circle mr-0.5"></i>已存在启用的 Issue 升级规则，保存将被拒绝
                         </div>
                     </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">所属组织</label>
+                    <select id="orgSelect" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"></select>
                 </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
@@ -364,7 +370,7 @@ const STAGE_MEANINGS = [
     '首次提醒（开发者本人）',
     '协助督促（抄送负责人）',
     '正式升级（通知负责人）',
-    '通知管理员',
+    '通知组织管理员',
     '自动归档'
 ];
 
@@ -534,7 +540,7 @@ function renderStages() {
                     <option value="owner" ${s.recipient==='owner'?'selected':''}>开发者</option>
                     <option value="owner+steward" ${s.recipient==='owner+steward'?'selected':''}>开发者+负责人</option>
                     <option value="steward" ${s.recipient==='steward'?'selected':''}>项目负责人</option>
-                    <option value="admin" ${s.recipient==='admin'?'selected':''}>管理员</option>
+                    <option value="admin" ${s.recipient==='admin'?'selected':''}>组织管理员</option>
                 </select>
             </div>
 
@@ -626,6 +632,7 @@ function showAddModal() {
     renderStages();
     onTriggerChange();
     document.getElementById('rEnabled').checked = true;
+    loadOrgSelect('orgSelect', null);
     document.getElementById('ruleModal').classList.remove('hidden');
     document.getElementById('ruleModal').classList.add('flex');
 }
@@ -662,6 +669,7 @@ async function editRule(id) {
         document.getElementById('rQuietEnd').value = String(r.quiet_hours_end || '09:00');
         document.getElementById('rDedup').value = String(r.dedup_window_minutes !== undefined ? r.dedup_window_minutes : 15);
         document.getElementById('rEnabled').checked = !!r.enabled;
+        loadOrgSelect('orgSelect', r.org_id || null);
         stages = [];
         if (r.escalation_config) {
             try {
@@ -697,25 +705,27 @@ async function doSave() {
         }
     }
     const notifierIdVal = document.getElementById('rNotifierId').value;
-    const payload = {
-        name: document.getElementById('rName').value.trim(),
-        trigger: trigger,
-        provider: document.getElementById('rProvider').value,
-        notifier_id: notifierIdVal ? parseInt(notifierIdVal) : null,
-        template: document.getElementById('rTemplate').value,
-        delay_minutes: parseInt(document.getElementById('rDelay').value) || 0,
-        quiet_hours_start: document.getElementById('rQuietStart').value,
-        quiet_hours_end: document.getElementById('rQuietEnd').value,
-        dedup_window_minutes: parseInt(document.getElementById('rDedup').value) || 0,
-        escalation_config: getEscalationJSON(),
-        enabled: enabled
-    };
+     let payload = {
+         name: document.getElementById('rName').value.trim(),
+         trigger: trigger,
+         provider: document.getElementById('rProvider').value,
+         notifier_id: notifierIdVal ? parseInt(notifierIdVal) : null,
+         template: document.getElementById('rTemplate').value,
+         delay_minutes: parseInt(document.getElementById('rDelay').value) || 0,
+         quiet_hours_start: document.getElementById('rQuietStart').value,
+         quiet_hours_end: document.getElementById('rQuietEnd').value,
+         dedup_window_minutes: parseInt(document.getElementById('rDedup').value) || 0,
+         escalation_config: getEscalationJSON(),
+         enabled: enabled
+     };
+     injectOrgId(payload, 'orgSelect');
     if (!payload.name) { showToast('请填写规则名称', 'error'); return; }
     if (!payload.notifier_id) { showToast('请选择通知机器人', 'error'); return; }
     try {
         const url = editingId ? `${API_BASE}/notification-rules/${editingId}` : `${API_BASE}/notification-rules`;
         const method = editingId ? 'PUT' : 'POST';
-        const res = await apiFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const orgHeaders = getOrgOverrideHeaders('orgSelect');
+        const res = await apiFetch(url, { method, headers: { ...orgHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         if (!res.ok) {
             let msg = 'HTTP ' + res.status;
             try {
@@ -902,11 +912,11 @@ async function showRuleDetail(id) {
                 { role: '开发者', title: 'Issue 已升级给项目负责人', desc: 'Issue #N 已升级给项目负责人\n您的 Issue 因超期 {th} 小时未处理，已升级给项目负责人协助推进。' }
             ],
             4: [
-                { role: '管理员', title: '【全局告警】Issue 超期 {th} 小时', desc: '【全局告警】项目 XXX 有 Issue 超期 {th} 小时未闭环，请关注。\nIssue #N\nMR：XXX\n问题：XXX' }
+                { role: '组织管理员', title: '【全局告警】Issue 超期 {th} 小时', desc: '【全局告警】项目 XXX 有 Issue 超期 {th} 小时未闭环，请关注。\nIssue #N\nMR：XXX\n问题：XXX' }
             ],
             5: [
                 { role: '责任人', title: 'Issue 已自动归档', desc: 'Issue #N 已自动归档\n因超期 {th} 小时未处理，系统已自动归档。\n项目：XXX\nMR：XXX' },
-                { role: '管理员', title: '【全局通知】Issue 自动归档', desc: '【全局通知】项目 XXX 有 Issue 已自动归档\nIssue #N 因超期 {th} 小时未处理，系统已自动归档。\nMR：XXX' }
+                { role: '组织管理员', title: '【全局通知】Issue 自动归档', desc: '【全局通知】项目 XXX 有 Issue 已自动归档\nIssue #N 因超期 {th} 小时未处理，系统已自动归档。\nMR：XXX' }
             ]
         };
         if (r.trigger === 'issue.escalation' && r.escalation_config) {
@@ -922,7 +932,7 @@ async function showRuleDetail(id) {
                         ${cfgStages.map((s, idx) => {
                             const level = s.level || (idx + 1);
                             const label = STAGE_MEANINGS[level - 1] || `Level ${level}`;
-                            const recipientMap = { owner: '开发者', 'owner+steward': '开发者+负责人', steward: '项目负责人', admin: '管理员', auto_archive: '自动归档' };
+                            const recipientMap = { owner: '开发者', 'owner+steward': '开发者+负责人', steward: '项目负责人', admin: '组织管理员', auto_archive: '自动归档' };
                             const recipientLabel = recipientMap[s.recipient] || s.recipient || '-';
                             const imBadge = s.notify_im
                                 ? '<span class="inline-flex items-center gap-1 text-[11px] bg-green-50 text-green-700 px-2 py-0.5 rounded border border-green-200"><i class="fas fa-comment text-[9px]"></i>启用IM</span>'
@@ -1075,12 +1085,13 @@ async function loadRules() {
         window.__escalationConflictId = rules.find(r => r.trigger === 'issue.escalation' && r.enabled)?.id || null;
         const tbody = document.getElementById('ruleTableBody');
         if (rules.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">暂无规则</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">暂无规则</td></tr>';
             return;
         }
         tbody.innerHTML = rules.map(r => `
             <tr class="hover:bg-gray-50">
                 <td class="px-4 py-3 text-sm font-medium text-gray-800">${escapeHtml(r.name)}</td>
+                <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(r.org_name || '根组织')}</td>
                 <td class="px-4 py-3 text-sm text-gray-600">${triggerLabels[r.trigger] || r.trigger}</td>
                 <td class="px-4 py-3 text-sm text-gray-600">${providerLabels[r.provider] || r.provider || '-'}</td>
                 <td class="px-4 py-3 text-sm text-gray-600">${r.notifier_id ? (() => {

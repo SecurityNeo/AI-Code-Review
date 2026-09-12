@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>规则孵化台 - CodeGuard</title>
-    <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+    <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <script src="/static/js/cytoscape.min.js"></script>
@@ -211,6 +212,7 @@
                                 <tr>
                                     <th class="px-3 py-2 w-8"></th>
                                     <th class="px-3 py-2 text-left">问题描述</th>
+                                    <th class="px-3 py-2 text-left">所属组织</th>
                                     <th class="px-3 py-2 text-left">文件</th>
                                     <th class="px-3 py-2 text-center">维度</th>
                                     <th class="px-3 py-2 text-center">级别</th>
@@ -359,7 +361,11 @@
                         </div>
                     </div>
 
-                    <div class="mt-4">
+                    <div class="mt-4 flex items-center gap-3">
+                        <div>
+                            <label class="block text-xs text-gray-500 mb-1">所属组织</label>
+                            <select id="orgSelectConfig" class="px-3 py-2 border rounded-lg text-sm bg-white"></select>
+                        </div>
                         <button onclick="saveConfig()" class="px-5 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
                             <i class="fas fa-save mr-1"></i>保存配置
                         </button>
@@ -790,6 +796,7 @@
                     <option value="low">低危</option>
                     <option value="info">提示</option>
                 </select>
+                <select id="orgSelect" class="px-3 py-2 border rounded-lg text-sm bg-white"></select>
                 <button onclick="loadIssuesForCreateCandidate()" class="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
                     <i class="fas fa-search mr-1"></i>查询
                 </button>
@@ -803,6 +810,7 @@
                             <input type="checkbox" id="createCandSelectAll" onchange="toggleCreateCandSelectAll()">
                         </th>
                         <th class="px-3 py-2 text-left">Issue 信息</th>
+                        <th class="px-3 py-2 text-left w-24">所属组织</th>
                         <th class="px-3 py-2 text-left w-24">维度</th>
                         <th class="px-3 py-2 text-left w-20">级别</th>
                         <th class="px-3 py-2 text-left w-24">时间</th>
@@ -933,7 +941,7 @@ async function loadIssues(page = 1) {
     if (sev) params.append('severity', sev);
 
     const tbody = document.getElementById('issueTableBody');
-    tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-gray-500">加载中...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center py-8 text-gray-500">加载中...</td></tr>';
 
     try {
         const res = await apiFetch(API_BASE + '/incubator/issues?' + params.toString());
@@ -944,7 +952,7 @@ async function loadIssues(page = 1) {
         document.getElementById('statUnmatched').textContent = total;
 
         if (list.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-gray-400">暂无数据</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center py-8 text-gray-400">暂无数据</td></tr>';
         } else {
             tbody.innerHTML = list.map(iss => `
                 <tr class="issue-row border-b">
@@ -952,6 +960,7 @@ async function loadIssues(page = 1) {
                     <td class="px-3 py-2" title="${escapeHtml(iss.message)}">
                         <div class="max-w-md truncate">${escapeHtml(iss.message)}</div>
                     </td>
+                    <td class="px-3 py-2 text-gray-500">${escapeHtml(iss.org_name || '-')}</td>
                     <td class="px-3 py-2 text-gray-500">${escapeHtml(iss.file || '-')}:${iss.line_start || 0}</td>
                     <td class="px-3 py-2 text-center"><span class="text-xs px-2 py-0.5 rounded bg-gray-100">${categoryName(iss.category)}</span></td>
                     <td class="px-3 py-2 text-center"><span class="text-xs px-2 py-0.5 rounded ${severityClass(iss.severity)}">${severityName(iss.severity)}</span></td>
@@ -965,7 +974,7 @@ async function loadIssues(page = 1) {
         }
         renderPagination('issuePagination', issuePage, Math.ceil(total / issuePageSize) || 1, loadIssues);
     } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-red-500">加载失败: ${err.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-red-500">加载失败: ${err.message}</td></tr>`;
     }
 }
 
@@ -1000,8 +1009,10 @@ function updateSelectionUI() {
 async function batchCreateCandidate() {
     if (selectedIssueIds.size === 0) return;
     try {
+        const orgHeaders = getOrgOverrideHeaders('orgSelect');
         const res = await apiFetch(API_BASE + '/incubator/candidates', {
             method: 'POST',
+            headers: orgHeaders,
             body: JSON.stringify({ source_issue_ids: Array.from(selectedIssueIds) })
         });
         const data = await res.json();
@@ -1270,15 +1281,16 @@ function renderTestResults(results) {
 
 function closeCandidateDrawer() { document.getElementById('candidateDrawer').classList.add('hidden'); }
 
-async function saveCandidate(id) {
-    const payload = {
-        name: document.getElementById('editCandName').value,
-        category: document.getElementById('editCandCategory').value,
-        severity: document.getElementById('editCandSeverity').value,
-        language: document.getElementById('editCandLanguage').value,
-        description: document.getElementById('editCandDesc').value,
-        prompt: document.getElementById('editCandPrompt').value,
-    };
+ async function saveCandidate(id) {
+     let payload = {
+         name: document.getElementById('editCandName').value,
+         category: document.getElementById('editCandCategory').value,
+         severity: document.getElementById('editCandSeverity').value,
+         language: document.getElementById('editCandLanguage').value,
+         description: document.getElementById('editCandDesc').value,
+         prompt: document.getElementById('editCandPrompt').value,
+     };
+     injectOrgId(payload, 'orgSelect');
     try {
         const res = await apiFetch(API_BASE + '/incubator/candidates/' + id, { method: 'PUT', body: JSON.stringify(payload) });
         if (res.ok) { showToast('已保存'); closeCandidateDrawer(); loadCandidates(); }
@@ -1342,6 +1354,7 @@ function openCreateCandidateModal() {
     document.getElementById('createCandIssueKeyword').value = '';
     document.getElementById('createCandIssueSeverity').value = '';
     loadIssuesForCreateCandidate();
+    loadOrgSelect('orgSelect');
 }
 
 function closeCreateCandidateModal() {
@@ -1398,6 +1411,7 @@ async function loadIssuesForCreateCandidate(page = 1) {
                         <div class="font-medium text-gray-800 text-xs">${issue.title || '无标题'}</div>
                         <div class="text-[10px] text-gray-500 mt-0.5 line-clamp-1">${issue.description || ''}</div>
                     </td>
+                    <td class="px-3 py-2 text-[10px] text-gray-500">${escapeHtml(issue.org_name || '-')}</td>
                     <td class="px-3 py-2">
                         <span class="inline-block px-2 py-0.5 text-[10px] rounded border bg-gray-50 text-gray-600">${issue.dimension || '-'}</span>
                     </td>
@@ -1466,11 +1480,15 @@ async function submitCreateCandidate() {
     const btn = document.getElementById('createCandSubmitBtn');
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>创建中...';
-    try {
-        const res = await apiFetch(API_BASE + '/incubator/candidates/batch', {
-            method: 'POST',
-            body: JSON.stringify({ source_issue_ids: Array.from(createCandSelectedIds) })
-        });
+     try {
+         const orgHeaders = getOrgOverrideHeaders('orgSelect');
+         let payload = { source_issue_ids: Array.from(createCandSelectedIds) };
+         injectOrgId(payload, 'orgSelect');
+         const res = await apiFetch(API_BASE + '/incubator/candidates/batch', {
+             method: 'POST',
+             headers: orgHeaders,
+             body: JSON.stringify(payload)
+         });
         const data = await res.json();
         if (data.code === 0) {
             showToast(`成功创建 ${data.data?.length || createCandSelectedIds.size} 条候选规则`);
@@ -2033,6 +2051,7 @@ async function loadConfig() {
             updateVectorizeUI(hasModel, {});
         }
     } catch (e) { console.error(e); }
+    loadOrgSelect('orgSelectConfig');
 }
 
 // 根据向量状态刷新配置页的提示区域
@@ -2101,18 +2120,20 @@ function updateVectorizeUI(hasModel, st) {
         </button>`;
 }
 
-async function saveConfig() {
-    const payload = {
-        embedding_model_id: document.getElementById('cfgEmbeddingModel').value ? parseInt(document.getElementById('cfgEmbeddingModel').value) : null,
-        cluster_time_window_days: parseInt(document.getElementById('cfgTimeWindow').value),
-        cluster_min_group_size: parseInt(document.getElementById('cfgMinGroupSize').value),
-        cluster_max_groups_per_run: parseInt(document.getElementById('cfgMaxGroups').value),
-        similarity_pass_threshold: parseFloat(document.getElementById('cfgSimilarityThreshold').value),
-        retro_match_enabled: document.getElementById('cfgRetroEnabled').checked,
-        retro_match_max_days_lookback: parseInt(document.getElementById('cfgRetroDays').value),
-    };
+ async function saveConfig() {
+     let payload = {
+         embedding_model_id: document.getElementById('cfgEmbeddingModel').value ? parseInt(document.getElementById('cfgEmbeddingModel').value) : null,
+         cluster_time_window_days: parseInt(document.getElementById('cfgTimeWindow').value),
+         cluster_min_group_size: parseInt(document.getElementById('cfgMinGroupSize').value),
+         cluster_max_groups_per_run: parseInt(document.getElementById('cfgMaxGroups').value),
+         similarity_pass_threshold: parseFloat(document.getElementById('cfgSimilarityThreshold').value),
+         retro_match_enabled: document.getElementById('cfgRetroEnabled').checked,
+         retro_match_max_days_lookback: parseInt(document.getElementById('cfgRetroDays').value),
+     };
+     injectOrgId(payload, 'orgSelectConfig');
     try {
-        const res = await apiFetch(API_BASE + '/incubator/config', { method: 'PUT', body: JSON.stringify(payload) });
+        const orgHeaders = getOrgOverrideHeaders('orgSelectConfig');
+        const res = await apiFetch(API_BASE + '/incubator/config', { method: 'PUT', headers: orgHeaders, body: JSON.stringify(payload) });
         if (res.ok) { showToast('配置已保存'); loadStatus(); }
         else { const d = await res.json(); showToast(d.error || '保存失败', 'error'); }
     } catch (e) { showToast(e.message, 'error'); }

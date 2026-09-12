@@ -1,15 +1,16 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>数据概览 - CodeGuard</title>
         <script defer src="/static/js/echarts.min.js"></script>
-    <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+    <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <style>
@@ -139,6 +140,9 @@
                 <!-- 筛选栏 -->
                 <div class="bg-white rounded-xl p-4 border mb-6 flex items-center gap-4 flex-wrap">
                     <div class="flex items-center gap-2">
+                        <select id="orgSelect"></select>
+                    </div>
+                    <div class="flex items-center gap-2">
                         <select id="projectFilter" class="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" onchange="loadStatistics()">
                             <option value="">所有项目</option>
                         </select>
@@ -162,7 +166,7 @@
                         <span class="text-gray-400">至</span>
                         <input type="date" id="endDate" class="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
                     </div>
-                    <div class="flex items-center gap-2 ml-auto">
+                    <div class="flex items-center gap-2">
                         <button onclick="applyCustomRange()" class="bg-blue-50 text-blue-600 px-3 py-2 rounded-lg text-sm hover:bg-blue-100">
                             <i class="fas fa-sync-alt mr-1"></i>刷新数据
                         </button>
@@ -324,12 +328,13 @@
                                         <th>项目</th>
                                         <th>标题</th>
                                         <th>作者</th>
+                                        <th>所属组织</th>
                                         <th style="text-align: center;">评分</th>
                                         <th style="text-align: right;">变更量</th>
                                     </tr>
                                 </thead>
                                 <tbody id="lowQualityTable">
-                                    <tr><td colspan="5" class="text-center text-gray-400 py-8">暂无数据</td></tr>
+                                    <tr><td colspan="6" class="text-center text-gray-400 py-8">暂无数据</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -474,17 +479,19 @@
 
         async function loadFilterOptions() {
             try {
-                const projectRes = await apiFetch(`${API_BASE}/mr-review-logs/projects`);
+                const orgSel = document.getElementById('orgSelect');
+                const orgId = orgSel ? orgSel.value : '';
+                const orgParam = orgId ? `?org_id=${encodeURIComponent(orgId)}` : '';
+                const projectRes = await apiFetch(`${API_BASE}/mr-review-logs/projects${orgParam}`);
                 if (projectRes.ok) {
                     const json = await projectRes.json();
                     allProjects = json.data || [];
                     const sel = document.getElementById('projectFilter');
                     sel.innerHTML = '<option value="">所有项目</option>' +
                         allProjects.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
-                    // 同时初始化雷达图项目选择器
                     initRadarProjectSelect(allProjects);
                 }
-                const authorRes = await apiFetch(`${API_BASE}/mr-review-logs/authors`);
+                const authorRes = await apiFetch(`${API_BASE}/mr-review-logs/authors${orgParam}`);
                 if (authorRes.ok) {
                     const json = await authorRes.json();
                     const sel = document.getElementById('authorFilter');
@@ -623,6 +630,8 @@
             const startDate = document.getElementById('startDate').value;
             const endDate = document.getElementById('endDate').value;
             const days = document.getElementById('timeFilter').value;
+            const orgSel = document.getElementById('orgSelect');
+            const orgId = orgSel ? orgSel.value : '';
 
             let url = `${API_BASE}/mr-review-logs/statistics`;
             const params = [];
@@ -634,6 +643,7 @@
             if (selectedRadarProjects.length > 0) {
                 params.push(`projects=${encodeURIComponent(selectedRadarProjects.join(','))}`);
             }
+            if (orgId) params.push(`org_id=${encodeURIComponent(orgId)}`);
             if (params.length > 0) url += '?' + params.join('&');
 
             try {
@@ -654,7 +664,7 @@
         async function loadTokenSummary() {
             if (!isAdmin()) return;
             try {
-                const resp = await apiFetch(`${API_BASE}/dashboard/token-summary`);
+                const resp = await apiFetch(`${API_BASE}/dashboard/token-summary`, { headers: getOrgOverrideHeaders('orgSelect') });
                 if (!resp.ok) return;
                 const json = await resp.json();
                 const d = json.data || json; // 兼容后端包装
@@ -1018,7 +1028,7 @@
         function renderLowQuality(data) {
             const tbody = document.getElementById('lowQualityTable');
             if (!data || data.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-gray-400 py-8">暂无低质量 MR</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray-400 py-8">暂无低质量 MR</td></tr>';
                 return;
             }
             tbody.innerHTML = data.map(mr => `
@@ -1026,6 +1036,7 @@
                     <td><span class="project-tag">${escapeHtml(mr.project || '-')}</span></td>
                     <td title="${escapeHtml(mr.title || '')}" class="truncate max-w-[200px]">${escapeHtml(mr.title || '-')}</td>
                     <td>${escapeHtml(mr.author || '-')}</td>
+                    <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(mr.org_name || '根组织')}</td>
                     <td style="text-align: center;"><span class="score-badge-fail inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold">${mr.score}</span></td>
                     <td style="text-align: right;" class="text-sm text-gray-600">+${formatNumber(mr.additions)} / -${formatNumber(mr.deletions)}</td>
                 </tr>
@@ -1265,10 +1276,25 @@
             // 先根据角色显隐管理员专属区域，再加载数据，防止普通用户看到不该有的内容
             applyAdminVisibility();
             initDateRange();
+            loadOrgSelect('orgSelect');
             loadFilterOptions();
             loadStatistics();
             loadTokenSummary();
             renderSidebar('data-overview');
+            // 组织变化时联动刷新
+            const orgSel = document.getElementById('orgSelect');
+            if (orgSel) {
+                orgSel.addEventListener('change', () => {
+                    // 切换组织后清空已选的项目和作者，避免旧值在新组织中不存在
+                    document.getElementById('projectFilter').value = '';
+                    document.getElementById('authorFilter').value = '';
+                    selectedRadarProjects = [];
+                    updateSelectedTags();
+                    loadFilterOptions();
+                    loadStatistics();
+                    loadTokenSummary();
+                });
+            }
             // 普通用户：作者筛选框只显示自己（数据已由后端过滤）
             if (isUser()) {
                 restrictAuthorFilterToSelf();

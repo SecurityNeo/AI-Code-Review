@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>项目管理 - CodeGuard</title>
-        <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+        <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <style>
@@ -95,26 +96,24 @@
                 <!-- 项目列表 Tab -->
                 <div id="tab-projects" class="tab-content active">
                 <!-- 过滤器 -->
-                <div class="bg-white rounded-xl p-4 border flex items-center gap-4">
-                    <div class="flex items-center gap-4">
-                        <input type="text" id="searchInput" placeholder="搜索项目..." class="w-48 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" onkeyup="if(event.key==='Enter')loadProjects()">
-                        <select id="statusFilter" class="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" onchange="loadProjects()">
-                            <option value="">所有状态</option>
-                            <option value="active">启用AI</option>
-                            <option value="inactive">未启用AI</option>
-                        </select>
-                        <button onclick="loadProjects()" class="bg-gray-100 text-gray-600 px-3 py-2 rounded-lg text-sm hover:bg-gray-200">
-                            <i class="fas fa-filter mr-1"></i>筛选
-                        </button>
-                    </div>
-                    <div class="flex items-center gap-2 ml-auto">
-                        <button onclick="showModal('createModal')" data-admin-only class="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700">
-                            <i class="fas fa-plus mr-1"></i>新建项目
-                        </button>
-                        <button onclick="loadProjects()" class="bg-gray-100 text-gray-600 px-3 py-2 rounded-lg text-sm hover:bg-gray-200">
-                            <i class="fas fa-redo mr-1"></i>刷新
-                        </button>
-                    </div>
+                <div class="bg-white rounded-xl p-3 border flex items-center gap-2">
+                    <select id="orgSelect" class="w-24 px-1 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"></select>
+                    <input type="text" id="searchInput" placeholder="搜索..." class="w-36 px-2 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" onkeyup="if(event.key==='Enter')loadProjects()">
+                    <select id="statusFilter" class="px-2 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" onchange="loadProjects()">
+                        <option value="">全部</option>
+                        <option value="active">启用AI</option>
+                        <option value="inactive">未启用AI</option>
+                    </select>
+                    <button onclick="loadProjects()" class="bg-gray-100 text-gray-600 px-2.5 py-1.5 rounded-lg text-sm hover:bg-gray-200">
+                        <i class="fas fa-filter"></i>
+                    </button>
+                    <div class="ml-auto"></div>
+                    <button onclick="showModal('createModal')" data-admin-only class="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-blue-700">
+                        <i class="fas fa-plus mr-1"></i>新建项目
+                    </button>
+                    <button onclick="loadProjects()" class="bg-gray-100 text-gray-600 px-2.5 py-1.5 rounded-lg text-sm hover:bg-gray-200">
+                        <i class="fas fa-redo"></i>
+                    </button>
                 </div>
 
                 <!-- 项目列表 -->
@@ -122,12 +121,12 @@
                     <table class="w-full">
                         <thead class="bg-gray-50 border-b">
                         <tr>
-                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">项目名称</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">项目名称</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">所属组织</th>
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">开发语言</th>
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">项目地址</th>
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">AI审核模版</th>
                             <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">规则数</th>
-                            <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">最近5个任务</th>
                             <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">启用AI</th>
                             <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">代码地图</th>
                             <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">操作</th>
@@ -173,15 +172,20 @@
 
     <!-- 新建/编辑项目弹窗 -->
     <div id="createModal" class="modal fixed inset-0 bg-black/50 items-center justify-center z-50">
-        <div class="bg-white rounded-xl w-[600px] max-h-[90vh] overflow-y-auto">
-            <div class="px-6 py-4 border-b flex items-center justify-between">
+        <div class="bg-white rounded-xl w-[600px] max-h-[90vh] flex flex-col">
+            <div class="px-6 py-4 border-b flex items-center justify-between flex-shrink-0">
                 <h3 class="font-bold text-lg">新建项目</h3>
                 <button onclick="hideModal('createModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
             </div>
-            <div class="p-6 space-y-4">
+            <div class="p-6 space-y-4 overflow-y-auto flex-1">
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">项目名称</label>
                     <input type="text" id="projectName" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="请输入项目名称">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">所属组织</label>
+                    <select id="projectOrgSelect" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                    </select>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">GitLab 项目 ID</label>
@@ -222,11 +226,6 @@
                     </select>
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">关联资源池</label>
-                    <select id="poolId" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
-                    </select>
-                </div>
-                <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">默认模型</label>
                     <select id="defaultModelId" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
                     </select>
@@ -239,7 +238,7 @@
                     <span class="text-sm text-gray-700">启用 AI 审核</span>
                 </div>
             </div>
-            <div class="px-6 py-4 border-t flex justify-end gap-3">
+            <div class="px-6 py-4 border-t flex justify-end gap-3 flex-shrink-0">
                 <button onclick="hideModal('createModal')" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">取消</button>
                 <button onclick="saveProject()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">保存</button>
             </div>
@@ -264,6 +263,11 @@
                         <label class="block text-sm font-medium text-gray-700 mb-1">描述</label>
                         <input type="text" id="tmplDesc" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="模版用途说明">
                     </div>
+                </div>
+                <!-- 所属组织（仅系统管理员可编辑） -->
+                <div id="tmplOrgSelectWrapper" style="display:none;">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">所属组织</label>
+                    <select id="tmplOrgSelect" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"></select>
                 </div>
 
                 <!-- 评分维度权重配置 -->
@@ -399,6 +403,10 @@
                         <div class="text-sm text-gray-700" id="detailDesc">-</div>
                     </div>
                 </div>
+                <div class="bg-gray-50 rounded-lg p-3">
+                    <label class="text-xs text-gray-400 mb-1 block">所属组织</label>
+                    <div class="text-sm text-gray-700" id="detailOrg">-</div>
+                </div>
 
                 <!-- 评审维度权重 -->
                 <div>
@@ -516,7 +524,6 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
         let projectsData = [];
         let templatesData = [];
         let categoriesData = [];
-        let poolsData = [];
         let modelsData = [];
         let editingId = null;
         let editingTemplateId = null;
@@ -528,10 +535,13 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
         async function loadProjects() {
             const keyword = document.getElementById('searchInput')?.value || '';
             const status = document.getElementById('statusFilter')?.value || '';
+            const orgSel = document.getElementById('orgSelect');
+            const orgId = orgSel ? orgSel.value : '';
 
             let url = `${API_BASE}/projects?page=${currentPage}&page_size=${pageSize}`;
             if (keyword) url += `&keyword=${encodeURIComponent(keyword)}`;
             if (status) url += `&status=${status}`;
+            if (orgId) url += `&org_id=${encodeURIComponent(orgId)}`;
 
             try {
                 const res = await apiFetch(url);
@@ -559,7 +569,7 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             if (!tbody) return;
             
             if (projects.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="9" class="px-6 py-8 text-center text-gray-500">暂无数据</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="10" class="px-6 py-8 text-center text-gray-500">暂无数据</td></tr>';
                 return;
             }
 
@@ -576,9 +586,10 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                             <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center text-blue-600">
                                 <i class="fab fa-gitlab text-sm"></i>
                             </div>
-                            <a href="project-detail.html?id=${p.id}" class="font-medium text-sm text-blue-600 hover:text-blue-700">${escapeHtml(p.name || '-')}</a>
+                            <a href="project-detail.html?id=${p.id}" title="${escapeHtml(p.name || '')}" class="font-medium text-sm text-blue-600 hover:text-blue-700 truncate max-w-[200px] block">${escapeHtml(p.name || '-')}</a>
                         </div>
                     </td>
+                    <td class="px-6 py-4 text-sm text-gray-600 truncate max-w-[120px]" title="${escapeHtml(p.org_name || '根组织')}">${escapeHtml(p.org_name || '根组织')}</td>
                     <td class="px-6 py-4 text-center">
                         ${formatLanguageBadge(p.language)}
                     </td>
@@ -590,9 +601,6 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                         </a>` : `<span class="text-sm text-gray-600">
                             <span class="font-medium">${p.enabled_rule_count ?? 0}</span><span class="text-gray-400">/${p.total_rule_count ?? 0}</span>
                         </span>`}
-                    </td>
-                    <td class="px-6 py-4 text-center">
-                        ${p.tasks && p.tasks.length > 0 ? p.tasks.map(t => `<span class="inline-block w-3 h-3 mr-1 mb-1 rounded-full ${getTaskStatusDotClass(t.status)}" title="${getTaskStatusText(t.status)}"></span>`).join('') : '-'}
                     </td>
                     <td class="px-6 py-4 text-center">
                         <label class="switch">
@@ -755,11 +763,10 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             document.getElementById('aiEnabled').checked = p.ai_enabled || false;
             // 先渲染下拉选项，再设置选中值
             renderTemplateSelect(templatesData);
-            renderPoolSelect(poolsData);
             renderModelSelect(modelsData);
             document.getElementById('projectTemplateId').value = p.template_id || '';
-            document.getElementById('poolId').value = p.pool_id || '';
             document.getElementById('defaultModelId').value = p.default_model_id !== null && p.default_model_id !== undefined ? String(p.default_model_id) : '-1';
+            loadOrgSelect('projectOrgSelect', p.org_id);
             document.getElementById('createModal').classList.add('active');
         }
 
@@ -776,37 +783,37 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
         }
 
         async function saveProject() {
+            const orgHeaders = getOrgOverrideHeaders();
             const templateInput = document.getElementById('projectTemplateId').value;
-            const poolInput = document.getElementById('poolId').value;
             const defaultModelInput = document.getElementById('defaultModelId').value;
             const gitlabProjectId = document.getElementById('gitlabProjectId').value;
             
-            const data = {
-                name: document.getElementById('projectName').value,
-                project_path: document.getElementById('projectPath').value,
-                graph_base_branch: document.getElementById('graphBaseBranch').value || 'main',
-                language: document.getElementById('projectLanguage').value,
-                access_token: document.getElementById('projectToken').value,
-                ai_enabled: document.getElementById('aiEnabled').checked
-            };
-
-            // 空模板解绑时传 0，确保能正确清空关联
-            data.template_id = parseInt(templateInput, 10) || 0;
-            data.pool_id = parseInt(poolInput, 10) || 0;
-            if (defaultModelInput === '-1' || !defaultModelInput) {
-                data.default_model_id = null;  // 未选择或“走全局主备链路”均清空
-            } else {
-                data.default_model_id = parseInt(defaultModelInput);
-            }
-            if (gitlabProjectId) data.gitlab_project_id = parseInt(gitlabProjectId);
-            if (!data.access_token) delete data.access_token;
+             const data = {
+                 name: document.getElementById('projectName').value,
+                 project_path: document.getElementById('projectPath').value,
+                 graph_base_branch: document.getElementById('graphBaseBranch').value || 'main',
+                 language: document.getElementById('projectLanguage').value,
+                 access_token: document.getElementById('projectToken').value,
+                 ai_enabled: document.getElementById('aiEnabled').checked
+             };
+ 
+             // 空模板解绑时传 0，确保能正确清空关联
+             data.template_id = parseInt(templateInput, 10) || 0;
+             if (defaultModelInput === '-1' || !defaultModelInput) {
+                 data.default_model_id = null;  // 未选择或"走全局主备链路"均清空
+             } else {
+                 data.default_model_id = parseInt(defaultModelInput);
+             }
+             if (gitlabProjectId) data.gitlab_project_id = parseInt(gitlabProjectId);
+             if (!data.access_token) delete data.access_token;
+             injectOrgId(data, 'projectOrgSelect');
 
             try {
                 const url = editingId ? `${API_BASE}/projects/${editingId}` : `${API_BASE}/projects`;
                 const method = editingId ? 'PUT' : 'POST';
                 const res = await apiFetch(url, {
                     method: method,
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...orgHeaders },
                     body: JSON.stringify(data)
                 });
                 if (!res.ok) throw new Error('保存失败');
@@ -833,9 +840,10 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                 document.getElementById('tokenEyeIcon').className = 'fas fa-eye';
                 document.getElementById('aiEnabled').checked = false;
                 document.getElementById('projectTemplateId').value = '';
-                document.getElementById('poolId').value = '';
                 document.getElementById('defaultModelId').value = '';
                 renderTemplateSelect(templatesData);
+                loadOrgSelect('projectOrgSelect');
+                loadOrgSelect('tmplOrgSelect');
             }
             document.getElementById(id).classList.add('active');
         }
@@ -866,6 +874,11 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
         
         function switchTab(tab, evt) {
             const event = evt || window.event;
+            // 非 admin 禁止切换到 AI审核模版
+            if (tab === 'templates') {
+                const isAdmin = typeof isSystemAdmin === 'function' && isSystemAdmin();
+                if (!isAdmin) return;
+            }
             document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
             (event.target || event.srcElement).closest('.tab-btn').classList.add('active');
@@ -892,25 +905,6 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             if (!select) return;
             select.innerHTML = '<option value="">请选择AI审核模版</option>' + 
                 templates.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
-        }
-
-        async function loadPools() {
-            try {
-                const res = await apiFetch(`${API_BASE}/pools`);
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                const json = await res.json();
-                poolsData = json.data || [];
-                renderPoolSelect(poolsData);
-            } catch (e) {
-                console.error('加载资源池失败:', e);
-            }
-        }
-
-        function renderPoolSelect(pools) {
-            const select = document.getElementById('poolId');
-            if (!select) return;
-            select.innerHTML = '<option value="">请选择资源池</option>' + 
-                pools.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
         }
 
         async function loadModels() {
@@ -997,6 +991,7 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                                     ${t.is_default ? '<span class="px-2 py-0.5 bg-blue-100 text-blue-700 text-[10px] rounded-full font-semibold flex-shrink-0">默认</span>' : ''}
                                     ${!dimResult.isDefault ? '<span class="px-2 py-0.5 bg-amber-50 text-amber-600 text-[10px] rounded-full font-semibold flex-shrink-0">自定义权重</span>' : ''}
                                     ${t.deduct_score_config && t.deduct_score_config !== '{}' ? '<span class="px-2 py-0.5 bg-red-50 text-red-600 text-[10px] rounded-full font-semibold flex-shrink-0">自定义扣分</span>' : ''}
+                                    <span class="px-2 py-0.5 bg-gray-100 text-gray-500 text-[10px] rounded-full font-semibold flex-shrink-0">${escapeHtml(t.org_name || '根组织')}</span>
                                 </div>
                                 <p class="text-sm text-gray-500 mb-3 line-clamp-1">${escapeHtml(t.description || '暂无描述')}</p>
                                 
@@ -1196,6 +1191,15 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                 if (slider) slider.value = el.value;
             });
             updateWeightTotal();
+            // 组织选择器：仅超管可见
+            const orgWrapper = document.getElementById('tmplOrgSelectWrapper');
+            if (isSystemAdmin() && orgWrapper) {
+                orgWrapper.style.display = '';
+                const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+                loadOrgSelect('tmplOrgSelect', userInfo.current_org_id || null);
+            } else if (orgWrapper) {
+                orgWrapper.style.display = 'none';
+            }
             showModal('templateModal');
         }
 
@@ -1208,6 +1212,15 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             document.getElementById('tmplDesc').value = t.description || '';
             document.getElementById('tmplCustomInstruction').value = t.custom_instruction || '';
             document.getElementById('tmplMaxRules').value = t.max_rules_per_review || 5;
+
+            // 组织选择器：仅超管可见
+            const orgWrapper = document.getElementById('tmplOrgSelectWrapper');
+            if (isSystemAdmin() && orgWrapper) {
+                orgWrapper.style.display = '';
+                loadOrgSelect('tmplOrgSelect', t.org_id);
+            } else if (orgWrapper) {
+                orgWrapper.style.display = 'none';
+            }
 
             // 加载扣分规则配置
             let deductCfg = { critical: 10, high: 5, medium: 3, low: 1, info: 0 };
@@ -1271,6 +1284,7 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
             document.getElementById('detailTitle').textContent = t.name + ' - 模版详情';
             document.getElementById('detailName').textContent = t.name || '-';
             document.getElementById('detailDesc').textContent = t.description || '暂无描述';
+            document.getElementById('detailOrg').textContent = t.org_name || '根组织';
 
             // 维度权重
             const dimContainer = document.getElementById('detailDimensionWeights');
@@ -1345,20 +1359,21 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
                 return;
             }
 
-            const data = {
-                name,
-                description: document.getElementById('tmplDesc').value,
-                custom_instruction: document.getElementById('tmplCustomInstruction').value,
-                dimension_weights: JSON.stringify(dimensionWeights),
-                max_rules_per_review: parseInt(document.getElementById('tmplMaxRules').value) || 5,
-                deduct_score_config: JSON.stringify({
-                    critical: parseInt(document.getElementById('tmplDeductCritical').value) || 0,
-                    high:     parseInt(document.getElementById('tmplDeductHigh').value) || 0,
-                    medium:   parseInt(document.getElementById('tmplDeductMedium').value) || 0,
-                    low:      parseInt(document.getElementById('tmplDeductLow').value) || 0,
-                    info:     parseInt(document.getElementById('tmplDeductInfo').value) || 0,
-                }),
-            };
+             let data = {
+                 name,
+                 description: document.getElementById('tmplDesc').value,
+                 custom_instruction: document.getElementById('tmplCustomInstruction').value,
+                 dimension_weights: JSON.stringify(dimensionWeights),
+                 max_rules_per_review: parseInt(document.getElementById('tmplMaxRules').value) || 5,
+                 deduct_score_config: JSON.stringify({
+                     critical: parseInt(document.getElementById('tmplDeductCritical').value) || 0,
+                     high:     parseInt(document.getElementById('tmplDeductHigh').value) || 0,
+                     medium:   parseInt(document.getElementById('tmplDeductMedium').value) || 0,
+                     low:      parseInt(document.getElementById('tmplDeductLow').value) || 0,
+                     info:     parseInt(document.getElementById('tmplDeductInfo').value) || 0,
+                 }),
+             };
+             injectOrgId(data, 'tmplOrgSelect');
 
             try {
                 const url = editingTemplateId
@@ -1393,10 +1408,24 @@ const languageLabels = { common: '通用', golang: 'Go', python: 'Python', front
         }
         
         document.addEventListener('DOMContentLoaded', () => {
+            loadOrgSelect('orgSelect');
+            const orgSel = document.getElementById('orgSelect');
+            if (orgSel) {
+                orgSel.addEventListener('change', () => {
+                    currentPage = 1;
+                    loadProjects();
+                });
+            }
+            // 非 admin 隐藏 AI审核模版 Tab
+            const isAdmin = typeof isSystemAdmin === 'function' && isSystemAdmin();
+            if (!isAdmin) {
+                document.querySelectorAll('.tab-btn').forEach(el => {
+                    if (el.innerHTML.includes('AI审核模版')) el.style.display = 'none';
+                });
+            }
             loadCategories();
             loadProjects();
             loadTemplates();
-            loadPools();
             loadModels();
             renderSidebar('projects');
             bindDimensionInputs();

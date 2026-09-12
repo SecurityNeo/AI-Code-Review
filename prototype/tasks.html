@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>任务列表 - CodeGuard</title>
-        <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+        <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <script src="/static/js/marked.min.js"></script>
@@ -124,7 +125,8 @@
 
             <div class="p-8 space-y-6">
                 <!-- 筛选区 -->
-                <div class="bg-white rounded-xl p-4 border flex items-center justify-end gap-4 flex-wrap">
+                <div class="bg-white rounded-xl p-4 border flex items-center gap-4 flex-wrap">
+                    <select id="orgSelect" class="w-24 px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"></select>
                     <select id="projectFilter" class="px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
                         <option value="">所有项目</option>
                     </select>
@@ -165,6 +167,7 @@
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">任务ID</th>
                                 <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500">类型</th>
                                 <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500">评审分数</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">所属组织</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">所属项目</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">MR ID</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">开发人员</th>
@@ -415,6 +418,8 @@ const API_BASE = '/api/v1';
             const authorFilter = document.getElementById('authorFilter').value.trim();
             const mrFilter = document.getElementById('mrFilter').value.trim();
             const pendingIssuesFilter = document.getElementById('pendingIssuesFilter').checked;
+            const orgSel = document.getElementById('orgSelect');
+            const orgId = orgSel ? orgSel.value : '';
             
             let url = `/api/v1/tasks?page=${currentPage}&page_size=${pageSize}`;
             if (statusFilter) url += `&status=${statusFilter}`;
@@ -423,6 +428,7 @@ const API_BASE = '/api/v1';
             if (authorFilter) url += `&author=${encodeURIComponent(authorFilter)}`;
             if (mrFilter) url += `&mr_iid=${encodeURIComponent(mrFilter)}`;
             if (pendingIssuesFilter) url += `&has_pending_issues=true`;
+            if (orgId) url += `&org_id=${encodeURIComponent(orgId)}`;
 
             try {
                 const res = await apiFetch(url);
@@ -515,7 +521,7 @@ const API_BASE = '/api/v1';
 function renderTasks(tasks) {
             const tbody = document.getElementById('tasksBody');
             if (tasks.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="12" class="px-4 py-8 text-center text-gray-500">暂无数据</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="13" class="px-4 py-8 text-center text-gray-500">暂无数据</td></tr>';
                 return;
             }
 
@@ -528,6 +534,7 @@ function renderTasks(tasks) {
                     <td class="px-4 py-3 text-sm font-mono text-gray-600 cursor-pointer" onclick="openTaskDetail(${t.id})">#${t.id}</td>
                     <td class="px-4 py-3 text-center cursor-pointer" onclick="openTaskDetail(${t.id})"><span class="task-type-badge ${isReview ? 'review' : 'chat'}">${getTaskTypeText(t.task_type)}</span></td>
                     <td class="px-4 py-3 text-center cursor-pointer" onclick="openTaskDetail(${t.id})">${t.status === 'running' ? '<span class="text-gray-400 text-xs">--</span>' : getScoreBadge(t.score_value)}</td>
+                    <td class="px-4 py-3 text-sm text-gray-600 cursor-pointer" onclick="openTaskDetail(${t.id})">${escapeHtml(t.org_name || '根组织')}</td>
                     <td class="px-4 py-3 text-sm cursor-pointer" onclick="openTaskDetail(${t.id})">${t.project?.name || '-'}</td>
                     <td class="px-4 py-3 text-sm cursor-pointer" onclick="openTaskDetail(${t.id})">${t.mr_iid ? '<a href="' + (t.mr_url || '#') + '" target="_blank" class="text-blue-600 hover:underline">' + t.mr_iid + '</a>' : '-'}</td>
                     <td class="px-4 py-3 text-sm cursor-pointer" onclick="openTaskDetail(${t.id})">${t.author || '-'}</td>
@@ -1985,6 +1992,14 @@ function renderTasks(tasks) {
             loadStats();
         }
 
+        loadOrgSelect('orgSelect');
+        const orgSel = document.getElementById('orgSelect');
+        if (orgSel) {
+            orgSel.addEventListener('change', () => {
+                currentPage = 1;
+                loadTasks();
+            });
+        }
         loadProjectFilter(); // 先加载项目列表到筛选下拉框
         loadTasks();
         loadStats();

@@ -5,7 +5,8 @@ backend/ai-optimizer.log
 backend/main
 .vscode
 query_minio.py
-docs/*.md
+docs/
 AGENTS.md
+backend/scripts/
 test/
 *.tar

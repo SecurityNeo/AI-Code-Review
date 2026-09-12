@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ai-optimizer/backend/internal/middleware"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
 	"github.com/ai-optimizer/backend/internal/service/pipeline"
@@ -23,9 +24,21 @@ func NewPipelineHandler(hub *service.PipelineSSEHub) *PipelineHandler {
 
 // GetPipelineStatus 获取任务的 Pipeline 执行状态
 func (h *PipelineHandler) GetPipelineStatus(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	taskID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(400, gin.H{"error": "invalid task id"})
+		return
+	}
+
+	// 先校验用户对该 task 的访问权限（通过 task 的 org_id 过滤）
+	var task model.Task
+	if err := model.DBWithScope(scope).First(&task, taskID).Error; err != nil {
+		c.JSON(404, gin.H{"error": "task not found"})
 		return
 	}
 
@@ -72,8 +85,6 @@ func (h *PipelineHandler) GetPipelineStatus(c *gin.Context) {
 	}
 
 	// 计算整体进度
-	var task model.Task
-	model.DB.First(&task, taskID)
 	overallStatus := string(task.Status)
 	if overallStatus == string(model.TaskRunning) && len(stages) > 0 {
 		// 若任务仍在 running，以 pipeline 最后一个阶段状态为准
@@ -97,6 +108,11 @@ func (h *PipelineHandler) GetPipelineStatus(c *gin.Context) {
 
 // GetStageDetail 获取阶段详情（含输入输出快照）
 func (h *PipelineHandler) GetStageDetail(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	execID, err := strconv.Atoi(c.Param("execution_id"))
 	if err != nil {
 		c.JSON(400, gin.H{"error": "invalid execution id"})
@@ -104,7 +120,11 @@ func (h *PipelineHandler) GetStageDetail(c *gin.Context) {
 	}
 
 	var exec model.TaskPipelineExecution
-	if err := model.DB.First(&exec, execID).Error; err != nil {
+	db := model.DB
+	if !scope.IsSuperAdmin {
+		db = db.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	if err := db.First(&exec, execID).Error; err != nil {
 		c.JSON(404, gin.H{"error": "阶段不存在"})
 		return
 	}
@@ -174,9 +194,21 @@ func (h *PipelineHandler) GetStageDetail(c *gin.Context) {
 
 // SubscribePipelineEvents SSE 推送 Pipeline 事件（事件驱动为主， ticker 兜底）
 func (h *PipelineHandler) SubscribePipelineEvents(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	taskID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(400, gin.H{"error": "invalid task id"})
+		return
+	}
+
+	// 权限校验：用户必须能访问该任务
+	if !CanAccessTask(scope, uint(taskID)) {
+		c.JSON(403, gin.H{"error": "无权访问此任务"})
 		return
 	}
 

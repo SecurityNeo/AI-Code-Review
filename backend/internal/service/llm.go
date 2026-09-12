@@ -16,6 +16,7 @@ import (
 	"github.com/ai-optimizer/backend/pkg/llm"
 	"github.com/ai-optimizer/backend/pkg/llmcall"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // CallStatus 调用状态常量
@@ -157,7 +158,20 @@ func (s *LLMService) ChatCompletion(ctx context.Context, taskID *uint, modelID u
 // ctx 用于支持调用取消和超时中断传递。
 func (s *LLMService) callSpecificModel(ctx context.Context, taskID *uint, modelID uint, caller, systemPrompt, userPrompt string, responseFormat *llm.ResponseFormat) (*llm.ChatResponse, *model.LLMModel, error) {
 	var m model.LLMModel
-	if err := model.DB.First(&m, modelID).Error; err != nil {
+	db := model.DB
+
+	// 多租户隔离：通过 taskID 反查 org_id，按组织过滤模型
+	if taskID != nil && *taskID > 0 {
+		var t model.Task
+		if err := model.DB.Select("org_id").First(&t, *taskID).Error; err == nil {
+			db = db.Where("org_id = ?", t.OrgID)
+		}
+	}
+
+	if err := db.First(&m, modelID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, fmt.Errorf("指定的模型不存在或无权限访问")
+		}
 		return nil, nil, fmt.Errorf("指定的模型不存在: %w", err)
 	}
 	if m.Status != "active" {
@@ -179,9 +193,22 @@ func (s *LLMService) callSpecificModel(ctx context.Context, taskID *uint, modelI
 func (s *LLMService) tryChain(ctx context.Context, taskID *uint, responseFormat *llm.ResponseFormat, caller, systemPrompt, userPrompt string) (*llm.ChatResponse, *model.LLMModel, error) {
 	attempts := make([]ModelAttempt, 0, 4)
 
-	// ① 主模型
+	// 多租户隔离：通过 taskID 反查 org_id
+	var orgID uint
+	if taskID != nil && *taskID > 0 {
+		var t model.Task
+		if err := model.DB.Select("org_id").First(&t, *taskID).Error; err == nil {
+			orgID = t.OrgID
+		}
+	}
+
+	// ① 主模型（按组织过滤）
 	var primary model.LLMModel
-	if err := model.DB.Where("is_primary = ? AND status = ?", true, "active").First(&primary).Error; err == nil {
+	db := model.DB
+	if orgID > 0 {
+		db = db.Where("org_id = ?", orgID)
+	}
+	if err := db.Where("is_primary = ? AND status = ?", true, "active").First(&primary).Error; err == nil {
 		resp, callErr := s.callLLMAPI(ctx, taskID, &primary, caller, systemPrompt, userPrompt, responseFormat)
 		if callErr == nil && len(resp.Choices) > 0 {
 			zap.L().Info("主模型调用成功",
@@ -209,9 +236,13 @@ func (s *LLMService) tryChain(ctx context.Context, taskID *uint, responseFormat 
 		zap.L().Warn("未找到可用的主模型，直接尝试备用模型", zap.Error(err))
 	}
 
-	// ② 按 backup_order 遍历备用
+	// ② 按 backup_order 遍历备用（按组织过滤）
 	var backups []model.LLMModel
-	model.DB.Where("backup_order > 0 AND status = ?", "active").Order("backup_order ASC, id ASC").Find(&backups)
+	db2 := model.DB
+	if orgID > 0 {
+		db2 = db2.Where("org_id = ?", orgID)
+	}
+	db2.Where("backup_order > 0 AND status = ?", "active").Order("backup_order ASC, id ASC").Find(&backups)
 
 	for i, b := range backups {
 		resp, callErr := s.callLLMAPI(ctx, taskID, &b, caller, systemPrompt, userPrompt, responseFormat)
@@ -288,6 +319,12 @@ func (s *LLMService) callLLMAPI(ctx context.Context, taskID *uint, llmModel *mod
 			CallType:   model.CallTypeScore,
 			Caller:     caller,
 			DurationMs: int(duration.Milliseconds()),
+		}
+		if taskID != nil && *taskID > 0 {
+			var t model.Task
+			if err := model.DB.Select("org_id").First(&t, *taskID).Error; err == nil {
+				record.OrgID = t.OrgID
+			}
 		}
 		if retErr != nil {
 			record.Status = CallStatusFailed
@@ -497,12 +534,29 @@ func RefreshSysCfgCache() {
 }
 
 // SysCfgMaxDiffFiles 返回当前生效的最大 diff 文件数（从 ReviewAgentConfig batch_review_frame 阶段配置读取）
+// Deprecated: 多租户改造后建议传入 orgID 调用 SysCfgMaxDiffFilesByOrg，以获取组织级配置。
 func SysCfgMaxDiffFiles() int {
+	return SysCfgMaxDiffFilesByOrg(1) // 向后兼容：默认查根组织
+}
+
+// SysCfgMaxDiffFilesByOrg 返回指定 org 生效的最大 diff 文件数
+// 多租户改造：按 org_id 查询 ReviewAgentConfig，替代硬编码 ID=1。
+func SysCfgMaxDiffFilesByOrg(orgID uint) int {
 	var agentCfg model.ReviewAgentConfig
-	if err := model.DB.First(&agentCfg, 1).Error; err == nil {
+	if err := model.DB.Where("org_id = ?", orgID).First(&agentCfg).Error; err == nil {
 		if sc := agentCfg.StageConfig("batch_review_frame"); sc != nil {
 			if v, ok := sc["max_diff_files"].(float64); ok && v > 0 {
 				return int(v)
+			}
+		}
+	}
+	// fallback：根组织
+	if orgID != 1 {
+		if err := model.DB.Where("org_id = 1").First(&agentCfg).Error; err == nil {
+			if sc := agentCfg.StageConfig("batch_review_frame"); sc != nil {
+				if v, ok := sc["max_diff_files"].(float64); ok && v > 0 {
+					return int(v)
+				}
 			}
 		}
 	}
@@ -510,12 +564,29 @@ func SysCfgMaxDiffFiles() int {
 }
 
 // SysCfgMaxTokensPerBatch 返回当前生效的每批最大 token 数（从 ReviewAgentConfig batch_review_frame 阶段配置读取）
+// Deprecated: 多租户改造后建议传入 orgID 调用 SysCfgMaxTokensPerBatchByOrg，以获取组织级配置。
 func SysCfgMaxTokensPerBatch() int {
+	return SysCfgMaxTokensPerBatchByOrg(1) // 向后兼容：默认查根组织
+}
+
+// SysCfgMaxTokensPerBatchByOrg 返回指定 org 生效的每批最大 token 数
+// 多租户改造：按 org_id 查询 ReviewAgentConfig，替代硬编码 ID=1。
+func SysCfgMaxTokensPerBatchByOrg(orgID uint) int {
 	var agentCfg model.ReviewAgentConfig
-	if err := model.DB.First(&agentCfg, 1).Error; err == nil {
+	if err := model.DB.Where("org_id = ?", orgID).First(&agentCfg).Error; err == nil {
 		if sc := agentCfg.StageConfig("batch_review_frame"); sc != nil {
 			if v, ok := sc["max_tokens_per_batch"].(float64); ok && v > 0 {
 				return int(v)
+			}
+		}
+	}
+	// fallback：根组织
+	if orgID != 1 {
+		if err := model.DB.Where("org_id = 1").First(&agentCfg).Error; err == nil {
+			if sc := agentCfg.StageConfig("batch_review_frame"); sc != nil {
+				if v, ok := sc["max_tokens_per_batch"].(float64); ok && v > 0 {
+					return int(v)
+				}
 			}
 		}
 	}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/ai-optimizer/backend/internal/model"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // SnapshotStorage 快照存储接口（由上层注入，避免 import cycle）
@@ -58,7 +59,7 @@ func NewSnapshotManager() *SnapshotManager {
 }
 
 // SaveInputSnapshot 保存阶段输入快照
-func (m *SnapshotManager) SaveInputSnapshot(execID uint, data map[string]interface{}) (string, error) {
+func (m *SnapshotManager) SaveInputSnapshot(db *gorm.DB, execID uint, data map[string]interface{}) (string, error) {
 	jsonBytes, err := json.Marshal(data)
 	if err != nil {
 		return "", err
@@ -76,7 +77,7 @@ func (m *SnapshotManager) SaveInputSnapshot(execID uint, data map[string]interfa
 				Summary:     generateSummary(data),
 			}
 			refBytes, _ := json.Marshal(ref)
-			model.DB.Model(&model.TaskPipelineExecution{}).
+			db.Model(&model.TaskPipelineExecution{}).
 				Where("id = ?", execID).
 				Update("input_snapshot", string(refBytes))
 			return url, nil
@@ -86,7 +87,7 @@ func (m *SnapshotManager) SaveInputSnapshot(execID uint, data map[string]interfa
 	}
 
 	// 对象存储未配置或写入失败，存入数据库
-	err = model.DB.Model(&model.TaskPipelineExecution{}).
+	err = db.Model(&model.TaskPipelineExecution{}).
 		Where("id = ?", execID).
 		Update("input_snapshot", string(jsonBytes)).Error
 	if err != nil {
@@ -96,7 +97,7 @@ func (m *SnapshotManager) SaveInputSnapshot(execID uint, data map[string]interfa
 }
 
 // SaveOutputSnapshot 保存阶段输出快照
-func (m *SnapshotManager) SaveOutputSnapshot(execID uint, data map[string]interface{}) (string, error) {
+func (m *SnapshotManager) SaveOutputSnapshot(db *gorm.DB, execID uint, data map[string]interface{}) (string, error) {
 	jsonBytes, err := json.Marshal(data)
 	if err != nil {
 		return "", err
@@ -114,7 +115,7 @@ func (m *SnapshotManager) SaveOutputSnapshot(execID uint, data map[string]interf
 				Summary:     generateSummary(data),
 			}
 			refBytes, _ := json.Marshal(ref)
-			model.DB.Model(&model.TaskPipelineExecution{}).
+			db.Model(&model.TaskPipelineExecution{}).
 				Where("id = ?", execID).
 				Update("output_snapshot", string(refBytes))
 			return url, nil
@@ -124,7 +125,7 @@ func (m *SnapshotManager) SaveOutputSnapshot(execID uint, data map[string]interf
 	}
 
 	// 对象存储未配置或写入失败，存入数据库
-	err = model.DB.Model(&model.TaskPipelineExecution{}).
+	err = db.Model(&model.TaskPipelineExecution{}).
 		Where("id = ?", execID).
 		Update("output_snapshot", string(jsonBytes)).Error
 	if err != nil {

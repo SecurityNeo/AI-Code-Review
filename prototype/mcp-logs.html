@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MCP 调用日志 - CodeGuard</title>
-    <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+    <script src="js/auth.js?v=9"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <script src="/static/js/tailwindcss.min.js"></script>
@@ -84,6 +84,7 @@
                     <tr>
                         <th style="width:60px;">ID</th>
                         <th>时间</th>
+                        <th>所属组织</th>
                         <th>密钥</th>
                         <th>用户</th>
                         <th>Method / Tool</th>
@@ -93,7 +94,7 @@
                     </tr>
                 </thead>
                 <tbody id="logTableBody">
-                    <tr><td colspan="8" style="text-align:center; padding:2rem; color:#94a3b8;">加载中...</td></tr>
+                    <tr><td colspan="9" style="text-align:center; padding:2rem; color:#94a3b8;">加载中...</td></tr>
                 </tbody>
             </table>
 
@@ -149,7 +150,7 @@ async function loadLogs() {
 
         const tbody = document.getElementById('logTableBody');
         if (logs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:2rem; color:#94a3b8;">暂无数据</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:2rem; color:#94a3b8;">暂无数据</td></tr>';
         } else {
             let html = '';
             logs.forEach(log => {
@@ -173,6 +174,7 @@ async function loadLogs() {
                     <tr style="cursor:pointer;" onclick="toggleDetail(${log.id})">
                         <td>${log.id}</td>
                         <td style="font-size:0.75rem; white-space:nowrap;">${timeStr}</td>
+                        <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(log.org_name || '根组织')}</td>
                         <td>${escapeHtml(log.api_key_name || '-')}</td>
                         <td>${userDisplay}</td>
                         <td style="font-size:0.75rem;">${escapeHtml(methodTool)}</td>
@@ -185,7 +187,7 @@ async function loadLogs() {
                 if (isExpanded) {
                     html += `
                         <tr class="detail-row">
-                            <td colspan="8" class="detail-cell">
+                            <td colspan="9" class="detail-cell">
                                 <div class="detail-grid">
                                     <div><span class="label">User ID:</span> <span class="value">${log.user_id || '-'}</span></div>
                                     <div><span class="label">Client IP:</span> <span class="value">${escapeHtml(log.client_ip || '-')}</span></div>
@@ -211,7 +213,7 @@ async function loadLogs() {
         renderPagination(total, currentPage);
     } catch (err) {
         console.error('load logs failed', err);
-        document.getElementById('logTableBody').innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:#ef4444;">加载失败: ${err.message}</td></tr>`;
+        document.getElementById('logTableBody').innerHTML = `<tr><td colspan="9" style="text-align:center; padding:2rem; color:#ef4444;">加载失败: ${err.message}</td></tr>`;
     }
 }
 

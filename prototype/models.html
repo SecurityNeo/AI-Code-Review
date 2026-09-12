@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>大模型管理 - CodeGuard</title>
-        <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+        <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <style>
@@ -71,11 +72,10 @@
                         <thead class="bg-gray-50 border-b">
                             <tr>
                                 <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">模型提供方</th>
-                                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">模型ID</th>
-                                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">模型类型</th>
-                                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">API Base URL</th>
+                                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">所属组织</th>
+                                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">模型标识</th>
+                                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 max-w-[200px]">API Base URL</th>
                                 <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">最大Tokens</th>
-                                <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500">健康检查间隔</th>
                                 <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">角色</th>
                                 <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">状态</th>
                                 <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500">最后检查</th>
@@ -84,7 +84,7 @@
                         </thead>
                         <tbody id="modelTableBody" class="divide-y divide-gray-100">
                             <tr>
-                                <td colspan="10" class="px-6 py-8 text-center text-gray-500">
+                                <td colspan="9" class="px-6 py-8 text-center text-gray-500">
                                     <i class="fas fa-spinner fa-spin mr-2"></i>加载中...
                                 </td>
                             </tr>
@@ -103,8 +103,8 @@
 
     <!-- 新建模型弹窗 -->
     <div id="createModal" class="modal fixed inset-0 bg-black/50 items-center justify-center z-50">
-        <div class="bg-white rounded-xl w-[640px] max-h-[90vh] overflow-y-auto shadow-2xl">
-            <div class="px-6 py-4 border-b flex items-center justify-between bg-gray-50 rounded-t-xl">
+        <div class="bg-white rounded-xl w-[640px] max-h-[90vh] shadow-2xl flex flex-col">
+            <div class="px-6 py-4 border-b flex items-center justify-between bg-gray-50 rounded-t-xl flex-shrink-0">
                 <div class="flex items-center gap-2">
                     <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white">
                         <i class="fas fa-plus text-sm"></i>
@@ -115,14 +115,14 @@
                     <i class="fas fa-times"></i>
                 </button>
             </div>
-            <div class="p-6 space-y-6">
+            <div class="p-6 space-y-6 overflow-y-auto flex-1">
                 <!-- 基础信息 -->
                 <section>
                     <div class="flex items-center gap-2 mb-4">
                         <div class="w-5 h-5 rounded bg-blue-100 text-blue-600 flex items-center justify-center text-[10px]">
                             <i class="fas fa-info"></i>
                         </div>
-                        <span class="text-sm font-semibold text-gray-800">基础信息</span>
+                        <span class="text-sm font-semibold text-gray-800">新建模型</span>
                     </div>
                     <div class="space-y-3 pl-7">
                         <div class="grid grid-cols-3 gap-3">
@@ -147,6 +147,11 @@
                                     <option value="embedding">Embedding 模型</option>
                                 </select>
                             </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">所属组织</label>
+                            <select id="orgSelect" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none focus:border-blue-500 transition-all">
+                            </select>
                         </div>
                         <div>
                             <label class="block text-xs font-medium text-gray-500 mb-1">API Base URL <span class="text-red-400">*</span></label>
@@ -259,7 +264,7 @@
                     </div>
                 </section>
             </div>
-            <div class="px-6 py-4 border-t bg-gray-50 rounded-b-xl flex justify-between gap-3">
+            <div class="px-6 py-4 border-t bg-gray-50 rounded-b-xl flex justify-between gap-3 flex-shrink-0">
                 <button onclick="testCreateConfig()" class="px-4 py-2 border-2 border-blue-600 text-blue-600 rounded-lg text-sm hover:bg-blue-50 transition-colors flex items-center gap-2">
                     <i class="fas fa-stethoscope text-xs"></i>测试连接
                 </button>
@@ -275,8 +280,8 @@
 
     <!-- 编辑模型弹窗 -->
     <div id="editModal" class="modal fixed inset-0 bg-black/50 items-center justify-center z-50">
-        <div class="bg-white rounded-xl w-[640px] max-h-[90vh] overflow-y-auto shadow-2xl">
-            <div class="px-6 py-4 border-b flex items-center justify-between bg-gray-50 rounded-t-xl">
+        <div class="bg-white rounded-xl w-[640px] max-h-[90vh] shadow-2xl flex flex-col">
+            <div class="px-6 py-4 border-b flex items-center justify-between bg-gray-50 rounded-t-xl flex-shrink-0">
                 <div class="flex items-center gap-2">
                     <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white">
                         <i class="fas fa-brain text-sm"></i>
@@ -288,7 +293,7 @@
                 </button>
             </div>
             
-            <div class="p-6 space-y-6">
+            <div class="p-6 space-y-6 overflow-y-auto flex-1">
                 <input type="hidden" id="editId">
 
                 <!-- 基础信息 -->
@@ -316,6 +321,11 @@
                                     <option value="embedding">Embedding 模型</option>
                                 </select>
                             </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">所属组织</label>
+                            <select id="editOrgSelect" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none focus:border-blue-500 transition-all">
+                            </select>
                         </div>
                         <div>
                             <label class="block text-xs font-medium text-gray-500 mb-1">API Base URL <span class="text-red-400">*</span></label>
@@ -426,7 +436,7 @@
                 </section>
             </div>
             
-            <div class="px-6 py-4 border-t bg-gray-50 rounded-b-xl flex justify-end gap-3">
+            <div class="px-6 py-4 border-t bg-gray-50 rounded-b-xl flex justify-end gap-3 flex-shrink-0">
                 <button onclick="closeModal('editModal')" class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-white hover:border-gray-400 transition-colors">取消</button>
                 <button onclick="updateModel()" class="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 shadow-sm hover:shadow transition-all flex items-center gap-2">
                     <i class="fas fa-save text-xs"></i>保存修改
@@ -703,7 +713,7 @@
         // 加载模型列表
         async function loadModels() {
             const tbody = document.getElementById('modelTableBody');
-            tbody.innerHTML = '<tr><td colspan="10" class="px-6 py-8 text-center text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i>加载中...</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="px-6 py-8 text-center text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i>加载中...</td></tr>';
             
             const keyword = document.getElementById('searchInput').value;
             const url = `${API_BASE}/models?page=${currentPage}&page_size=20&keyword=${encodeURIComponent(keyword)}`;
@@ -717,13 +727,13 @@
                     document.getElementById('totalCount').textContent = `共 ${data.total} 条记录`;
                     renderPagination(data.page, Math.ceil(data.total / 20));
                 } else {
-                    tbody.innerHTML = '<tr><td colspan="10" class="px-6 py-8 text-center text-gray-500">暂无数据</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="9" class="px-6 py-8 text-center text-gray-500">暂无数据</td></tr>';
                     document.getElementById('totalCount').textContent = '共 0 条记录';
                     document.getElementById('pagination').innerHTML = '';
                 }
             } catch (err) {
                 console.error('加载失败:', err);
-                tbody.innerHTML = '<tr><td colspan="10" class="px-6 py-8 text-center text-red-500">加载失败，请刷新页面重试</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" class="px-6 py-8 text-center text-red-500">加载失败，请刷新页面重试</td></tr>';
             }
         }
 
@@ -742,13 +752,13 @@
                     <td class="px-6 py-4 text-sm">
                         <span class="bg-green-50 text-green-700 px-2 py-1 rounded text-xs">${getProviderName(m.provider)}</span>
                     </td>
-                    <td class="px-6 py-4 text-sm font-medium">${m.model_id}</td>
-                    <td class="px-6 py-4 text-sm">
-                        <span class="px-2 py-1 rounded text-xs ${m.model_type === 'embedding' ? 'bg-indigo-50 text-indigo-700' : 'bg-blue-50 text-blue-700'}">${m.model_type === 'embedding' ? 'Embedding' : 'LLM'}</span>
+                    <td class="px-6 py-4 text-sm text-gray-600 truncate max-w-[120px]" title="${escapeHtml(m.org_name || '根组织')}">${escapeHtml(m.org_name || '根组织')}</td>
+                    <td class="px-6 py-4 text-sm whitespace-nowrap">
+                        <span class="px-2 py-1 rounded text-xs ${m.model_type === 'embedding' ? 'bg-indigo-50 text-indigo-700' : 'bg-blue-50 text-blue-700'}">${m.model_type === 'embedding' ? '[Embedding]' : '[LLM]'}</span>
+                        <span class="font-medium ml-1">${m.model_id}</span>
                     </td>
-                    <td class="px-6 py-4 text-sm text-gray-600">${m.base_url}</td>
+                    <td class="px-6 py-4 text-sm text-gray-600 truncate max-w-[200px]" title="${escapeHtml(m.base_url)}">${m.base_url}</td>
                     <td class="px-6 py-4 text-sm text-center">${m.max_tokens || 4096}</td>
-                    <td class="px-6 py-4 text-sm text-center">${m.check_interval_sec || 5} 秒</td>
                     <td class="px-6 py-4 text-sm">
                         ${getRoleHtml(m)}
                     </td>
@@ -810,6 +820,7 @@
             document.getElementById('createTemperature').value = '0.1';
             document.getElementById('createIsDefault').checked = false;
             toggleCreateModelTypeSections();
+            loadOrgSelect('orgSelect');
             showModal('createModal');
         }
 
@@ -833,7 +844,7 @@
             const role = document.querySelector('input[name="createRole"]:checked')?.value || '';
             const isPrimary = role === 'primary';
             const isBackup = role === 'backup';
-            const data = {
+            let data = {
                 model_type: document.getElementById('createModelType').value,
                 provider: document.getElementById('createProvider').value,
                 model_id: document.getElementById('createModelId').value,
@@ -853,10 +864,12 @@
                 return;
             }
 
+            injectOrgId(data, 'orgSelect');
+            const orgHeaders = getOrgOverrideHeaders('orgSelect');
             try {
                 const resp = await apiFetch(`${API_BASE}/models`, {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: {'Content-Type': 'application/json', ...orgHeaders},
                     body: JSON.stringify(data)
                 });
                 const result = await resp.json();
@@ -910,7 +923,7 @@
                 document.getElementById('editBackupOrder').value = isBackup ? editData.backup_order : 1;
                 document.getElementById('editBackupOrder').disabled = !isBackup;
                 toggleEditModelTypeSections();
-
+                loadOrgSelect('editOrgSelect', editData.org_id);
                 showModal('editModal');
             } catch (err) {
                 showToast('加载失败', 'error');
@@ -932,7 +945,7 @@
                 }
             }
 
-            const data = {
+            let data = {
                 model_type: document.getElementById('editModelType').value,
                 model_id: document.getElementById('editModelId').value,
                 base_url: document.getElementById('editBaseUrl').value,
@@ -948,10 +961,12 @@
 
             if (!data.api_key) delete data.api_key;
 
+            injectOrgId(data, 'editOrgSelect');
+            const orgHeaders = getOrgOverrideHeaders('editOrgSelect');
             try {
                 const resp = await apiFetch(`${API_BASE}/models/${id}`, {
                     method: 'PUT',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: {'Content-Type': 'application/json', ...orgHeaders},
                     body: JSON.stringify(data)
                 });
                 const result = await resp.json();
@@ -1064,7 +1079,13 @@
                 const resp = await apiFetch(`${API_BASE}/models?page=1&page_size=1000`);
                 const data = await resp.json();
                 if (data.data) {
-                    return data.data.some(m => m.backup_order === order && m.id !== excludeId && m.status !== 'inactive');
+                    const targetOrgId = data.data.find(m => m.id === excludeId)?.org_id;
+                    return data.data.some(m =>
+                        m.backup_order === order &&
+                        m.id !== excludeId &&
+                        m.status !== 'inactive' &&
+                        (!targetOrgId || m.org_id === targetOrgId)
+                    );
                 }
             } catch (e) {}
             return false;

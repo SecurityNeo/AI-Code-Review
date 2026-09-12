@@ -348,6 +348,7 @@ func (s *EmbeddingService) getConfig() model.IncubatorConfig {
 func (s *EmbeddingService) recordCallLog(m *model.LLMModel, tokens int) {
 	costCents := calcCostCents(m, tokens, 0, 0) // embedding has no completion tokens
 	log := &model.LLMCallLog{
+		OrgID:            1, // embedding 调用暂归根组织（全局配置）
 		Provider:         m.Provider,
 		ModelName:        m.ModelID,
 		CallType:         "embedding",

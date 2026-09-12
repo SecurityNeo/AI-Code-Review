@@ -1,6 +1,8 @@
 package model
 
 import (
+	"errors"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -10,8 +12,11 @@ import (
 
 type Project struct {
 	ID                 uint            `gorm:"primaryKey" json:"id"`
+	OrgID              uint            `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
+	OrgName            string          `gorm:"-" json:"org_name,omitempty"`
+	GitLabInstanceID   uint            `gorm:"column:gitlab_instance_id;not null;default:1;index:idx_gitlab_instance" json:"gitlab_instance_id"`
 	Name               string          `gorm:"size:255;not null" json:"name"`
-	ProjectPath        string          `gorm:"size:255;uniqueIndex" json:"project_path"`
+	ProjectPath        string          `gorm:"size:255;not null;uniqueIndex:idx_org_project_path,priority:2" json:"project_path"`
 	GitLabProjectID    int             `gorm:"column:gitlab_project_id" json:"gitlab_project_id"`
 	TemplateID         uint            `gorm:"index" json:"template_id"`
 	PoolID             uint            `gorm:"index" json:"pool_id"`
@@ -19,7 +24,7 @@ type Project struct {
 	AIEnabled          bool            `gorm:"default:false" json:"ai_enabled"`
 	Source             string          `gorm:"size:20;default:'manual'" json:"source"`
 	Language           string          `gorm:"size:32;default:'golang'" json:"language"` // 项目主要编程语言
-	AccessToken        string          `gorm:"size:500" json:"access_token"`
+	AccessToken        string          `gorm:"size:500" json:"-"`
 	LastSyncAt         *time.Time      `json:"last_sync_at"`
 	SyncStatus         string          `gorm:"size:20;default:'success'" json:"sync_status"`
 	SyncError          string          `gorm:"size:512" json:"sync_error"`
@@ -32,6 +37,7 @@ type Project struct {
 	GraphScanStatus    string          `gorm:"size:32;not null;default:'none'" json:"graph_scan_status"` // none | pending | running | completed | failed
 	GraphLastBuildAt   *time.Time      `json:"graph_last_build_at"`
 	GraphScanError     string          `gorm:"size:512" json:"graph_scan_error"`
+	Version            int             `gorm:"default:1" json:"version"` // 乐观锁版本号
 	CreatedAt          time.Time       `json:"created_at"`
 	UpdatedAt          time.Time       `json:"updated_at"`
 	DeletedAt          gorm.DeletedAt  `gorm:"index" json:"deleted_at"`
@@ -46,6 +52,28 @@ type Project struct {
 	PendingIssueCount int `gorm:"default:0" json:"pending_issue_count"` // 项目中待处理 Issue 的快照计数
 }
 
+// BeforeUpdate GORM hook: 防止 org_id 被修改
+// 拦截所有更新方式：map[string]interface{} 和 struct 指针
+func (p *Project) BeforeUpdate(tx *gorm.DB) error {
+	if tx.Statement == nil {
+		return nil
+	}
+	switch dest := tx.Statement.Dest.(type) {
+	case map[string]interface{}:
+		if _, exists := dest["org_id"]; exists {
+			return errors.New("org_id cannot be modified on Project")
+		}
+	case *Project:
+		// 在 Updates(&project) 或 Save(&project) 时，检查当前值与新值是否不同
+		if dest.OrgID != 0 && dest.OrgID != p.OrgID {
+			return errors.New("org_id cannot be modified on Project")
+		}
+	}
+	return nil
+}
+
+// --- TaskStatus ---
+
 type TaskStatus string
 
 const (
@@ -59,6 +87,8 @@ const (
 
 type Task struct {
 	ID                  uint                `gorm:"primaryKey" json:"id"`
+	OrgID               uint                `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
+	OrgName             string              `gorm:"-" json:"org_name,omitempty"`
 	ProjectID           uint                `gorm:"index;not null" json:"project_id"`
 	MRMergeID           int                 `json:"mr_iid"`
 	MRAuthor            string              `gorm:"size:100" json:"author"`
@@ -101,7 +131,7 @@ type Task struct {
 	ExecutionCount      int                 `gorm:"default:0;column:execution_count" json:"execution_count"`         // 同一任务第几次运行（首次创建为0，首次保存后变为1）
 }
 
-// BeforeCreate GORM hook: 确保 JSON 字段有合法默认值
+// BeforeCreate GORM hook: 确保 JSON 字段有合法默认值，自动 fallback org_id
 func (t *Task) BeforeCreate(tx *gorm.DB) error {
 	if t.DiffFilesJSON == "" {
 		t.DiffFilesJSON = "[]"
@@ -114,6 +144,18 @@ func (t *Task) BeforeCreate(tx *gorm.DB) error {
 	}
 	if t.AIResponseJSON == "" {
 		t.AIResponseJSON = "{}"
+	}
+	// 自动 fallback org_id：如果未设置且有关联 Project，从 Project 继承
+	if t.OrgID == 0 && t.ProjectID > 0 {
+		var project Project
+		if err := tx.First(&project, t.ProjectID).Error; err != nil {
+			return fmt.Errorf("fallback org_id failed: project %d not found", t.ProjectID)
+		}
+		t.OrgID = project.OrgID
+	}
+	// 兜底：仍为零则设为根组织
+	if t.OrgID == 0 {
+		t.OrgID = 1
 	}
 	return nil
 }
@@ -137,6 +179,8 @@ func (t *Task) BeforeUpdate(tx *gorm.DB) error {
 
 type ReviewCategory struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
+	OrgID     uint      `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
+	OrgName   string    `gorm:"-" json:"org_name,omitempty"`
 	Code      string    `gorm:"uniqueIndex;size:32" json:"code"`
 	Name      string    `gorm:"size:100" json:"name"`
 	IsBuiltIn bool      `gorm:"default:false" json:"is_built_in"`
@@ -149,7 +193,10 @@ type ReviewCategory struct {
 
 type ReviewRule struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
-	Code        string    `gorm:"uniqueIndex;size:64" json:"code"`
+	OrgID       uint      `gorm:"column:org_id;not null;default:1;uniqueIndex:idx_org_scope_code,priority:1" json:"org_id"`
+	OrgName     string    `gorm:"-" json:"org_name,omitempty"`
+	Scope       string    `gorm:"size:20;not null;default:'global';uniqueIndex:idx_org_scope_code,priority:2" json:"scope"` // global/org/project
+	Code        string    `gorm:"size:64;not null;uniqueIndex:idx_org_scope_code,priority:3" json:"code"`
 	Name        string    `gorm:"size:100" json:"name"`
 	Category    string    `gorm:"size:32" json:"category"`                  // security/performance/readability/maintainability/test_coverage
 	Severity    string    `gorm:"size:16" json:"severity"`                  // critical/high/medium/low/info
@@ -167,6 +214,7 @@ type ReviewRule struct {
 
 type ProjectReviewConfig struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
+	OrgID     uint      `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
 	ProjectID uint      `gorm:"index" json:"project_id"`
 	RuleID    uint      `gorm:"index" json:"rule_id"`
 	IsEnabled bool      `gorm:"default:true" json:"is_enabled"`
@@ -179,6 +227,7 @@ type ProjectReviewConfig struct {
 
 type TaskReviewRule struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
+	OrgID       uint      `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
 	TaskID      uint      `gorm:"index;not null" json:"task_id"`
 	RuleID      *uint     `gorm:"index" json:"rule_id"` // 指向 review_rules.id，NULL=规则已删除
 	RuleCode    string    `gorm:"size:64;not null" json:"rule_code"`
@@ -195,6 +244,8 @@ type TaskReviewRule struct {
 
 type ReviewIssue struct {
 	ID                   uint           `gorm:"primaryKey" json:"id"`
+	OrgID                uint           `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
+	OrgName              string         `gorm:"-" json:"org_name,omitempty"`
 	TaskID               uint           `gorm:"index" json:"task_id"`
 	MRID                 int            `gorm:"column:mr_id;index:idx_mr_fingerprint" json:"mr_id"` // 关联 MR IID
 	RuleID               *uint          `gorm:"index" json:"rule_id"`                               // NULL=AI自主发现
@@ -228,6 +279,7 @@ type ReviewIssue struct {
 // --- TaskReviewComment 任务人工复核意见 ---
 type TaskReviewComment struct {
 	ID         uint      `gorm:"primaryKey" json:"id"`
+	OrgID      uint      `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
 	TaskID     uint      `gorm:"index;not null" json:"task_id"`
 	Content    string    `gorm:"type:text;not null" json:"content"`
 	RetryRound int       `gorm:"default:1" json:"retry_round"`
@@ -237,7 +289,9 @@ type TaskReviewComment struct {
 
 type ProjectTemplate struct {
 	ID                    uint      `gorm:"primaryKey" json:"id"`
-	Name                  string    `gorm:"size:100;uniqueIndex;not null" json:"name"`
+	OrgID                 uint      `gorm:"column:org_id;not null;default:1;uniqueIndex:idx_org_name,priority:1" json:"org_id"`
+	OrgName               string    `gorm:"-" json:"org_name,omitempty"`
+	Name                  string    `gorm:"size:100;uniqueIndex:idx_org_name,priority:2;not null" json:"name"`
 	Description           string    `gorm:"size:512" json:"description"`
 	Prompt                string    `gorm:"type:text;not null" json:"prompt"`                                  // 旧版自定义 prompt（废弃兼容）
 	CustomInstruction     string    `gorm:"type:text;column:custom_instruction" json:"custom_instruction"`     // 项目特殊说明
@@ -262,11 +316,14 @@ const (
 
 type ResourcePool struct {
 	ID               uint       `gorm:"primaryKey" json:"id"`
-	Name             string     `gorm:"size:100;uniqueIndex;not null" json:"name"`
+	OrgID            uint       `gorm:"column:org_id;not null;default:1;uniqueIndex:idx_org_name,priority:1" json:"org_id"`
+	OrgName          string     `gorm:"-" json:"org_name,omitempty"`
+	IsShared         bool       `gorm:"column:is_shared;default:false" json:"is_shared"`
+	Name             string     `gorm:"size:100;uniqueIndex:idx_org_name,priority:2;not null" json:"name"`
 	OpencodeEndpoint string     `gorm:"size:512;not null" json:"opencode_endpoint"`
 	OpencodeUsername string     `gorm:"size:100" json:"opencode_username"`
-	OpencodePassword string     `gorm:"size:512" json:"opencode_password"`
-	OpencodeAPIKey   string     `gorm:"size:512" json:"opencode_api_key"`
+	OpencodePassword string     `gorm:"size:512" json:"-"`
+	OpencodeAPIKey   string     `gorm:"size:512" json:"-"`
 	OpencodeVersion  string     `gorm:"size:50" json:"opencode_version"`
 	MaxParallel      int        `gorm:"default:5" json:"max_parallel"`
 	CheckIntervalSec int        `gorm:"default:5" json:"check_interval_sec"`
@@ -292,10 +349,13 @@ const (
 
 type LLMModel struct {
 	ID                    uint       `gorm:"primaryKey" json:"id"`
+	OrgID                 uint       `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
+	OrgName               string     `gorm:"-" json:"org_name,omitempty"`
+	IsShared              bool       `gorm:"column:is_shared;default:false" json:"is_shared"`
 	Provider              string     `gorm:"size:50;not null" json:"provider"`
 	ModelID               string     `gorm:"size:100;not null" json:"model_id"`
 	BaseURL               string     `gorm:"size:512;not null" json:"base_url"`
-	APIKey                string     `gorm:"size:512;not null" json:"api_key"`
+	APIKey                string     `gorm:"size:512;not null" json:"-"`
 	MaxTokens             int        `gorm:"default:4096" json:"max_tokens"`
 	TimeoutSec            int        `gorm:"default:120" json:"timeout_sec"`
 	Temperature           float64    `gorm:"default:0.1" json:"temperature"`
@@ -322,8 +382,10 @@ type LLMModel struct {
 
 type WeComNotifier struct {
 	ID              uint   `gorm:"primaryKey"`
+	OrgID           uint   `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
 	Name            string `gorm:"size:100;not null"`
-	WebhookUrl      string `gorm:"size:512;not null"` // Webhook URL（完整URL，明文存储）
+	WebhookUrl      string `gorm:"size:512;not null"` // Webhook URL（完整URL）
+	WebhookKeyEnc   string `gorm:"column:webhook_key_enc;size:512" json:"-"` // 企微机器人key加密存储
 	MessageTemplate string `gorm:"type:text"`         // 消息模版
 	ProjectID       *uint  `gorm:"index"`
 	Enabled         bool   `gorm:"default:false"`
@@ -333,10 +395,29 @@ type WeComNotifier struct {
 	UpdatedAt       time.Time
 }
 
+// BeforeUpdate GORM hook: 防止 org_id 被修改
+func (n *WeComNotifier) BeforeUpdate(tx *gorm.DB) error {
+	if tx.Statement == nil {
+		return nil
+	}
+	switch dest := tx.Statement.Dest.(type) {
+	case map[string]interface{}:
+		if _, exists := dest["org_id"]; exists {
+			return errors.New("org_id cannot be modified on WeComNotifier")
+		}
+	case *WeComNotifier:
+		if dest.OrgID != 0 && dest.OrgID != n.OrgID {
+			return errors.New("org_id cannot be modified on WeComNotifier")
+		}
+	}
+	return nil
+}
+
 // --- OperationLog ---
 
 type OperationLog struct {
 	ID         uint   `gorm:"primaryKey"`
+	OrgID      uint   `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
 	OpType     string `gorm:"size:50;index;not null"`
 	OpObject   string `gorm:"size:100"`
 	OpObjectID uint
@@ -351,6 +432,8 @@ type OperationLog struct {
 
 type MergeRequestReviewLog struct {
 	ID                uint       `gorm:"primaryKey" json:"id"`
+	OrgID             uint       `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
+	OrgName           string     `gorm:"-" json:"org_name,omitempty"`
 	ProjectName       string     `gorm:"size:255;index" json:"project_name"`
 	Author            string     `gorm:"size:100;index" json:"author"`
 	AuthorDisplayName string     `gorm:"column:author_display_name;size:100" json:"author_display_name"`
@@ -376,7 +459,7 @@ type MergeRequestReviewLog struct {
 
 type SystemConfig struct {
 	ID                      uint   `gorm:"primaryKey" json:"id"`
-	GitlabToken             string `gorm:"size:255" json:"gitlab_token"`
+	GitlabToken             string `gorm:"size:255" json:"-"`
 	TaskTimeoutMin          int    `gorm:"default:120" json:"task_timeout_min"`
 	SyncIntervalSec         int    `gorm:"default:60" json:"sync_interval_sec"`
 	MRSyncIntervalSec       int    `gorm:"default:60" json:"mr_sync_interval_sec"`
@@ -437,6 +520,7 @@ const (
 // --- User ---
 type User struct {
 	ID             uint      `gorm:"primaryKey" json:"id"`
+	DefaultOrgID   uint      `gorm:"column:default_org_id;not null;default:1;index:idx_default_org_id" json:"default_org_id"`
 	Username       string    `gorm:"size:50;uniqueIndex;not null" json:"username"`
 	DisplayName    string    `gorm:"size:100" json:"display_name"`
 	Password       string    `gorm:"size:255" json:"-"`                         // GitLab 用户无本地密码
@@ -449,29 +533,33 @@ type User struct {
 	IMUserID       string    `gorm:"size:128" json:"im_user_id"`
 	Enabled        bool      `gorm:"default:true" json:"enabled"`
 	AvatarURL      string    `gorm:"size:512" json:"avatar_url"`
+	Version        int       `gorm:"default:1" json:"version"` // 乐观锁版本号
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // --- Token ---
 type Token struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	UserID    uint      `gorm:"index" json:"user_id"`
-	Username  string    `gorm:"size:50" json:"username"`
-	Token     string    `gorm:"size:255;index" json:"-"`
-	ExpiresAt time.Time `json:"expires_at"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        uint       `gorm:"primaryKey" json:"id"`
+	UserID    uint       `gorm:"index" json:"user_id"`
+	OrgID     uint       `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
+	Username  string     `gorm:"size:50" json:"username"`
+	Token     string     `gorm:"size:255;index" json:"-"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	RevokedAt *time.Time `json:"revoked_at"` // 吊销时间，NULL=未吊销
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 // --- SMTPConfig ---
 
 type SMTPConfig struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
+	OrgID     uint      `gorm:"column:org_id;not null;default:1;index" json:"org_id"`
 	Host      string    `gorm:"size:255;not null" json:"host"`
 	Port      int       `gorm:"not null;default:587" json:"port"`
 	Username  string    `gorm:"size:255" json:"username"`
-	Password  string    `gorm:"size:512" json:"password"`
+	Password  string    `gorm:"size:512" json:"-"`
 	FromEmail string    `gorm:"size:255;not null" json:"from_email"`
 	FromName  string    `gorm:"size:100" json:"from_name"`
 	UseTLS    bool      `gorm:"default:true" json:"use_tls"`
@@ -484,6 +572,7 @@ type SMTPConfig struct {
 
 type ReportConfig struct {
 	ID              uint      `gorm:"primaryKey" json:"id"`
+	OrgID           uint      `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
 	ReportType      string    `gorm:"size:20;not null" json:"report_type"` // weekly / monthly
 	Enabled         bool      `gorm:"default:false" json:"enabled"`        // 保留兼容
 	GenerateEnabled bool      `gorm:"default:false;column:generate_enabled" json:"generate_enabled"`
@@ -503,6 +592,8 @@ type ReportConfig struct {
 
 type ReportRecipient struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
+	OrgID     uint      `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
+	OrgName   string    `gorm:"-" json:"org_name,omitempty"`
 	Name      string    `gorm:"size:100" json:"name"`
 	Email     string    `gorm:"size:255;not null" json:"email"`
 	GroupName string    `gorm:"size:100;default:'默认分组'" json:"group_name"`
@@ -515,6 +606,8 @@ type ReportRecipient struct {
 
 type ReportLog struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
+	OrgID       uint      `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
+	OrgName     string    `gorm:"-" json:"org_name,omitempty"`
 	ReportType  string    `gorm:"size:20" json:"report_type"`  // weekly / monthly
 	TriggerType string    `gorm:"size:20" json:"trigger_type"` // auto / manual / preview
 	Status      string    `gorm:"size:20" json:"status"`       // sent_success / sent_failed / generated_success / generated_failed
@@ -536,6 +629,7 @@ const (
 
 type LLMCallLog struct {
 	ID               uint      `gorm:"primaryKey" json:"id"`
+	OrgID            uint      `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
 	TaskID           *uint     `gorm:"index:idx_task_call_type,priority:1" json:"task_id,omitempty"`
 	ModelID          *uint     `gorm:"index:idx_model_created,priority:2" json:"model_id,omitempty"`
 	Provider         string    `gorm:"size:32;not null;default:'';index" json:"provider"`
@@ -575,6 +669,8 @@ type IncubatorConfig struct {
 
 type RuleIncubation struct {
 	ID               uint       `gorm:"primaryKey" json:"id"`
+	OrgID            uint       `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
+	OrgName          string     `gorm:"-" json:"org_name,omitempty"`
 	Status           string     `gorm:"size:20;default:'draft';index" json:"status"`
 	Name             string     `gorm:"size:100" json:"name"`
 	Code             string     `gorm:"size:128;uniqueIndex" json:"code"`
@@ -619,6 +715,7 @@ type RuleIncubationJob struct {
 
 type ReviewIssueRuleMatch struct {
 	ID         uint       `gorm:"primaryKey" json:"id"`
+	OrgID      uint       `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
 	IssueID    uint       `gorm:"uniqueIndex:idx_issue_rule,priority:1" json:"issue_id"`
 	RuleID     uint       `gorm:"uniqueIndex:idx_issue_rule,priority:2" json:"rule_id"`
 	MatchType  string     `gorm:"size:20;default:'retroactive'" json:"match_type"`
@@ -657,6 +754,18 @@ type RuleIncubationVector struct {
 	ModelID      uint   `gorm:"index"`
 	Vector       string `gorm:"type:json;not null"`
 	Dimension    int    `gorm:"default:1536"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// LoginAttempt 登录失败尝试记录（用于账号锁定）
+type LoginAttempt struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	Username     string    `gorm:"size:255;not null;index:idx_username" json:"username"`
+	IP           string    `gorm:"size:64;index:idx_ip" json:"ip"`
+	FailedCount  int       `gorm:"default:0" json:"failed_count"`
+	LastFailedAt time.Time `json:"last_failed_at"`
+	LockedUntil  *time.Time `json:"locked_until"`
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }

@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>智能体配置 - CodeGuard</title>
-    <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+    <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <style>
@@ -64,23 +65,6 @@
         </header>
 
         <div class="p-6 max-w-6xl mx-auto">
-            <!-- 快速预设 -->
-            <div class="bg-white rounded-xl border p-5 mb-6">
-                <h3 class="text-sm font-semibold text-gray-700 mb-3">快速预设</h3>
-                <div class="flex gap-3">
-                    <button onclick="applyPreset('full')" class="px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm hover:bg-blue-100 border border-blue-200">
-                        <i class="fas fa-check-double mr-1"></i>全量评审
-                    </button>
-                    <button onclick="applyPreset('standard')" class="px-4 py-2 bg-gray-50 text-gray-700 rounded-lg text-sm hover:bg-gray-100 border border-gray-200">
-                        <i class="fas fa-check mr-1"></i>标准评审
-                    </button>
-                    <button onclick="applyPreset('security')" class="px-4 py-2 bg-green-50 text-green-700 rounded-lg text-sm hover:bg-green-100 border border-green-200">
-                        <i class="fas fa-shield-alt mr-1"></i>极速安全
-                    </button>
-                </div>
-                <p class="text-xs text-gray-400 mt-2">一键应用预设后仍可微调下方开关</p>
-            </div>
-
             <!-- 核心智能体 -->
             <div class="bg-white rounded-xl border p-5 mb-6">
                 <h3 class="text-sm font-semibold text-gray-700 mb-4">核心智能体</h3>
@@ -137,6 +121,12 @@ go.sum"></textarea>
 !*.important.log"></textarea>
                     <p class="text-[10px] text-gray-400 mt-1">白名单优先级高于排除规则。如果某路径同时匹配排除和白名单，则保留该文件。</p>
                 </div>
+            </div>
+
+            <!-- 所属组织（仅 super_admin 可见） -->
+            <div class="mb-4" id="orgSelectWrap" style="display:none;">
+                <label class="block text-sm font-medium text-gray-700 mb-1">所属组织</label>
+                <select id="orgSelect" class="w-48 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"></select>
             </div>
 
             <!-- 操作按钮 -->
@@ -335,17 +325,25 @@ const TRIGGER_EVENT_DEFS = [
 // ========== API ==========
 const API_BASE = (typeof window.API_BASE !== 'undefined') ? window.API_BASE : '';
 
-function apiFetch(url, opts = {}) {
+// 使用局部变量避免与全局 window.apiFetch 冲突（后者返回原生 Response）
+const _agentApiFetch = function _agentApiFetch(url, opts = {}) {
     const token = localStorage.getItem('auth_token') || '';
     opts.headers = opts.headers || {};
     opts.headers['Authorization'] = 'Bearer ' + token;
     if (!opts.headers['Content-Type'] && !(opts.body instanceof FormData)) {
         opts.headers['Content-Type'] = 'application/json';
     }
+    // GET 请求统一禁用浏览器缓存，避免多租户下因缓存导致读到其他组织的配置
+    if ((!opts.method || opts.method.toUpperCase() === 'GET') && !opts.headers['Cache-Control']) {
+        opts.headers['Cache-Control'] = 'no-cache, no-store';
+    }
     return fetch(API_BASE + url, opts).then(async r => {
         const data = await r.json().catch(() => ({}));
         if (!r.ok) {
-            throw new Error(data.error || ('HTTP ' + r.status));
+            const err = new Error(data.error || ('HTTP ' + r.status));
+            err.status = r.status;
+            err.data = data;
+            throw err;
         }
         return data;
     });
@@ -364,6 +362,7 @@ function showToast(msg, type = 'success') {
 document.addEventListener('DOMContentLoaded', () => {
     renderSidebar('agent-config');
     loadConfig();
+    loadOrgSelect('orgSelect');
 });
 
 // ========== 渲染阶段列表 ==========
@@ -689,7 +688,7 @@ function clampParallelMax(el) {
 
 // ========== 加载配置 ==========
 function loadConfig() {
-    apiFetch('/api/v1/review-agent-config')
+    _agentApiFetch('/api/v1/review-agent-config', { headers: getOrgOverrideHeaders() })
         .then(res => {
             const data = res.data || {};
             currentConfig = data;
@@ -729,8 +728,9 @@ function loadConfig() {
             document.getElementById('includePatterns').value = (ffCfg.include_patterns || []).join('\n');
             if (data.updated_at) {
                 const d = new Date(data.updated_at);
+                const updaterText = data.updated_by_name || (data.updated_by ? `by user #${data.updated_by}` : '');
                 document.getElementById('lastUpdateInfo').textContent = 
-                    `最后更新：${d.toLocaleString('zh-CN')}  ${data.updated_by ? 'by admin' : ''}`;
+                    `最后更新：${d.toLocaleString('zh-CN')}  ${updaterText}`;
             }
         })
         .catch(err => {
@@ -756,28 +756,6 @@ function loadConfig() {
             });
             renderStages(STAGE_DEFS.map(s => s.code), defaultStageConfigs, TRIGGER_EVENT_DEFS.map(e => e.code));
         });
-}
-
-// ========== 预设 ==========
-function applyPreset(type) {
-    const presets = {
-        full: STAGE_DEFS.map(s => s.code),
-        standard: STAGE_DEFS.map(s => s.code).filter(c => !['secret_scan','security_audit','test_suggestion','impact_analysis'].includes(c)),
-        security: ['trigger_check', 'dependency_scan', 'secret_scan', 'security_audit', 'post_process']
-    };
-
-    const enabled = presets[type] || presets.full;
-    // 只选择阶段主 checkbox（id 以 stage_ 开头），避开内部 trigger_event 等子 checkbox
-    const checkboxes = document.querySelectorAll('#stagesContainer input[type="checkbox"][id^="stage_"]');
-    checkboxes.forEach(cb => {
-        const code = cb.id.replace('stage_', '');
-        cb.checked = enabled.includes(code);
-        toggleStage(code);
-    });
-
-    showToast(type === 'full' ? '已应用全量评审预设' : 
-               type === 'standard' ? '已应用标准评审预设' : '已应用极速安全预设', 'info');
-    recalcViolations();
 }
 
 // ========== 保存配置 ==========
@@ -861,44 +839,39 @@ function saveConfig() {
     };
     stageConfigs['file_filter'] = fileFilterCfg;
 
-    const payload = {
+    let payload = {
         enabled_stages: enabledStages,
         stage_configs: stageConfigs,
         trigger_events: triggerEvents,
         show_agent_status: document.getElementById('showAgentStatus').checked
     };
 
-    const token = localStorage.getItem('auth_token') || '';
-    fetch(API_BASE + '/api/v1/review-agent-config', {
+    injectOrgId(payload, 'orgSelect');
+    const orgHeaders = getOrgOverrideHeaders();
+    _agentApiFetch('/api/v1/review-agent-config', {
         method: 'PUT',
-        headers: {
-            'Authorization': 'Bearer ' + token,
-            'Content-Type': 'application/json'
-        },
+        headers: orgHeaders,
         body: JSON.stringify(payload)
     })
-    .then(async r => {
-        const data = await r.json().catch(() => ({}));
-        if (!r.ok) {
-            if (r.status === 422 && data.error === 'dependency_violation' && Array.isArray(data.violations)) {
-                currentViolations = data.violations;
-                renderViolationBadges();
-                const msgs = data.violations.map(v => v.message).join('；');
-                showToast('配置保存失败：' + msgs, 'error');
-                // 滚动到第一个违规卡片
-                const first = document.querySelector('.stage-card--error, .stage-card--dep-warning');
-                if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            } else {
-                showToast(data.error || ('保存失败 HTTP ' + r.status), 'error');
-            }
-            return;
-        }
+    .then(data => {
         showToast('配置保存成功');
         currentViolations = [];
         renderViolationBadges();
         loadConfig();
     })
-    .catch(err => showToast(err.message || '保存失败', 'error'));
+    .catch(err => {
+        if (err.status === 422 && err.data && err.data.error === 'dependency_violation' && Array.isArray(err.data.violations)) {
+            currentViolations = err.data.violations;
+            renderViolationBadges();
+            const msgs = err.data.violations.map(v => v.message).join('；');
+            showToast('配置保存失败：' + msgs, 'error');
+            // 滚动到第一个违规卡片
+            const first = document.querySelector('.stage-card--error, .stage-card--dep-warning');
+            if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+            showToast(err.message || '保存失败', 'error');
+        }
+    });
 }
 
 // ========== 重置 ==========
@@ -947,7 +920,7 @@ function toggleDefaultPatterns() {
 async function loadDefaultFilterPatterns() {
     const contentEl = document.getElementById('defaultPatternsContent');
     try {
-        const res = await apiFetch('/api/v1/review-agent-config/file-filter-defaults');
+        const res = await _agentApiFetch('/api/v1/review-agent-config/file-filter-defaults');
         if (res.code !== 0 || !res.data) {
             contentEl.innerHTML = '<p class="text-red-400">加载失败</p>';
             return;

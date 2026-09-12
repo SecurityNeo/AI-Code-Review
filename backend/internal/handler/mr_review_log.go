@@ -29,6 +29,12 @@ func NewMRReviewLogHandler() *MRReviewLogHandler {
 }
 
 func (h *MRReviewLogHandler) List(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+
 	user, ok := middleware.GetUser(c)
 	if !ok {
 		c.JSON(401, gin.H{"error": "未登录"})
@@ -51,9 +57,21 @@ func (h *MRReviewLogHandler) List(c *gin.Context) {
 	var total int64
 
 	db := model.DB.Model(&model.MergeRequestReviewLog{})
+	if !scope.IsSuperAdmin {
+		db = db.Scopes(model.OrgScope(scope))
+	} else {
+		// super_admin 如果显式传了 org_id query，按指定组织过滤
+		if orgIDStr := c.Query("org_id"); orgIDStr != "" {
+			if orgID, err := strconv.Atoi(orgIDStr); err == nil && orgID > 0 {
+				db = db.Where("org_id = ?", uint(orgID))
+			}
+		}
+	}
 
-	// 按用户角色过滤：user 只能看自己的
-	db = model.FilterByUser(db, user, "author")
+	// 按用户角色过滤：developer 只能看自己的；废弃 users.role
+	if scope.CurrentOrgRole == "developer" && user.GitlabUsername != "" {
+		db = db.Where("author = ?", user.GitlabUsername)
+	}
 
 	if projectName != "" {
 		db = db.Where("project_name = ?", projectName)
@@ -83,6 +101,16 @@ func (h *MRReviewLogHandler) List(c *gin.Context) {
 		zap.L().Error("list mr review logs failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
+	}
+
+	// 批量填充组织名称
+	orgIDs := make([]uint, 0, len(logs))
+	for _, l := range logs {
+		orgIDs = append(orgIDs, l.OrgID)
+	}
+	orgNameMap := model.BatchOrgNames(orgIDs)
+	for i := range logs {
+		logs[i].OrgName = orgNameMap[logs[i].OrgID]
 	}
 
 	// 聚合统计（基于同样的筛选条件，使用新 Session 避免影响主查询）
@@ -120,9 +148,11 @@ func (h *MRReviewLogHandler) List(c *gin.Context) {
 	}
 	stateDB := model.DB.Model(&model.MergeRequestReviewLog{}).
 		Select("mr_state, COUNT(*) as count").
-		Where("mr_state IN ?", []string{"merged", "opened", "closed"})
-	// 关键：状态统计也必须按用户角色过滤，否则 user 会看到全表状态分布
-	stateDB = model.FilterByUser(stateDB, user, "author")
+		Where("mr_state IN ?", []string{"merged", "opened", "closed"}).
+		Scopes(model.OrgScope(scope))
+	if scope.CurrentOrgRole == "developer" && user.GitlabUsername != "" {
+		stateDB = stateDB.Where("author = ?", user.GitlabUsername)
+	}
 	if projectName != "" {
 		stateDB = stateDB.Where("project_name = ?", projectName)
 	}
@@ -164,6 +194,11 @@ func (h *MRReviewLogHandler) List(c *gin.Context) {
 
 // MarkAsDraft 将 MR 标记为 Draft
 func (h *MRReviewLogHandler) MarkAsDraft(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 
 	var log model.MergeRequestReviewLog
@@ -174,7 +209,7 @@ func (h *MRReviewLogHandler) MarkAsDraft(c *gin.Context) {
 
 	// 查找项目配置获取 GitLab Project ID 和 token
 	var project model.Project
-	if err := model.DB.Where("name = ?", log.ProjectName).First(&project).Error; err != nil {
+	if err := model.DB.Scopes(model.OrgScope(scope)).Where("name = ?", log.ProjectName).First(&project).Error; err != nil {
 		c.JSON(500, gin.H{"error": "project not found"})
 		return
 	}
@@ -236,6 +271,11 @@ func (h *MRReviewLogHandler) MarkAsDraft(c *gin.Context) {
 
 // MarkAsReady 将 MR 从 Draft 标记为 ready（移除 [Draft]: 前缀）
 func (h *MRReviewLogHandler) MarkAsReady(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.Atoi(c.Param("id"))
 
 	var log model.MergeRequestReviewLog
@@ -245,7 +285,7 @@ func (h *MRReviewLogHandler) MarkAsReady(c *gin.Context) {
 	}
 
 	var project model.Project
-	if err := model.DB.Where("name = ?", log.ProjectName).First(&project).Error; err != nil {
+	if err := model.DB.Scopes(model.OrgScope(scope)).Where("name = ?", log.ProjectName).First(&project).Error; err != nil {
 		c.JSON(500, gin.H{"error": "project not found"})
 		return
 	}
@@ -305,18 +345,57 @@ func (h *MRReviewLogHandler) MarkAsReady(c *gin.Context) {
 }
 
 func (h *MRReviewLogHandler) Projects(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+	db := model.DB.Model(&model.MergeRequestReviewLog{}).Scopes(model.OrgScope(scope))
+
+	var orgID uint
+	if orgIDStr := c.Query("org_id"); orgIDStr != "" {
+		if id, err := strconv.ParseUint(orgIDStr, 10, 64); err == nil {
+			orgID = uint(id)
+		}
+	}
+	// 非 super_admin 未显式传参时 fallback 到当前默认组织
+	// super_admin 未传参时不限制（返回所有组织）
+	if orgID == 0 && !scope.IsSuperAdmin {
+		orgID = middleware.GetCurrentOrgID(c)
+	}
+	if orgID > 0 {
+		db = db.Where("org_id = ?", orgID)
+	}
+
 	var projects []string
-	model.DB.Model(&model.MergeRequestReviewLog{}).
-		Distinct("project_name").
-		Pluck("project_name", &projects)
+	db.Distinct("project_name").Pluck("project_name", &projects)
 	c.JSON(200, gin.H{"data": projects})
 }
 
 func (h *MRReviewLogHandler) Authors(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
+	db := model.DB.Model(&model.MergeRequestReviewLog{}).Scopes(model.OrgScope(scope))
+
+	var orgID uint
+	if orgIDStr := c.Query("org_id"); orgIDStr != "" {
+		if id, err := strconv.ParseUint(orgIDStr, 10, 64); err == nil {
+			orgID = uint(id)
+		}
+	}
+	// 非 super_admin 未显式传参时 fallback 到当前默认组织
+	// super_admin 未传参时不限制（返回所有组织）
+	if orgID == 0 && !scope.IsSuperAdmin {
+		orgID = middleware.GetCurrentOrgID(c)
+	}
+	if orgID > 0 {
+		db = db.Where("org_id = ?", orgID)
+	}
+
 	var authors []string
-	model.DB.Model(&model.MergeRequestReviewLog{}).
-		Distinct("author").
-		Where("author != ?", "").
-		Pluck("author", &authors)
+	db.Distinct("author").Where("author != ?", "").Pluck("author", &authors)
 	c.JSON(200, gin.H{"data": authors})
 }

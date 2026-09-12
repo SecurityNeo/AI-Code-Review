@@ -25,6 +25,7 @@ type ReviewPipelineStage struct {
 // TaskPipelineExecution 任务 Pipeline 阶段执行实例
 type TaskPipelineExecution struct {
 	ID              uint       `gorm:"primaryKey" json:"id"`
+	OrgID           uint       `gorm:"column:org_id;not null;default:1;index:idx_org_id" json:"org_id"`
 	TaskID          uint       `gorm:"index" json:"task_id"`
 	StageCode       string     `gorm:"size:32;index" json:"stage_code"`
 	Status          string     `gorm:"size:16;default:'pending'" json:"status"` // pending / running / success / failed / timeout / skipped

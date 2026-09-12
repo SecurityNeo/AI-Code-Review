@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>报告管理 - CodeGuard</title>
-        <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+        <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <style>
@@ -208,6 +209,7 @@
                                 <thead>
                                     <tr class="bg-gray-50 text-gray-600">
                                         <th class="px-4 py-2 text-left font-medium">时间</th>
+                                        <th class="px-4 py-2 text-left font-medium">所属组织</th>
                                         <th class="px-4 py-2 text-left font-medium">类型</th>
                                         <th class="px-4 py-2 text-left font-medium">触发方式</th>
                                         <th class="px-4 py-2 text-left font-medium">接收人</th>
@@ -216,7 +218,7 @@
                                     </tr>
                                 </thead>
                                 <tbody id="reportLogTable">
-                                    <tr><td colspan="6" class="text-center text-gray-400 py-6">暂无数据</td></tr>
+                                    <tr><td colspan="7" class="text-center text-gray-400 py-6">暂无数据</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -295,28 +297,31 @@
         async function saveReportConfigs() {
             const weeklyGroups = Array.from(document.querySelectorAll('#weeklyGroups input[type="checkbox"]:checked')).map(cb => cb.value);
             const monthlyGroups = Array.from(document.querySelectorAll('#monthlyGroups input[type="checkbox"]:checked')).map(cb => cb.value);
-            const weekly = {
-                generate_enabled: document.getElementById('weeklyGenerateEnabled').checked,
-                send_enabled: document.getElementById('weeklySendEnabled').checked,
-                send_groups: weeklyGroups,
-                send_day_of_week: parseInt(document.getElementById('weeklyDay').value),
-                send_hour: parseInt(document.getElementById('weeklyHour').value),
-                send_minute: parseInt(document.getElementById('weeklyMinute').value),
-                data_period_days: parseInt(document.getElementById('weeklyPeriod').value),
-            };
-            const monthly = {
-                generate_enabled: document.getElementById('monthlyGenerateEnabled').checked,
-                send_enabled: document.getElementById('monthlySendEnabled').checked,
-                send_groups: monthlyGroups,
-                send_day_of_month: parseInt(document.getElementById('monthlyDay').value),
-                send_hour: parseInt(document.getElementById('monthlyHour').value),
-                send_minute: parseInt(document.getElementById('monthlyMinute').value),
-                data_period_days: parseInt(document.getElementById('monthlyPeriod').value),
-            };
+             let weekly = {
+                 generate_enabled: document.getElementById('weeklyGenerateEnabled').checked,
+                 send_enabled: document.getElementById('weeklySendEnabled').checked,
+                 send_groups: weeklyGroups,
+                 send_day_of_week: parseInt(document.getElementById('weeklyDay').value),
+                 send_hour: parseInt(document.getElementById('weeklyHour').value),
+                 send_minute: parseInt(document.getElementById('weeklyMinute').value),
+                 data_period_days: parseInt(document.getElementById('weeklyPeriod').value),
+             };
+             let monthly = {
+                 generate_enabled: document.getElementById('monthlyGenerateEnabled').checked,
+                 send_enabled: document.getElementById('monthlySendEnabled').checked,
+                 send_groups: monthlyGroups,
+                 send_day_of_month: parseInt(document.getElementById('monthlyDay').value),
+                 send_hour: parseInt(document.getElementById('monthlyHour').value),
+                 send_minute: parseInt(document.getElementById('monthlyMinute').value),
+                 data_period_days: parseInt(document.getElementById('monthlyPeriod').value),
+             };
+             weekly = injectOrgId(weekly, 'orgSelect');
+             monthly = injectOrgId(monthly, 'orgSelect');
             try {
+                const orgHeaders = getOrgOverrideHeaders();
                 const [wRes, mRes] = await Promise.all([
-                    apiFetch(`${API_BASE}/reports/config/weekly`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(weekly) }),
-                    apiFetch(`${API_BASE}/reports/config/monthly`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(monthly) }),
+                    apiFetch(`${API_BASE}/reports/config/weekly`, { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, orgHeaders), body: JSON.stringify(weekly) }),
+                    apiFetch(`${API_BASE}/reports/config/monthly`, { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, orgHeaders), body: JSON.stringify(monthly) }),
                 ]);
                 if (!wRes.ok) { const err = await wRes.json(); throw new Error(err.error); }
                 if (!mRes.ok) { const err = await mRes.json(); throw new Error(err.error); }
@@ -364,7 +369,8 @@
             btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>发送中...';
             try {
                 const body = groups ? JSON.stringify({ groups }) : '{}';
-                const res = await apiFetch(`${API_BASE}/reports/send/${type}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+                const orgHeaders = getOrgOverrideHeaders();
+                const res = await apiFetch(`${API_BASE}/reports/send/${type}`, { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, orgHeaders), body });
                 const result = await res.json();
                 if (!res.ok) throw new Error(result.error);
                 showToast(result.message || '报告已发送', 'success');
@@ -503,13 +509,14 @@
                 const result = await res.json();
                 const tbody = document.getElementById('reportLogTable');
                 if (!result.data || result.data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray-400 py-6">暂无数据</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-gray-400 py-6">暂无数据</td></tr>';
                     document.getElementById('logPagination').classList.add('hidden');
                     return;
                 }
                 tbody.innerHTML = result.data.map(l => `
                     <tr class="border-b">
                         <td class="px-4 py-2 text-sm">${formatDate(l.sent_at)}</td>
+                        <td class="px-4 py-2 text-sm text-gray-600">${escapeHtml(l.org_name || '根组织')}</td>
                         <td class="px-4 py-2 text-sm">${l.report_type === 'weekly' ? '周报' : '月报'}</td>
                         <td class="px-4 py-2 text-sm">${l.trigger_type === 'auto' ? '自动' : l.trigger_type === 'manual' ? '手动' : '预览'}</td>
                         <td class="px-4 py-2 text-sm">${(() => { try { const r = JSON.parse(l.recipients || '[]'); return r.map(x => x.name || x.email).join(', '); } catch(e) { return '-'; } })()}</td>
@@ -635,6 +642,7 @@
 
         loadReportConfig();
         loadReportLogs();
+        loadOrgSelect('orgSelect');
         renderSidebar('report');
     </script>
     <script defer src="/static/js/tailwindcss.min.js"></script>

@@ -17,6 +17,7 @@ type Engine struct {
 	db          *gorm.DB
 	executors   map[string]StageExecutor
 	snapshotMgr *SnapshotManager
+	scheduler   *FairScheduler // 多租户改造：公平调度器
 }
 
 // NewEngine 创建 Pipeline 引擎（llm: LLMService 实例由调用方注入）
@@ -25,6 +26,7 @@ func NewEngine(db *gorm.DB, llm LLMService) *Engine {
 		db:          db,
 		executors:   make(map[string]StageExecutor),
 		snapshotMgr: NewSnapshotManager(),
+		scheduler:   NewFairScheduler(), // 多租户改造
 	}
 	// 注册阶段执行器
 	e.Register(&TriggerCheckExecutor{})
@@ -56,6 +58,35 @@ func (e *Engine) ExecuteTask(taskID uint, inputs map[string]interface{}, broadca
 		return fmt.Errorf("任务不存在: %w", err)
 	}
 
+	// ===== 多租户改造：公平调度检查 =====
+	if e.scheduler != nil && !e.scheduler.Allow(task.OrgID) {
+		zap.L().Info("Pipeline 公平调度：org 速率限制，任务暂未执行",
+			zap.Uint("task_id", task.ID),
+			zap.Uint("org_id", task.OrgID))
+		return fmt.Errorf("org %d 触发速率限制，请稍后重试", task.OrgID)
+	}
+
+	// ===== 多租户改造：加载组织配置快照 =====
+	// 替代实时查询 model.DB.First(&agentCfg, 1)，一次性加载后冻结供全 Pipeline 使用
+	var orgSnapshot *OrgConfigSnapshot
+	if v, ok := inputs["_org_config_snapshot"].(*OrgConfigSnapshot); ok && v != nil {
+		orgSnapshot = v
+	} else {
+		var snapErr error
+		orgSnapshot, snapErr = LoadOrgConfigSnapshot(e.db, task.OrgID)
+		if snapErr != nil {
+			zap.L().Warn("Pipeline 加载组织配置快照失败，使用默认配置",
+				zap.Uint("task_id", task.ID),
+				zap.Uint("org_id", task.OrgID),
+				zap.Error(snapErr))
+			orgSnapshot = &OrgConfigSnapshot{}
+		}
+		if inputs == nil {
+			inputs = make(map[string]interface{})
+		}
+		inputs["_org_config_snapshot"] = orgSnapshot
+	}
+
 	// 加载阶段定义
 	var stageDefs []model.ReviewPipelineStage
 	if err := e.db.Order("sort_order ASC").Find(&stageDefs).Error; err != nil {
@@ -65,10 +96,10 @@ func (e *Engine) ExecuteTask(taskID uint, inputs map[string]interface{}, broadca
 		return fmt.Errorf("未配置 Pipeline 阶段")
 	}
 
-	// 读取全局智能体配置
-	var agentCfg model.ReviewAgentConfig
+	// 多租户改造：从快照读取智能体配置，不再实时查库
+	agentCfg := orgSnapshot.AgentConfig
 	enabledMap := make(map[string]bool)
-	if err := e.db.First(&agentCfg, 1).Error; err == nil {
+	if agentCfg.ID > 0 {
 		// 自动迁移旧 context_extract 配置到 code_understanding
 		agentCfg.MigrateContextExtractConfig()
 		for _, code := range agentCfg.EnabledStageCodes() {
@@ -148,7 +179,7 @@ func (e *Engine) ExecuteTask(taskID uint, inputs map[string]interface{}, broadca
 	task.Status = model.TaskRunning
 	now := time.Now()
 	task.StartedAt = &now
-	e.db.Omit("pool_id").Save(&task)
+	e.db.Omit("org_id", "pool_id").Save(&task) // ⚠️ 多租户改造：Omit org_id 防止零值覆盖
 
 	zap.L().Info("Pipeline 开始执行", zap.Uint("task_id", task.ID), zap.Int("stages", len(stageDefs)))
 
@@ -184,6 +215,7 @@ func (e *Engine) ExecuteTask(taskID uint, inputs map[string]interface{}, broadca
 			// 创建 skipped 执行记录
 			exec := &model.TaskPipelineExecution{
 				TaskID:      task.ID,
+				OrgID:       task.OrgID,
 				StageCode:   stageDef.Code,
 				Status:      model.PipelineStageSkipped,
 				SortOrder:   stageDef.SortOrder,
@@ -199,6 +231,7 @@ func (e *Engine) ExecuteTask(taskID uint, inputs map[string]interface{}, broadca
 		// 创建 execution 记录
 		exec := &model.TaskPipelineExecution{
 			TaskID:    task.ID,
+			OrgID:     task.OrgID,
 			StageCode: stageDef.Code,
 			Status:    model.PipelineStagePending,
 			SortOrder: stageDef.SortOrder,
@@ -240,7 +273,7 @@ func (e *Engine) ExecuteTask(taskID uint, inputs map[string]interface{}, broadca
 				exec.Status = status
 				exec.CompletedAt = &now
 				exec.ErrorMessage = "依赖阶段未成功执行"
-				e.db.Save(exec)
+				e.db.Omit("org_id").Save(exec) // ⚠️ 多租户改造：Omit org_id 防止零值覆盖
 				zap.L().Info("阶段因依赖失败被跳过/失败",
 					zap.String("stage", stageDef.Code),
 					zap.String("status", status))

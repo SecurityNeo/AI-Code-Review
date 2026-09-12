@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ai-optimizer/backend/internal/middleware"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
 	"github.com/gin-gonic/gin"
@@ -22,11 +23,16 @@ func NewTeamMemberHandler() *TeamMemberHandler {
 
 // List 人员列表
 func (h *TeamMemberHandler) List(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	search := c.Query("search")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 
-	members, total, err := service.NewTeamMemberService().List(search, page, pageSize)
+	members, total, err := service.NewTeamMemberService().List(scope, search, page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -37,8 +43,13 @@ func (h *TeamMemberHandler) List(c *gin.Context) {
 
 // Get 人员详情
 func (h *TeamMemberHandler) Get(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	member, err := service.NewTeamMemberService().Get(uint(id))
+	member, err := service.NewTeamMemberService().Get(scope, uint(id))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
@@ -48,13 +59,25 @@ func (h *TeamMemberHandler) Get(c *gin.Context) {
 
 // Create 创建人员
 func (h *TeamMemberHandler) Create(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	var data map[string]interface{}
 	if err := c.ShouldBindJSON(&data); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	member, err := service.NewTeamMemberService().Create(data)
+	// 多租户改造：非 super_admin 强制绑定当前组织
+	if !scope.IsSuperAdmin {
+		data["org_id"] = scope.CurrentOrgID
+	} else if _, ok := data["org_id"]; !ok {
+		data["org_id"] = scope.CurrentOrgID
+	}
+
+	member, err := service.NewTeamMemberService().Create(scope, data)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -65,6 +88,11 @@ func (h *TeamMemberHandler) Create(c *gin.Context) {
 
 // Update 更新人员
 func (h *TeamMemberHandler) Update(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 	var data map[string]interface{}
 	if err := c.ShouldBindJSON(&data); err != nil {
@@ -72,7 +100,10 @@ func (h *TeamMemberHandler) Update(c *gin.Context) {
 		return
 	}
 
-	if err := service.NewTeamMemberService().Update(uint(id), data); err != nil {
+	// 多租户改造：禁止修改 org_id
+	delete(data, "org_id")
+
+	if err := service.NewTeamMemberService().Update(scope, uint(id), data); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -82,8 +113,13 @@ func (h *TeamMemberHandler) Update(c *gin.Context) {
 
 // Delete 删除人员
 func (h *TeamMemberHandler) Delete(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err := service.NewTeamMemberService().Delete(uint(id)); err != nil {
+	if err := service.NewTeamMemberService().Delete(scope, uint(id)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -92,7 +128,12 @@ func (h *TeamMemberHandler) Delete(c *gin.Context) {
 
 // GitUsers 获取已知 Git 用户列表
 func (h *TeamMemberHandler) GitUsers(c *gin.Context) {
-	usernames, err := service.NewTeamMemberService().GetGitUsers()
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	usernames, err := service.NewTeamMemberService().GetGitUsers(scope)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -108,6 +149,7 @@ type ResponsibilityView struct {
 	ProjectID      uint      `json:"project_id"`
 	ProjectName    string    `json:"project_name,omitempty"`
 	MemberID       uint      `json:"member_id"`
+	Username       string    `json:"username"`
 	GitlabUsername string    `json:"gitlab_username"`
 	DisplayName    string    `json:"display_name"`
 	IMPlatform     string    `json:"im_platform"`
@@ -132,18 +174,21 @@ func toResponsibilityView(r model.ProjectResponsibility) ResponsibilityView {
 		Priority:   r.Priority,
 		CreatedAt:  r.CreatedAt,
 	}
-	if r.Member != nil && r.Member.ID > 0 {
-		v.GitlabUsername = r.Member.GitlabUsername
-		v.DisplayName = r.Member.DisplayName
-		v.IMPlatform = r.Member.IMPlatform
-		v.IMUserID = r.Member.IMUserID
-	}
-	// toResponsibilityView falls back to the User association when Member is not preloaded.
-	if v.DisplayName == "" && r.User.ID > 0 {
+	// 1. 优先使用 User（users 表）—— user_id 是当前主访问键
+	if r.User.ID > 0 {
 		v.GitlabUsername = r.User.GitlabUsername
 		v.DisplayName = r.User.DisplayName
+		v.Username = r.User.Username
 		v.IMPlatform = r.User.IMPlatform
 		v.IMUserID = r.User.IMUserID
+	}
+	// 2. User 为空时才回退到已退役的 Member（team_members 表，兼容旧数据）
+	if v.DisplayName == "" && r.Member != nil && r.Member.ID > 0 {
+		v.GitlabUsername = r.Member.GitlabUsername
+		v.DisplayName = r.Member.DisplayName
+		v.Username = r.Member.Username
+		v.IMPlatform = r.Member.IMPlatform
+		v.IMUserID = r.Member.IMUserID
 	}
 	if r.Project.ID > 0 {
 		v.ProjectName = r.Project.Name
@@ -154,8 +199,13 @@ func toResponsibilityView(r model.ProjectResponsibility) ResponsibilityView {
 // ListResponsibilitiesByMember 列出某人的职责
 // Deprecated: 使用 ListResponsibilitiesByUser 替代。
 func (h *TeamMemberHandler) ListResponsibilitiesByMember(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	memberID, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	list, err := service.NewTeamMemberService().ListResponsibilitiesByMember(uint(memberID))
+	list, err := service.NewTeamMemberService().ListResponsibilitiesByMember(scope, uint(memberID))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -169,8 +219,13 @@ func (h *TeamMemberHandler) ListResponsibilitiesByMember(c *gin.Context) {
 
 // ListResponsibilitiesByProject 列出某项目的职责（用于项目详情页）
 func (h *TeamMemberHandler) ListResponsibilitiesByProject(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	projectID, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	list, err := service.NewTeamMemberService().ListResponsibilitiesByProject(uint(projectID))
+	list, err := service.NewTeamMemberService().ListResponsibilitiesByProject(scope, uint(projectID))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -185,6 +240,11 @@ func (h *TeamMemberHandler) ListResponsibilitiesByProject(c *gin.Context) {
 // AddResponsibility 为人员添加职责
 // Deprecated: 使用 AddResponsibilityByUser 替代。
 func (h *TeamMemberHandler) AddResponsibility(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	memberID, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 	var data map[string]interface{}
 	if err := c.ShouldBindJSON(&data); err != nil {
@@ -192,7 +252,7 @@ func (h *TeamMemberHandler) AddResponsibility(c *gin.Context) {
 		return
 	}
 
-	resp, err := service.NewTeamMemberService().AddResponsibility(uint(memberID), data)
+	resp, err := service.NewTeamMemberService().AddResponsibility(scope, uint(memberID), data)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -203,6 +263,11 @@ func (h *TeamMemberHandler) AddResponsibility(c *gin.Context) {
 
 // UpdateResponsibility 更新职责
 func (h *TeamMemberHandler) UpdateResponsibility(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	rid, _ := strconv.ParseUint(c.Param("rid"), 10, 64)
 	var data map[string]interface{}
 	if err := c.ShouldBindJSON(&data); err != nil {
@@ -210,7 +275,7 @@ func (h *TeamMemberHandler) UpdateResponsibility(c *gin.Context) {
 		return
 	}
 
-	if err := service.NewTeamMemberService().UpdateResponsibility(uint(rid), data); err != nil {
+	if err := service.NewTeamMemberService().UpdateResponsibility(scope, uint(rid), data); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -226,8 +291,13 @@ func (h *TeamMemberHandler) UpdateResponsibility(c *gin.Context) {
 
 // DeleteResponsibility 删除职责
 func (h *TeamMemberHandler) DeleteResponsibility(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	rid, _ := strconv.ParseUint(c.Param("rid"), 10, 64)
-	if err := service.NewTeamMemberService().DeleteResponsibility(uint(rid)); err != nil {
+	if err := service.NewTeamMemberService().DeleteResponsibility(scope, uint(rid)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

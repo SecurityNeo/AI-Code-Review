@@ -146,6 +146,7 @@ const (
 
 type escalationAlert struct {
 	userID uint
+	orgID  uint
 	level  int
 	typ    string
 	title  string
@@ -222,8 +223,13 @@ type EscalationStage struct {
 }
 
 func (s *EscalationService) loadEscalationConfig() []EscalationStage {
+	// 兼容旧调用：默认加载根组织配置
+	return s.loadEscalationConfigForOrg(1)
+}
+
+func (s *EscalationService) loadEscalationConfigForOrg(orgID uint) []EscalationStage {
 	var rules []model.NotificationRule
-	model.DB.Where("`trigger` = ? AND enabled = ?", "issue.escalation", true).Find(&rules)
+	model.DB.Where("`trigger` = ? AND enabled = ? AND org_id = ?", "issue.escalation", true, orgID).Find(&rules)
 
 	// 默认清空免打扰时段，避免旧规则禁用后 quiet hours 残留
 	s.quietStart = ""
@@ -277,14 +283,14 @@ func (s *EscalationService) applyNotificationBaseline(query *gorm.DB) *gorm.DB {
 	return query.Where("original_created_at >= ?", baseline)
 }
 
-func (s *EscalationService) collectAlert(userID uint, level int, typ, title, item string) {
+func (s *EscalationService) collectAlert(userID, orgID uint, level int, typ, title, item string) {
 	key := fmt.Sprintf("%d:%d", userID, level)
 	if s.alertCollector == nil {
 		s.alertCollector = make(map[string]*escalationAlert)
 	}
 	batch, ok := s.alertCollector[key]
 	if !ok {
-		batch = &escalationAlert{userID: userID, level: level, typ: typ, title: title, items: make([]string, 0)}
+		batch = &escalationAlert{userID: userID, orgID: orgID, level: level, typ: typ, title: title, items: make([]string, 0)}
 		s.alertCollector[key] = batch
 	}
 	batch.items = append(batch.items, item)
@@ -304,31 +310,53 @@ func (s *EscalationService) flushAlerts() {
 		} else {
 			content = fmt.Sprintf("您有 %d 条 Issue 同时达到该升级节点：\n\n%s", len(batch.items), strings.Join(batch.items, "\n---\n"))
 		}
-		s.notifSvc.SendInbox(batch.userID, batch.typ, batch.title, content, "")
+		s.notifSvc.SendInbox(batch.orgID, batch.userID, batch.typ, batch.title, content, "")
 	}
 	s.alertCollector = nil
 }
 
 // RunDailyEscalation 每日定时运行升级检查（建议每小时执行一次）
+// 多租户改造：接受 scope，若 scope 指定了 org，则只处理该 org；否则处理所有活跃 org
 // 分页处理，避免 OOM
-func (s *EscalationService) RunDailyEscalation() {
+func (s *EscalationService) RunDailyEscalation(scope *model.UserAuthScope) {
 	now := time.Now()
-	zap.L().Debug("RunDailyEscalation started", zap.Time("now", now))
+	zap.L().Debug("RunDailyEscalation started", zap.Time("now", now), zap.Uint("org_id", scope.CurrentOrgID))
 	defer func() {
 		if r := recover(); r != nil {
 			zap.L().Error("RunDailyEscalation panic recovered", zap.Any("recover", r))
 		}
 	}()
 
-	// 预加载升级配置，避免每个 Issue 都重复查询 DB
-	stages := s.loadEscalationConfig()
+	if scope != nil && scope.CurrentOrgID > 0 {
+		s.runEscalationForOrg(scope.CurrentOrgID, now)
+		zap.L().Debug("RunDailyEscalation completed for org", zap.Uint("org_id", scope.CurrentOrgID))
+		return
+	}
 
-	// 冻结期入口拦截：免打扰时段或节假日直接跳过
+	// 兼容旧调用：未传 scope 时遍历所有活跃组织
+	var orgs []model.Organization
+	model.DB.Where("status = ?", "active").Find(&orgs)
+	if len(orgs) == 0 {
+		// fallback: 至少处理根组织
+		orgs = append(orgs, model.Organization{ID: 1, Name: "Root Organization"})
+	}
+	for _, org := range orgs {
+		s.runEscalationForOrg(org.ID, now)
+	}
+
+		zap.L().Debug("RunDailyEscalation completed", zap.Int("org_count", len(orgs)))
+}
+
+// runEscalationForOrg 为指定组织运行升级检查
+func (s *EscalationService) runEscalationForOrg(orgID uint, now time.Time) {
+	zap.L().Debug("runEscalationForOrg", zap.Uint("org_id", orgID))
+
+	// 1. 加载该组织的升级配置
+	stages := s.loadEscalationConfigForOrg(orgID)
+
+	// 2. 冻结期入口拦截
 	if s.shouldFreezeExecution() {
-		zap.L().Debug("RunDailyEscalation skipped: in frozen period",
-			zap.String("quiet_start", s.quietStart),
-			zap.String("quiet_end", s.quietEnd),
-			zap.Time("now", now))
+		zap.L().Debug("runEscalationForOrg skipped: in frozen period", zap.Uint("org_id", orgID))
 		return
 	}
 
@@ -337,7 +365,8 @@ func (s *EscalationService) RunDailyEscalation() {
 
 	for {
 		var issues []model.ReviewIssue
-		query := model.DB.Where("deleted_at IS NULL AND status IN (?)", []string{model.IssueStatusPending, model.IssueStatusPendingInherited})
+		query := model.DB.Where("deleted_at IS NULL AND status IN (?) AND org_id = ?",
+			[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}, orgID)
 		query = s.applyNotificationBaseline(query)
 		query.Order("id ASC").Limit(batchSize).Offset(offset).Find(&issues)
 		if len(issues) == 0 {
@@ -346,14 +375,12 @@ func (s *EscalationService) RunDailyEscalation() {
 
 		for i := range issues {
 			issue := &issues[i]
-			// 老数据兜底：OriginalCreatedAt 为空时用 CreatedAt 填充
 			if issue.OriginalCreatedAt == nil || issue.OriginalCreatedAt.IsZero() {
 				model.DB.Model(issue).UpdateColumn("original_created_at", issue.CreatedAt)
 				issue.OriginalCreatedAt = &issue.CreatedAt
 			}
 		}
 
-		// 预加载关联 Task 和 Project，避免 N+1
 		taskMap, projectMap := s.preloadTaskProjects(issues)
 
 		for i := range issues {
@@ -362,7 +389,6 @@ func (s *EscalationService) RunDailyEscalation() {
 			s.processEscalation(issue, ageH, stages, taskMap, projectMap)
 		}
 
-		// 每批处理完后 flush 聚合通知（避免单页内重复刷屏）
 		s.flushAlerts()
 		s.flushIMs()
 
@@ -372,11 +398,7 @@ func (s *EscalationService) RunDailyEscalation() {
 		offset += batchSize
 	}
 
-	// 批量积压告警
-	s.checkBatchAlerts()
-
-	// IM 投递失败自动管理员告警
-	s.checkDeliveryFailures()
+	s.checkBatchAlertsForOrg(orgID)
 }
 
 // preloadTaskProjects 批量预加载 Issue 列表关联的 Task 和 Project
@@ -469,7 +491,7 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 		case EscalationLevel24h:
 			if issue.OwnerID != nil {
 				dur := formatDuration(stage.ThresholdHours)
-				s.collectAlert(*issue.OwnerID, level, model.NotificationTypeIssueEscalation,
+				s.collectAlert(*issue.OwnerID, project.OrgID, level, model.NotificationTypeIssueEscalation,
 					"Issue 超期提醒（已超期 "+dur+"）",
 					fmt.Sprintf("Issue #%d 已超期 %s\n项目：%s\nMR：%s\n问题：%s\n请尽快处理，否则将进一步升级。",
 						issue.ID, dur, project.Name, task.MRTitle, issue.Message))
@@ -482,7 +504,7 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 				zap.Int("steward_count", len(stewards)))
 			if issue.OwnerID != nil {
 				dur := formatDuration(stage.ThresholdHours)
-				s.collectAlert(*issue.OwnerID, level, model.NotificationTypeIssueEscalation,
+				s.collectAlert(*issue.OwnerID, project.OrgID, level, model.NotificationTypeIssueEscalation,
 					"Issue 超期提醒（已超期 "+dur+"）",
 					fmt.Sprintf("Issue #%d 已超期 %s\n项目：%s\nMR：%s\n问题：%s\n请立即处理，否则将进一步升级。",
 						issue.ID, dur, project.Name, task.MRTitle, issue.Message))
@@ -503,7 +525,7 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 							zap.Uint("user_id", st.UserID),
 							zap.String("gitlab_username", st.User.GitlabUsername))
 					} else {
-						s.collectAlert(notifyUserID, level, model.NotificationTypeIssueEscalation,
+						s.collectAlert(notifyUserID, project.OrgID, level, model.NotificationTypeIssueEscalation,
 							"Issue 协助督促（已超期 "+formatDuration(stage.ThresholdHours)+"）",
 							fmt.Sprintf("协助督促：Issue #%d\n任务ID：%d\n项目：%s\nMR：%s\n开发者：%s\n问题：%s\n请协助督促处理。",
 								issue.ID, task.ID, project.Name, task.MRTitle, task.MRAuthor, issue.Message))
@@ -550,7 +572,7 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 							zap.String("gitlab_username", st.User.GitlabUsername))
 						continue
 					}
-					s.collectAlert(notifyUserID, level, model.NotificationTypeIssueEscalation,
+					s.collectAlert(notifyUserID, project.OrgID, level, model.NotificationTypeIssueEscalation,
 						"Issue 正式升级（已超期 "+dur+"）",
 						fmt.Sprintf("Issue #%d 已升级给您处理\n任务ID：%d\n项目：%s\nMR：%s\n开发者：%s\n问题：%s\n请尽快协助处理。",
 							issue.ID, task.ID, project.Name, task.MRTitle, task.MRAuthor, issue.Message))
@@ -580,17 +602,25 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 			}
 			if issue.OwnerID != nil {
 				dur := formatDuration(stage.ThresholdHours)
-				s.collectAlert(*issue.OwnerID, level, model.NotificationTypeIssueEscalation,
+				s.collectAlert(*issue.OwnerID, project.OrgID, level, model.NotificationTypeIssueEscalation,
 					"Issue 已升级给项目负责人",
 					fmt.Sprintf("Issue #%d 已升级给项目负责人\n您的 Issue 因超期 %s 未处理，已升级给项目负责人协助推进。", issue.ID, dur))
 			}
 
 		case EscalationLevel240hAdmin:
+			// 多租户改造：users 表没有 org_id，通过 org_users 查询管理员
+			var adminUserIDs []uint
+			model.DB.Model(&model.OrgUser{}).
+				Select("user_id").
+				Where("org_id = ? AND role IN (?)", project.OrgID, []string{"org_admin", "super_admin"}).
+				Pluck("user_id", &adminUserIDs)
 			var admins []model.User
-			model.DB.Where("role = ?", model.RoleAdmin).Find(&admins)
+			if len(adminUserIDs) > 0 {
+				model.DB.Where("id IN ?", adminUserIDs).Find(&admins)
+			}
 			dur := formatDuration(stage.ThresholdHours)
 			for _, admin := range admins {
-				s.collectAlert(admin.ID, level, model.NotificationTypeIssueEscalation,
+				s.collectAlert(admin.ID, project.OrgID, level, model.NotificationTypeIssueEscalation,
 					"【全局告警】Issue 超期 "+dur,
 					fmt.Sprintf("【全局告警】项目 %s 有 Issue 超期 %s 未闭环，请关注。\nIssue #%d\nMR：%s\n问题：%s",
 						project.Name, dur, issue.ID, task.MRTitle, issue.Message))
@@ -626,15 +656,17 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 			}
 			dur := formatDuration(stage.ThresholdHours)
 			for uid := range recipients {
-				s.collectAlert(uid, level, model.NotificationTypeAutoArchived,
+				s.collectAlert(uid, project.OrgID, level, model.NotificationTypeAutoArchived,
 					"Issue 已自动归档",
 					fmt.Sprintf("Issue #%d 已自动归档\n因超期 %s 未处理，系统已自动归档。\n项目：%s\nMR：%s",
 						issue.ID, dur, project.Name, task.MRTitle))
 			}
 			var admins []model.User
-			model.DB.Where("role = ?", model.RoleAdmin).Find(&admins)
+			model.DB.Joins("JOIN org_users ON users.id = org_users.user_id").
+				Where("org_users.org_id = ? AND org_users.role IN ? AND org_users.status = 'active' AND users.enabled = ?", project.OrgID, []string{"super_admin", "org_admin"}, true).
+				Find(&admins)
 			for _, admin := range admins {
-				s.collectAlert(admin.ID, level, model.NotificationTypeAutoArchived,
+				s.collectAlert(admin.ID, project.OrgID, level, model.NotificationTypeAutoArchived,
 					"【全局通知】Issue 自动归档",
 					fmt.Sprintf("【全局通知】项目 %s 有 Issue 已自动归档\nIssue #%d 因超期 %s 未处理，系统已自动归档。\nMR：%s",
 						project.Name, issue.ID, dur, task.MRTitle))
@@ -734,6 +766,17 @@ func (s *EscalationService) buildAdminMentions(admins []model.User) []string {
 
 // checkBatchAlerts 项目批量积压告警
 func (s *EscalationService) checkBatchAlerts() {
+	// 兼容旧调用：遍历所有组织
+	var orgs []model.Organization
+	model.DB.Where("status = ?", "active").Find(&orgs)
+	for _, org := range orgs {
+		s.checkBatchAlertsForOrg(org.ID)
+	}
+}
+
+func (s *EscalationService) checkBatchAlertsForOrg(orgID uint) {
+	// 原有的 checkBatchAlerts 逻辑（按组织过滤后执行）
+
 	type Result struct {
 		ProjectID    uint
 		PendingCount int64
@@ -743,14 +786,14 @@ func (s *EscalationService) checkBatchAlerts() {
 		SELECT t.project_id, COUNT(ri.id) AS pending_count
 		FROM review_issues ri
 		INNER JOIN tasks t ON t.id = ri.task_id
-		WHERE ri.deleted_at IS NULL AND ri.status = ?
+		WHERE ri.deleted_at IS NULL AND ri.status = ? AND t.org_id = ?
 		GROUP BY t.project_id
 		HAVING pending_count >= 50
-	`, model.IssueStatusPending).Scan(&results)
+	`, model.IssueStatusPending, orgID).Scan(&results)
 
 	for _, r := range results {
 		var project model.Project
-		if err := model.DB.First(&project, r.ProjectID).Error; err != nil {
+		if err := model.DB.Where("org_id = ?", orgID).First(&project, r.ProjectID).Error; err != nil {
 			continue
 		}
 		stewards := s.findStewards(r.ProjectID, "", "")
@@ -759,7 +802,7 @@ func (s *EscalationService) checkBatchAlerts() {
 			if notifyUserID == 0 {
 				continue
 			}
-			s.notifSvc.SendInbox(notifyUserID, model.NotificationTypeBatchAlert,
+			s.notifSvc.SendInbox(orgID, notifyUserID, model.NotificationTypeBatchAlert,
 				fmt.Sprintf("【项目告警】%s 积压 %d 条未处理 Issue", project.Name, r.PendingCount),
 				fmt.Sprintf("项目 %s 当前有 %d 条 Issue 待处理，建议关注。", project.Name, r.PendingCount),
 				"",
@@ -767,9 +810,11 @@ func (s *EscalationService) checkBatchAlerts() {
 		}
 		// 通知管理员
 		var admins []model.User
-		model.DB.Where("role = ?", model.RoleAdmin).Find(&admins)
+		model.DB.Joins("JOIN org_users ON users.id = org_users.user_id").
+			Where("org_users.org_id = ? AND org_users.role IN ? AND org_users.status = 'active' AND users.enabled = ?", orgID, []string{"super_admin", "org_admin"}, true).
+			Find(&admins)
 		for _, admin := range admins {
-			s.notifSvc.SendInbox(admin.ID, model.NotificationTypeBatchAlert,
+			s.notifSvc.SendInbox(orgID, admin.ID, model.NotificationTypeBatchAlert,
 				fmt.Sprintf("【全局告警】项目 %s 积压 %d 条 Issue", project.Name, r.PendingCount),
 				fmt.Sprintf("项目 %s 当前有 %d 条 Issue 待处理，请关注。", project.Name, r.PendingCount),
 				"",
@@ -779,18 +824,34 @@ func (s *EscalationService) checkBatchAlerts() {
 }
 
 // SendDailyDigest 每日摘要（09:00 执行）
-func (s *EscalationService) SendDailyDigest() {
-	zap.L().Debug("SendDailyDigest started", zap.Time("now", time.Now()))
+// 多租户改造：接受 scope，若 scope 指定了 org，则只处理该 org；否则处理所有活跃 org
+func (s *EscalationService) SendDailyDigest(scope *model.UserAuthScope) {
+	zap.L().Debug("SendDailyDigest started", zap.Time("now", time.Now()), zap.Uint("org_id", scope.CurrentOrgID))
 	defer func() {
 		if r := recover(); r != nil {
 			zap.L().Error("SendDailyDigest panic recovered", zap.Any("recover", r))
 		}
 	}()
 
-	// 加载配置以获取 quiet hours，并检查是否处于冻结期
-	_ = s.loadEscalationConfig()
+	if scope != nil && scope.CurrentOrgID > 0 {
+		s.sendDailyDigestForOrg(scope.CurrentOrgID)
+		return
+	}
+
+	// 兼容旧调用：未传 scope 时遍历所有活跃组织
+	var orgs []model.Organization
+	model.DB.Where("status = ?", "active").Find(&orgs)
+	for _, org := range orgs {
+		s.sendDailyDigestForOrg(org.ID)
+	}
+}
+
+func (s *EscalationService) sendDailyDigestForOrg(orgID uint) {
+	// 加载该组织的配置以获取 quiet hours，避免跨组织配置污染
+	_ = s.loadEscalationConfigForOrg(orgID)
+
 	if s.shouldFreezeExecution() {
-		zap.L().Debug("SendDailyDigest skipped: in frozen period")
+		zap.L().Debug("SendDailyDigest skipped: in frozen period", zap.Uint("org_id", orgID))
 		return
 	}
 
@@ -805,9 +866,9 @@ func (s *EscalationService) SendDailyDigest() {
 	rawSQL := `
 		SELECT current_owner_id AS user_id, COUNT(*) AS pending_count
 		FROM review_issues
-		WHERE deleted_at IS NULL AND status IN (?) AND current_owner_id > 0
+		WHERE deleted_at IS NULL AND org_id = ? AND status IN (?) AND current_owner_id > 0
 	`
-	args := []interface{}{[]string{model.IssueStatusPending, model.IssueStatusPendingInherited}}
+	args := []interface{}{orgID, []string{model.IssueStatusPending, model.IssueStatusPendingInherited}}
 	if !baseline.IsZero() {
 		rawSQL += ` AND original_created_at >= ?`
 		args = append(args, baseline)
@@ -816,7 +877,7 @@ func (s *EscalationService) SendDailyDigest() {
 	model.DB.Raw(rawSQL, args...).Scan(&stats)
 
 	for _, st := range stats {
-		s.notifSvc.SendInbox(st.UserID, model.NotificationTypeDailyDigest,
+		s.notifSvc.SendInbox(orgID, st.UserID, model.NotificationTypeDailyDigest,
 			fmt.Sprintf("今日待办：您有 %d 条 Issue 待处理", st.PendingCount),
 			fmt.Sprintf("您当前有 %d 条 Issue 等待处理，请及时闭环。", st.PendingCount),
 			"",
@@ -829,14 +890,14 @@ func (s *EscalationService) findProjectNotifier(project model.Project) *model.We
 	// 1. 优先查项目专属机器人（取第一个启用的）
 	if project.ID > 0 {
 		var specific model.WeComNotifier
-		if err := model.DB.Where("enabled = ? AND project_id = ?", true, project.ID).
+		if err := model.DB.Where("enabled = ? AND org_id = ? AND project_id = ?", true, project.OrgID, project.ID).
 			Order("created_at ASC").First(&specific).Error; err == nil {
 			return &specific
 		}
 	}
 	// 2. 无专属时，查全局机器人（取第一个启用的）
 	var global model.WeComNotifier
-	if err := model.DB.Where("enabled = ? AND project_id IS NULL", true).
+	if err := model.DB.Where("enabled = ? AND org_id = ? AND project_id IS NULL", true, project.OrgID).
 		Order("created_at ASC").First(&global).Error; err == nil {
 		return &global
 	}
@@ -1055,10 +1116,11 @@ func renderIMDefault(batch *imBatch) string {
 	return msg
 }
 
-// checkDeliveryFailures 检查当日 IM 投递失败并告警管理员
-func (s *EscalationService) checkDeliveryFailures() {
+// checkDeliveryFailuresForOrg 检查当日 IM 投递失败并告警管理员（按组织）
+func (s *EscalationService) checkDeliveryFailuresForOrg(orgID uint) {
 	var failedCount int64
 	todayStart := time.Now().Truncate(24 * time.Hour)
+	// TODO: NotificationDeliveryLog 尚无 org_id，当前按全局统计；待模型扩展后改为 org 过滤
 	model.DB.Model(&model.NotificationDeliveryLog{}).
 		Where("status = ? AND created_at >= ?", "failed", todayStart).
 		Count(&failedCount)
@@ -1066,9 +1128,11 @@ func (s *EscalationService) checkDeliveryFailures() {
 		return
 	}
 	var admins []model.User
-	model.DB.Where("role = ?", model.RoleAdmin).Find(&admins)
+	model.DB.Joins("JOIN org_users ON users.id = org_users.user_id").
+		Where("org_users.org_id = ? AND org_users.role IN ? AND org_users.status = 'active' AND users.enabled = ?", orgID, []string{"super_admin", "org_admin"}, true).
+		Find(&admins)
 	for _, admin := range admins {
-		s.notifSvc.SendInbox(admin.ID, model.NotificationTypeBatchAlert,
+		s.notifSvc.SendInbox(orgID, admin.ID, model.NotificationTypeBatchAlert,
 			fmt.Sprintf("【系统告警】今日 IM 投递失败 %d 次", failedCount),
 			fmt.Sprintf("今日企微/IM 消息投递失败 %d 次，请检查 Webhook 配置或网络状态。", failedCount),
 			"",

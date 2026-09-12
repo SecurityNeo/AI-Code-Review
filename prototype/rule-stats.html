@@ -1,15 +1,16 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <script src="js/theme.js?v=1"></script>
+    <script src="js/theme.js?v=9"></script>
     <style>html{background-color:#1e293b;}</style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>规则命中统计 - CodeGuard</title>
     <script defer src="/static/js/echarts.min.js"></script>
-    <script src="js/auth.js?v=7"></script>
-    <script src="js/menu-config.js?v=7"></script>
-    <script src="js/sidebar.js?v=6"></script>
+    <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
     <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="css/theme.css?v=1">
     <script defer src="/static/js/tailwindcss.min.js"></script>
@@ -78,6 +79,9 @@
         <div class="px-5 py-5 space-y-4">
             <!-- 时间筛选 -->
             <div class="bg-white rounded-xl p-4 border flex items-center gap-4 flex-wrap">
+                <div class="flex items-center gap-2">
+                    <select id="orgSelect"></select>
+                </div>
                 <div class="flex items-center gap-2">
                     <span class="text-sm text-gray-500">时间范围：</span>
                     <select id="rangeFilter" class="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" onchange="loadOverview()">
@@ -167,6 +171,7 @@
                             <tr>
                                 <th style="width:50px;">#</th>
                                 <th>规则</th>
+                                <th>所属组织</th>
                                 <th style="width:120px;">分类</th>
                                 <th style="width:90px;">严重级别</th>
                                 <th style="text-align:right;width:90px;">命中</th>
@@ -176,7 +181,7 @@
                             </tr>
                         </thead>
                         <tbody id="topRulesTableBody">
-                            <tr><td colspan="8" class="text-center text-gray-400 py-8">加载中...</td></tr>
+                            <tr><td colspan="9" class="text-center text-gray-400 py-8">加载中...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -303,7 +308,7 @@ function categoryBadge(catName, catCode) {
 async function loadOverview() {
     const range = getRange();
     try {
-        const res = await apiFetch(`${API_BASE}/rule-stats/overview?range=${range}`);
+        const res = await apiFetch(`${API_BASE}/rule-stats/overview?range=${range}`, { headers: getOrgOverrideHeaders('orgSelect') });
         if (!res.ok) {
             showToast(`加载失败（HTTP ${res.status}）`, 'error');
             return;
@@ -419,7 +424,7 @@ function renderCategoryChart(rows) {
 function renderTopRulesTable(rules) {
     const tbody = document.getElementById('topRulesTableBody');
     if (!rules || rules.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-gray-400 py-8">该时间范围内无命中记录</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-gray-400 py-8">该时间范围内无命中记录</td></tr>';
         return;
     }
     tbody.innerHTML = rules.map((r, i) => `
@@ -429,6 +434,7 @@ function renderTopRulesTable(rules) {
                 <div class="font-medium text-gray-800">${escapeHtml(r.rule_name || r.rule_code)}</div>
                 <div class="text-xs text-gray-400 font-mono">${escapeHtml(r.rule_code)}</div>
             </td>
+            <td>${escapeHtml(r.org_name || '-')}</td>
             <td>${categoryBadge(r.category_name, r.category)}</td>
             <td>${severityBadge(r.severity, r.severity_name)}</td>
             <td style="text-align:right;font-weight:600;font-family:monospace;">${formatNumber(r.hit_count)}</td>
@@ -460,7 +466,7 @@ async function loadRuleDetail() {
     if (!drawerCurrentRule) return;
     const range = getRange();
     try {
-        const res = await apiFetch(`${API_BASE}/rule-stats/by-rule/${encodeURIComponent(drawerCurrentRule)}?range=${range}`);
+        const res = await apiFetch(`${API_BASE}/rule-stats/by-rule/${encodeURIComponent(drawerCurrentRule)}?range=${range}`, { headers: getOrgOverrideHeaders('orgSelect') });
         if (!res.ok) {
             showToast(`加载失败（HTTP ${res.status}）`, 'error');
             return;
@@ -564,7 +570,7 @@ async function loadDrawerIssues() {
     if (!drawerCurrentRule) return;
     const range = getRange();
     try {
-        const res = await apiFetch(`${API_BASE}/rule-stats/recent-issues?rule_code=${encodeURIComponent(drawerCurrentRule)}&range=${range}&page=${drawerPage}&page_size=${drawerPageSize}`);
+        const res = await apiFetch(`${API_BASE}/rule-stats/recent-issues?rule_code=${encodeURIComponent(drawerCurrentRule)}&range=${range}&page=${drawerPage}&page_size=${drawerPageSize}`, { headers: getOrgOverrideHeaders('orgSelect') });
         if (!res.ok) {
             showToast(`加载命中明细失败（HTTP ${res.status}）`, 'error');
             return;
@@ -659,7 +665,13 @@ window.addEventListener('resize', () => {
 
 // 初始化
 document.addEventListener('DOMContentLoaded', () => {
-    // 支持 ?rule=XXX 自动打开抽屉（从 review-rules.html 跳转过来）
+    loadOrgSelect('orgSelect');
+    const orgSel = document.getElementById('orgSelect');
+    if (orgSel) {
+        orgSel.addEventListener('change', () => {
+            loadOverview();
+        });
+    }
     const params = new URLSearchParams(window.location.search);
     const preselectRule = params.get('rule');
     const preselectRange = params.get('range');

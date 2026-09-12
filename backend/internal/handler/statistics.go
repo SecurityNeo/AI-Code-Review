@@ -126,6 +126,11 @@ type DevDailyScore struct {
 }
 
 func (h *StatisticsHandler) Get(c *gin.Context) {
+	scope := middleware.GetAuthScope(c)
+	if scope == nil {
+		c.JSON(401, gin.H{"error": "未登录"})
+		return
+	}
 	user, ok := middleware.GetUser(c)
 	if !ok {
 		c.JSON(401, gin.H{"error": "未登录"})
@@ -151,9 +156,22 @@ func (h *StatisticsHandler) Get(c *gin.Context) {
 	dateCol := "IF(mr_created_at IS NOT NULL AND mr_created_at > '1970-01-01', mr_created_at, synced_at)"
 
 	db := model.DB.Model(&model.MergeRequestReviewLog{})
+	// 多租户改造：按组织过滤
+	if !scope.IsSuperAdmin {
+		db = db.Where("org_id IN ?", scope.VisibleOrgIDs)
+	} else {
+		// super_admin 如果显式传了 org_id，按指定组织过滤
+		if orgIDStr := c.Query("org_id"); orgIDStr != "" {
+			if orgID, err := strconv.Atoi(orgIDStr); err == nil && orgID > 0 {
+				db = db.Where("org_id = ?", uint(orgID))
+			}
+		}
+	}
 
-	// 按用户角色过滤
-	db = model.FilterByUser(db, user, "author")
+	// 按用户角色过滤：developer 只能看自己的；废弃 users.role
+	if scope.CurrentOrgRole == "developer" && user.GitlabUsername != "" {
+		db = db.Where("author = ?", user.GitlabUsername)
+	}
 	// 已关闭 MR 不参与评分与代码变更量统计，但 MR 状态分布不排除 closed
 	// 使用 Session 复制避免修改原始 db，否则状态分布也会跟着排除 closed
 	scoreChangeDB := db.Session(&gorm.Session{}).Where("mr_state != ?", "closed")
@@ -204,9 +222,13 @@ func (h *StatisticsHandler) Get(c *gin.Context) {
 	_ = db.Session(&gorm.Session{}).Select("COUNT(DISTINCT project_name) as active_projs").Scan(&activeProjs).Error
 	resp.KPI.ActiveProjects = activeProjs
 
-	// 总项目数（不随筛选条件变化，取 projects 表总记录数）
+	// 总项目数（当前组织可见项目数）
 	var totalProjs int64
-	model.DB.Model(&model.Project{}).Count(&totalProjs)
+	if scope.IsSuperAdmin {
+		model.DB.Model(&model.Project{}).Count(&totalProjs)
+	} else {
+		model.DB.Model(&model.Project{}).Where("org_id IN ?", scope.VisibleOrgIDs).Count(&totalProjs)
+	}
 	resp.KPI.TotalProjects = totalProjs
 
 	// 2. 项目活跃度 TOP10（MR 数量，不排除 closed）
@@ -317,69 +339,99 @@ func (h *StatisticsHandler) Get(c *gin.Context) {
 	}
 
 	if len(radarProjects) > 0 {
-		// 预先计算每个项目的 MR 数量，取最大值作为雷达图"活跃MR数"维度的 Max
+		// 先遍历所有项目收集原始指标值，用于动态计算 Max
+		type rawMetrics struct {
+			AvgScore    float64
+			Efficiency  float64
+			AvgReview   float64
+			MergeRate   float64
+			MRCount     int64
+			LowQRate    float64
+		}
+		projectMetrics := make(map[string]rawMetrics)
 		var maxMRCount int64
-		projectMRCounts := make(map[string]int64)
+
 		for _, proj := range radarProjects {
 			var cnt int64
-			_ = model.DB.Model(&model.MergeRequestReviewLog{}).
+			_ = model.DB.Model(&model.MergeRequestReviewLog{}).Scopes(model.OrgScope(scope)).
 				Where("project_name = ?", proj).
+				Where("mr_state != ?", "closed").
 				Count(&cnt).Error
-			projectMRCounts[proj] = cnt
 			if cnt > maxMRCount {
 				maxMRCount = cnt
 			}
-		}
-		if maxMRCount == 0 {
-			maxMRCount = 1
-		}
 
-		indicators := []RadarIndicator{
-			{Name: "平均评分", Max: 100},
-			{Name: "变更效率", Max: 100},
-			{Name: "Review频次", Max: 10},
-			{Name: "合入率", Max: 100},
-			{Name: "活跃MR数", Max: float64(maxMRCount)},
-			{Name: "低质量占比", Max: 50},
-		}
-		resp.Radar.Indicators = indicators
-
-		for _, proj := range radarProjects {
 			var r struct {
-				AvgScore   float64
+				AvgScore  float64
 				Efficiency float64
-				AvgReview  float64
-				MergeRate  float64
-				MRCount    int64
-				LowQRate   float64
+				AvgReview float64
+				MergeRate float64
+				MRCount   int64
+				LowQRate  float64
 			}
-			_ = model.DB.Model(&model.MergeRequestReviewLog{}).
+			_ = model.DB.Model(&model.MergeRequestReviewLog{}).Scopes(model.OrgScope(scope)).
 				Where("project_name = ?", proj).
 				Where("mr_state != ?", "closed").
 				Select(
 					"COALESCE(AVG(CASE WHEN score > 0 THEN score END), 0) as avg_score, " +
-						"COALESCE(AVG(CASE WHEN additions + deletions > 0 THEN score / (additions + deletions) * 1000 ELSE 0 END), 0) as efficiency, " +
+						// 变更效率：单条记录先做上限截断（防止 additions+deletions 极小时爆炸），再取平均
+						"COALESCE(AVG(CASE WHEN additions + deletions > 0 THEN LEAST(score / (additions + deletions) * 1000, 10000) ELSE 0 END), 0) as efficiency, " +
 						"COALESCE(AVG(review_count), 0) as avg_review, " +
 						"CASE WHEN COUNT(*) > 0 THEN SUM(CASE WHEN mr_state = 'merged' THEN 1 ELSE 0 END) * 100.0 / COUNT(*) ELSE 0 END as merge_rate, " +
 						"COUNT(*) as mr_count, " +
 						"CASE WHEN COUNT(*) > 0 THEN SUM(CASE WHEN score > 0 AND score < 60 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) ELSE 0 END as low_q_rate").
 				Scan(&r).Error
 
-			// 变更效率归一化到 0-100
-			efficiency := r.Efficiency
-			if efficiency > 100 {
-				efficiency = 100
+			projectMetrics[proj] = rawMetrics{
+				AvgScore:   r.AvgScore,
+				Efficiency: r.Efficiency,
+				AvgReview:  r.AvgReview,
+				MergeRate:  r.MergeRate,
+				MRCount:    r.MRCount,
+				LowQRate:   r.LowQRate,
 			}
+		}
+		if maxMRCount == 0 {
+			maxMRCount = 1
+		}
 
+		// 动态计算各指标的 Max（取所有项目中的最大值，保底值为历史硬编码值）
+		maxAvgReview := float64(10)
+		maxLowQRate  := float64(50)
+		maxEfficiency := float64(100)
+		for _, m := range projectMetrics {
+			if m.AvgReview > maxAvgReview {
+				maxAvgReview = m.AvgReview
+			}
+			if m.LowQRate > maxLowQRate {
+				maxLowQRate = m.LowQRate
+			}
+			if m.Efficiency > maxEfficiency {
+				maxEfficiency = m.Efficiency
+			}
+		}
+
+		indicators := []RadarIndicator{
+			{Name: "平均评分", Max: 100},
+			{Name: "变更效率", Max: maxEfficiency},
+			{Name: "Review频次", Max: maxAvgReview},
+			{Name: "合入率", Max: 100},
+			{Name: "活跃MR数", Max: float64(maxMRCount)},
+			{Name: "低质量占比", Max: maxLowQRate},
+		}
+		resp.Radar.Indicators = indicators
+
+		for _, proj := range radarProjects {
+			m := projectMetrics[proj]
 			resp.Radar.Series = append(resp.Radar.Series, RadarSeries{
 				Name: proj,
 				Value: []float64{
-					r.AvgScore,
-					efficiency,
-					r.AvgReview,
-					r.MergeRate,
-					float64(r.MRCount),
-					r.LowQRate,
+					m.AvgScore,
+					m.Efficiency,
+					m.AvgReview,
+					m.MergeRate,
+					float64(m.MRCount),
+					m.LowQRate,
 				},
 			})
 		}
@@ -400,9 +452,10 @@ func (h *StatisticsHandler) Get(c *gin.Context) {
 	}
 
 	var sources []trendSource
-	trendQueryDB := model.DB.Model(&model.MergeRequestReviewLog{}).Select("id, mr_created_at, synced_at, score, additions, deletions")
-	// 补上用户角色过滤（Bug：此前遗漏导致普通用户能看到所有人的质量趋势）
-	trendQueryDB = model.FilterByUser(trendQueryDB, user, "author")
+	trendQueryDB := model.DB.Model(&model.MergeRequestReviewLog{}).Scopes(model.OrgScope(scope)).Select("id, mr_created_at, synced_at, score, additions, deletions")
+	if scope.CurrentOrgRole == "developer" && user.GitlabUsername != "" {
+		trendQueryDB = trendQueryDB.Where("author = ?", user.GitlabUsername)
+	}
 	if projectName != "" {
 		trendQueryDB = trendQueryDB.Where("project_name = ?", projectName)
 	}

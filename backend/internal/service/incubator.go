@@ -43,12 +43,13 @@ func NewIncubatorService(embedSvc *EmbeddingService, store vectorstore.Store) *I
 
 // EnsureRuleEmbeddings scans all enabled rules and backfills missing embeddings
 // into the vector store. Safe to call multiple times; existing vectors are skipped.
-func (s *IncubatorService) EnsureRuleEmbeddings() {
+func (s *IncubatorService) EnsureRuleEmbeddings(scope *model.UserAuthScope) {
+	db := model.DBWithScope(scope)
 	if s.embedSvc == nil || !s.embedSvc.IsAvailable() || s.store == nil {
 		zap.L().Info("EnsureRuleEmbeddings: embedding not available, skipping")
 		return
 	}
-	cfg := s.getConfig()
+			cfg := s.getConfig(scope)
 	if cfg.EmbeddingModelID == nil {
 		zap.L().Info("EnsureRuleEmbeddings: no embedding model configured, skipping")
 		return
@@ -56,7 +57,7 @@ func (s *IncubatorService) EnsureRuleEmbeddings() {
 	modelID := *cfg.EmbeddingModelID
 
 	var rules []model.ReviewRule
-	if err := model.DB.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
+	if err := db.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
 		zap.L().Warn("EnsureRuleEmbeddings: query rules failed", zap.Error(err))
 		return
 	}
@@ -168,18 +169,19 @@ func (s *IncubatorService) EnsureRuleEmbeddings() {
 
 // GetVectorizationStatus returns the current progress of rule embedding generation.
 // total = total enabled rules, done = how many already have vectors for the current model.
-func (s *IncubatorService) GetVectorizationStatus() (int, int, bool) {
-	cfg := s.getConfig()
+func (s *IncubatorService) GetVectorizationStatus(scope *model.UserAuthScope) (int, int, bool) {
+	db := model.DBWithScope(scope)
+			cfg := s.getConfig(scope)
 	if cfg.EmbeddingModelID == nil {
 		return 0, 0, false
 	}
 	modelID := *cfg.EmbeddingModelID
 
 	var total int64
-	model.DB.Model(&model.ReviewRule{}).Where("is_enabled = ?", true).Count(&total)
+	db.Model(&model.ReviewRule{}).Where("is_enabled = ?", true).Count(&total)
 
 	var done int64
-	model.DB.Table("review_rule_vectors").
+	db.Table("review_rule_vectors").
 		Where("model_id = ?", modelID).
 		Count(&done)
 
@@ -191,8 +193,9 @@ func (s *IncubatorService) GetVectorizationStatus() (int, int, bool) {
 }
 
 // Status returns the current incubator status including embedding availability.
-func (s *IncubatorService) Status() (map[string]any, error) {
-	cfg := s.getConfig()
+func (s *IncubatorService) Status(scope *model.UserAuthScope) (map[string]any, error) {
+	db := model.DBWithScope(scope)
+			cfg := s.getConfig(scope)
 	embeddingConfigured := cfg.EmbeddingModelID != nil
 
 	res := map[string]any{
@@ -204,7 +207,7 @@ func (s *IncubatorService) Status() (map[string]any, error) {
 	if embeddingConfigured {
 		res["embedding_model_id"] = *cfg.EmbeddingModelID
 		var m model.LLMModel
-		if err := model.DB.First(&m, *cfg.EmbeddingModelID).Error; err == nil {
+		if err := db.First(&m, *cfg.EmbeddingModelID).Error; err == nil {
 			res["embedding_model_name"] = m.ModelID
 			available := m.Status == "active" && m.ModelType == string(model.ModelTypeEmbedding)
 			res["embedding_available"] = available
@@ -231,7 +234,7 @@ func (s *IncubatorService) Status() (map[string]any, error) {
 
 	// Last cluster job
 	var lastJob model.RuleIncubationJob
-	if err := model.DB.Where("job_type = ?", "cluster").
+	if err := db.Where("job_type = ?", "cluster").
 		Order("created_at DESC").First(&lastJob).Error; err == nil {
 		res["last_cluster_job"] = map[string]any{
 			"id":           lastJob.ID,
@@ -244,8 +247,8 @@ func (s *IncubatorService) Status() (map[string]any, error) {
 }
 
 // ListUnmatchedIssues returns issues without an associated rule (rule_id IS NULL).
-func (s *IncubatorService) ListUnmatchedIssues(filter IssueFilter) ([]model.ReviewIssue, int64, error) {
-	db := model.DB.Model(&model.ReviewIssue{}).
+func (s *IncubatorService) ListUnmatchedIssues(scope *model.UserAuthScope, filter IssueFilter) ([]model.ReviewIssue, int64, error) {
+	db := model.DBWithScope(scope).Model(&model.ReviewIssue{}).
 		Where("rule_id IS NULL")
 
 	if filter.StartDate != "" {
@@ -303,13 +306,14 @@ type IssueFilter struct {
 }
 
 // CreateCandidate creates a RuleIncubation from selected issues.
-func (s *IncubatorService) CreateCandidate(req CreateCandidateRequest, userID uint) (*model.RuleIncubation, error) {
+func (s *IncubatorService) CreateCandidate(scope *model.UserAuthScope, req CreateCandidateRequest, userID uint) (*model.RuleIncubation, error) {
+	db := model.DBWithScope(scope)
 	if len(req.SourceIssueIDs) == 0 {
 		return nil, fmt.Errorf("source_issue_ids is empty")
 	}
 
 	var issues []model.ReviewIssue
-	if err := model.DB.Where("id IN ?", req.SourceIssueIDs).Find(&issues).Error; err != nil {
+	if err := db.Where("id IN ?", req.SourceIssueIDs).Find(&issues).Error; err != nil {
 		return nil, err
 	}
 	if len(issues) == 0 {
@@ -332,7 +336,7 @@ func (s *IncubatorService) CreateCandidate(req CreateCandidateRequest, userID ui
 
 		// Infer project from task
 		var t model.Task
-		if err := model.DB.Select("project_id").First(&t, iss.TaskID).Error; err == nil {
+		if err := db.Select("project_id").First(&t, iss.TaskID).Error; err == nil {
 			projectIDs[t.ProjectID] = struct{}{}
 		}
 	}
@@ -366,12 +370,12 @@ func (s *IncubatorService) CreateCandidate(req CreateCandidateRequest, userID ui
 		TestResults:     "{}",
 	}
 
-	if err := model.DB.Create(cand).Error; err != nil {
+	if err := db.Create(cand).Error; err != nil {
 		return nil, err
 	}
 
 	if req.AutoRefine {
-		_, _ = QueueJob("refine", map[string]any{"incubation_id": cand.ID})
+		_, _ = QueueJob(scope, "refine", map[string]any{"incubation_id": cand.ID})
 	}
 
 	return cand, nil
@@ -386,9 +390,10 @@ type CreateCandidateRequest struct {
 }
 
 // GetCandidate returns a candidate by ID with source issues hydrated.
-func (s *IncubatorService) GetCandidate(id uint) (*model.RuleIncubation, []model.ReviewIssue, error) {
+func (s *IncubatorService) GetCandidate(scope *model.UserAuthScope, id uint) (*model.RuleIncubation, []model.ReviewIssue, error) {
+	db := model.DBWithScope(scope)
 	var cand model.RuleIncubation
-	if err := model.DB.First(&cand, id).Error; err != nil {
+	if err := db.First(&cand, id).Error; err != nil {
 		return nil, nil, err
 	}
 
@@ -396,16 +401,17 @@ func (s *IncubatorService) GetCandidate(id uint) (*model.RuleIncubation, []model
 	_ = json.Unmarshal([]byte(cand.SourceIssueIDs), &issueIDs)
 	var issues []model.ReviewIssue
 	if len(issueIDs) > 0 {
-		model.DB.Where("id IN ?", issueIDs).Find(&issues)
+		db.Where("id IN ?", issueIDs).Find(&issues)
 	}
 
 	return &cand, issues, nil
 }
 
 // UpdateCandidate edits a draft/ready candidate.
-func (s *IncubatorService) UpdateCandidate(id uint, updates map[string]any) error {
+func (s *IncubatorService) UpdateCandidate(scope *model.UserAuthScope, id uint, updates map[string]any) error {
+	db := model.DBWithScope(scope)
 	var cand model.RuleIncubation
-	if err := model.DB.First(&cand, id).Error; err != nil {
+	if err := db.First(&cand, id).Error; err != nil {
 		return err
 	}
 	if cand.Status == "published" || cand.Status == "rejected" || cand.Status == "merged" {
@@ -415,7 +421,7 @@ func (s *IncubatorService) UpdateCandidate(id uint, updates map[string]any) erro
 	delete(updates, "source_issue_ids")
 	delete(updates, "created_by")
 	delete(updates, "published_rule_id")
-	return model.DB.Model(&cand).Updates(updates).Error
+	return db.Model(&cand).Updates(updates).Error
 }
 
 // calculateConfidenceScore computes a dynamic confidence score (0.40–1.00) for a candidate rule.
@@ -477,9 +483,10 @@ func (s *IncubatorService) calculateConfidenceScore(cand *model.RuleIncubation) 
 }
 
 // DeleteCandidate hard-deletes a candidate rule (protects published ones).
-func (s *IncubatorService) DeleteCandidate(id uint) error {
+func (s *IncubatorService) DeleteCandidate(scope *model.UserAuthScope, id uint) error {
+	db := model.DBWithScope(scope)
 	var cand model.RuleIncubation
-	if err := model.DB.First(&cand, id).Error; err != nil {
+	if err := db.First(&cand, id).Error; err != nil {
 		return err
 	}
 	if cand.Status == "published" {
@@ -488,7 +495,7 @@ func (s *IncubatorService) DeleteCandidate(id uint) error {
 
 	// Delete associated vector if store is available
 	if s.store != nil {
-		cfg := s.getConfig()
+		cfg := s.getConfig(scope)
 		if cfg.EmbeddingModelID != nil {
 			ctx := context.Background()
 			if err := s.store.Delete(ctx, vectorstore.Key{
@@ -504,12 +511,12 @@ func (s *IncubatorService) DeleteCandidate(id uint) error {
 		}
 	}
 
-	return model.DB.Delete(&cand).Error
+	return db.Delete(&cand).Error
 }
 
 // ListCandidates returns incubation candidates with optional status filter.
-func (s *IncubatorService) ListCandidates(status, keyword, severity string, page, pageSize int) ([]model.RuleIncubation, int64, error) {
-	db := model.DB.Model(&model.RuleIncubation{})
+func (s *IncubatorService) ListCandidates(scope *model.UserAuthScope, status, keyword, severity string, page, pageSize int) ([]model.RuleIncubation, int64, error) {
+	db := model.DBWithScope(scope).Model(&model.RuleIncubation{})
 	if status != "" {
 		db = db.Where("status = ?", status)
 	}
@@ -533,23 +540,25 @@ func (s *IncubatorService) ListCandidates(status, keyword, severity string, page
 }
 
 // PublishCandidate converts an incubation into a real ReviewRule.
-func (s *IncubatorService) PublishCandidate(id uint, req PublishRequest, userID uint) (uint, error) {
+func (s *IncubatorService) PublishCandidate(scope *model.UserAuthScope, orgID uint, id uint, req PublishRequest, userID uint) (uint, error) {
+	db := model.DBWithScope(scope)
 	var cand model.RuleIncubation
-	if err := model.DB.First(&cand, id).Error; err != nil {
+	if err := db.First(&cand, id).Error; err != nil {
 		return 0, err
 	}
 	if cand.Status == "published" {
 		return 0, fmt.Errorf("already published")
 	}
 
-	// Check code uniqueness
+	// Check code uniqueness within org
 	var exists int64
-	model.DB.Model(&model.ReviewRule{}).Where("code = ?", cand.Code).Count(&exists)
+	db.Model(&model.ReviewRule{}).Where("code = ? AND org_id = ?", cand.Code, orgID).Count(&exists)
 	if exists > 0 {
 		return 0, fmt.Errorf("rule code %s already exists", cand.Code)
 	}
 
 	rule := model.ReviewRule{
+		OrgID:       orgID,
 		Code:        cand.Code,
 		Name:        cand.Name,
 		Category:    cand.Category,
@@ -561,16 +570,16 @@ func (s *IncubatorService) PublishCandidate(id uint, req PublishRequest, userID 
 		IsEnabled:   req.IsEnabled,
 	}
 
-	if err := model.DB.Create(&rule).Error; err != nil {
+	if err := db.Create(&rule).Error; err != nil {
 		return 0, err
 	}
 
 	// Auto-create project configs (default disabled)
-	autoCreateProjectReviewConfigs(rule.ID)
+	autoCreateProjectReviewConfigs(scope, rule.ID)
 
 	// Update candidate
 	now := time.Now()
-	model.DB.Model(&cand).Updates(map[string]any{
+	db.Model(&cand).Updates(map[string]any{
 		"status":            "published",
 		"published_rule_id": rule.ID,
 		"resolved_by":       userID,
@@ -580,7 +589,7 @@ func (s *IncubatorService) PublishCandidate(id uint, req PublishRequest, userID 
 	// Asynchronously vectorize the published rule
 	if s.embedSvc != nil && s.embedSvc.IsAvailable() {
 		go func(r model.ReviewRule) {
-			cfg := s.getConfig()
+			cfg := s.getConfig(scope)
 			if cfg.EmbeddingModelID == nil {
 				return
 			}
@@ -609,8 +618,9 @@ type PublishRequest struct {
 // and optional embedding vectors for frontend projection.
 // If data is missing (similar_rules empty or embeddings absent), it performs
 // real-time computation and backfills silently.
-func (s *IncubatorService) GetSimilarGraph(incubationID uint) (map[string]any, error) {
-	cand, _, err := s.GetCandidate(incubationID)
+func (s *IncubatorService) GetSimilarGraph(scope *model.UserAuthScope, incubationID uint) (map[string]any, error) {
+	db := model.DBWithScope(scope)
+	cand, _, err := s.GetCandidate(scope, incubationID)
 	if err != nil {
 		return nil, err
 	}
@@ -627,7 +637,7 @@ func (s *IncubatorService) GetSimilarGraph(incubationID uint) (map[string]any, e
 
 	// Build context: all enabled rules + current candidate for vector projection
 	var rules []model.ReviewRule
-	if err := model.DB.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
+	if err := db.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
 		return nil, err
 	}
 
@@ -642,7 +652,7 @@ func (s *IncubatorService) GetSimilarGraph(incubationID uint) (map[string]any, e
 		Embedding []float32 `json:"embedding,omitempty"`
 	}
 
-	cfg := s.getConfig()
+			cfg := s.getConfig(scope)
 
 	// ---- fetchVec with real-time fallback ----
 	fetchVec := func(entityType string, entityID uint, text string) []float32 {
@@ -730,7 +740,7 @@ func (s *IncubatorService) GetSimilarGraph(incubationID uint) (map[string]any, e
 							}
 						} else {
 							var rule model.ReviewRule
-							if _ = model.DB.First(&rule, r.Key.EntityID).Error; rule.ID > 0 {
+							if _ = db.First(&rule, r.Key.EntityID).Error; rule.ID > 0 {
 								similarMap[rule.ID] = map[string]any{
 									"rule_id":    rule.ID,
 									"name":       rule.Name,
@@ -760,7 +770,7 @@ func (s *IncubatorService) GetSimilarGraph(incubationID uint) (map[string]any, e
 
 		// Persist so future calls are fast
 		if b, err := json.Marshal(top5); err == nil && len(top5) > 0 {
-			_ = s.UpdateCandidate(incubationID, map[string]any{"similar_rules": string(b)})
+			_ = s.UpdateCandidate(scope, incubationID, map[string]any{"similar_rules": string(b)})
 		}
 	}
 
@@ -807,7 +817,8 @@ func (s *IncubatorService) GetSimilarGraph(incubationID uint) (map[string]any, e
 }
 
 // ClusterIssues performs keyword-based clustering on unmatched issues and manages its own job record.
-func (s *IncubatorService) ClusterIssues(timeRangeDays int, languages []string, minGroupSize int) (*model.RuleIncubationJob, error) {
+func (s *IncubatorService) ClusterIssues(scope *model.UserAuthScope, timeRangeDays int, languages []string, minGroupSize int) (*model.RuleIncubationJob, error) {
+	db := model.DBWithScope(scope)
 	since := time.Now().AddDate(0, 0, -timeRangeDays)
 	paramsJSON, _ := json.Marshal(map[string]any{
 		"time_range_days": timeRangeDays,
@@ -826,11 +837,11 @@ func (s *IncubatorService) ClusterIssues(timeRangeDays int, languages []string, 
 		CreatedAt:     time.Now(),
 		StartedAt:     func() *time.Time { t := time.Now(); return &t }(),
 	}
-	if err := model.DB.Create(job).Error; err != nil {
+	if err := db.Create(job).Error; err != nil {
 		return nil, fmt.Errorf("create cluster job failed: %w", err)
 	}
 
-	summary, err := s.doClusterIssues(timeRangeDays, languages, minGroupSize, nil)
+	summary, err := s.doClusterIssues(scope, timeRangeDays, languages, minGroupSize, nil)
 	now := time.Now()
 	updates := map[string]any{"completed_at": &now}
 	if err != nil {
@@ -840,14 +851,14 @@ func (s *IncubatorService) ClusterIssues(timeRangeDays int, languages []string, 
 		updates["status"] = "success"
 		updates["result_summary"] = summary
 	}
-	model.DB.Model(job).Updates(updates)
+	db.Model(job).Updates(updates)
 	return job, err
 }
 
 // doClusterIssues is the core clustering logic without job lifecycle management.
 // Returns the JSON summary string.
-func (s *IncubatorService) doClusterIssues(timeRangeDays int, languages []string, minGroupSize int, pipelineJobID *uint) (string, error) {
-	cfg := s.getConfig()
+func (s *IncubatorService) doClusterIssues(scope *model.UserAuthScope, timeRangeDays int, languages []string, minGroupSize int, pipelineJobID *uint) (string, error) {
+			cfg := s.getConfig(scope)
 	if timeRangeDays <= 0 {
 		timeRangeDays = cfg.ClusterTimeWindowDays
 	}
@@ -857,7 +868,7 @@ func (s *IncubatorService) doClusterIssues(timeRangeDays int, languages []string
 
 	since := time.Now().AddDate(0, 0, -timeRangeDays)
 	var issues []model.ReviewIssue
-	db := model.DB.Where("rule_id IS NULL AND created_at >= ?", since)
+	db := model.DBWithScope(scope).Where("rule_id IS NULL AND created_at >= ?", since)
 	if len(languages) > 0 {
 		_ = languages
 	}
@@ -868,7 +879,7 @@ func (s *IncubatorService) doClusterIssues(timeRangeDays int, languages []string
 	// Asynchronously vectorize issues when embedding is available
 	if s.embedSvc != nil && s.embedSvc.IsAvailable() {
 		go func(issList []model.ReviewIssue) {
-			cfg := s.getConfig()
+			cfg := s.getConfig(scope)
 			if cfg.EmbeddingModelID == nil {
 				return
 			}
@@ -910,7 +921,7 @@ func (s *IncubatorService) doClusterIssues(timeRangeDays int, languages []string
 		if generated >= cfg.ClusterMaxGroupsPerRun {
 			break
 		}
-		_, err := s.CreateCandidate(CreateCandidateRequest{
+		_, err := s.CreateCandidate(scope, CreateCandidateRequest{
 			SourceIssueIDs: cl.IssueIDs,
 			ClusterID:      cl.ID,
 			AutoRefine:     true,
@@ -1012,15 +1023,16 @@ func (s *IncubatorService) splitByKeywordOverlap(issues []model.ReviewIssue, thr
 }
 
 // GetConfig returns the incubator configuration singleton.
-func (s *IncubatorService) GetConfig() model.IncubatorConfig {
-	return s.getConfig()
+func (s *IncubatorService) GetConfig(scope *model.UserAuthScope) model.IncubatorConfig {
+	return s.getConfig(scope)
 }
 
 // SaveConfig updates the incubator configuration.
 // It sanitizes and type-converts known fields to avoid GORM map-update type mismatches.
-func (s *IncubatorService) SaveConfig(updates map[string]any) error {
+func (s *IncubatorService) SaveConfig(scope *model.UserAuthScope, updates map[string]any) error {
+	db := model.DBWithScope(scope)
 	var cfg model.IncubatorConfig
-	if err := model.DB.First(&cfg, 1).Error; err != nil {
+	if err := db.First(&cfg, 1).Error; err != nil {
 		return err
 	}
 
@@ -1092,7 +1104,7 @@ func (s *IncubatorService) SaveConfig(updates map[string]any) error {
 	if len(clean) == 0 {
 		return nil
 	}
-	return model.DB.Model(&cfg).Updates(clean).Error
+	return db.Model(&cfg).Updates(clean).Error
 }
 
 // generateIncubationCode creates a semantic, readable code for a candidate rule.
@@ -1260,20 +1272,21 @@ func sanitizeSlug(s string) string {
 
 // ValidateEmbedding checks whether the configured embedding model is reachable.
 // If modelID > 0, tests that specific model directly (useful before saving config).
-func (s *IncubatorService) ValidateEmbedding(modelID uint) (map[string]any, error) {
+func (s *IncubatorService) ValidateEmbedding(scope *model.UserAuthScope, modelID uint) (map[string]any, error) {
+	db := model.DBWithScope(scope)
 	var m model.LLMModel
 	var err error
 
 	if modelID > 0 {
 		// Test a specific model selected by user (before saving config)
-		err = model.DB.First(&m, modelID).Error
+		err = db.First(&m, modelID).Error
 	} else {
 		// Test the currently saved configuration
-		cfg := s.getConfig()
+		cfg := s.getConfig(scope)
 		if cfg.EmbeddingModelID == nil {
 			return nil, fmt.Errorf("embedding model not configured")
 		}
-		err = model.DB.First(&m, *cfg.EmbeddingModelID).Error
+		err = db.First(&m, *cfg.EmbeddingModelID).Error
 	}
 	if err != nil {
 		return nil, err
@@ -1302,9 +1315,10 @@ func (s *IncubatorService) ValidateEmbedding(modelID uint) (map[string]any, erro
 
 // --- helpers ---
 
-func (s *IncubatorService) getConfig() model.IncubatorConfig {
+func (s *IncubatorService) getConfig(scope *model.UserAuthScope) model.IncubatorConfig {
+	db := model.DBWithScope(scope)
 	var cfg model.IncubatorConfig
-	if err := model.DB.First(&cfg, 1).Error; err != nil {
+	if err := db.First(&cfg, 1).Error; err != nil {
 		zap.L().Warn("incubator config not found, using defaults", zap.Error(err))
 	}
 	return cfg
@@ -1559,8 +1573,9 @@ func looksLikeJSONControlAfter(s string, pos int) bool {
 }
 
 // runRefine uses LLM to generate rule name, description and prompt from source issues.
-func (s *IncubatorService) runRefine(incubationID uint) error {
-	_, issues, err := s.GetCandidate(incubationID)
+func (s *IncubatorService) runRefine(scope *model.UserAuthScope, incubationID uint) error {
+	db := model.DBWithScope(scope)
+	_, issues, err := s.GetCandidate(scope, incubationID)
 	if err != nil {
 		return err
 	}
@@ -1644,7 +1659,7 @@ Please output in the following JSON format (do not include markdown code block):
 	// Use LLM-generated slug for the rule code; fallback to heuristic if slug is missing/invalid.
 	slug := sanitizeSlug(refineResult.Slug)
 	if slug == "" {
-		cand, _, _ := s.GetCandidate(incubationID)
+		cand, _, _ := s.GetCandidate(scope, incubationID)
 		if cand != nil && cand.Prompt != "" {
 			slug = extractSemanticSlug(cand.Prompt)
 		} else if len(issues) > 0 {
@@ -1662,7 +1677,7 @@ Please output in the following JSON format (do not include markdown code block):
 	updates["code"] = newCode
 	updates["status"] = "ready"
 	if len(updates) > 0 {
-		if err := s.UpdateCandidate(incubationID, updates); err != nil {
+		if err := s.UpdateCandidate(scope, incubationID, updates); err != nil {
 			return err
 		}
 	}
@@ -1674,12 +1689,12 @@ Please output in the following JSON format (do not include markdown code block):
 	// Asynchronously vectorize the refined candidate
 	if s.embedSvc != nil && s.embedSvc.IsAvailable() {
 		go func(id uint) {
-			cfg := s.getConfig()
+			cfg := s.getConfig(scope)
 			if cfg.EmbeddingModelID == nil {
 				return
 			}
 			var cand model.RuleIncubation
-			if err := model.DB.First(&cand, id).Error; err != nil {
+			if err := db.First(&cand, id).Error; err != nil {
 				return
 			}
 			key := vectorstore.Key{
@@ -1696,9 +1711,9 @@ Please output in the following JSON format (do not include markdown code block):
 	}
 
 	// Recalculate confidence score after refine succeeded
-	if cd, _, err := s.GetCandidate(incubationID); err == nil {
+	if cd, _, err := s.GetCandidate(scope, incubationID); err == nil {
 		conf := s.calculateConfidenceScore(cd)
-		_ = s.UpdateCandidate(incubationID, map[string]any{
+		_ = s.UpdateCandidate(scope, incubationID, map[string]any{
 			"confidence_score": conf,
 		})
 		zap.L().Info("confidence updated after refine",
@@ -1712,14 +1727,15 @@ Please output in the following JSON format (do not include markdown code block):
 // runSimilarCheck detects similarity between the candidate and existing rules.
 // Combines L1 keyword (Jaccard) and L2 semantic (Embedding cosine) matching.
 // Returns true if the candidate passes originality check (no similar rules found).
-func (s *IncubatorService) runSimilarCheck(incubationID uint) (bool, error) {
-	cand, _, err := s.GetCandidate(incubationID)
+func (s *IncubatorService) runSimilarCheck(scope *model.UserAuthScope, incubationID uint) (bool, error) {
+	db := model.DBWithScope(scope)
+	cand, _, err := s.GetCandidate(scope, incubationID)
 	if err != nil {
 		zap.L().Warn("similarCheck: get candidate failed", zap.Uint("incubation_id", incubationID), zap.Error(err))
 		return false, err
 	}
 
-	cfg := s.getConfig()
+			cfg := s.getConfig(scope)
 	threshold := cfg.SimilarityPassThreshold
 	if threshold <= 0 || threshold > 1 {
 		threshold = 0.5
@@ -1727,7 +1743,7 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) (bool, error) {
 
 	// --- L1: Jaccard keyword matching (fast, structural) ---
 	var rules []model.ReviewRule
-	if err := model.DB.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
+	if err := db.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
 		zap.L().Warn("similarCheck: query rules failed", zap.Uint("incubation_id", incubationID), zap.Error(err))
 		return false, err
 	}
@@ -1799,7 +1815,7 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) (bool, error) {
 							} else {
 								// Hydrate rule details
 								var rule model.ReviewRule
-								if _ = model.DB.First(&rule, r.Key.EntityID).Error; rule.ID > 0 {
+								if _ = db.First(&rule, r.Key.EntityID).Error; rule.ID > 0 {
 									similarMap[rule.ID] = map[string]any{
 										"rule_id":    rule.ID,
 										"name":       rule.Name,
@@ -1837,9 +1853,9 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) (bool, error) {
 
 	passed := len(similarList) == 0
 
-	// Also check code uniqueness
+	// Also check code uniqueness (global check since incubation jobs lack org_id)
 	var codeExists int64
-	model.DB.Model(&model.ReviewRule{}).Where("code = ?", cand.Code).Count(&codeExists)
+	db.Model(&model.ReviewRule{}).Where("code = ?", cand.Code).Count(&codeExists)
 	updates := map[string]any{
 		"similar_rules":  string(similarJSON),
 		"similar_passed": passed,
@@ -1850,7 +1866,7 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) (bool, error) {
 			zap.Uint("incubation_id", incubationID), zap.String("new_code", updates["code"].(string)))
 	}
 
-	if err := s.UpdateCandidate(incubationID, updates); err != nil {
+	if err := s.UpdateCandidate(scope, incubationID, updates); err != nil {
 		zap.L().Warn("similarCheck: update candidate failed",
 			zap.Uint("incubation_id", incubationID), zap.Error(err))
 		return false, err
@@ -1863,9 +1879,9 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) (bool, error) {
 		zap.Bool("passed", passed))
 
 	// Recalculate confidence after similar-check
-	if updatedCand, _, err := s.GetCandidate(incubationID); err == nil {
+	if updatedCand, _, err := s.GetCandidate(scope, incubationID); err == nil {
 		conf := s.calculateConfidenceScore(updatedCand)
-		if err := s.UpdateCandidate(incubationID, map[string]any{
+		if err := s.UpdateCandidate(scope, incubationID, map[string]any{
 			"confidence_score": conf,
 		}); err == nil {
 			zap.L().Info("confidence updated after similar-check",
@@ -1879,8 +1895,9 @@ func (s *IncubatorService) runSimilarCheck(incubationID uint) (bool, error) {
 
 // runSandboxTest uses LLM to verify the candidate rule by generating test code and validating it.
 // Returns true if the candidate passes the test (accuracy >= 0.5).
-func (s *IncubatorService) runSandboxTest(incubationID uint) (bool, error) {
-	cand, _, err := s.GetCandidate(incubationID)
+func (s *IncubatorService) runSandboxTest(scope *model.UserAuthScope, incubationID uint) (bool, error) {
+	db := model.DBWithScope(scope)
+	cand, _, err := s.GetCandidate(scope, incubationID)
 	if err != nil {
 		zap.L().Warn("sandboxTest: get candidate failed", zap.Uint("incubation_id", incubationID), zap.Error(err))
 		return false, err
@@ -1959,7 +1976,7 @@ func (s *IncubatorService) runSandboxTest(incubationID uint) (bool, error) {
 	}
 	resultJSON, _ := json.Marshal(testResult)
 
-	if err := model.DB.Model(&model.RuleIncubation{}).Where("id = ?", incubationID).Update("test_results", string(resultJSON)).Error; err != nil {
+	if err := db.Model(&model.RuleIncubation{}).Where("id = ?", incubationID).Update("test_results", string(resultJSON)).Error; err != nil {
 		zap.L().Warn("sandboxTest: save results failed",
 			zap.Uint("incubation_id", incubationID), zap.Error(err))
 		return false, err
@@ -1974,9 +1991,9 @@ func (s *IncubatorService) runSandboxTest(incubationID uint) (bool, error) {
 		zap.Bool("passed_overall", passedOverall))
 
 	// Recalculate confidence after sandbox test
-	if updatedCand, _, err := s.GetCandidate(incubationID); err == nil {
+	if updatedCand, _, err := s.GetCandidate(scope, incubationID); err == nil {
 		conf := s.calculateConfidenceScore(updatedCand)
-		if err := s.UpdateCandidate(incubationID, map[string]any{
+		if err := s.UpdateCandidate(scope, incubationID, map[string]any{
 			"confidence_score": conf,
 		}); err == nil {
 			zap.L().Info("confidence updated after sandbox-test",
@@ -2118,21 +2135,22 @@ type testCase struct {
 }
 
 // runRetroMatch performs retroactive matching for a published rule against historical issues.
-func (s *IncubatorService) runRetroMatch(ruleID uint, lookbackDays int, threshold float64) error {
+func (s *IncubatorService) runRetroMatch(scope *model.UserAuthScope, ruleID uint, lookbackDays int, threshold float64) error {
+	db := model.DBWithScope(scope)
 	var rule model.ReviewRule
-	if err := model.DB.First(&rule, ruleID).Error; err != nil {
+	if err := db.First(&rule, ruleID).Error; err != nil {
 		return err
 	}
 	if lookbackDays <= 0 {
-		lookbackDays = s.getConfig().RetroMatchMaxDaysLookback
+		lookbackDays = s.getConfig(scope).RetroMatchMaxDaysLookback
 	}
 	if threshold <= 0 {
-		threshold = s.getConfig().RetroMatchConfidenceThreshold
+		threshold = s.getConfig(scope).RetroMatchConfidenceThreshold
 	}
 
 	since := time.Now().AddDate(0, 0, -lookbackDays)
 	var issues []model.ReviewIssue
-	if err := model.DB.Where("rule_id IS NULL AND created_at >= ?", since).Find(&issues).Error; err != nil {
+	if err := db.Where("rule_id IS NULL AND created_at >= ?", since).Find(&issues).Error; err != nil {
 		return err
 	}
 
@@ -2173,19 +2191,20 @@ func (s *IncubatorService) runRetroMatch(ruleID uint, lookbackDays int, threshol
 		}
 
 		exists := int64(0)
-		model.DB.Model(&model.ReviewIssueRuleMatch{}).Where("issue_id = ? AND rule_id = ?", iss.ID, ruleID).Count(&exists)
+		db.Model(&model.ReviewIssueRuleMatch{}).Where("issue_id = ? AND rule_id = ?", iss.ID, ruleID).Count(&exists)
 		if exists > 0 {
 			continue
 		}
 
 		match := model.ReviewIssueRuleMatch{
+			OrgID:      iss.OrgID,
 			IssueID:    iss.ID,
 			RuleID:     ruleID,
 			MatchType:  "retroactive",
 			MatchedAt:  time.Now(),
 			Confidence: confidence,
 		}
-		if err := model.DB.Create(&match).Error; err != nil {
+		if err := db.Create(&match).Error; err != nil {
 			zap.L().Warn("create retro match failed",
 				zap.Uint("issue_id", iss.ID),
 				zap.Uint("rule_id", ruleID),
@@ -2203,14 +2222,15 @@ func (s *IncubatorService) runRetroMatch(ruleID uint, lookbackDays int, threshol
 }
 
 // runHealthCheck evaluates the health of all published rules.
-func (s *IncubatorService) runHealthCheck() error {
-	cfg := s.getConfig()
+func (s *IncubatorService) runHealthCheck(scope *model.UserAuthScope) error {
+	db := model.DBWithScope(scope)
+			cfg := s.getConfig(scope)
 	if !cfg.HealthCheckEnabled {
 		return nil
 	}
 
 	var rules []model.ReviewRule
-	if err := model.DB.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
+	if err := db.Where("is_enabled = ?", true).Find(&rules).Error; err != nil {
 		return err
 	}
 
@@ -2218,11 +2238,11 @@ func (s *IncubatorService) runHealthCheck() error {
 		// Calculate recent hit rate (past 7 days)
 		sevenDaysAgo := time.Now().AddDate(0, 0, -7)
 		var hitCount int64
-		model.DB.Model(&model.ReviewIssue{}).Where("rule_id = ? AND created_at >= ?", rule.ID, sevenDaysAgo).Count(&hitCount)
+		db.Model(&model.ReviewIssue{}).Where("rule_id = ? AND created_at >= ?", rule.ID, sevenDaysAgo).Count(&hitCount)
 
 		// Calculate total unmatched issues in the same category/language in past 7 days
 		var missedCount int64
-		missedDB := model.DB.Model(&model.ReviewIssue{}).
+		missedDB := db.Model(&model.ReviewIssue{}).
 			Where("rule_id IS NULL AND created_at >= ? AND category = ?", sevenDaysAgo, rule.Category)
 		if rule.Language != "common" {
 			// approximate by file extension; exact language matching needs a language column
@@ -2231,8 +2251,8 @@ func (s *IncubatorService) runHealthCheck() error {
 
 		// Get reject rate
 		var totalIssues, rejectedIssues int64
-		model.DB.Model(&model.ReviewIssue{}).Where("rule_id = ?", rule.ID).Count(&totalIssues)
-		model.DB.Model(&model.ReviewIssue{}).Where("rule_id = ? AND status = ?", rule.ID, "false_positive").Count(&rejectedIssues)
+		db.Model(&model.ReviewIssue{}).Where("rule_id = ?", rule.ID).Count(&totalIssues)
+		db.Model(&model.ReviewIssue{}).Where("rule_id = ? AND status = ?", rule.ID, "false_positive").Count(&rejectedIssues)
 
 		rejectRate := float64(0)
 		if totalIssues > 0 {
@@ -2279,15 +2299,16 @@ func inferLanguage(file string) string {
 }
 
 // autoCreateProjectReviewConfigs 为所有已有项目自动插入新规则的默认配置（默认禁用）
-func autoCreateProjectReviewConfigs(ruleID uint) {
+func autoCreateProjectReviewConfigs(scope *model.UserAuthScope, ruleID uint) {
+	db := model.DBWithScope(scope)
 	var projects []model.Project
-	if err := model.DB.Find(&projects).Error; err != nil {
+	if err := db.Find(&projects).Error; err != nil {
 		zap.L().Warn("auto create project review configs: find projects failed", zap.Error(err))
 		return
 	}
 	for _, p := range projects {
 		var count int64
-		model.DB.Model(&model.ProjectReviewConfig{}).
+		db.Model(&model.ProjectReviewConfig{}).
 			Where("project_id = ? AND rule_id = ?", p.ID, ruleID).
 			Count(&count)
 		if count > 0 {
@@ -2299,7 +2320,7 @@ func autoCreateProjectReviewConfigs(ruleID uint) {
 			IsEnabled: false,
 			Severity:  "",
 		}
-		if err := model.DB.Create(&cfg).Error; err != nil {
+		if err := db.Create(&cfg).Error; err != nil {
 			zap.L().Warn("auto create project review config failed",
 				zap.Uint("project_id", p.ID), zap.Uint("rule_id", ruleID), zap.Error(err))
 		}
@@ -2319,10 +2340,11 @@ func (e *ErrPipelineRunning) Error() string {
 
 // RunPipeline kicks off a full pipeline: cluster → refine → similar_check → sandbox_test.
 // It creates a pipeline_run job and executes steps asynchronously in a goroutine.
-func (s *IncubatorService) RunPipeline(timeRangeDays, minGroupSize int) (*model.RuleIncubationJob, error) {
+func (s *IncubatorService) RunPipeline(scope *model.UserAuthScope, timeRangeDays, minGroupSize int) (*model.RuleIncubationJob, error) {
+	db := model.DBWithScope(scope)
 	// Check mutex: only one pipeline_run can be active at a time.
 	var existing model.RuleIncubationJob
-	if err := model.DB.Where("job_type = ? AND status = ?", "pipeline_run", "running").
+	if err := db.Where("job_type = ? AND status = ?", "pipeline_run", "running").
 		Order("created_at DESC").First(&existing).Error; err == nil {
 		return nil, &ErrPipelineRunning{JobID: existing.ID}
 	}
@@ -2340,21 +2362,22 @@ func (s *IncubatorService) RunPipeline(timeRangeDays, minGroupSize int) (*model.
 		CreatedAt:     time.Now(),
 		StartedAt:     func() *time.Time { t := time.Now(); return &t }(),
 	}
-	if err := model.DB.Create(job).Error; err != nil {
+	if err := db.Create(job).Error; err != nil {
 		return nil, fmt.Errorf("create pipeline job failed: %w", err)
 	}
-	go s.runPipelineSteps(job.ID, timeRangeDays, minGroupSize)
+	go s.runPipelineSteps(scope, job.ID, timeRangeDays, minGroupSize)
 	return job, nil
 }
 
-func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupSize int) {
+func (s *IncubatorService) runPipelineSteps(scope *model.UserAuthScope, jobID uint, timeRangeDays, minGroupSize int) {
+	db := model.DBWithScope(scope)
 	defer func() {
 		if r := recover(); r != nil {
 			zap.L().Error("pipeline run panicked, recovering",
 				zap.Uint("job_id", jobID),
 				zap.Any("panic", r))
 			now := time.Now()
-			model.DB.Model(&model.RuleIncubationJob{}).Where("id = ?", jobID).Updates(map[string]any{
+			db.Model(&model.RuleIncubationJob{}).Where("id = ?", jobID).Updates(map[string]any{
 				"status":       "failed",
 				"error_msg":    fmt.Sprintf("pipeline panicked: %v", r),
 				"completed_at": &now,
@@ -2390,7 +2413,7 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 
 	updateStep := func(stepID, status string, current, total int) {
 		var job model.RuleIncubationJob
-		if err := model.DB.First(&job, jobID).Error; err != nil {
+		if err := db.First(&job, jobID).Error; err != nil {
 			return
 		}
 		var summary map[string]any
@@ -2413,13 +2436,13 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 		steps[stepID] = stepInfo
 		summary["pipeline_steps"] = steps
 		b, _ := json.Marshal(summary)
-		model.DB.Model(&job).Update("result_summary", string(b))
+		db.Model(&job).Update("result_summary", string(b))
 		broadcast(stepID, status, job.Status, current, total)
 	}
 
 	failJob := func(err error) {
 		now := time.Now()
-		model.DB.Model(&model.RuleIncubationJob{}).Where("id = ?", jobID).Updates(map[string]any{
+		db.Model(&model.RuleIncubationJob{}).Where("id = ?", jobID).Updates(map[string]any{
 			"status":       "failed",
 			"error_msg":    err.Error(),
 			"completed_at": &now,
@@ -2429,7 +2452,7 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 
 	completeJob := func() {
 		now := time.Now()
-		model.DB.Model(&model.RuleIncubationJob{}).Where("id = ?", jobID).Updates(map[string]any{
+		db.Model(&model.RuleIncubationJob{}).Where("id = ?", jobID).Updates(map[string]any{
 			"status":       "success",
 			"completed_at": &now,
 		})
@@ -2438,7 +2461,7 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 
 	// -------- Step 1: Cluster --------
 	// 初始状态已在创建 Job 时设为 running，这里直接进入执行
-	summaryJSON, err := s.doClusterIssues(timeRangeDays, nil, minGroupSize, &jobID)
+	summaryJSON, err := s.doClusterIssues(scope, timeRangeDays, nil, minGroupSize, &jobID)
 	if err != nil {
 		failJob(fmt.Errorf("cluster failed: %w", err))
 		return
@@ -2465,12 +2488,12 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 
     // -------- Step 2: Refine --------
     var pipeCands []model.RuleIncubation
-    model.DB.Where("pipeline_job_id = ?", jobID).Find(&pipeCands)
+    db.Where("pipeline_job_id = ?", jobID).Find(&pipeCands)
     updateStep("refine", "running", 0, len(pipeCands))
     refineDone := 0
     for i, cand := range pipeCands {
         if cand.Status == "draft" {
-            if err := s.runRefine(cand.ID); err == nil {
+            if err := s.runRefine(scope, cand.ID); err == nil {
                 refineDone++
             }
         } else {
@@ -2482,13 +2505,13 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
 
     // Reload candidates after refine to get fresh status for downstream steps
     var freshCands []model.RuleIncubation
-    model.DB.Where("pipeline_job_id = ?", jobID).Find(&freshCands)
+    db.Where("pipeline_job_id = ?", jobID).Find(&freshCands)
 
     // -------- Step 3: Similar Check --------
     updateStep("similar_check", "running", 0, len(freshCands))
     similarDone := 0
     for i, cand := range freshCands {
-        if _, err := s.runSimilarCheck(cand.ID); err == nil {
+        if _, err := s.runSimilarCheck(scope, cand.ID); err == nil {
             similarDone++
         }
         updateStep("similar_check", "running", i+1, len(freshCands))
@@ -2499,7 +2522,7 @@ func (s *IncubatorService) runPipelineSteps(jobID uint, timeRangeDays, minGroupS
     updateStep("sandbox_test", "running", 0, len(freshCands))
     sandboxDone := 0
     for i, cand := range freshCands {
-        if _, err := s.runSandboxTest(cand.ID); err == nil {
+        if _, err := s.runSandboxTest(scope, cand.ID); err == nil {
             sandboxDone++
         }
         updateStep("sandbox_test", "running", i+1, len(freshCands))

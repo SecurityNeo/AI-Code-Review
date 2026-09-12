@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>出错了 — CodeGuard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .error-container {
+      text-align: center;
+      max-width: 480px;
+      padding: 40px;
+    }
+    .error-code {
+      font-size: 96px;
+      font-weight: 800;
+      color: #3b82f6;
+      line-height: 1;
+      margin-bottom: 16px;
+    }
+    .error-title {
+      font-size: 24px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+    .error-desc {
+      font-size: 16px;
+      color: #94a3b8;
+      margin-bottom: 32px;
+      line-height: 1.6;
+    }
+    .error-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      text-decoration: none;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: none;
+    }
+    .btn-primary {
+      background: #3b82f6;
+      color: white;
+    }
+    .btn-primary:hover { background: #2563eb; }
+    .btn-secondary {
+      background: #1e293b;
+      color: #94a3b8;
+      border: 1px solid #334155;
+    }
+    .btn-secondary:hover {
+      background: #334155;
+      color: #e2e8f0;
+    }
+    .org-info {
+      margin-top: 32px;
+      padding-top: 24px;
+      border-top: 1px solid #1e293b;
+      font-size: 13px;
+      color: #64748b;
+    }
+    .org-info .org-name {
+      color: #94a3b8;
+      font-weight: 500;
+    }
+    .org-info .contact {
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="error-container">
+    <div class="error-code" id="errorCode">404</div>
+    <h1 class="error-title" id="errorTitle">页面未找到</h1>
+    <p class="error-desc" id="errorDesc">
+      您访问的页面不存在或已被移除。<br>
+      请检查 URL 是否正确，或返回首页重试。
+    </p>
+    <div class="error-actions">
+      <a href="/" class="btn btn-primary">🏠 返回首页</a>
+      <a href="javascript:history.back()" class="btn btn-secondary">← 返回上一页</a>
+    </div>
+    <div class="org-info" id="orgInfo">
+      <div>当前组织：<span class="org-name" id="orgName">加载中...</span></div>
+      <div class="contact">
+        遇到问题？请联系 <a href="mailto:support@codeguard.io" style="color:#60a5fa;text-decoration:none;">support@codeguard.io</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function() {
+    // 根据 URL 参数渲染不同错误码
+    var params = new URLSearchParams(window.location.search);
+    var code = params.get('code') || '404';
+    var orgName = 'CodeGuard';
+
+    var titles = {
+      '404': '页面未找到',
+      '403': '访问被拒绝',
+      '500': '服务器错误',
+      '503': '服务不可用'
+    };
+    var descs = {
+      '404': '您访问的页面不存在或已被移除。请检查 URL 是否正确，或返回首页重试。',
+      '403': '您没有权限访问此页面。如果您认为这是一个错误，请联系组织管理员。',
+      '500': '服务器遇到了意外错误。请稍后再试，或联系技术支持。',
+      '503': '服务暂时不可用。这可能是计划维护或临时过载，请稍后再试。'
+    };
+
+    var codeEl = document.getElementById('errorCode');
+    var titleEl = document.getElementById('errorTitle');
+    var descEl = document.getElementById('errorDesc');
+    var orgNameEl = document.getElementById('orgName');
+
+    if (codeEl) codeEl.textContent = code;
+    if (titleEl) titleEl.textContent = titles[code] || '出错了';
+    if (descEl) descEl.textContent = descs[code] || '发生了一个意外错误，请稍后再试。';
+
+    // 动态加载组织信息
+    var currentOrg = window.getCurrentOrg ? window.getCurrentOrg() : null;
+    if (currentOrg && currentOrg.name) {
+      orgName = currentOrg.name;
+    }
+    if (orgNameEl) orgNameEl.textContent = escapeHtml(orgName);
+
+    function escapeHtml(text) {
+      var div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  })();
+  </script>
+</body>
+</html>

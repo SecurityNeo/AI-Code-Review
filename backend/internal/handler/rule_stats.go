@@ -146,8 +146,15 @@ func ruleStatsBaseQuery(c *gin.Context) (*gorm.DB, time.Time, time.Time) {
 	q := model.DB.Model(&model.ReviewIssue{}).
 		Joins("LEFT JOIN tasks t ON t.id = review_issues.task_id").
 		Where("review_issues.created_at >= ? AND review_issues.created_at < ?", start, end)
+
+	// 多租户改造：叠加组织过滤
+	scope := middleware.GetAuthScope(c)
+	if scope != nil && !scope.IsSuperAdmin {
+		q = q.Where("review_issues.org_id IN ?", scope.VisibleOrgIDs)
+	}
+
 	if user, ok := middleware.GetUser(c); ok {
-		if user.Role != model.RoleAdmin {
+		if scope == nil || !scope.HasOrgRole("super_admin", "org_admin") {
 			if user.GitlabUsername == "" {
 				q = q.Where("1 = 0")
 			} else {
@@ -230,7 +237,7 @@ func (h *RuleStatsHandler) Overview(c *gin.Context) {
 		HitN   int64  `gorm:"column:hit_n"`
 	}
 	var trendRows []trendRow
-	if err := ruleStatsScopedQuery(c, category, severity).Select(trendSQL+`, COUNT(*) AS hit_n`).
+	if err := ruleStatsScopedQuery(c, category, severity).Select(trendSQL + `, COUNT(*) AS hit_n`).
 		Group("bucket").Order("bucket ASC").Scan(&trendRows).Error; err != nil {
 		zap.L().Error("rule stats overview trend failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -455,7 +462,7 @@ func (h *RuleStatsHandler) ByRule(c *gin.Context) {
 		N      int64  `gorm:"column:n"`
 	}
 	var trendRows []trendRow
-	if err := applyCode().Select(trendSQL+`, COUNT(*) AS n`).
+	if err := applyCode().Select(trendSQL + `, COUNT(*) AS n`).
 		Group("bucket").Order("bucket ASC").Scan(&trendRows).Error; err != nil {
 		zap.L().Error("rule stats by-rule trend failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
