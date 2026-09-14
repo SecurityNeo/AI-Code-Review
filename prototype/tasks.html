@@ -117,38 +117,44 @@
 
             <div class="p-8 space-y-6">
                 <!-- 筛选区 -->
-                <div class="bg-white rounded-xl p-4 border flex items-center gap-4 flex-wrap">
-                    <select id="orgSelect" class="w-24 px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"></select>
-                    <select id="projectFilter" class="px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                <div class="bg-white rounded-xl p-4 border flex items-center gap-3 flex-wrap">
+                    <select id="orgSelect" class="w-32 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"></select>
+                    <select id="projectFilter" class="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white">
                         <option value="">所有项目</option>
                     </select>
-                    <select id="statusFilter" class="px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                    <select id="statusFilter" class="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white">
                         <option value="">所有状态</option>
                         <option value="pending">待处理</option>
                         <option value="running">运行中</option>
                         <option value="success">成功</option>
                         <option value="failed">失败</option>
                     </select>
-                    <select id="timeFilter" class="px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                    <select id="timeFilter" class="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white">
                         <option value="">所有时间</option>
                         <option value="today">今日</option>
                         <option value="7d">近7日</option>
                         <option value="30d">近30日</option>
                     </select>
-                    <div class="flex gap-2">
-                        <input type="text" id="authorFilter" placeholder="开发人员" class="w-32 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
-                        <input type="text" id="mrFilter" placeholder="MR ID" class="w-28 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                    <div class="relative">
+                        <i class="fas fa-user text-gray-400 text-xs absolute left-3 top-1/2 -translate-y-1/2"></i>
+                        <input type="text" id="authorFilter" placeholder="开发人员" class="w-28 pl-8 pr-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
                     </div>
-                    <label class="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer select-none">
+                    <div class="relative">
+                        <i class="fas fa-code-branch text-gray-400 text-xs absolute left-3 top-1/2 -translate-y-1/2"></i>
+                        <input type="text" id="mrFilter" placeholder="MR ID" class="w-24 pl-8 pr-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                    </div>
+                    <label class="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer select-none whitespace-nowrap">
                         <input type="checkbox" id="pendingIssuesFilter" class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500">
-                        <span>有待处理Issue</span>
+                        <span>有待处理 Issue</span>
                     </label>
-                    <button onclick="filterTasks()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700">
-                        <i class="fas fa-search mr-1"></i>查询
-                    </button>
-                    <button onclick="refreshTasks()" class="bg-gray-100 text-gray-600 px-4 py-2 rounded-lg text-sm hover:bg-gray-200">
-                        <i class="fas fa-redo mr-1"></i>刷新
-                    </button>
+                    <div class="flex items-center gap-2 ml-auto">
+                        <button onclick="filterTasks()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
+                            <i class="fas fa-search mr-1.5"></i>查询
+                        </button>
+                        <button onclick="refreshTasks()" class="bg-gray-100 text-gray-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors">
+                            <i class="fas fa-redo mr-1.5"></i>刷新
+                        </button>
+                    </div>
                 </div>
 
                 <!-- 任务表格 -->

@@ -84,7 +84,6 @@
                     <tr>
                         <th style="width:60px;">ID</th>
                         <th>时间</th>
-                        <th>所属组织</th>
                         <th>密钥</th>
                         <th>用户</th>
                         <th>Method / Tool</th>
@@ -174,7 +173,6 @@ async function loadLogs() {
                     <tr style="cursor:pointer;" onclick="toggleDetail(${log.id})">
                         <td>${log.id}</td>
                         <td style="font-size:0.75rem; white-space:nowrap;">${timeStr}</td>
-                        <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(log.org_name || '根组织')}</td>
                         <td>${escapeHtml(log.api_key_name || '-')}</td>
                         <td>${userDisplay}</td>
                         <td style="font-size:0.75rem;">${escapeHtml(methodTool)}</td>
