@@ -603,7 +603,8 @@ func (s *TaskService) Retry(scope *model.UserAuthScope, taskID uint, userReviewC
 	var injectedParts []string
 	if len(selectedCommentIDs) > 0 {
 		var selected []model.TaskReviewComment
-		if err := db.Where("task_id = ? AND id IN ?", taskID, selectedCommentIDs).Order("retry_round asc").Find(&selected).Error; err == nil {
+		// 【修复】使用独立 DB session，避免复用 First(&task) 后的被污染 Statement
+		if err := model.DBWithScope(scope).Where("task_id = ? AND id IN ?", taskID, selectedCommentIDs).Order("retry_round asc").Find(&selected).Error; err == nil {
 			for _, c := range selected {
 				injectedParts = append(injectedParts, fmt.Sprintf("- 【第%d次复核】%s", c.RetryRound, c.Content))
 			}
@@ -642,10 +643,12 @@ func (s *TaskService) Retry(scope *model.UserAuthScope, taskID uint, userReviewC
 	task.StartedAt = &now
 	// review 类型无资源池，避免外键约束失败
 	var saveErr error
+	// 【修复】使用独立 DB session，避免复用 First(&task) 后的被污染 Statement
+	saveDB := model.DBWithScope(scope)
 	if task.TaskType == "review" {
-		saveErr = db.Omit("org_id", "pool_id").Save(&task).Error // ⚠️ 多租户改造：Omit org_id 防止零值覆盖
+		saveErr = saveDB.Omit("org_id", "pool_id").Save(&task).Error // ⚠️ 多租户改造：Omit org_id 防止零值覆盖
 	} else {
-		saveErr = db.Omit("org_id").Save(&task).Error // ⚠️ 多租户改造：Omit org_id 防止零值覆盖
+		saveErr = saveDB.Omit("org_id").Save(&task).Error // ⚠️ 多租户改造：Omit org_id 防止零值覆盖
 	}
 	if saveErr != nil {
 		zap.L().Error("save task failed before execution",
