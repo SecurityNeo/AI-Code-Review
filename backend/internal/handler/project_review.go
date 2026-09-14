@@ -260,13 +260,25 @@ func (h *ProjectReviewHandler) BatchResolveIssues(c *gin.Context) {
 			return
 		}
 
-		// 查询 Issue 所属任务ID
+		// 查询 Issue 所属任务ID，并校验跨表权限（GORM Updates 不支持 Joins，改用子查询）
 		var issue model.ReviewIssue
-		var taskID uint
-		if err := model.DB.Select("task_id").First(&issue, item.ID).Error; err != nil {
-			taskID = 0
-		} else {
-			taskID = issue.TaskID
+		if err := model.DB.First(&issue, item.ID).Error; err != nil {
+			zap.L().Warn("issue not found", zap.Uint("issue_id", item.ID), zap.Error(err))
+			continue
+		}
+		taskID := issue.TaskID
+
+		// 子查询校验：该 issue 的 task 所属 org 是否在可见范围内
+		var count int64
+		if err := model.DB.Table("tasks").
+			Where("id = ? AND org_id IN ?", taskID, scope.VisibleOrgIDs).
+			Count(&count).Error; err != nil {
+			zap.L().Warn("verify issue permission failed", zap.Uint("issue_id", item.ID), zap.Error(err))
+			continue
+		}
+		if count == 0 {
+			zap.L().Warn("issue not in visible orgs", zap.Uint("issue_id", item.ID), zap.Uint("task_id", taskID))
+			continue
 		}
 
 		updates := map[string]interface{}{
@@ -280,7 +292,7 @@ func (h *ProjectReviewHandler) BatchResolveIssues(c *gin.Context) {
 			updates["reject_reason"] = item.RejectReason
 		}
 
-		if err := model.DB.Table("review_issues").Joins("JOIN tasks ON tasks.id = review_issues.task_id").Where("review_issues.id = ? AND tasks.org_id IN ?", item.ID, scope.VisibleOrgIDs).Updates(updates).Error; err != nil {
+		if err := model.DB.Model(&model.ReviewIssue{}).Where("id = ?", item.ID).Updates(updates).Error; err != nil {
 			zap.L().Warn("update review issue status failed",
 				zap.Uint("issue_id", item.ID),
 				zap.Error(err))

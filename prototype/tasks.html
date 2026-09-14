@@ -31,14 +31,6 @@
         .status-failed { background-color: #fee2e2; color: #991b1b; }
         .status-timeout { background-color: #fce7f3; color: #9d174d; }
         .status-stopped { background-color: #f3f4f6; color: #6b7280; }
-        .task-type-badge {
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-        .task-type-badge.chat { background-color: #e0e7ff; color: #4338ca; }
-        .task-type-badge.review { background-color: #f3e8ff; color: #7c3aed; }
         .modal { display: none; }
         .modal.active { display: flex; }
         #logContent { color: #e5e7eb; }
@@ -165,7 +157,6 @@
                         <thead class="bg-gray-50 border-b">
                             <tr>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">任务ID</th>
-                                <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500">类型</th>
                                 <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500">评审分数</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">所属组织</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">所属项目</th>
@@ -532,7 +523,6 @@ function renderTasks(tasks) {
                     : '';
                 return `<tr class="hover:bg-gray-50">
                     <td class="px-4 py-3 text-sm font-mono text-gray-600 cursor-pointer" onclick="openTaskDetail(${t.id})">#${t.id}</td>
-                    <td class="px-4 py-3 text-center cursor-pointer" onclick="openTaskDetail(${t.id})"><span class="task-type-badge ${isReview ? 'review' : 'chat'}">${getTaskTypeText(t.task_type)}</span></td>
                     <td class="px-4 py-3 text-center cursor-pointer" onclick="openTaskDetail(${t.id})">${t.status === 'running' ? '<span class="text-gray-400 text-xs">--</span>' : getScoreBadge(t.score_value)}</td>
                     <td class="px-4 py-3 text-sm text-gray-600 cursor-pointer" onclick="openTaskDetail(${t.id})">${escapeHtml(t.org_name || '根组织')}</td>
                     <td class="px-4 py-3 text-sm cursor-pointer" onclick="openTaskDetail(${t.id})">${t.project?.name || '-'}</td>
@@ -556,11 +546,6 @@ function renderTasks(tasks) {
                     </td>
                 </tr>`;
             }).join('');
-        }
-
-        function getTaskTypeText(type) {
-            const map = { chat: '对话', review: 'AI评审' };
-            return map[type] || type || '对话';
         }
 
         function getStatusText(status) {
