@@ -610,7 +610,7 @@ func (s *TaskService) Retry(scope *model.UserAuthScope, taskID uint, userReviewC
 		}
 	}
 
-	// 将新复核意见写入独立表
+	// 将新复核意见写入独立表（使用独立 DB session，避免复用 First(&task) 后的被污染 Statement）
 	if userReviewComment != "" {
 		comment := model.TaskReviewComment{
 			OrgID:      task.OrgID,
@@ -619,7 +619,7 @@ func (s *TaskService) Retry(scope *model.UserAuthScope, taskID uint, userReviewC
 			RetryRound: task.RetryCount + 1,
 			OperatorID: operatorID,
 		}
-		if err := db.Create(&comment).Error; err != nil {
+		if err := model.DBWithScope(scope).Create(&comment).Error; err != nil {
 			zap.L().Error("create task review comment failed", zap.Error(err))
 			return fmt.Errorf("保存复核意见失败: %w", err)
 		}
