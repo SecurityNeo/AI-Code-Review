@@ -35,7 +35,9 @@ func Logger() gin.HandlerFunc {
 			path = path + "?" + raw
 		}
 
-		zap.L().Info("HTTP",
+		// 默认不打印 HTTP 访问日志（避免噪音）
+		// 需要调试时可改为 zap.L().Info(...)
+		zap.L().Debug("HTTP",
 			zap.String("client_ip", clientIP),
 			zap.String("method", method),
 			zap.String("path", path),

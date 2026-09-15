@@ -2295,6 +2295,10 @@ func (a *pipelineLLMAdapter) ChatCompletionStructured(ctx context.Context, taskI
 	}, nil
 }
 
+func (a *pipelineLLMAdapter) ChatWithToolCalls(ctx context.Context, req llm.ToolChatRequest) (*llm.ToolChatResponse, error) {
+	return a.svc.ChatWithToolCalls(ctx, req)
+}
+
 // detectLanguage 根据 diff 文件扩展名投票检测项目主语言
 func detectLanguage(files []map[string]interface{}) string {
 	counts := map[string]int{

@@ -40,6 +40,10 @@ type StageContext interface {
 	// 广播事件
 	BroadcastStageStatus(exec *model.TaskPipelineExecution)
 
+	// 批次文件管理（Agentic 评审使用）
+	SetBatchFiles(index int, files []interface{})
+	GetBatchFiles(index int) []interface{}
+
 	// WithTimeout 创建一个带超时的子上下文，用于阶段级超时控制
 	WithTimeout(timeout time.Duration) (StageContext, context.CancelFunc)
 }
@@ -70,26 +74,15 @@ func newStageContext(ctx context.Context, task *model.Task, db *gorm.DB) *stageC
 	}
 }
 
-// Done 返回任务取消信号 channel（如果注入了 _cancel_ch）
-// 覆盖嵌入 context.Context 的 Done()，支持 Abort 后 Pipeline 各阶段立即感知取消
+// Done 返回 context 的 Done channel
+// 注意：cancelCh 的关闭通过 SetInput 中的 context.WithCancel 注入到嵌入 context 中，
+// 不再在此处覆盖，否则 Pipeline 阶段超时和 HTTP 超时都会失效
 func (c *stageContextImpl) Done() <-chan struct{} {
-	if c.cancelCh != nil {
-		return c.cancelCh
-	}
 	return c.Context.Done()
 }
 
-// Err 返回 context.Canceled（若 cancelCh 已被关闭），否则返回嵌入 context 的 Err()
-// 必须覆盖，否则 context.WithTimeout 的 propagateCancel 会传 nil err 导致 panic:
-// "missing cancel error"
+// Err 返回 context 错误（包含 cancelCh 注入的 cancel 错误）
 func (c *stageContextImpl) Err() error {
-	if c.cancelCh != nil {
-		select {
-		case <-c.cancelCh:
-			return context.Canceled
-		default:
-		}
-	}
 	return c.Context.Err()
 }
 
@@ -104,6 +97,14 @@ func (c *stageContextImpl) SetInput(key string, val interface{}) {
 	if key == "_cancel_ch" {
 		if ch, ok := val.(chan struct{}); ok {
 			c.cancelCh = ch
+			// 将 cancelCh 的关闭传播到新 context，确保 Done() 能同时感知 Abort 和 Pipeline 超时
+			// 不再在 Done() 中覆盖，避免绕过 context.WithTimeout 的超时机制
+			ctx, cancel := context.WithCancel(c.Context)
+			go func() {
+				<-ch
+				cancel()
+			}()
+			c.Context = ctx
 		}
 	}
 }

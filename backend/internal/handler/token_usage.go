@@ -413,7 +413,12 @@ func (h *TokenUsageHandler) ListCalls(c *gin.Context) {
 		q = q.Where("l.model_name = ?", v)
 	}
 	if v := c.Query("caller"); v != "" {
-		q = q.Where("l.caller = ?", v)
+		// 【Agentic 通配匹配】选择 "agentic_batch_round" 时匹配所有轮次
+		if v == "agentic_batch_round" {
+			q = q.Where("l.caller LIKE ?", "agentic_batch_round_%")
+		} else {
+			q = q.Where("l.caller = ?", v)
+		}
 	}
 	if v := c.Query("status"); v != "" {
 		q = q.Where("l.status = ?", v)
