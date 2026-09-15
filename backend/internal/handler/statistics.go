@@ -156,17 +156,8 @@ func (h *StatisticsHandler) Get(c *gin.Context) {
 	dateCol := "IF(mr_created_at IS NOT NULL AND mr_created_at > '1970-01-01', mr_created_at, synced_at)"
 
 	db := model.DB.Model(&model.MergeRequestReviewLog{})
-	// 多租户改造：按组织过滤
-	if !scope.IsSuperAdmin {
-		db = db.Where("org_id IN ?", scope.VisibleOrgIDs)
-	} else {
-		// super_admin 如果显式传了 org_id，按指定组织过滤
-		if orgIDStr := c.Query("org_id"); orgIDStr != "" {
-			if orgID, err := strconv.Atoi(orgIDStr); err == nil && orgID > 0 {
-				db = db.Where("org_id = ?", uint(orgID))
-			}
-		}
-	}
+	// 多租户改造：按组织过滤（super_admin 显式指定 org_id 时包含后代组织）
+	db = ApplyOrgScopeFilter(c, db, scope)
 
 	// 按用户角色过滤：developer 只能看自己的；废弃 users.role
 	if scope.CurrentOrgRole == "developer" && user.GitlabUsername != "" {

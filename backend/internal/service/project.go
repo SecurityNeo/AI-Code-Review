@@ -13,7 +13,7 @@ func NewProjectService() *ProjectService {
 	return &ProjectService{}
 }
 
-func (s *ProjectService) List(scope *model.UserAuthScope, page, pageSize int, keyword, status, source string, projectIDs []uint, filterOrgID uint) ([]model.Project, int64, error) {
+func (s *ProjectService) List(scope *model.UserAuthScope, page, pageSize int, keyword, status, source string, projectIDs []uint, filterOrgIDs []uint) ([]model.Project, int64, error) {
 	var projects []model.Project
 	var total int64
 
@@ -29,9 +29,9 @@ func (s *ProjectService) List(scope *model.UserAuthScope, page, pageSize int, ke
 	if source != "" {
 		db = db.Where("source = ?", source)
 	}
-	// 按组织ID过滤（分配职责场景优先）
-	if filterOrgID > 0 {
-		db = db.Where("org_id = ?", filterOrgID)
+	// 按组织ID过滤（分配职责场景优先，含后代组织）
+	if len(filterOrgIDs) > 0 {
+		db = db.Where("org_id IN ?", filterOrgIDs)
 	} else if len(projectIDs) > 0 {
 		// 按项目ID过滤（非管理员默认行为）
 		db = db.Where("id IN ?", projectIDs)

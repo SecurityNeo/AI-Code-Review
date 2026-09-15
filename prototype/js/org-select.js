@@ -67,7 +67,9 @@
         const style = document.createElement('style');
         style.id = 'org-picker-styles';
         style.textContent =
-            '.org-picker { position: relative; display: inline-block; width: 100%; font-size: 14px; }' +
+            '.org-picker { position: relative; display: inline-block; font-size: 14px; }' +
+            /* 未显式指定 w-* 宽度类时占满父容器；显式指定时由 Tailwind 宽度类决定，避免覆盖 w-24/w-32 等 */
+            '.org-picker:not([class*=" w-"]) { width: 100%; }' +
             '.org-picker-trigger {' +
             '  display: flex; align-items: center; justify-content: space-between;' +
             '  width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 8px;' +

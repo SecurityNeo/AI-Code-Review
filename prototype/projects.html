@@ -96,8 +96,8 @@
                 <!-- 项目列表 Tab -->
                 <div id="tab-projects" class="tab-content active">
                 <!-- 过滤器 -->
-                <div class="bg-white rounded-xl p-3 border flex items-center gap-2">
-                    <select id="orgSelect" class="w-24 px-1 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"></select>
+                <div class="bg-white rounded-xl p-3 border flex items-center gap-2 flex-wrap">
+                    <select id="orgSelect" class="w-32 px-2 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"></select>
                     <input type="text" id="searchInput" placeholder="搜索..." class="w-36 px-2 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" onkeyup="if(event.key==='Enter')loadProjects()">
                     <select id="statusFilter" class="px-2 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" onchange="loadProjects()">
                         <option value="">全部</option>
@@ -107,13 +107,14 @@
                     <button onclick="loadProjects()" class="bg-gray-100 text-gray-600 px-2.5 py-1.5 rounded-lg text-sm hover:bg-gray-200">
                         <i class="fas fa-filter"></i>
                     </button>
-                    <div class="ml-auto"></div>
-                    <button onclick="showModal('createModal')" data-admin-only class="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-blue-700">
-                        <i class="fas fa-plus mr-1"></i>新建项目
-                    </button>
-                    <button onclick="loadProjects()" class="bg-gray-100 text-gray-600 px-2.5 py-1.5 rounded-lg text-sm hover:bg-gray-200">
-                        <i class="fas fa-redo"></i>
-                    </button>
+                    <div class="ml-auto flex items-center gap-2">
+                        <button onclick="showModal('createModal')" data-admin-only class="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-blue-700 whitespace-nowrap">
+                            <i class="fas fa-plus mr-1"></i>新建项目
+                        </button>
+                        <button onclick="loadProjects()" class="bg-gray-100 text-gray-600 px-2.5 py-1.5 rounded-lg text-sm hover:bg-gray-200">
+                            <i class="fas fa-redo"></i>
+                        </button>
+                    </div>
                 </div>
 
                 <!-- 项目列表 -->

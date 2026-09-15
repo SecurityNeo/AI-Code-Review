@@ -57,16 +57,8 @@ func (h *MRReviewLogHandler) List(c *gin.Context) {
 	var total int64
 
 	db := model.DB.Model(&model.MergeRequestReviewLog{})
-	if !scope.IsSuperAdmin {
-		db = db.Scopes(model.OrgScope(scope))
-	} else {
-		// super_admin 如果显式传了 org_id query，按指定组织过滤
-		if orgIDStr := c.Query("org_id"); orgIDStr != "" {
-			if orgID, err := strconv.Atoi(orgIDStr); err == nil && orgID > 0 {
-				db = db.Where("org_id = ?", uint(orgID))
-			}
-		}
-	}
+	// 组织过滤（super_admin 显式指定 org_id 时包含后代组织）
+	db = ApplyOrgScopeFilter(c, db, scope)
 
 	// 按用户角色过滤：developer 只能看自己的；废弃 users.role
 	if scope.CurrentOrgRole == "developer" && user.GitlabUsername != "" {
@@ -350,22 +342,9 @@ func (h *MRReviewLogHandler) Projects(c *gin.Context) {
 		c.JSON(401, gin.H{"error": "未登录"})
 		return
 	}
-	db := model.DB.Model(&model.MergeRequestReviewLog{}).Scopes(model.OrgScope(scope))
-
-	var orgID uint
-	if orgIDStr := c.Query("org_id"); orgIDStr != "" {
-		if id, err := strconv.ParseUint(orgIDStr, 10, 64); err == nil {
-			orgID = uint(id)
-		}
-	}
-	// 非 super_admin 未显式传参时 fallback 到当前默认组织
-	// super_admin 未传参时不限制（返回所有组织）
-	if orgID == 0 && !scope.IsSuperAdmin {
-		orgID = middleware.GetCurrentOrgID(c)
-	}
-	if orgID > 0 {
-		db = db.Where("org_id = ?", orgID)
-	}
+	db := model.DB.Model(&model.MergeRequestReviewLog{})
+	// 组织过滤（super_admin 显式指定 org_id 时包含后代组织）
+	db = ApplyOrgScopeFilter(c, db, scope)
 
 	var projects []string
 	db.Distinct("project_name").Pluck("project_name", &projects)
@@ -378,22 +357,9 @@ func (h *MRReviewLogHandler) Authors(c *gin.Context) {
 		c.JSON(401, gin.H{"error": "未登录"})
 		return
 	}
-	db := model.DB.Model(&model.MergeRequestReviewLog{}).Scopes(model.OrgScope(scope))
-
-	var orgID uint
-	if orgIDStr := c.Query("org_id"); orgIDStr != "" {
-		if id, err := strconv.ParseUint(orgIDStr, 10, 64); err == nil {
-			orgID = uint(id)
-		}
-	}
-	// 非 super_admin 未显式传参时 fallback 到当前默认组织
-	// super_admin 未传参时不限制（返回所有组织）
-	if orgID == 0 && !scope.IsSuperAdmin {
-		orgID = middleware.GetCurrentOrgID(c)
-	}
-	if orgID > 0 {
-		db = db.Where("org_id = ?", orgID)
-	}
+	db := model.DB.Model(&model.MergeRequestReviewLog{})
+	// 组织过滤（super_admin 显式指定 org_id 时包含后代组织）
+	db = ApplyOrgScopeFilter(c, db, scope)
 
 	var authors []string
 	db.Distinct("author").Where("author != ?", "").Pluck("author", &authors)
