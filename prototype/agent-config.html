@@ -376,12 +376,19 @@ function renderStageCard(stage, enabledSet, triggerEventSet, stageConfigs) {
         </div>`;
     }
 
-    const timeoutVal = stageCfg.timeout || stage.timeout || 300;
+    let timeoutVal = stageCfg.timeout || stage.timeout || 300;
+    // LLM 增强阶段：阶段超时不得小于 LLM 增强超时，历史倒挂配置自动提升为「增强超时 + 10s」
+    if (stage.llmEnhanceTimeout) {
+        const enhVal = stageCfg.llm_enhance_timeout || stage.llmEnhanceTimeout;
+        if (enhVal > 0 && timeoutVal < enhVal) {
+            timeoutVal = Math.min(enhVal + 10, 3600);
+        }
+    }
     const timeoutSection = `<div class="stage-config-section">
         <div class="flex items-center justify-between">
             <span class="text-[11px] text-gray-500">超时时间</span>
             <div class="flex items-center gap-1">
-                <input type="number" id="timeout_${stage.code}" value="${timeoutVal}" min="5" max="3600" class="w-16 px-1.5 py-1 border rounded text-[11px] text-right focus:ring-1 focus:ring-blue-500 focus:outline-none" onchange="clampTimeout(this)">
+                <input type="number" id="timeout_${stage.code}" value="${timeoutVal}" min="5" max="3600" class="w-16 px-1.5 py-1 border rounded text-[11px] text-right focus:ring-1 focus:ring-blue-500 focus:outline-none" onchange="onStageTimeoutChange(this, '${stage.code}')">
                 <span class="text-[11px] text-gray-400">秒</span>
             </div>
         </div>
@@ -491,8 +498,9 @@ function renderStageCard(stage, enabledSet, triggerEventSet, stageConfigs) {
             <div class="flex items-center justify-between">
                 <span class="text-[11px] text-gray-500">LLM 增强超时</span>
                 <div class="flex items-center gap-1">
-                    <input type="number" id="llm_enhance_timeout_${stage.code}" value="${letVal}" min="0" max="1200" class="w-16 px-1.5 py-1 border rounded text-[11px] text-right focus:ring-1 focus:ring-blue-500 focus:outline-none" onchange="clampTimeout(this)">
+                    <input type="number" id="llm_enhance_timeout_${stage.code}" value="${letVal}" min="0" max="1200" class="w-16 px-1.5 py-1 border rounded text-[11px] text-right focus:ring-1 focus:ring-blue-500 focus:outline-none" onchange="onLlmEnhanceTimeoutChange(this, '${stage.code}')">
                     <span class="text-[11px] text-gray-400">秒</span>
+                    <i class="fas fa-info-circle text-gray-400 text-[10px]" title="设置后，本阶段超时时间将自动调整为「LLM 增强超时 + 10 秒」，且不得小于 LLM 增强超时"></i>
                 </div>
             </div>
         </div>`;
@@ -739,6 +747,34 @@ function clampParallelMax(el) {
     el.value = v;
 }
 
+// LLM 增强超时变化：阶段超时自动调整为「LLM 增强超时 + 10s」
+function onLlmEnhanceTimeoutChange(el, stageCode) {
+    let v = parseInt(el.value, 10);
+    if (isNaN(v) || v < 0) v = 0;
+    if (v > 1200) v = 1200;
+    el.value = v;
+    if (v <= 0) return; // 未配置增强超时，不做联动
+    const timeoutEl = document.getElementById('timeout_' + stageCode);
+    if (!timeoutEl) return;
+    timeoutEl.value = Math.min(v + 10, 3600);
+}
+
+// 阶段超时变化：不得小于 LLM 增强超时，违规时自动调整为「增强超时 + 10s」
+function onStageTimeoutChange(el, stageCode) {
+    let v = parseInt(el.value, 10) || 300;
+    if (v < 5) v = 5;
+    if (v > 3600) v = 3600;
+    el.value = v;
+    const enhanceEl = document.getElementById('llm_enhance_timeout_' + stageCode);
+    if (!enhanceEl) return;
+    const enhance = parseInt(enhanceEl.value, 10) || 0;
+    if (enhance > 0 && v < enhance) {
+        const adjusted = Math.min(enhance + 10, 3600);
+        el.value = adjusted;
+        showToast('阶段超时不能小于 LLM 增强超时，已自动调整为 ' + adjusted + ' 秒', 'info');
+    }
+}
+
 // ========== 加载配置 ==========
 function loadConfig() {
     _agentApiFetch('/api/v1/review-agent-config', { headers: getOrgOverrideHeaders() })
@@ -889,6 +925,11 @@ function saveConfig() {
             const letEl = document.getElementById('llm_enhance_timeout_' + stage.code);
             if (letEl) {
                 cfg.llm_enhance_timeout = parseInt(letEl.value, 10) || stage.llmEnhanceTimeout;
+            }
+            // 防御校验：阶段超时不得小于 LLM 增强超时（自动提升为「增强超时 + 10s」）
+            const enhance = parseInt(cfg.llm_enhance_timeout, 10) || 0;
+            if (enhance > 0 && (cfg.timeout || 0) < enhance) {
+                cfg.timeout = Math.min(enhance + 10, 3600);
             }
         }
         if (stage.subTimeouts && Array.isArray(stage.subTimeouts)) {
