@@ -949,10 +949,21 @@ const CALLER_LABELS = {
     sandbox_test:                   { text: '模拟测试',               cls: 'bg-teal-50 text-teal-700 border-teal-200' },
     similar_check:                  { text: '相似检测',               cls: 'bg-orange-50 text-orange-700 border-orange-200' },
     score:                          { text: '代码评审',               cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+    agentic_force_final:            { text: 'Agentic 强制最终轮',     cls: 'bg-purple-50 text-purple-700 border-purple-200' },
 };
 function renderCallerBadge(caller) {
-    const info = CALLER_LABELS[caller] || { text: caller || '-', cls: 'bg-gray-50 text-gray-500 border-gray-200' };
-    return `<span class="inline-block px-2 py-0.5 rounded text-xs border ${info.cls}" title="${escapeHtml(caller || '')}">${escapeHtml(info.text)}</span>`;
+    // 1. 精确匹配
+    if (CALLER_LABELS[caller]) {
+        const info = CALLER_LABELS[caller];
+        return `<span class="inline-block px-2 py-0.5 rounded text-xs border ${info.cls}" title="${escapeHtml(caller || '')}">${escapeHtml(info.text)}</span>`;
+    }
+    // 2. Agentic 批次评审动态匹配：agentic_batch_round_N
+    const agenticBatchMatch = caller && caller.match(/^agentic_batch_round_(\d+)$/);
+    if (agenticBatchMatch) {
+        return `<span class="inline-block px-2 py-0.5 rounded text-xs border bg-purple-50 text-purple-700 border-purple-200" title="${escapeHtml(caller)}">Agentic 批次评审 (Round ${agenticBatchMatch[1]})</span>`;
+    }
+    // 3. 兜底：原样显示
+    return `<span class="inline-block px-2 py-0.5 rounded text-xs border bg-gray-50 text-gray-500 border-gray-200" title="${escapeHtml(caller || '')}">${escapeHtml(caller || '-')}</span>`;
 }
 
 function escapeHtml(text) {
@@ -2602,7 +2613,7 @@ function createPipelineStageNode(stage, index, totalCount) {
 function createBatchReviewSubflow(children, parentStage) {
     // 分类子阶段
     const planStage = children.find(c => c.stage_code === 'batch_plan');
-    const rawBatchStages = children.filter(c => c.stage_code && c.stage_code.startsWith('batch_review_')).sort((a, b) => (a.batch_index || 0) - (b.batch_index || 0));
+    const rawBatchStages = children.filter(c => c.stage_code && (c.stage_code.startsWith('batch_review_') || c.stage_code.startsWith('agentic_batch_'))).sort((a, b) => (a.batch_index || 0) - (b.batch_index || 0));
     const summaryStage = children.find(c => c.stage_code === 'batch_summary');
 
     // 从分批决策获取总批次数量（plan.snapshot.output_snapshot.plan.batch_count）
@@ -2613,11 +2624,21 @@ function createBatchReviewSubflow(children, parentStage) {
     totalBatches = Math.max(totalBatches, rawBatchStages.length);
 
     // 构造完整的批次数组（含 pending 占位）
+    // 【修复】同 batch_index 可能同时存在 agentic_batch_N(failed) 和 batch_review_N(success)
+    // 优先显示成功的 execution，若都失败则显示 agentic（因为信息更完整）
     const batchStages = [];
     for (let i = 1; i <= totalBatches; i++) {
-        const found = rawBatchStages.find(b => (b.batch_index || 0) === i || parseInt(b.stage_code.replace('batch_review_', ''), 10) === i);
-        if (found) {
-            batchStages.push(found);
+        const matches = rawBatchStages.filter(b => {
+            const batchIdx = b.batch_index || 0;
+            if (batchIdx === i) return true;
+            const codeIdx = parseInt((b.stage_code || '').replace('batch_review_', '').replace('agentic_batch_', ''), 10);
+            return codeIdx === i;
+        });
+        if (matches.length > 0) {
+            // 优先成功率高的，其次按 status 优先级：success > running > failed
+            const statusRank = { success: 3, running: 2, failed: 1, pending: 0, skipped: 0 };
+            matches.sort((a, b) => (statusRank[b.status] || 0) - (statusRank[a.status] || 0));
+            batchStages.push(matches[0]);
         } else {
             batchStages.push({
                 stage_code: `batch_review_${i}`,
@@ -2676,14 +2697,35 @@ function createBatchReviewSubflow(children, parentStage) {
 
             html += '<div class="flex items-center gap-1">';
             // 批次卡片
+            const snap = batch.output_snapshot || {};
+            // 【修复】Agentic 判断不能仅依赖 output_snapshot（运行初期 snapshot 为空）
+            // 需同时通过 stage_code 前缀判断
+            const isAgentic = snap.agentic_mode === true || (batch.stage_code || '').startsWith('agentic_batch_');
+            const agenticRounds = snap.agentic_rounds || 0;
+            const agenticToolCalls = snap.agentic_tool_calls || 0;
+            const isFallback = snap.fallback === true;
             html += `<div onclick="${bExecId ? `showPipelineDetail(${bExecId})` : ''}" class="flex-1 rounded-lg border ${bStatus === 'running' ? 'border-blue-300 bg-blue-50' : bStatus === 'success' ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-gray-50'} px-3 py-1.5 text-left transition-all hover:shadow-sm ${bExecId ? 'cursor-pointer' : ''}">`;
             html += `<div class="flex items-center gap-1.5">`;
             html += `<span class="w-1.5 h-1.5 rounded-full ${bColor}"></span>`;
             html += `<span class="text-[11px] font-medium ${isPending ? 'text-gray-400' : 'text-gray-700'}">${escapeHtml(bName)}</span>`;
+            if (isAgentic) {
+                html += `<span class="text-[9px] px-1 py-0.5 rounded ${isFallback ? 'bg-amber-100 text-amber-700' : 'bg-purple-100 text-purple-700'} font-medium">${isFallback ? 'Agentic(降级)' : 'Agentic'}</span>`;
+            } else if (!isPending) {
+                html += `<span class="text-[9px] px-1 py-0.5 rounded bg-blue-50 text-blue-600 font-medium">标准</span>`;
+            }
             html += `<span class="text-[10px] text-gray-400 ml-auto">${batch.duration_ms ? Math.round(batch.duration_ms/1000)+'s' : (isPending ? '待运行' : '-')}</span>`;
             html += `</div>`;
+            // 【修复】Agentic 附加信息也应在运行中展示（通过 stage_code 判断，不依赖 snapshot）
+            if (isAgentic && !isPending) {
+                html += `<div class="flex items-center gap-2 mt-1 text-[10px] text-gray-500">`;
+                html += `<span><i class="fas fa-sync-alt text-[8px] mr-0.5"></i>${agenticRounds}轮</span>`;
+                html += `<span><i class="fas fa-tools text-[8px] mr-0.5"></i>${agenticToolCalls}工具</span>`;
+                if (snap.input_tokens || snap.output_tokens) {
+                    html += `<span class="font-mono">${(snap.input_tokens||0)+(snap.output_tokens||0)}tk</span>`;
+                }
+                html += `</div>`;
+            }
             html += `</div>`;
-            // 移除箭头（用户反馈不需要）
             html += '</div>'; // end row
         });
         html += '</div>';
@@ -2887,6 +2929,8 @@ async function showPipelineDetail(execId) {
             body.innerHTML = renderBatchReviewPanel(json);
         } else if (stageCode.startsWith('batch_review_')) {
             body.innerHTML = renderBatchDetail(json);
+        } else if (stageCode.startsWith('agentic_batch_')) {
+            body.innerHTML = renderAgenticDetail(json);
         } else if (stageCode === 'batch_summary') {
             body.innerHTML = renderSummaryDetail(json);
         } else if (stageCode === 'batch_plan') {
@@ -4402,6 +4446,179 @@ function renderBatchDetail(json) {
     }
 
     return html;
+}
+
+// ========== Agentic 批次详情（展示每轮对话） ==========
+function renderAgenticDetail(json) {
+    const inp = json.input_snapshot || {};
+    const out = json.output_snapshot || {};
+    let html = '';
+    html += renderMetaBar(json);
+
+    // Agentic 模式标签 + Fallback 标记
+    const isFallback = out.fallback === true || out.forced_final === true;
+    html += `<div class="mb-3"><span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${isFallback ? 'bg-amber-100 text-amber-700' : 'bg-purple-100 text-purple-700'}"><i class="fas fa-robot mr-1"></i>${isFallback ? 'Agentic (降级/强制结束)' : 'Agentic 模式'}</span>`;
+    if (out.fallback_reason) {
+        html += `<span class="ml-2 text-[10px] text-amber-600"><i class="fas fa-info-circle mr-0.5"></i>${escapeHtml(out.fallback_reason)}</span>`;
+    }
+    html += `</div>`;
+
+    // Token 用量
+    if (json.input_tokens || json.output_tokens) {
+        html += `<div class="mb-3 bg-purple-50 border border-purple-100 rounded-lg p-2 flex justify-between items-center">`;
+        html += `<span class="text-xs text-purple-700 font-medium">Token 用量</span>`;
+        html += `<span class="text-[11px] font-mono text-purple-600">in: ${(json.input_tokens||0).toLocaleString()} / out: ${(json.output_tokens||0).toLocaleString()}</span>`;
+        html += `</div>`;
+    }
+
+    // ========== 轮次概览表格（紧凑）==========
+    const rounds = out.round_metrics || [];
+    const toolCallsCount = out.agentic_tool_calls || 0;
+    const llmRounds = rounds.filter(r => r.role === 'llm_call');
+    const toolRounds = rounds.filter(r => r.role === 'tool_execution');
+    if (rounds.length > 0) {
+        html += `<div class="mb-3 bg-white rounded-lg border border-gray-200 p-3">`;
+        html += `<div class="font-semibold text-gray-700 text-xs mb-2">对话轮次概览</div>`;
+        html += `<div class="text-[11px] text-gray-600 mb-2">LLM 调用: <span class="font-mono font-medium">${llmRounds.length}</span>轮 · 工具执行: <span class="font-mono font-medium">${toolRounds.length}</span>轮 · 累计工具调用: <span class="font-mono font-medium">${toolCallsCount}</span>次</div>`;
+        html += `<table class="w-full text-[10px] border-collapse"><thead><tr class="text-gray-400 border-b border-gray-300">`;
+        html += `<th class="text-left py-1.5 pr-2 w-8">轮次</th>`;
+        html += `<th class="text-left py-1.5 pr-2 w-12">类型</th>`;
+        html += `<th class="text-left py-1.5 pr-2">状态</th>`;
+        html += `<th class="text-left py-1.5 pr-2">工具详情</th>`;
+        html += `<th class="text-right py-1.5 w-24">Token</th>`;
+        html += `</tr></thead><tbody>`;
+        rounds.forEach(r => {
+            const isLLM = r.role === 'llm_call';
+            const isTool = r.role === 'tool_execution';
+            const typeLabel = isLLM ? 'LLM' : isTool ? '工具' : r.role;
+            const typeColor = isLLM ? 'text-blue-600' : isTool ? 'text-orange-600' : 'text-gray-600';
+            const finishLabel = r.finish_reason ? `(${r.finish_reason})` : '';
+            const tokenLabel = isLLM ? `${(r.input_tokens||0).toLocaleString()} / ${(r.output_tokens||0).toLocaleString()}` : '-';
+            let toolDetail = '-';
+            if (isTool && r.tool_results && r.tool_results.length > 0) {
+                const names = r.tool_results.map(tr => tr.tool_name).filter(Boolean);
+                toolDetail = names.join(', ');
+            } else if (isTool && r.tool_calls && r.tool_calls.length > 0) {
+                toolDetail = r.tool_calls.join(', ');
+            }
+            html += `<tr class="border-b border-gray-200 last:border-b-0">`;
+            html += `<td class="py-2 pr-2 font-mono text-gray-500 align-top">#${r.round_index}</td>`;
+            html += `<td class="py-2 pr-2 ${typeColor} font-medium align-top">${typeLabel}</td>`;
+            html += `<td class="py-2 pr-2 text-gray-500 align-top">${finishLabel}</td>`;
+            html += `<td class="py-2 pr-2 text-gray-600 align-top">${escapeHtml(toolDetail)}</td>`;
+            html += `<td class="py-2 text-right font-mono text-gray-400 align-top">${tokenLabel}</td>`;
+            html += `</tr>`;
+        });
+        html += `</tbody></table>`;
+        html += `</div>`;
+    }
+
+    // ========== 对话时间线（按 Round 分组）==========
+    const messages = inp.agentic_full_messages || [];
+    if (messages.length > 0 || rounds.length > 0) {
+        html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-2">对话时间线</div>`;
+
+        // 按 round_index 分组（LLM Call + 附属 Tool Execution）
+        const roundMap = {};
+        rounds.forEach(r => {
+            if (!roundMap[r.round_index]) roundMap[r.round_index] = { llm: null, tool: null };
+            if (r.role === 'llm_call') roundMap[r.round_index].llm = r;
+            if (r.role === 'tool_execution') roundMap[r.round_index].tool = r;
+        });
+
+        Object.keys(roundMap).sort((a,b) => parseInt(a)-parseInt(b)).forEach(ridx => {
+            const roundData = roundMap[ridx];
+            const roundNum = parseInt(ridx);
+            html += `<div class="mb-3 rounded-lg border border-gray-200 overflow-hidden">`;
+            // Round 头部
+            html += `<div class="px-3 py-2 bg-gray-50 border-b border-gray-200 flex items-center justify-between">`;
+            html += `<span class="text-[11px] font-bold text-gray-700">第${roundNum}轮</span>`;
+            if (roundData.llm) {
+                html += `<span class="text-[10px] text-gray-400 font-mono">${(roundData.llm.input_tokens||0).toLocaleString()} / ${(roundData.llm.output_tokens||0).toLocaleString()} tk · ${roundData.llm.finish_reason || 'unknown'}</span>`;
+            }
+            html += `</div>`;
+
+            // LLM Call Content（展示完整内容，默认展开）
+            if (roundData.llm && roundData.llm.content_preview) {
+                html += `<div class="px-3 py-2 border-b border-gray-100">`;
+                html += `<div class="text-[10px] font-medium text-blue-600 mb-1">LLM 输出</div>`;
+                html += renderCollapsibleContent(roundData.llm.content_preview, 'full', true);
+                html += `</div>`;
+            }
+
+            // Tool Execution 详情（默认折叠）
+            if (roundData.tool && roundData.tool.tool_results && roundData.tool.tool_results.length > 0) {
+                roundData.tool.tool_results.forEach((tr, ti) => {
+                    html += `<div class="px-3 py-2 ${ti < roundData.tool.tool_results.length-1 ? 'border-b border-gray-100' : ''}">`;
+                    html += `<div class="text-[10px] font-medium text-orange-600 mb-1">➜ ${escapeHtml(tr.tool_name || 'unknown')}</div>`;
+                    if (tr.arguments) {
+                        try {
+                            const argsObj = JSON.parse(tr.arguments);
+                            html += `<div class="mb-1 text-[10px] text-gray-500">参数: <span class="font-mono text-gray-600">${escapeHtml(JSON.stringify(argsObj))}</span></div>`;
+                        } catch(e) {
+                            html += `<div class="mb-1 text-[10px] text-gray-500">参数: <span class="font-mono text-gray-600">${escapeHtml(tr.arguments)}</span></div>`;
+                        }
+                    }
+                    if (tr.result) {
+                        html += `<div class="text-[10px] text-gray-500 mb-0.5">结果 (${tr.result_chars || tr.result.length} 字符):</div>`;
+                        // 默认折叠工具结果
+                        html += renderCollapsibleContent(tr.result, 'json', false);
+                    }
+                    html += `</div>`;
+                });
+            }
+
+            html += `</div>`;
+        });
+
+        // 如果没有 round_metrics（旧数据），回退到 messages 展示
+        if (Object.keys(roundMap).length === 0) {
+            messages.forEach((msg, idx) => {
+                const roleLabel = msg.role === 'system' ? '系统提示' : msg.role === 'user' ? '用户输入' : msg.role === 'assistant' ? 'AI 回复' : msg.role === 'tool' ? '工具结果' : msg.role;
+                const roleColor = msg.role === 'system' ? 'border-purple-200 bg-purple-50' : msg.role === 'user' ? 'border-blue-200 bg-blue-50' : msg.role === 'assistant' ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-gray-50';
+                const content = msg.content || '';
+                const toolCalls = msg.tool_calls || [];
+                html += `<details class="mb-2 rounded-lg border ${roleColor} overflow-hidden">`;
+                html += `<summary class="px-3 py-2 text-[11px] font-medium text-gray-600 cursor-pointer hover:opacity-80 select-none flex items-center justify-between">`;
+                html += `<span><span class="inline-block w-5 text-center mr-1">${idx+1}</span>${roleLabel}</span>`;
+                html += `<span class="text-[10px] text-gray-400 font-mono">${content.length} 字符</span>`;
+                html += `</summary>`;
+                html += `<div class="px-3 py-2 text-[11px] text-gray-700 whitespace-pre-wrap overflow-x-auto">`;
+                if (toolCalls.length > 0) {
+                    html += `<div class="mb-2 text-[10px] font-medium text-orange-600">工具调用请求 (${toolCalls.length} 个):</div>`;
+                    toolCalls.forEach(tc => {
+                        html += `<div class="mb-1 pl-2 border-l-2 border-orange-200">`;
+                        html += `<span class="font-mono text-orange-700">${escapeHtml(tc.function?.name || 'unknown')}</span>`;
+                        html += `<pre class="mt-1 text-[10px] text-gray-600 whitespace-pre-wrap">${escapeHtml(tc.function?.arguments || '')}</pre>`;
+                        html += `</div>`;
+                    });
+                }
+                if (content) {
+                    html += `<div>${escapeHtml(content)}</div>`;
+                }
+                html += `</div></details>`;
+            });
+        }
+
+        html += `</div>`;
+    }
+
+    return html;
+}
+
+// 通用折叠展示组件（不截断内容）
+function renderCollapsibleContent(content, type, open) {
+    const id = 'collapsible-' + Math.random().toString(36).substr(2, 8);
+    const isOpen = open === true;
+    // 短内容直接展示，不折叠
+    if (content.length <= 500) {
+        return `<pre class="text-[11px] text-gray-700 whitespace-pre-wrap p-2 bg-gray-50 rounded border border-gray-200 overflow-x-auto">${escapeHtml(content)}</pre>`;
+    }
+    // 长内容使用 details 折叠，open 参数控制默认状态
+    return `<details class="bg-gray-50 rounded border border-gray-200 overflow-hidden" ${isOpen ? 'open' : ''}>` +
+        `<summary class="px-3 py-2 text-[10px] text-gray-500 cursor-pointer hover:bg-gray-100 select-none">${escapeHtml(content.substring(0, 120))}${content.length > 120 ? '... (' + content.length + ' 字符)' : ''}</summary>` +
+        `<pre id="${id}" class="text-[11px] text-gray-700 whitespace-pre-wrap p-3 overflow-x-auto max-h-[32rem] overflow-y-auto border-t border-gray-200">${escapeHtml(content)}</pre>` +
+        `</details>`;
 }
 
 // ========== 汇总详情 ==========

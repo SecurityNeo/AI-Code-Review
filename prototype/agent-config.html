@@ -82,47 +82,6 @@
                 </label>
             </div>
 
-            <!-- 文件过滤配置 -->
-            <div class="bg-white rounded-xl border p-5 mb-6">
-                <h3 class="text-sm font-semibold text-gray-700 mb-3">文件过滤</h3>
-                <p class="text-xs text-gray-500 mb-4">配置评审时自动排除的依赖文件和第三方代码目录，减少 Token 浪费和误报</p>
-                
-                <div class="form-check mb-3">
-                    <label class="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" id="enableDefaultFilters" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500">
-                        <span class="text-sm text-gray-700">启用默认过滤规则（按项目语言自动匹配）</span>
-                    </label>
-                </div>
-                
-                <!-- 默认规则展示面板 -->
-                <div class="mb-4">
-                    <button type="button" onclick="toggleDefaultPatterns()" class="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1">
-                        <i class="fas fa-chevron-down" id="defaultPatternsIcon"></i>
-                        <span id="defaultPatternsText">查看默认排除规则</span>
-                    </button>
-                    <div id="defaultPatternsPanel" class="hidden mt-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                        <div id="defaultPatternsContent" class="text-xs">
-                            <p class="text-gray-400">加载中...</p>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="mb-3">
-                    <label class="block text-xs font-medium text-gray-600 mb-1">自定义排除规则（glob 语法，每行一个）</label>
-                    <textarea id="excludePatterns" rows="4" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="vendor/**
-node_modules/**
-go.sum"></textarea>
-                    <p class="text-[10px] text-gray-400 mt-1">支持 glob 语法：* 匹配任意字符，** 匹配任意层级目录</p>
-                </div>
-                
-                <div class="mb-3">
-                    <label class="block text-xs font-medium text-gray-600 mb-1">自定义包含规则（白名单，覆盖排除规则）</label>
-                    <textarea id="includePatterns" rows="2" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="vendor/mycompany/**
-!*.important.log"></textarea>
-                    <p class="text-[10px] text-gray-400 mt-1">白名单优先级高于排除规则。如果某路径同时匹配排除和白名单，则保留该文件。</p>
-                </div>
-            </div>
-
             <!-- 所属组织（仅 super_admin 可见） -->
             <div class="mb-4" id="orgSelectWrap" style="display:none;">
                 <label class="block text-sm font-medium text-gray-700 mb-1">所属组织</label>
@@ -168,10 +127,11 @@ const STAGE_DEFS = [
     {
         code: 'trigger_check',
         name: '触发过滤器',
-        desc: '校验 Merge Request 事件类型与目标分支规则，决定是否触发完整评审流水线',
-        impact: '关闭后：所有 MR 直接进入评审，不做触发过滤',
+        desc: '校验 Merge Request 事件类型与目标分支规则，决定是否触发完整评审流水线；支持配置文件过滤规则（排除依赖和第三方目录），控制评审文件范围以减少 Token 消耗',
+        impact: '关闭后：所有 MR 直接进入评审，不做触发过滤与文件范围控制',
         removable: true,
         triggerEvents: true,
+        fileFilterConfig: true,
         timeout: 5
     },
     {
@@ -427,7 +387,45 @@ function renderStageCard(stage, enabledSet, triggerEventSet, stageConfigs) {
         </div>
     </div>`;
 
+    let fileFilterSection = '';
+    if (stage.fileFilterConfig) {
+        const ffCfg = (stageConfigs && stageConfigs['file_filter']) || {};
+        const ffEnabled = ffCfg.enable_default_filters !== false;
+        const ffExclude = (ffCfg.exclude_patterns || []).join('\n');
+        const ffInclude = (ffCfg.include_patterns || []).join('\n');
+        fileFilterSection = `<div class="stage-config-section">
+            <div class="text-[11px] font-medium text-gray-500 mb-1.5">文件过滤</div>
+            <p class="text-[10px] text-gray-400 mb-2">配置评审时自动排除的依赖文件和第三方代码目录，减少 Token 消耗和误报</p>
+            <label class="flex items-center gap-2 cursor-pointer mb-2">
+                <input type="checkbox" id="ff_${stage.code}_enableDefault" ${ffEnabled ? 'checked' : ''} class="w-3.5 h-3.5 text-blue-600 rounded focus:ring-blue-500">
+                <span class="text-[11px] text-gray-700">启用默认过滤规则（按项目语言自动匹配）</span>
+            </label>
+            <div class="mb-2">
+                <button type="button" onclick="event.stopPropagation(); toggleDefaultPatterns('${stage.code}')" class="text-[11px] text-blue-600 hover:text-blue-800 flex items-center gap-1">
+                    <i class="fas fa-chevron-down" id="ff_${stage.code}_icon"></i>
+                    <span id="ff_${stage.code}_text">查看默认排除规则</span>
+                </button>
+                <div id="ff_${stage.code}_panel" class="hidden mt-1.5 p-2.5 bg-gray-50 rounded-lg border border-gray-200">
+                    <div id="ff_${stage.code}_content" class="text-[10px]">
+                        <p class="text-gray-400">加载中...</p>
+                    </div>
+                </div>
+            </div>
+            <div class="mb-2">
+                <label class="block text-[11px] font-medium text-gray-600 mb-1">自定义排除规则（glob 语法，每行一个）</label>
+                <textarea id="ff_${stage.code}_exclude" rows="3" class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white" placeholder="vendor/**\nnode_modules/**\ngo.sum">${escapeHtml(ffExclude)}</textarea>
+                <p class="text-[10px] text-gray-400 mt-0.5">支持 glob 语法：* 匹配任意字符，** 匹配任意层级目录</p>
+            </div>
+            <div>
+                <label class="block text-[11px] font-medium text-gray-600 mb-1">自定义包含规则（白名单，覆盖排除规则）</label>
+                <textarea id="ff_${stage.code}_include" rows="2" class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white" placeholder="vendor/mycompany/**\n!*.important.log">${escapeHtml(ffInclude)}</textarea>
+                <p class="text-[10px] text-gray-400 mt-0.5">白名单优先级高于排除规则。如果某路径同时匹配排除和白名单，则保留该文件。</p>
+            </div>
+        </div>`;
+    }
+
     let batchReviewSection = '';
+    let agenticSection = '';
     if (stage.batchConfig) {
         const maxDiffVal = stageCfg.max_diff_files || 50;
         const maxTokensVal = stageCfg.max_tokens_per_batch || 100000;
@@ -441,6 +439,46 @@ function renderStageCard(stage, enabledSet, triggerEventSet, stageConfigs) {
                 <div class="flex items-center gap-1">
                     <input type="number" id="max_tokens_per_batch_${stage.code}" value="${maxTokensVal}" min="1000" max="2000000" class="w-20 px-1.5 py-1 border rounded text-[11px] text-right focus:ring-1 focus:ring-blue-500 focus:outline-none">
                     <span class="text-[11px] text-gray-400">token/批</span>
+                </div>
+            </div>
+        </div>`;
+
+        // Agentic 评审模式配置
+        const agenticEnabled = stageCfg.agentic_mode === true;
+        const agenticMaxRounds = stageCfg.agentic_max_rounds || 5;
+        const agenticMaxTools = stageCfg.agentic_max_tools || 8;
+        const agenticTemperature = stageCfg.agentic_temperature !== undefined ? stageCfg.agentic_temperature : 0.1;
+        const agenticBudgetMultiplier = stageCfg.agentic_budget_multiplier !== undefined ? stageCfg.agentic_budget_multiplier : 1.2;
+        agenticSection = `<div class="stage-config-section">
+            <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" id="agentic_mode_${stage.code}" ${agenticEnabled ? 'checked' : ''} 
+                       onchange="toggleAgenticConfig('${stage.code}', this.checked)"
+                       class="w-3.5 h-3.5 text-blue-600 rounded focus:ring-blue-500">
+                <span class="text-[11px] font-medium text-gray-700">启用 Agentic 评审模式</span>
+                <i class="fas fa-info-circle text-gray-400 text-[10px]" title="Agentic 模式下 LLM 会按需调用工具获取上下文，而非全量注入 code_understanding 报告"></i>
+            </label>
+            <div id="agentic_warning_${stage.code}" class="${agenticEnabled ? '' : 'hidden'} mt-1.5 pl-5">
+                <div class="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-2 py-1">
+                    <i class="fas fa-exclamation-triangle mr-1"></i>
+                    开启 Agentic 模式强烈建议同时开启 <code>code_understanding</code> 阶段。若该阶段被禁用或失败，所有工具将返回空或降级结果。
+                </div>
+            </div>
+            <div id="agentic_advanced_${stage.code}" class="${agenticEnabled ? '' : 'hidden'} pl-5 mt-2 space-y-1.5">
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] text-gray-500">最大轮次 (2-10)</span>
+                    <input type="number" id="agentic_max_rounds_${stage.code}" value="${agenticMaxRounds}" min="2" max="10" class="w-14 px-1.5 py-1 border rounded text-[11px] text-right focus:ring-1 focus:ring-blue-500 focus:outline-none">
+                </div>
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] text-gray-500">最大工具调用次数 (3-15)</span>
+                    <input type="number" id="agentic_max_tools_${stage.code}" value="${agenticMaxTools}" min="3" max="15" class="w-14 px-1.5 py-1 border rounded text-[11px] text-right focus:ring-1 focus:ring-blue-500 focus:outline-none">
+                </div>
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] text-gray-500">Temperature (0.0-1.0)</span>
+                    <input type="number" id="agentic_temperature_${stage.code}" value="${agenticTemperature}" min="0" max="1" step="0.1" class="w-14 px-1.5 py-1 border rounded text-[11px] text-right focus:ring-1 focus:ring-blue-500 focus:outline-none">
+                </div>
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] text-gray-500">预算弹性 (1.0-3.0)</span>
+                    <input type="number" id="agentic_budget_multiplier_${stage.code}" value="${agenticBudgetMultiplier}" min="1" max="3" step="0.1" class="w-14 px-1.5 py-1 border rounded text-[11px] text-right focus:ring-1 focus:ring-blue-500 focus:outline-none">
                 </div>
             </div>
         </div>`;
@@ -503,7 +541,7 @@ function renderStageCard(stage, enabledSet, triggerEventSet, stageConfigs) {
         impactSection = `<div class="mt-2 text-[11px] text-gray-500 bg-amber-50 border border-amber-100 rounded-md px-2.5 py-1.5"><i class="fas fa-info-circle text-amber-500 mr-1"></i>${stage.impact}</div>`;
     }
 
-    const configContent = [triggerEventsSection, timeoutSection, batchReviewSection, llmEnhanceSection, parallelMaxSection, subTimeoutsSection, depsSection, impactSection].filter(Boolean).join('');
+    const configContent = [triggerEventsSection, timeoutSection, fileFilterSection, batchReviewSection, agenticSection, llmEnhanceSection, parallelMaxSection, subTimeoutsSection, depsSection, impactSection].filter(Boolean).join('');
     const hasConfig = Boolean(configContent);
 
     return `<div class="stage-card rounded-xl border ${isEnabled ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50/60'} transition-all hover:shadow-sm" data-code="${stage.code}">
@@ -544,6 +582,21 @@ function toggleStageConfig(code) {
     const isOpen = !panel.classList.contains('hidden');
     btn.innerHTML = isOpen ? '<i class="fas fa-chevron-up mr-0.5"></i>收起' : '<i class="fas fa-cog mr-0.5"></i>配置';
     btn.classList.toggle('text-blue-600', isOpen);
+}
+
+function toggleAgenticConfig(stageCode, enabled) {
+    const warningEl = document.getElementById('agentic_warning_' + stageCode);
+    const advancedEl = document.getElementById('agentic_advanced_' + stageCode);
+    if (warningEl) warningEl.classList.toggle('hidden', !enabled);
+    if (advancedEl) advancedEl.classList.toggle('hidden', !enabled);
+    
+    // 检查 code_understanding 是否开启
+    if (enabled) {
+        const cuCheckbox = document.getElementById('stage_code_understanding');
+        if (cuCheckbox && !cuCheckbox.checked) {
+            // 只显示警告，不阻止勾选（给用户决定权）
+        }
+    }
 }
 
 function toggleTriggerStyle(el) {
@@ -702,6 +755,11 @@ function loadConfig() {
                 if (s.batchConfig) {
                     defaultStageConfigs[s.code].max_diff_files = 50;
                     defaultStageConfigs[s.code].max_tokens_per_batch = 100000;
+                    defaultStageConfigs[s.code].agentic_mode = false;
+                    defaultStageConfigs[s.code].agentic_max_rounds = 5;
+                    defaultStageConfigs[s.code].agentic_max_tools = 8;
+                    defaultStageConfigs[s.code].agentic_temperature = 0.1;
+                    defaultStageConfigs[s.code].agentic_budget_multiplier = 1.2;
                 }
                 if (s.llmEnhanceTimeout) {
                     defaultStageConfigs[s.code].llm_enhance_timeout = s.llmEnhanceTimeout;
@@ -722,10 +780,6 @@ function loadConfig() {
             // 首次渲染完成后立即渲染 violations（标红+感叹号）
             renderViolationBadges();
             document.getElementById('showAgentStatus').checked = data.show_agent_status !== false;
-            const ffCfg = (data.stage_configs && data.stage_configs['file_filter']) || {};
-            document.getElementById('enableDefaultFilters').checked = ffCfg.enable_default_filters !== false;
-            document.getElementById('excludePatterns').value = (ffCfg.exclude_patterns || []).join('\n');
-            document.getElementById('includePatterns').value = (ffCfg.include_patterns || []).join('\n');
             if (data.updated_at) {
                 const d = new Date(data.updated_at);
                 const updaterText = data.updated_by_name || (data.updated_by ? `by user #${data.updated_by}` : '');
@@ -744,6 +798,11 @@ function loadConfig() {
                 if (s.batchConfig) {
                     defaultStageConfigs[s.code].max_diff_files = 50;
                     defaultStageConfigs[s.code].max_tokens_per_batch = 100000;
+                    defaultStageConfigs[s.code].agentic_mode = false;
+                    defaultStageConfigs[s.code].agentic_max_rounds = 5;
+                    defaultStageConfigs[s.code].agentic_max_tools = 8;
+                    defaultStageConfigs[s.code].agentic_temperature = 0.1;
+                    defaultStageConfigs[s.code].agentic_budget_multiplier = 1.2;
                 }
                 if (s.llmEnhanceTimeout) {
                     defaultStageConfigs[s.code].llm_enhance_timeout = s.llmEnhanceTimeout;
@@ -810,6 +869,21 @@ function saveConfig() {
             if (mtEl) {
                 cfg.max_tokens_per_batch = parseInt(mtEl.value, 10) || 100000;
             }
+            // Agentic 配置
+            const agenticModeEl = document.getElementById('agentic_mode_' + stage.code);
+            if (agenticModeEl) {
+                cfg.agentic_mode = agenticModeEl.checked;
+                if (agenticModeEl.checked) {
+                    const amrEl = document.getElementById('agentic_max_rounds_' + stage.code);
+                    const amtEl = document.getElementById('agentic_max_tools_' + stage.code);
+                    const atEl = document.getElementById('agentic_temperature_' + stage.code);
+                    const abmEl = document.getElementById('agentic_budget_multiplier_' + stage.code);
+                    if (amrEl) cfg.agentic_max_rounds = parseInt(amrEl.value, 10) || 5;
+                    if (amtEl) cfg.agentic_max_tools = parseInt(amtEl.value, 10) || 8;
+                    if (atEl) cfg.agentic_temperature = parseFloat(atEl.value) || 0.1;
+                    if (abmEl) cfg.agentic_budget_multiplier = parseFloat(abmEl.value) || 1.2;
+                }
+            }
         }
         if (stage.llmEnhanceTimeout) {
             const letEl = document.getElementById('llm_enhance_timeout_' + stage.code);
@@ -825,19 +899,25 @@ function saveConfig() {
                 }
             });
         }
+        if (stage.fileFilterConfig) {
+            const ffEnableEl = document.getElementById('ff_' + stage.code + '_enableDefault');
+            const ffExcludeEl = document.getElementById('ff_' + stage.code + '_exclude');
+            const ffIncludeEl = document.getElementById('ff_' + stage.code + '_include');
+            if (ffEnableEl && ffExcludeEl && ffIncludeEl) {
+                const fileFilterCfg = {
+                    enable_default_filters: ffEnableEl.checked,
+                    exclude_patterns: ffExcludeEl.value
+                        .split('\n').map(s => s.trim()).filter(s => s),
+                    include_patterns: ffIncludeEl.value
+                        .split('\n').map(s => s.trim()).filter(s => s)
+                };
+                stageConfigs['file_filter'] = fileFilterCfg;
+            }
+        }
         if (Object.keys(cfg).length > 0) {
             stageConfigs[stage.code] = cfg;
         }
     });
-
-    const fileFilterCfg = {
-        enable_default_filters: document.getElementById('enableDefaultFilters').checked,
-        exclude_patterns: document.getElementById('excludePatterns').value
-            .split('\n').map(s => s.trim()).filter(s => s),
-        include_patterns: document.getElementById('includePatterns').value
-            .split('\n').map(s => s.trim()).filter(s => s)
-    };
-    stageConfigs['file_filter'] = fileFilterCfg;
 
     let payload = {
         enabled_stages: enabledStages,
@@ -888,27 +968,36 @@ function resetToDefault() {
     });
     renderStages(defaultStages, defaultStageConfigs, TRIGGER_EVENT_DEFS.map(e => e.code));
     document.getElementById('showAgentStatus').checked = true;
-    // 重置文件过滤配置为默认
-    document.getElementById('enableDefaultFilters').checked = true;
-    document.getElementById('excludePatterns').value = '';
-    document.getElementById('includePatterns').value = '';
+    // 重置文件过滤配置为默认（trigger_check 面板内）
+    const triggerFileFilterStages = STAGE_DEFS.filter(s => s.fileFilterConfig);
+    triggerFileFilterStages.forEach(s => {
+        const code = s.code;
+        const enableEl = document.getElementById('ff_' + code + '_enableDefault');
+        const excludeEl = document.getElementById('ff_' + code + '_exclude');
+        const includeEl = document.getElementById('ff_' + code + '_include');
+        if (enableEl) enableEl.checked = true;
+        if (excludeEl) excludeEl.value = '';
+        if (includeEl) includeEl.value = '';
+    });
     showToast('已恢复默认配置，请点击保存', 'info');
 }
 
 // ========== 文件过滤：默认规则展示 ==========
 let defaultFilterPatterns = null;
 
-function toggleDefaultPatterns() {
-    const panel = document.getElementById('defaultPatternsPanel');
-    const icon = document.getElementById('defaultPatternsIcon');
-    const text = document.getElementById('defaultPatternsText');
+function toggleDefaultPatterns(stageCode) {
+    const panel = document.getElementById('ff_' + stageCode + '_panel');
+    const icon = document.getElementById('ff_' + stageCode + '_icon');
+    const text = document.getElementById('ff_' + stageCode + '_text');
+    
+    if (!panel || !icon || !text) return;
     
     if (panel.classList.contains('hidden')) {
         panel.classList.remove('hidden');
         icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
         text.textContent = '隐藏默认排除规则';
         if (!defaultFilterPatterns) {
-            loadDefaultFilterPatterns();
+            loadDefaultFilterPatterns(stageCode);
         }
     } else {
         panel.classList.add('hidden');
@@ -917,8 +1006,8 @@ function toggleDefaultPatterns() {
     }
 }
 
-async function loadDefaultFilterPatterns() {
-    const contentEl = document.getElementById('defaultPatternsContent');
+async function loadDefaultFilterPatterns(stageCode) {
+    const contentEl = document.getElementById('ff_' + stageCode + '_content');
     try {
         const res = await _agentApiFetch('/api/v1/review-agent-config/file-filter-defaults');
         if (res.code !== 0 || !res.data) {
