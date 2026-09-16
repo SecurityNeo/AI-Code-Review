@@ -793,13 +793,13 @@ function renderTaskMeta(t) {
 // 翻页状态：每次 force 重置到第 1 页；非 force 切 tab 不重新加载（保留上次分页位置）
 const taskTokenState = { page: 1, pageSize: 20, total: 0, hasMore: false, loaded: false };
 
-async function loadTaskTokenUsage(force) {
+async function loadTaskTokenUsage(force, keepPage) {
     const id = new URLSearchParams(window.location.search).get('id');
     if (!id) return;
     // 已加载过且不强制刷新则跳过（避免每次切 tab 重复请求，保留上次分页位置）
     if (taskTokenState.loaded && !force) return;
-    // 强制刷新 → 重置分页到第 1 页
-    if (force) taskTokenState.page = 1;
+    // 强制刷新：默认重置到第 1 页；翻页场景传 keepPage=true 以保留当前页
+    if (force && !keepPage) taskTokenState.page = 1;
 
     const tbody = document.getElementById('taskTokenCallsTableBody');
     tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray-400 py-8">加载中...</td></tr>';
@@ -903,7 +903,8 @@ function renderTaskTokenPagination() {
 async function changeTaskTokenPage(newPage) {
     if (newPage < 1) return;
     taskTokenState.page = newPage;
-    await loadTaskTokenUsage();
+    // 强制重载（否则会因 loaded=true 被提前 return），并保留刚设置的页码
+    await loadTaskTokenUsage(true, true);
 }
 
 function formatNumber(num) {
@@ -950,6 +951,7 @@ const CALLER_LABELS = {
     similar_check:                  { text: '相似检测',               cls: 'bg-orange-50 text-orange-700 border-orange-200' },
     score:                          { text: '代码评审',               cls: 'bg-blue-50 text-blue-700 border-blue-200' },
     agentic_force_final:            { text: 'Agentic 强制最终轮',     cls: 'bg-purple-50 text-purple-700 border-purple-200' },
+    agentic_parse_retry:            { text: 'Agentic 解析重试',       cls: 'bg-orange-50 text-orange-700 border-orange-200' },
 };
 function renderCallerBadge(caller) {
     // 1. 精确匹配
@@ -977,12 +979,33 @@ function escapeHtml(text) {
 }
 
 /**
+ * stripLineAnnotations 去掉代码片段中的 [newN|oldM] 行号注解，
+ * 并还原被一并抄入的 diff 前缀（上下文空格 / 新增+ / 删除-）。
+ * 用于兼容历史脏数据（新数据已在后端解析阶段清洗）。
+ */
+function stripLineAnnotations(snippet) {
+    if (!snippet || snippet.indexOf('[new') < 0) return snippet;
+    const re = /^[ \t]*\[new([^\]\r\n|]*)\|old([^\]\r\n]*)\][ \t]?/;
+    return snippet.split('\n').map((line) => {
+        const m = line.match(re);
+        if (!m) return line;
+        let rest = line.slice(m[0].length);
+        let expect = ' ';
+        if ((m[1] || '').trim() === '-') expect = '-';
+        else if ((m[2] || '').trim() === '-') expect = '+';
+        if (rest.length > 0 && rest[0] === expect) rest = rest.slice(1);
+        return rest;
+    }).join('\n');
+}
+
+/**
  * parseCodeSnippet 解析代码片段中的问题区域标记
  * 返回 { lines: [{text, type}], snippetStartLine, problemStartRel, problemEndRel }
  * type: 'context' | 'problem-start' | 'problem-end' | 'problem-single'
  */
 function parseCodeSnippet(snippet, issueLineStart, issueLineEnd) {
     if (!snippet) return null;
+    snippet = stripLineAnnotations(snippet);
     const rawLines = snippet.split('\n');
     const lines = [];
     let problemStartRel = -1, problemEndRel = -1;
@@ -1273,11 +1296,12 @@ function renderIssues() {
         const deductBadge = issue.deduct_score > 0 ? `<span class="text-xs text-white bg-red-500 px-1.5 py-0.5 rounded font-bold">-${issue.deduct_score}分</span>` : '';
         const lineInfo = issue.line_start > 0 ? ':' + issue.line_start + (issue.line_end > issue.line_start ? '-' + issue.line_end : '') : '';
         const summary = escapeHtml(issue.message).substring(0, 80) + (issue.message.length > 80 ? '...' : '');
-        return `<div class="issue-card ${sevClass}" id="issue-card-${issue.id}" onclick="toggleIssueDetail(${issue.id}, event)">
+        return `<div class="issue-card ${sevClass}" id="issue-card-${issue.id}">
             <div class="flex items-start justify-between gap-3">
-                <div class="flex-1 min-w-0">
-                    <!-- 头部摘要区（始终可见） -->
-                    <div class="flex items-center gap-1.5 flex-wrap cursor-pointer">
+                <!-- 头部摘要区：仅此区域可点击展开/折叠，详情区不参与（便于选中复制） -->
+                <div class="flex-1 min-w-0 cursor-pointer" onclick="toggleIssueDetail(${issue.id}, event)">
+                    <!-- 头部徽标行（始终可见） -->
+                    <div class="flex items-center gap-1.5 flex-wrap">
                         <input type="checkbox" class="issue-checkbox rounded flex-shrink-0 mr-1" value="${issue.id}" onclick="event.stopPropagation(); updateBatchActionBar()">
                         <span class="text-xs font-bold ${severityColors[issue.severity] || 'text-gray-500'} flex-shrink-0 bg-gray-50 px-1.5 py-0.5 rounded">${sevLabel}</span>
                         <span class="text-xs text-gray-400 flex-shrink-0">[${catLabel}]</span>
@@ -1289,11 +1313,13 @@ function renderIssues() {
                     </div>
                     <!-- 摘要文字 -->
                     <div class="text-sm text-gray-800 font-medium leading-relaxed mt-2 cursor-pointer">${summary}</div>
-                    <!-- 文件位置快捷展示 -->
-                    ${issue.file ? `<div class="text-xs font-mono text-blue-600 mt-1 cursor-pointer">${escapeHtml(issue.file)}${lineInfo}</div>` : ''}
+                    <!-- 文件位置快捷展示（非文件类问题给出占位，避免误以为信息缺失） -->
+                    ${issue.file
+                        ? `<div class="text-xs font-mono text-blue-600 mt-1 cursor-pointer">${escapeHtml(issue.file)}${lineInfo}</div>`
+                        : '<div class="text-xs text-gray-400 mt-1 cursor-pointer">（非文件类问题，无文件定位）</div>'}
                 </div>
                 <div class="flex flex-col items-center gap-1.5 flex-shrink-0">
-                    <i id="issue-toggle-${issue.id}" class="fas fa-chevron-down issue-toggle-icon text-gray-400 text-sm cursor-pointer p-1 hover:text-gray-600" onclick="toggleIssueDetail(${issue.id}, event)"></i>
+                    <i id="issue-toggle-${issue.id}" class="fas fa-chevron-down issue-toggle-icon text-gray-400 text-sm cursor-pointer p-1 hover:text-gray-600" onclick="event.stopPropagation(); toggleIssueDetail(${issue.id}, event)"></i>
                     <div class="flex flex-col gap-1.5 ${['pending', 'pending_inherited'].includes(issue.status) ? '' : 'hidden'}" onclick="event.stopPropagation()">
                         <button onclick="resolveIssue(${issue.id}, 'resolved')" class="text-[11px] px-2.5 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 flex items-center justify-center gap-1 whitespace-nowrap min-w-[5rem]" title="确认这是问题，已处理">
                             <i class="fas fa-check"></i>已处理
@@ -1320,19 +1346,18 @@ function renderIssues() {
                     <div class="text-sm text-gray-800 font-medium leading-relaxed pl-3">${escapeHtml(issue.message)}</div>
                 </div>` : ''}
 
-                <!-- 文件位置：展开态展示为可点击链接（与折叠态纯文本形成差异化） -->
-                ${issue.file ? `
+                <!-- 文件位置：有文件时展示为可点击链接；非文件类问题（如提交规范）展示占位说明 -->
                 <div class="mb-3">
                     <div class="flex items-center gap-1.5 mb-1">
                         <div class="w-1 h-3 bg-blue-500 rounded-full"></div>
                         <span class="text-xs font-semibold text-gray-700">文件位置</span>
                     </div>
                     <div class="pl-3">
-                        <a href="#" onclick="switchTab('diff'); selectDiffFile('${escapeHtml(issue.file)}'); return false;" class="text-xs font-mono text-blue-600 hover:underline bg-blue-50 px-2 py-1 rounded inline-block">
-                            ${escapeHtml(issue.file)}${lineInfo}
-                        </a>
+                        ${issue.file
+                            ? `<a href="#" onclick="switchTab('diff'); selectDiffFile('${escapeHtml(issue.file)}'); return false;" class="text-xs font-mono text-blue-600 hover:underline bg-blue-50 px-2 py-1 rounded inline-block">${escapeHtml(issue.file)}${lineInfo}</a>`
+                            : '<span class="text-xs text-gray-400 bg-gray-50 px-2 py-1 rounded inline-block border border-gray-200">非文件类问题（无文件定位）</span>'}
                     </div>
-                </div>` : ''}
+                </div>
 
                 <!-- 问题代码 -->
                 ${issue.code_snippet ? (() => {
@@ -2394,10 +2419,10 @@ function renderPipeline(data) {
 
     const stages = mergedStages;
 
-    // 从 batch_plan 阶段获取计划总批次数（用于正确的进度统计）
-    const planStage = rawStages.find(s => s.stage_code === 'batch_plan');
-    const batchPlan = planStage?.output_snapshot?.plan || {};
-    const plannedBatchCount = batchPlan.batch_count || 0;
+    // 从 batch_plan 阶段获取计划总批次数（batch_plan 是 batch_review_frame 的子阶段，不在顶层）
+    const batchFrameStage = rawStages.find(s => s.stage_code === 'batch_review_frame');
+    const planChild = batchFrameStage?.children?.find(c => c.stage_code === 'batch_plan');
+    const plannedBatchCount = planChild?.output_snapshot?.plan?.batch_count || 0;
 
     // 计算概览统计
     // 总阶段数 = 非Group顶层阶段各算1个 + batch_review_frame 的子阶段按 plan 中计划的批次数算
@@ -2413,24 +2438,35 @@ function renderPipeline(data) {
         totalDuration += s.duration_ms || 0;
 
         if (s.stage_code === 'batch_review_frame') {
-            // batch_review_frame 的子阶段总数量应按分批计划确定
-            // 因为后端在运行中可能只创建了部分批次的 execution 记录
-            const actualBatchCount = plannedBatchCount > 0
-                ? plannedBatchCount
-                : (s.children?.length || 0);
+            const children = s.children || [];
+            // Token/耗时：累计所有子执行记录（含 fallback 记录，反映真实消耗）
+            children.forEach(c => {
+                totalTokens += (c.input_tokens || 0) + (c.output_tokens || 0);
+                totalDuration += c.duration_ms || 0;
+            });
 
-            totalStages += actualBatchCount;
+            // 批次统计：仅统计 batch_review_*/agentic_batch_* 子阶段（排除 batch_plan/batch_summary），
+            // 并按 batch_index 去重——fallback 时同一批次可能同时存在
+            // agentic_batch_N(skipped) 与 batch_review_N(success)，重复计数会虚增进度分母/分子。
+            const rank = { success: 3, failed: 2, timeout: 2, running: 1, pending: 0, skipped: 0 };
+            const batchByIndex = new Map();
+            children.forEach(c => {
+                const code = c.stage_code || '';
+                if (!code.startsWith('batch_review_') && !code.startsWith('agentic_batch_')) return;
+                const idx = c.batch_index || parseInt(code.replace(/^(batch_review_|agentic_batch_)/, ''), 10) || 0;
+                const prev = batchByIndex.get(idx);
+                if (!prev || (rank[c.status] || 0) > (rank[prev.status] || 0)) {
+                    batchByIndex.set(idx, c);
+                }
+            });
 
-            // 已完成/失败的子阶段按实际 children 统计
-            if (s.children && s.children.length > 0) {
-                s.children.forEach(c => {
-                    totalTokens += (c.input_tokens || 0) + (c.output_tokens || 0);
-                    totalDuration += c.duration_ms || 0;
-                    if (c.status === 'success') completedMain++;
-                    if (c.status === 'failed' || c.status === 'timeout') failedMain++;
-                    // 运行中的子阶段不归入已完成，但已在 totalStages 中
-                });
-            }
+            const batchCount = Math.max(plannedBatchCount, batchByIndex.size);
+            totalStages += batchCount;
+            batchByIndex.forEach(c => {
+                if (c.status === 'success') completedMain++;
+                else if (c.status === 'failed' || c.status === 'timeout') failedMain++;
+                // running/pending/skipped 不计入完成
+            });
         } else if (s.has_children && s.children && s.children.length > 0) {
             // 其它 Group 阶段（如不需要 plan 修正的情况）
             s.children.forEach(c => {
@@ -2616,12 +2652,23 @@ function createBatchReviewSubflow(children, parentStage) {
     const rawBatchStages = children.filter(c => c.stage_code && (c.stage_code.startsWith('batch_review_') || c.stage_code.startsWith('agentic_batch_'))).sort((a, b) => (a.batch_index || 0) - (b.batch_index || 0));
     const summaryStage = children.find(c => c.stage_code === 'batch_summary');
 
+    // 去重后的实际批次数量：同一 batch_index 可能同时存在 agentic_batch_N(skipped/fallback)
+    // 与 batch_review_N(success)，直接取 rawBatchStages.length 会把总数虚增，导致出现"多出来的待运行批次"
+    const distinctBatchCount = new Set(
+        rawBatchStages.map(b => {
+            const idx = b.batch_index
+                || parseInt((b.stage_code || '').replace(/^(batch_review_|agentic_batch_)/, ''), 10)
+                || 0;
+            return idx;
+        }).filter(i => i > 0)
+    ).size;
+
     // 从分批决策获取总批次数量（plan.snapshot.output_snapshot.plan.batch_count）
-    let totalBatches = parentStage.batch_total || rawBatchStages.length;
+    let totalBatches = parentStage.batch_total || distinctBatchCount;
     if (planStage && planStage.output_snapshot && planStage.output_snapshot.plan) {
         totalBatches = planStage.output_snapshot.plan.batch_count || totalBatches;
     }
-    totalBatches = Math.max(totalBatches, rawBatchStages.length);
+    totalBatches = Math.max(totalBatches, distinctBatchCount);
 
     // 构造完整的批次数组（含 pending 占位）
     // 【修复】同 batch_index 可能同时存在 agentic_batch_N(failed) 和 batch_review_N(success)
@@ -4474,7 +4521,7 @@ function renderAgenticDetail(json) {
     // ========== 轮次概览表格（紧凑）==========
     const rounds = out.round_metrics || [];
     const toolCallsCount = out.agentic_tool_calls || 0;
-    const llmRounds = rounds.filter(r => r.role === 'llm_call');
+    const llmRounds = rounds.filter(r => r.role === 'llm_call' || r.role === 'llm_retry');
     const toolRounds = rounds.filter(r => r.role === 'tool_execution');
     if (rounds.length > 0) {
         html += `<div class="mb-3 bg-white rounded-lg border border-gray-200 p-3">`;
@@ -4489,11 +4536,12 @@ function renderAgenticDetail(json) {
         html += `</tr></thead><tbody>`;
         rounds.forEach(r => {
             const isLLM = r.role === 'llm_call';
+            const isLLMRetry = r.role === 'llm_retry';
             const isTool = r.role === 'tool_execution';
-            const typeLabel = isLLM ? 'LLM' : isTool ? '工具' : r.role;
-            const typeColor = isLLM ? 'text-blue-600' : isTool ? 'text-orange-600' : 'text-gray-600';
+            const typeLabel = isLLMRetry ? 'LLM重试' : isLLM ? 'LLM' : isTool ? '工具' : r.role;
+            const typeColor = (isLLM || isLLMRetry) ? 'text-blue-600' : isTool ? 'text-orange-600' : 'text-gray-600';
             const finishLabel = r.finish_reason ? `(${r.finish_reason})` : '';
-            const tokenLabel = isLLM ? `${(r.input_tokens||0).toLocaleString()} / ${(r.output_tokens||0).toLocaleString()}` : '-';
+            const tokenLabel = (isLLM || isLLMRetry) ? `${(r.input_tokens||0).toLocaleString()} / ${(r.output_tokens||0).toLocaleString()}` : '-';
             let toolDetail = '-';
             if (isTool && r.tool_results && r.tool_results.length > 0) {
                 const names = r.tool_results.map(tr => tr.tool_name).filter(Boolean);
@@ -4518,11 +4566,12 @@ function renderAgenticDetail(json) {
     if (messages.length > 0 || rounds.length > 0) {
         html += `<div class="mb-3"><div class="font-semibold text-gray-700 text-xs mb-2">对话时间线</div>`;
 
-        // 按 round_index 分组（LLM Call + 附属 Tool Execution）
+        // 按 round_index 分组（LLM Call + 解析重试 + 附属 Tool Execution）
         const roundMap = {};
         rounds.forEach(r => {
-            if (!roundMap[r.round_index]) roundMap[r.round_index] = { llm: null, tool: null };
+            if (!roundMap[r.round_index]) roundMap[r.round_index] = { llm: null, llmRetry: null, tool: null };
             if (r.role === 'llm_call') roundMap[r.round_index].llm = r;
+            else if (r.role === 'llm_retry') roundMap[r.round_index].llmRetry = r;
             if (r.role === 'tool_execution') roundMap[r.round_index].tool = r;
         });
 
@@ -4533,16 +4582,18 @@ function renderAgenticDetail(json) {
             // Round 头部
             html += `<div class="px-3 py-2 bg-gray-50 border-b border-gray-200 flex items-center justify-between">`;
             html += `<span class="text-[11px] font-bold text-gray-700">第${roundNum}轮</span>`;
-            if (roundData.llm) {
-                html += `<span class="text-[10px] text-gray-400 font-mono">${(roundData.llm.input_tokens||0).toLocaleString()} / ${(roundData.llm.output_tokens||0).toLocaleString()} tk · ${roundData.llm.finish_reason || 'unknown'}</span>`;
+            const roundLlm = roundData.llmRetry || roundData.llm;
+            if (roundLlm) {
+                html += `<span class="text-[10px] text-gray-400 font-mono">${(roundLlm.input_tokens||0).toLocaleString()} / ${(roundLlm.output_tokens||0).toLocaleString()} tk · ${roundLlm.finish_reason || 'unknown'}</span>`;
             }
             html += `</div>`;
 
-            // LLM Call Content（展示完整内容，默认展开）
-            if (roundData.llm && roundData.llm.content_preview) {
+            // LLM 输出（优先展示解析重试的完整内容；默认展开）
+            if (roundLlm && roundLlm.content_preview) {
+                const isRetry = !!roundData.llmRetry;
                 html += `<div class="px-3 py-2 border-b border-gray-100">`;
-                html += `<div class="text-[10px] font-medium text-blue-600 mb-1">LLM 输出</div>`;
-                html += renderCollapsibleContent(roundData.llm.content_preview, 'full', true);
+                html += `<div class="text-[10px] font-medium ${isRetry ? 'text-orange-600' : 'text-blue-600'} mb-1">LLM 输出${isRetry ? '（解析重试）' : ''}</div>`;
+                html += renderCollapsibleContent(roundLlm.content_preview, 'full', true);
                 html += `</div>`;
             }
 

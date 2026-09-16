@@ -452,6 +452,9 @@ function renderStageCard(stage, enabledSet, triggerEventSet, stageConfigs) {
         const agenticEnabled = stageCfg.agentic_mode === true;
         const agenticMaxRounds = stageCfg.agentic_max_rounds || 5;
         const agenticMaxTools = stageCfg.agentic_max_tools || 8;
+        // 消息条数上限缺省按 max_tools 联动推导：max_tools + 4
+        const agenticMaxMessages = stageCfg.agentic_max_messages || (agenticMaxTools + 4);
+        const agenticHistoryTokenLimit = stageCfg.agentic_history_token_limit || 80000;
         const agenticTemperature = stageCfg.agentic_temperature !== undefined ? stageCfg.agentic_temperature : 0.1;
         const agenticBudgetMultiplier = stageCfg.agentic_budget_multiplier !== undefined ? stageCfg.agentic_budget_multiplier : 1.2;
         agenticSection = `<div class="stage-config-section">
@@ -475,7 +478,19 @@ function renderStageCard(stage, enabledSet, triggerEventSet, stageConfigs) {
                 </div>
                 <div class="flex items-center justify-between">
                     <span class="text-[11px] text-gray-500">最大工具调用次数 (3-15)</span>
-                    <input type="number" id="agentic_max_tools_${stage.code}" value="${agenticMaxTools}" min="3" max="15" class="w-14 px-1.5 py-1 border rounded text-[11px] text-right focus:ring-1 focus:ring-blue-500 focus:outline-none">
+                    <input type="number" id="agentic_max_tools_${stage.code}" value="${agenticMaxTools}" min="3" max="15" class="w-14 px-1.5 py-1 border rounded text-[11px] text-right focus:ring-1 focus:ring-blue-500 focus:outline-none" onchange="onAgenticMaxToolsChange(this, '${stage.code}')">
+                </div>
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] text-gray-500">消息条数上限 (4-100)
+                        <i class="fas fa-info-circle text-gray-400 text-[10px]" title="上下文消息条数超过该值将强制进入最终轮、禁用工具直接输出结果。默认按「最大工具调用次数 + 4」自动推导，调整最大工具调用次数时会自动同步"></i>
+                    </span>
+                    <input type="number" id="agentic_max_messages_${stage.code}" value="${agenticMaxMessages}" min="4" max="100" class="w-14 px-1.5 py-1 border rounded text-[11px] text-right focus:ring-1 focus:ring-blue-500 focus:outline-none" onchange="clampAgenticMaxMessages(this)">
+                </div>
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] text-gray-500">历史截断 Token (1000-500000)
+                        <i class="fas fa-info-circle text-gray-400 text-[10px]" title="历史消息累计 token 超过该值时会截断较早对话，保留 system 与初始任务，并优先删除最早的 assistant+tool 对"></i>
+                    </span>
+                    <input type="number" id="agentic_history_token_limit_${stage.code}" value="${agenticHistoryTokenLimit}" min="1000" max="500000" class="w-20 px-1.5 py-1 border rounded text-[11px] text-right focus:ring-1 focus:ring-blue-500 focus:outline-none" onchange="clampAgenticHistoryTokenLimit(this)">
                 </div>
                 <div class="flex items-center justify-between">
                     <span class="text-[11px] text-gray-500">Temperature (0.0-1.0)</span>
@@ -757,6 +772,36 @@ function onLlmEnhanceTimeoutChange(el, stageCode) {
     timeoutEl.value = Math.min(v + 10, 3600);
 }
 
+// 消息条数上限：钳制 4-100
+function clampAgenticMaxMessages(el) {
+    let v = parseInt(el.value, 10);
+    if (isNaN(v)) v = 12;
+    if (v < 4) v = 4;
+    if (v > 100) v = 100;
+    el.value = v;
+}
+
+// 历史截断 Token：钳制 1000-500000
+function clampAgenticHistoryTokenLimit(el) {
+    let v = parseInt(el.value, 10);
+    if (isNaN(v)) v = 80000;
+    if (v < 1000) v = 1000;
+    if (v > 500000) v = 500000;
+    el.value = v;
+}
+
+// 最大工具调用次数变化：联动更新消息条数上限（tools + 4）
+function onAgenticMaxToolsChange(el, stageCode) {
+    let v = parseInt(el.value, 10) || 8;
+    if (v < 3) v = 3;
+    if (v > 15) v = 15;
+    el.value = v;
+    const msgEl = document.getElementById('agentic_max_messages_' + stageCode);
+    if (msgEl) {
+        msgEl.value = Math.min(v + 4, 100);
+    }
+}
+
 // 阶段超时变化：不得小于 LLM 增强超时，违规时自动调整为「增强超时 + 10s」
 function onStageTimeoutChange(el, stageCode) {
     let v = parseInt(el.value, 10) || 300;
@@ -910,10 +955,14 @@ function saveConfig() {
                 if (agenticModeEl.checked) {
                     const amrEl = document.getElementById('agentic_max_rounds_' + stage.code);
                     const amtEl = document.getElementById('agentic_max_tools_' + stage.code);
+                    const ammEl = document.getElementById('agentic_max_messages_' + stage.code);
+                    const ahtEl = document.getElementById('agentic_history_token_limit_' + stage.code);
                     const atEl = document.getElementById('agentic_temperature_' + stage.code);
                     const abmEl = document.getElementById('agentic_budget_multiplier_' + stage.code);
                     if (amrEl) cfg.agentic_max_rounds = parseInt(amrEl.value, 10) || 5;
                     if (amtEl) cfg.agentic_max_tools = parseInt(amtEl.value, 10) || 8;
+                    if (ammEl) cfg.agentic_max_messages = parseInt(ammEl.value, 10) || (cfg.agentic_max_tools + 4);
+                    if (ahtEl) cfg.agentic_history_token_limit = parseInt(ahtEl.value, 10) || 80000;
                     if (atEl) cfg.agentic_temperature = parseFloat(atEl.value) || 0.1;
                     if (abmEl) cfg.agentic_budget_multiplier = parseFloat(abmEl.value) || 1.2;
                 }
