@@ -168,7 +168,7 @@
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">所属项目</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">MR ID</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">开发人员</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">代码分支</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-40">代码分支</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">资源池/大模型</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">耗时</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500">创建时间</th>
@@ -527,14 +527,15 @@ function renderTasks(tasks) {
                 const pendingBadge = (isReview && t.status === 'success' && t.pending_issue_count > 0)
                     ? `<span class="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 cursor-pointer hover:bg-amber-100" onclick="event.stopPropagation(); openTaskDetail(${t.id}, 'report')" title="该任务还有 ${t.pending_issue_count} 条 Issue 待审核">待审 ${t.pending_issue_count}</span>`
                     : '';
+                const branchText = escapeHtml(`${t.source_branch || '-'}->${t.target_branch || '-'}`);
                 return `<tr class="hover:bg-gray-50">
-                    <td class="px-4 py-3 text-sm font-mono text-gray-600 cursor-pointer" onclick="openTaskDetail(${t.id})">#${t.id}</td>
+                    <td class="px-4 py-3 text-sm font-mono text-gray-600 cursor-pointer" onclick="openTaskDetail(${t.id})">${t.id}</td>
                     <td class="px-4 py-3 text-center cursor-pointer" onclick="openTaskDetail(${t.id})">${t.status === 'running' ? '<span class="text-gray-400 text-xs">--</span>' : getScoreBadge(t.score_value)}</td>
                     <td class="px-4 py-3 text-sm text-gray-600 cursor-pointer" onclick="openTaskDetail(${t.id})">${escapeHtml(t.org_name || '根组织')}</td>
                     <td class="px-4 py-3 text-sm cursor-pointer" onclick="openTaskDetail(${t.id})">${t.project?.name || '-'}</td>
                     <td class="px-4 py-3 text-sm cursor-pointer" onclick="openTaskDetail(${t.id})">${t.mr_iid ? '<a href="' + (t.mr_url || '#') + '" target="_blank" class="text-blue-600 hover:underline">' + t.mr_iid + '</a>' : '-'}</td>
                     <td class="px-4 py-3 text-sm cursor-pointer" onclick="openTaskDetail(${t.id})">${t.author || '-'}</td>
-                    <td class="px-4 py-3 text-sm font-mono text-xs text-blue-600 cursor-pointer" onclick="openTaskDetail(${t.id})">${t.source_branch || '-'}->${t.target_branch || '-'}</td>
+                    <td class="px-3 py-3 text-sm font-mono text-xs text-blue-600 cursor-pointer" onclick="openTaskDetail(${t.id})"><div class="truncate max-w-[150px]" title="${branchText}">${branchText}</div></td>
                     <td class="px-4 py-3 text-sm cursor-pointer" onclick="openTaskDetail(${t.id})">${isReview
                         ? getModelTag(t.used_model) || (t.model_id > 0 ? '模型#' + t.model_id : '<span class="text-gray-400">--</span>')
                         : (t.pool?.name || '-')}</td>
