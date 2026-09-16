@@ -858,6 +858,15 @@ func BuildAgenticUserPrompt(ctx *PromptContext, batchFiles []map[string]interfac
 	sb.WriteString("4. 所有关键假设经过工具验证后，输出最终 JSON 评审结果\n")
 	sb.WriteString("5. **不允许在没有调用任何工具的情况下直接输出 JSON**\n\n")
 
+	// 4.5 问题定位标注规则：保证 line_start/line_end 与 code_snippet 标记一致
+	sb.WriteString("## 【问题定位标注规则】\n\n")
+	sb.WriteString("- code_snippet：问题代码片段（可含少量上下文），必须用标记明确指出问题行。\n")
+	sb.WriteString("- line_start / line_end：必须指向真正的问题行/区域，并与标记严格一致：\n")
+	sb.WriteString("    · 单行问题 → 该行行末 ` <<< 问题所在`，line_start = line_end = 该行\n")
+	sb.WriteString("    · 多行问题 → 首行 ` <<< 问题区域开始`、末行 ` <<< 问题区域结束`，line_start / line_end = 区域首/末行\n")
+	sb.WriteString("- 上下文行不参与 line_start / line_end 范围；不要为了包含上下文而扩大范围。\n")
+	sb.WriteString("- file：与具体文件/代码行相关的问题必须填写本次 diff 中的文件路径；非文件类问题（如 Conventional Commits 提交规范、仓库级/流程类问题）`file` 填空字符串 \"\"，不要臆造路径。\n\n")
+
 	// 5. 待评审代码（diff）
 	sb.WriteString("\n## 待评审内容\n\n")
 	if isLineNumberInjectionEnabled(ctx.ProjectID) {
@@ -1046,11 +1055,11 @@ func BuildScoreArbitrationPrompt(ctx *PromptContext, batchResults []*llm.BatchRe
 
 // BuildArbitrationPrompt 【新增】构建 review_arbitration 专用的结构化 Prompt（JSON 注入模式）
 // 与 BuildScoreArbitrationPrompt 的区别：
-// 1. Agent findings 以结构化 JSON 注入（非 markdown 文本退化）
-// 2. 使用 GetReviewArbitrationJSONSchema（扩展了 security_findings / testing_notes / impact_notes / dedup_log / overall_suggestion）
-// 3. 【P0】返回 (systemPrompt, userPrompt, *llm.ResponseFormat, error) 四元组
-//    System Prompt 包含恒定行为准则（角色、去重规则、独立输出规则），
-//    User Prompt 包含动态配置（扣分规则、维度归类、输入 JSON 数据）。
+//  1. Agent findings 以结构化 JSON 注入（非 markdown 文本退化）
+//  2. 使用 GetReviewArbitrationJSONSchema（扩展了 security_findings / testing_notes / impact_notes / dedup_log / overall_suggestion）
+//  3. 【P0】返回 (systemPrompt, userPrompt, *llm.ResponseFormat, error) 四元组
+//     System Prompt 包含恒定行为准则（角色、去重规则、独立输出规则），
+//     User Prompt 包含动态配置（扣分规则、维度归类、输入 JSON 数据）。
 func BuildArbitrationPrompt(ctx *PromptContext) (string, string, *llm.ResponseFormat, error) {
 	var sysSb, usrSb strings.Builder
 
@@ -1088,22 +1097,37 @@ func BuildArbitrationPrompt(ctx *PromptContext) (string, string, *llm.ResponseFo
 	sysSb.WriteString("3. 去重优先级：保留 Agent 的 severity + rule_code，优先采用 LLM 的 description + suggestion\n")
 	sysSb.WriteString("4. 独立保留：Agent 发现但 LLM 未发现 → 保留（source=agent）；LLM 发现但 Agent 未发现 → 保留（source=llm）\n\n")
 
+	sysSb.WriteString("## 文件定位规则\n")
+	sysSb.WriteString("1. 与具体文件/代码行相关的问题：`file` 必填，且必须是输入 diff 中的文件路径；`line_start`/`line_end` 使用新文件行号。\n")
+	sysSb.WriteString("2. 非文件类问题（例如 Conventional Commits 提交信息不规范、仓库级/流程/规范类问题）：`file` 填空字符串 \"\"，并在 `message` 中说明问题对象（如“提交信息”），不要强行编造文件路径。\n")
+	sysSb.WriteString("3. 严禁为不可定位到文件的问题臆造 `file`；也不得对可定位到文件的问题留空 `file`。\n\n")
+
 	sysSb.WriteString("## 独立输出规则\n")
-	sysSb.WriteString("- TestSuggestion → testing_notes[]（输出到独立数组）\n")
-	sysSb.WriteString("- ImpactAnalysis → impact_notes[]（输出到独立数组）\n")
-	sysSb.WriteString("- SecurityFinding → security_findings[]（已在 Issues[] 中体现扣分，此处仅展示）\n\n")
+	sysSb.WriteString("- 仅 Agent 的 TestSuggestion 放入 testing_notes[]、ImpactAnalysis 放入 impact_notes[]（独立数组）。\n")
+	sysSb.WriteString("- SecurityFinding 同时体现在 Issues[]（参与扣分）与 security_findings[]（仅展示）。\n")
+	sysSb.WriteString("- 【重要】batch_results 中的每一条 issue 去重后必须保留在 issues[] 中，不得丢弃，也不得仅移入独立数组；\n")
+	sysSb.WriteString("  即使其 category 为 test_coverage 等，也只是归类不同，仍须作为 issue 输出。\n")
+	sysSb.WriteString("- 无法归类的问题仍须放入 issues[]，category 使用最接近的维度 code。\n\n")
 
 	// ========== User Prompt：动态配置 + 输入数据 ==========
 	// 1. 扣分规则（来自项目 AI 评审模板，按项目配置动态变化）
 	usrSb.WriteString(buildScoreRulesText(ctx.DeductScoreConfig))
 	usrSb.WriteString("\n")
 
-	// 2. 维度归类说明（按当前项目实际维度配置）
+	// 2. 维度归类说明（按当前项目实际维度配置动态生成，避免出现不存在的维度 code）
 	usrSb.WriteString("## 维度归类说明\n\n")
-	usrSb.WriteString("issues 按 `category` 字段归入对应维度，用于计算维度得分：\n")
-	usrSb.WriteString("- `security` → 安全维度：Issues[] 中 category=security 的问题 + Agent SecurityFindings 共同计入\n")
-	usrSb.WriteString("- `code_quality` → 代码质量维度：Issues[] 中 category=code_quality 的问题计入\n")
-	usrSb.WriteString("- `performance` → 性能维度：Issues[] 中 category=performance 的问题计入\n\n")
+	usrSb.WriteString("issues 按 `category` 字段归入对应维度，用于计算维度得分。本项目可用维度 code 如下：\n")
+	if len(ctx.DimensionWeights) > 0 {
+		for _, cat := range sortDimensions(ctx.DimensionWeights) {
+			if _, ok := ctx.DimensionWeights[cat]; !ok {
+				continue
+			}
+			usrSb.WriteString(fmt.Sprintf("- `%s`（%s）：Issues[] 中 category=%s 的问题计入\n", cat, categoryDisplay(cat), cat))
+		}
+	} else {
+		usrSb.WriteString("- Issues[] 中每条问题按自身 category 归入同名维度\n")
+	}
+	usrSb.WriteString("- 说明：security 维度除 Issues[] 中 category=security 的问题外，还会叠加 Agent SecurityFindings 的扣分\n\n")
 	usrSb.WriteString("（维度得分与总分的完整计算规则见上文【总分计算规则】）\n\n")
 
 	// 【Phase 1】明确 suggestion 字段语义，避免 model 填入评分计算、自证性文字
@@ -1449,8 +1473,11 @@ func lineNumberInstruction() string {
 	return " [行号前缀说明] 每行开头的 [newN|oldM] 表示：新文件行号=N，旧文件行号=M\n" +
 		"             [new-|oldM] → 删除行（仅存在于旧文件第 M 行）\n" +
 		"             [newN|old-] → 新增行（仅存在于新文件第 N 行）\n" +
-		"             【重要】请在返回 line_start 时使用【新文件行号】（即 new 后面的数字）\n" +
-		"             【重要】请在 code_snippet 中问题所在行的行末添加 ` <<< 问题所在` 标记\n"
+		" 【重要】line_start / line_end 一律使用【新文件行号】（new 后面的数字），且必须与 code_snippet 的标记严格一致：\n" +
+		"   ① 单行问题：line_start = line_end = 该问题行行号；并在该行行末添加 ` <<< 问题所在`\n" +
+		"   ② 多行问题：line_start = 区域首行、line_end = 区域末行；并在首行行末添加 ` <<< 问题区域开始`、末行行末添加 ` <<< 问题区域结束`\n" +
+		"   ③ 严禁：多行区间却只用 ` <<< 问题所在`；或单行区间却使用区域标记\n" +
+		"   ④ code_snippet 可包含上下文行，但 line_start / line_end 只能覆盖“问题行/问题区域”，不要因包含上下文而扩大范围\n"
 }
 
 // isLineNumberInjectionEnabled 判断当前项目是否启用了行号前缀注入

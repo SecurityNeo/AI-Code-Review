@@ -68,24 +68,33 @@ func ApplyLineCorrections(issues []llm.AIReviewIssue, rawDiff string, cfg *confi
 			matchedConfidenceSum += result.Confidence
 		}
 
+		// 先用旧值判断是否为多行问题区域（必须在覆盖 LineStart 之前判断）
+		wasMulti := issues[i].LineEnd > issues[i].LineStart
 		if result.NewStart != result.OldStart || result.NewEnd != result.OldEnd {
 			corrected++
 			zap.L().Info("ApplyLineCorrections: line number corrected",
 				zap.String("file", issues[i].File),
 				zap.Int("old_start", result.OldStart),
+				zap.Int("old_end", result.OldEnd),
 				zap.Int("new_start", result.NewStart),
+				zap.Int("new_end", result.NewEnd),
+				zap.String("marker_kind", result.MarkerKind.String()),
 				zap.Float64("confidence", result.Confidence),
 				zap.String("match_type", matchTypeString(result.MatchType)),
 			)
-			// 【修复】保持原始 range 长度，只平移起始位置。
-			// 如果原始 line_end > line_start（多行问题区域），delta 同步应用到 line_end。
-			delta := result.NewStart - result.OldStart
+			// 使用校正器返回的区间：区域标记（或原为多行）→ [NewStart,NewEnd]；否则收敛为单行。
 			issues[i].LineStart = result.NewStart
-			if issues[i].LineEnd > issues[i].LineStart {
-				issues[i].LineEnd += delta
+			if (wasMulti || result.MarkerKind == diff.MarkerKindRegion) && result.NewEnd >= result.NewStart {
+				issues[i].LineEnd = result.NewEnd
+			} else {
+				issues[i].LineEnd = result.NewStart
 			}
 		} else {
 			unchanged++
+		}
+		// 最终防线：保证 line_start <= line_end
+		if issues[i].LineStart > issues[i].LineEnd {
+			issues[i].LineStart, issues[i].LineEnd = issues[i].LineEnd, issues[i].LineStart
 		}
 	}
 
@@ -106,6 +115,32 @@ func ApplyLineCorrections(issues []llm.AIReviewIssue, rawDiff string, cfg *confi
 		zap.Float64("avg_confidence", avgConf),
 	)
 
+	return issues
+}
+
+// NormalizeIssueRanges 落库前的区间归一化，保证：
+//  1. line_start <= line_end（非法区间交换修正）
+//  2. 仅当 code_snippet 使用「单行问题标记」(`<<< 问题所在`) 时，才将多行区间收敛为单行；
+//     对于「问题区域」标记或无标记的 snippet，保留区间（避免把模型给出的多行问题误折叠）。
+func NormalizeIssueRanges(issues []llm.AIReviewIssue) []llm.AIReviewIssue {
+	for i := range issues {
+		if issues[i].LineStart > issues[i].LineEnd {
+			zap.L().Warn("NormalizeIssueRanges: invalid range, swapping",
+				zap.String("file", issues[i].File),
+				zap.Int("line_start", issues[i].LineStart),
+				zap.Int("line_end", issues[i].LineEnd))
+			issues[i].LineStart, issues[i].LineEnd = issues[i].LineEnd, issues[i].LineStart
+		}
+		if issues[i].LineEnd > issues[i].LineStart {
+			if diff.ParseSnippetMarkers(issues[i].CodeSnippet).Kind == diff.MarkerKindProblem {
+				zap.L().Warn("NormalizeIssueRanges: single-line marker with multi-line range, collapse to single line",
+					zap.String("file", issues[i].File),
+					zap.Int("line_start", issues[i].LineStart),
+					zap.Int("line_end", issues[i].LineEnd))
+				issues[i].LineEnd = issues[i].LineStart
+			}
+		}
+	}
 	return issues
 }
 

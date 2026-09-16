@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ai-optimizer/backend/internal/model"
+	"github.com/ai-optimizer/backend/pkg/diff"
 	"github.com/ai-optimizer/backend/pkg/llm"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -14,8 +15,18 @@ import (
 // PersistStructuredReview 将结构化评审结果幂等持久化到数据库
 // 每次调用会先清理该任务的历史 Issue，再写入最新结果，确保 Retry 后数据一致。
 // 注意：ReviewIssue 已加 gorm.DeletedAt 字段，这里的 Delete 实际执行 soft delete
-//（UPDATE deleted_at = NOW()），保证历史命中数据可用于规则命中统计。
+// （UPDATE deleted_at = NOW()），保证历史命中数据可用于规则命中统计。
 func PersistStructuredReview(taskID uint, result *llm.AIReviewResult) error {
+	// 落库前归一化 issue 行号区间：保证 line_start <= line_end，
+	// 且多行区间必须带「问题区域」标记，否则收敛为单行。
+	if result != nil {
+		result.Issues = NormalizeIssueRanges(result.Issues)
+		// 兜底：清洗 code_snippet 中的 [new|old] 行号注解（防非解析路径写入脏数据）
+		for i := range result.Issues {
+			result.Issues[i].CodeSnippet = diff.StripLineAnnotations(result.Issues[i].CodeSnippet)
+		}
+	}
+
 	// 事务开始前：加载 task 信息和 MR 历史 Issue（用于指纹匹配）
 	var task model.Task
 	if err := model.DB.First(&task, taskID).Error; err != nil {
@@ -40,8 +51,8 @@ func PersistStructuredReview(taskID uint, result *llm.AIReviewResult) error {
 			"ai_response_json": marshalJSON(result),
 			"dimension_scores": marshalJSON(result.Dimensions),
 			"issue_count":      len(result.Issues),
-			"score_value":      result.TotalScore,         // 后置校验后的最终评分
-			"raw_ai_score":     result.OriginalTotalScore, // LLM 原始评分（用于对比）
+			"score_value":      result.TotalScore,                // 后置校验后的最终评分
+			"raw_ai_score":     result.OriginalTotalScore,        // LLM 原始评分（用于对比）
 			"execution_count":  gorm.Expr("execution_count + 1"), // 首次创建为0，首次保存后变为1
 		}
 

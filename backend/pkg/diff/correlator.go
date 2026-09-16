@@ -9,23 +9,24 @@ import (
 type MatchType int
 
 const (
-	MatchTypeExact       MatchType = iota // 完全匹配
+	MatchTypeExact        MatchType = iota // 完全匹配
 	MatchTypeFuzzy                         // 模糊匹配
 	MatchTypeNotAvailable                  // 无 snippet，未做校正
 )
 
 // CorrectionResult 校正结果
 type CorrectionResult struct {
-	FilePath      string  // 文件路径
-	OldStart      int     // 原始起始行号（模型返回）
-	OldEnd        int     // 原始结束行号
-	NewStart      int     // 校正后起始行号
-	NewEnd        int     // 校正后结束行号
-	MatchType     MatchType // 匹配类型
-	Confidence    float64 // 置信度 0.0-1.0
-	OriginalSnippet string // 原始 snippet
-	MatchedSnippet  string // 匹配到的 snippet
-	Message       string  // 人类可读说明
+	FilePath        string     // 文件路径
+	OldStart        int        // 原始起始行号（模型返回）
+	OldEnd          int        // 原始结束行号
+	NewStart        int        // 校正后起始行号
+	NewEnd          int        // 校正后结束行号
+	MatchType       MatchType  // 匹配类型
+	MarkerKind      MarkerKind // snippet 标记类型（problem/region/none）
+	Confidence      float64    // 置信度 0.0-1.0
+	OriginalSnippet string     // 原始 snippet
+	MatchedSnippet  string     // 匹配到的 snippet
+	Message         string     // 人类可读说明
 }
 
 // LineCorrelator 行号校正器
@@ -48,7 +49,15 @@ func NewLineCorrelatorWithThreshold(fileMap map[string]*ParsedDiffFile, threshol
 	return &LineCorrelator{fileMap: fileMap, minFuzzyConfidence: threshold}
 }
 
-// CorrectIssue 对单个 Issue 进行校正
+// CorrectIssue 对单个 Issue 进行校正。
+// 策略（按优先级）：
+//  1. 将去掉标记后的 snippet 作为"连续代码块"在文件新行序列中查找，
+//     并选取离模型 line_start 最近的匹配块（解决同文件重复行歧义）；
+//     若模型 line_start 落在匹配块内，则保留（避免漂移），否则以块起始行为准。
+//  2. 块匹配失败时，退化为对"问题行/区域首行"做单行精确/模糊匹配。
+//  3. 均失败则信任模型行号。
+//
+// 区域标记（<<< 问题区域开始/结束）决定多行区间；仅单行标记时收敛为单行。
 func (lc *LineCorrelator) CorrectIssue(filePath string, startLine, endLine int, snippet string) CorrectionResult {
 	result := CorrectionResult{
 		FilePath:        filePath,
@@ -67,58 +76,182 @@ func (lc *LineCorrelator) CorrectIssue(filePath string, startLine, endLine int, 
 		return result
 	}
 
-	cleanSnippet := strings.TrimSpace(snippet)
-	if cleanSnippet == "" {
+	if strings.TrimSpace(snippet) == "" {
 		result.Message = "模型未返回有效 code snippet（空或纯空白），直接信任模型行号"
-		result.MatchType = MatchTypeNotAvailable
-		result.Confidence = 0.0
 		return result
 	}
 
-	// 首先尝试 exact match：在 file.Lines 中精确查找 snippet
-	exactLine := lc.findExact(file, snippet)
-	if exactLine != nil {
-		result.NewStart = getEffectiveLineNo(exactLine)
-		result.NewEnd = getEffectiveLineNo(exactLine)
+	// 解析问题定位标记
+	mk := ParseSnippetMarkers(snippet)
+	result.MarkerKind = mk.Kind
+
+	codeLines := mk.CodeLines
+	if len(codeLines) == 0 {
+		result.Message = "snippet 无有效代码行（仅标记/空白），直接信任模型行号"
+		return result
+	}
+
+	// 1) 连续代码块匹配（就近消歧）
+	if blockStart, blockEnd, ok := lc.findBlockNearest(file, codeLines, startLine); ok {
+		newStart := blockStart
+		if startLine >= blockStart && startLine <= blockEnd {
+			newStart = startLine // 模型行号已在匹配块内 → 信任模型，避免无谓漂移
+		}
+		result.NewStart = newStart
+		switch mk.Kind {
+		case MarkerKindRegion:
+			// 区域末端以「问题区域结束」标记所在行为准，避免 snippet 末尾的上下文行把范围撑大
+			newEnd := blockEnd
+			if mk.EndIdx >= 0 && blockStart+mk.EndIdx <= blockEnd {
+				newEnd = blockStart + mk.EndIdx
+			}
+			if newEnd > newStart {
+				result.NewEnd = newEnd
+			} else {
+				result.NewEnd = newStart
+			}
+		case MarkerKindProblem:
+			// 单行问题标记 → 收敛为单行
+			result.NewEnd = newStart
+		default:
+			// 无标记：保留模型给出的区间长度，随起始行平移（避免把多行问题误折叠为单行）
+			span := endLine - startLine
+			if span < 0 {
+				span = 0
+			}
+			result.NewEnd = newStart + span
+			if result.NewEnd < result.NewStart {
+				result.NewEnd = result.NewStart
+			}
+		}
 		result.MatchType = MatchTypeExact
 		result.Confidence = 1.0
-		result.MatchedSnippet = snippet
+		result.MatchedSnippet = strings.Join(codeLines, "\n")
+		result.Message = fmt.Sprintf("代码块匹配到新文件第%d-%d行", result.NewStart, result.NewEnd)
+		return result
+	}
+
+	// 2) 退化：单行匹配"问题行/区域首行"
+	target := mk.StartText
+	if target == "" {
+		target = FirstCodeLine(snippet)
+	}
+	line, matchType, confidence, matchedRaw := lc.matchLine(file, target)
+	if line == nil {
+		result.Message = fmt.Sprintf("未找到匹配代码，直接信任模型行号（搜索范围：%d 行）", len(file.Lines))
+		return result
+	}
+	result.NewStart = getEffectiveLineNo(line)
+	result.NewEnd = result.NewStart
+	result.MatchType = matchType
+	result.Confidence = confidence
+	result.MatchedSnippet = matchedRaw
+
+	// 多行区域：单独定位末行，得到合法区间 [NewStart, NewEnd]
+	if mk.Kind == MarkerKindRegion && mk.EndText != "" {
+		if el, _, _, _ := lc.matchLine(file, mk.EndText); el != nil {
+			result.NewEnd = getEffectiveLineNo(el)
+		}
+		if result.NewEnd < result.NewStart {
+			result.NewStart, result.NewEnd = result.NewEnd, result.NewStart
+		}
+	}
+	// 无标记：保留原始区间长度（模型已给出多行范围但未打标记的情况）
+	if mk.Kind == MarkerKindNone {
+		if span := endLine - startLine; span > 0 {
+			result.NewEnd = result.NewStart + span
+		}
+	}
+
+	switch matchType {
+	case MatchTypeExact:
 		result.Message = fmt.Sprintf("精确匹配到新文件第%d行", result.NewStart)
-		return result
-	}
-
-	// 次选：使用 fuzzy 匹配（编辑距离）
-	fuzzyLine := lc.findFuzzy(file, snippet)
-	if fuzzyLine != nil {
-		cleanSnippet := strings.TrimSpace(snippet)
-		cleanMatched := stripDiffPrefix(fuzzyLine.Raw, fuzzyLine.Type)
-		dist := levenshteinDistance(cleanSnippet, cleanMatched)
-		maxLen := max(len(cleanSnippet), len(cleanMatched))
-		var confidence float64
-		if maxLen == 0 {
-			confidence = 0 // 两边都是空字符串，认为无意义匹配
-		} else {
-			confidence = 1.0 - float64(dist)/float64(maxLen)
-		}
-		// 【P1 修复】置信度低于阈值时，视为不匹配，避免错误校正
-		if confidence < lc.minFuzzyConfidence {
-			result.Message = fmt.Sprintf("模糊匹配置信度 %.2f 低于阈值 %.2f，不校正",
-				confidence, lc.minFuzzyConfidence)
-			return result
-		}
-		result.NewStart = getEffectiveLineNo(fuzzyLine)
-		result.NewEnd = getEffectiveLineNo(fuzzyLine)
-		result.MatchType = MatchTypeFuzzy
-		result.Confidence = confidence
-		result.MatchedSnippet = fuzzyLine.Raw
-		// 【R1 修复】Message 使用校正后的文件行号（NewStart），而非 diff 文本偏移（DiffOffset）
+	default:
 		result.Message = fmt.Sprintf("模糊匹配到新文件第%d行，置信度%.2f", result.NewStart, confidence)
-		return result
+	}
+	return result
+}
+
+// findBlockNearest 在新行序列中查找与 snippetLines 连续匹配的代码块，
+// 返回块的首/末新文件行号。存在多个匹配时，选取起始行号最接近 anchor 的块。
+// 要求匹配块在「新文件行号」上连续（防止跨 hunk 间隙拼出伪连续块）。
+func (lc *LineCorrelator) findBlockNearest(file *ParsedDiffFile, snippetLines []string, anchor int) (int, int, bool) {
+	// 候选行：存在于新文件中的行（context + addition），保持文件顺序
+	cand := make([]*DiffLine, 0, len(file.Lines))
+	for i := range file.Lines {
+		if file.Lines[i].IsNewLine() {
+			cand = append(cand, &file.Lines[i])
+		}
+	}
+	n := len(snippetLines)
+	if n == 0 || len(cand) < n {
+		return 0, 0, false
 	}
 
-	// fallback：不校正
-	result.Message = fmt.Sprintf("未找到匹配，直接信任模型行号（搜索范围：%d 行）", len(file.Lines))
-	return result
+	bestIdx, bestDist := -1, 0
+	for i := 0; i+n <= len(cand); i++ {
+		ok := true
+		for j := 0; j < n; j++ {
+			// 新文件行号必须连续（间隔 >1 说明跨越了未变更区间/hunk 边界）
+			if cand[i+j].NewLineNo != cand[i].NewLineNo+j {
+				ok = false
+				break
+			}
+			if strings.TrimSpace(stripDiffPrefix(cand[i+j].Raw, cand[i+j].Type)) != snippetLines[j] {
+				ok = false
+				break
+			}
+		}
+		if !ok {
+			continue
+		}
+		dist := 0
+		if anchor > 0 {
+			dist = absInt(anchor - cand[i].NewLineNo)
+		}
+		if bestIdx == -1 || dist < bestDist {
+			bestIdx, bestDist = i, dist
+		}
+	}
+	if bestIdx == -1 {
+		return 0, 0, false
+	}
+	return cand[bestIdx].NewLineNo, cand[bestIdx+n-1].NewLineNo, true
+}
+
+func absInt(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// matchLine 在文件中查找与单行文本 text 最匹配的行：
+// 先精确匹配，失败后按编辑距离模糊匹配（低于阈值视为不匹配）。
+func (lc *LineCorrelator) matchLine(file *ParsedDiffFile, text string) (*DiffLine, MatchType, float64, string) {
+	if line := lc.findExact(file, text); line != nil {
+		return line, MatchTypeExact, 1.0, line.Raw
+	}
+	line := lc.findFuzzy(file, text)
+	if line == nil {
+		return nil, MatchTypeNotAvailable, 0, ""
+	}
+	conf := fuzzyConfidence(strings.TrimSpace(text), stripDiffPrefix(line.Raw, line.Type))
+	if conf < lc.minFuzzyConfidence {
+		return nil, MatchTypeNotAvailable, conf, ""
+	}
+	return line, MatchTypeFuzzy, conf, line.Raw
+}
+
+// fuzzyConfidence 计算两段文本的相似度（1 - 编辑距离 / 最大长度）
+func fuzzyConfidence(a, b string) float64 {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	maxLen := max(len([]rune(a)), len([]rune(b)))
+	if maxLen == 0 {
+		return 0
+	}
+	return 1.0 - float64(levenshteinDistance(a, b))/float64(maxLen)
 }
 
 // getEffectiveLineNo 返回 diff 行在目标文件中的有效行号
@@ -226,8 +359,8 @@ func levenshteinDistance(a, b string) int {
 				cost = 1
 			}
 			curr[j] = min(min(
-				prev[j]+1,      // deletion
-				curr[j-1]+1),   // insertion
+				prev[j]+1,    // deletion
+				curr[j-1]+1), // insertion
 				prev[j-1]+cost) // substitution
 		}
 		prev, curr = curr, prev
@@ -272,6 +405,7 @@ func StoreOriginalResult(result CorrectionResult) map[string]interface{} {
 		"old_end":          result.OldEnd,
 		"new_start":        result.NewStart,
 		"new_end":          result.NewEnd,
+		"marker_kind":      result.MarkerKind.String(),
 		"match_type":       result.MatchType,
 		"confidence":       result.Confidence,
 		"original_snippet": result.OriginalSnippet,

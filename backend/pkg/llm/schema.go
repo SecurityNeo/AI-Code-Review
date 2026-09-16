@@ -3,13 +3,13 @@ package llm
 // AIReviewResult LLM 结构化评审输出（Strict Mode，全字段必填）
 // 注意：strict=true 时所有字段均为 required，不能省略
 type AIReviewResult struct {
-	SchemaVersion       string               `json:"schema_version"`
-	TotalScore          int                  `json:"total_score"`
-	OriginalTotalScore  int                  `json:"original_total_score"`    // LLM 原始总分（后置校验前，用于展示对比）
-	Dimensions          map[string]Dimension `json:"dimensions"`
-	Summary             string               `json:"summary"`
-	Issues              []AIReviewIssue      `json:"issues"`
-	Recommendations     []string             `json:"recommendations"`
+	SchemaVersion      string               `json:"schema_version"`
+	TotalScore         int                  `json:"total_score"`
+	OriginalTotalScore int                  `json:"original_total_score"` // LLM 原始总分（后置校验前，用于展示对比）
+	Dimensions         map[string]Dimension `json:"dimensions"`
+	Summary            string               `json:"summary"`
+	Issues             []AIReviewIssue      `json:"issues"`
+	Recommendations    []string             `json:"recommendations"`
 
 	// Phase 2 新增扩展字段（omitempty 兼容旧 API）
 	SecurityFindings  []SecurityFinding `json:"security_findings,omitempty"`  // 安全发现独立区域
@@ -21,17 +21,17 @@ type AIReviewResult struct {
 
 // SecurityFinding 安全发现（Agent + LLM 共同确认）
 type SecurityFinding struct {
-	Source      string                 `json:"source"`      // "secret_scan" / "security_audit" / "llm_enhanced"
-	Category    string                 `json:"category"`    // "credential_leak" / "sql_injection" / ...
-	Severity    string                 `json:"severity"`    // critical/high/medium/low/info
-	Confidence  float64                `json:"confidence"`  // 0.0-1.0，LLM 验证后的置信度
+	Source      string                 `json:"source"`     // "secret_scan" / "security_audit" / "llm_enhanced"
+	Category    string                 `json:"category"`   // "credential_leak" / "sql_injection" / ...
+	Severity    string                 `json:"severity"`   // critical/high/medium/low/info
+	Confidence  float64                `json:"confidence"` // 0.0-1.0，LLM 验证后的置信度
 	File        string                 `json:"file"`
 	LineStart   int                    `json:"line_start"`
 	LineEnd     int                    `json:"line_end"`
-	Title       string                 `json:"title"`       // 一句话描述
-	Description string                 `json:"description"` // 详细描述
-	CodeSnippet string                 `json:"code_snippet"` // 相关代码片段
-	Suggestion  string                 `json:"suggestion"`  // 修复建议
+	Title       string                 `json:"title"`                // 一句话描述
+	Description string                 `json:"description"`          // 详细描述
+	CodeSnippet string                 `json:"code_snippet"`         // 相关代码片段
+	Suggestion  string                 `json:"suggestion"`           // 修复建议
 	AgentMeta   map[string]interface{} `json:"agent_meta,omitempty"` // Agent 原始数据
 }
 
@@ -45,21 +45,21 @@ type TestingNote struct {
 
 // TestScenario 单个测试场景（LLM 生成）
 type TestScenario struct {
-	Name       string `json:"name"`       // "测试空用户场景"
-	Input      string `json:"input"`      // "user == nil"
-	Expected   string `json:"expected"`   // "返回 ErrUserNotFound"
-	Reasoning  string `json:"reasoning"`  // "当前实现第45行未处理 nil"
-	Priority   string `json:"priority"`   // "must_have" / "should_have" / "nice_to_have"
+	Name       string `json:"name"`        // "测试空用户场景"
+	Input      string `json:"input"`       // "user == nil"
+	Expected   string `json:"expected"`    // "返回 ErrUserNotFound"
+	Reasoning  string `json:"reasoning"`   // "当前实现第45行未处理 nil"
+	Priority   string `json:"priority"`    // "must_have" / "should_have" / "nice_to_have"
 	LineNumber int    `json:"line_number"` // 对应代码行号
 }
 
 // ImpactNote 变更影响分析（结构化）
 type ImpactNote struct {
-	Type           string   `json:"type"`            // "breaking_change" / "schema_change" / "config_change" / "migration" / "behavior_change"
+	Type           string   `json:"type"` // "breaking_change" / "schema_change" / "config_change" / "migration" / "behavior_change"
 	FilePath       string   `json:"file_path"`
 	SymbolName     string   `json:"symbol_name"`
 	Description    string   `json:"description"`
-	Severity       string   `json:"severity"`        // critical/high/medium/low
+	Severity       string   `json:"severity"` // critical/high/medium/low
 	Suggestion     string   `json:"suggestion"`
 	AffectedFiles  []string `json:"affected_files"`  // 受影响文件列表
 	Compatibility  string   `json:"compatibility"`   // "breaking" / "compatible" / "behavioral"
@@ -68,7 +68,7 @@ type ImpactNote struct {
 
 // DedupEntry 去重操作审计日志（review_arbitration 内部记录）
 type DedupEntry struct {
-	Action    string `json:"action"`         // "merged" / "kept_agent" / "kept_llm"
+	Action    string `json:"action"` // "merged" / "kept_agent" / "kept_llm"
 	AgentFile string `json:"agent_file"`
 	AgentLine int    `json:"agent_line"`
 	AgentMsg  string `json:"agent_message"`
@@ -87,17 +87,17 @@ type Dimension struct {
 // AIReviewIssue 评审发现的 Issue
 // Phase 2 新增 Source 和 AgentMeta 字段，用于标记问题来源（agent/llm/merged）
 type AIReviewIssue struct {
-	RuleCode    string                 `json:"rule_code"`     // 为空字符串表示不属于已知规则
-	Severity    string                 `json:"severity"`      // critical/high/medium/low/info
-	DeductScore int                    `json:"deduct_score"`  // 该 Issue 扣多少分
-	Category    string                 `json:"category"`      // 维度分类
-	File        string                 `json:"file"`          // 文件路径
-	LineStart   int                    `json:"line_start"`    // 起始行号，不确定时为 0
-	LineEnd     int                    `json:"line_end"`      // 结束行号，单行为 0
-	CodeSnippet string                 `json:"code_snippet"`  // 相关代码片段
-	Message     string                 `json:"message"`       // 问题描述
-	Suggestion  string                 `json:"suggestion"`    // 改进建议
-	Source      string                 `json:"source"`        // "agent" / "llm" / "merged" / ""
+	RuleCode    string                 `json:"rule_code"`            // 为空字符串表示不属于已知规则
+	Severity    string                 `json:"severity"`             // critical/high/medium/low/info
+	DeductScore int                    `json:"deduct_score"`         // 该 Issue 扣多少分
+	Category    string                 `json:"category"`             // 维度分类
+	File        string                 `json:"file"`                 // 文件路径
+	LineStart   int                    `json:"line_start"`           // 起始行号，不确定时为 0
+	LineEnd     int                    `json:"line_end"`             // 结束行号，单行为 0
+	CodeSnippet string                 `json:"code_snippet"`         // 相关代码片段
+	Message     string                 `json:"message"`              // 问题描述
+	Suggestion  string                 `json:"suggestion"`           // 改进建议
+	Source      string                 `json:"source"`               // "agent" / "llm" / "merged" / ""
 	AgentMeta   map[string]interface{} `json:"agent_meta,omitempty"` // Agent 原始元数据（仅 source=agent/merged 时存在）
 }
 
@@ -143,19 +143,19 @@ func GetBatchCollectionJSONSchema() interface{} {
 						},
 						"file": map[string]interface{}{
 							"type":        "string",
-							"description": "文件路径",
+							"description": "文件路径（新文件路径）。与具体文件/代码相关的问题必须填写，且须为本次 diff 中的文件；非文件类问题（如 Conventional Commits 提交规范、仓库级/流程类问题）填空字符串 \"\"，不要臆造路径",
 						},
 						"line_start": map[string]interface{}{
 							"type":        "integer",
-							"description": "问题区域在文件中的起始行号（真正触发 bug 的第一行），不确定时填 0",
+							"description": "问题行/区域起始行号（新文件行号）。必须与 code_snippet 标记行一致：单行问题等于 line_end，多行问题为区域首行；不确定时填 0",
 						},
 						"line_end": map[string]interface{}{
 							"type":        "integer",
-							"description": "问题区域在文件中的结束行号。单行问题可等于 line_start 或填 0",
+							"description": "问题行/区域结束行号（新文件行号）。单行问题等于 line_start；多行问题为区域末行",
 						},
 						"code_snippet": map[string]interface{}{
 							"type":        "string",
-							"description": "相关代码片段（含上下文）。必须在问题区域首尾行末尾分别添加 ` <<< 问题区域开始` 和 ` <<< 问题区域结束` 标记；单行问题则添加 ` <<< 问题所在`",
+							"description": "相关代码片段（可含上下文）。单行问题：在问题行行末添加 ` <<< 问题所在`，且 line_start=line_end=该行；多行问题：首行加 ` <<< 问题区域开始`、末行加 ` <<< 问题区域结束`，且 line_start/line_end=区域首/末行。严禁多行区间只标 ` <<< 问题所在`",
 						},
 						"message": map[string]interface{}{
 							"type":        "string",
@@ -252,19 +252,19 @@ func GetReviewJSONSchema(dimensions []string) interface{} {
 						},
 						"file": map[string]interface{}{
 							"type":        "string",
-							"description": "文件路径",
+							"description": "文件路径（新文件路径）。与具体文件/代码相关的问题必须填写，且须为本次 diff 中的文件；非文件类问题（如 Conventional Commits 提交规范、仓库级/流程类问题）填空字符串 \"\"，不要臆造路径",
 						},
 						"line_start": map[string]interface{}{
 							"type":        "integer",
-							"description": "问题区域在文件中的起始行号（真正触发 bug 的第一行），不确定时填 0",
+							"description": "问题行/区域起始行号（新文件行号）。必须与 code_snippet 标记行一致：单行问题等于 line_end，多行问题为区域首行；不确定时填 0",
 						},
 						"line_end": map[string]interface{}{
 							"type":        "integer",
-							"description": "问题区域在文件中的结束行号。单行问题可等于 line_start 或填 0",
+							"description": "问题行/区域结束行号（新文件行号）。单行问题等于 line_start；多行问题为区域末行",
 						},
 						"code_snippet": map[string]interface{}{
 							"type":        "string",
-							"description": "相关代码片段（含上下文）。必须在问题区域首尾行末尾分别添加 ` <<< 问题区域开始` 和 ` <<< 问题区域结束` 标记；单行问题则添加 ` <<< 问题所在`",
+							"description": "相关代码片段（可含上下文）。单行问题：在问题行行末添加 ` <<< 问题所在`，且 line_start=line_end=该行；多行问题：首行加 ` <<< 问题区域开始`、末行加 ` <<< 问题区域结束`，且 line_start/line_end=区域首/末行。严禁多行区间只标 ` <<< 问题所在`",
 						},
 						"message": map[string]interface{}{
 							"type":        "string",
@@ -319,17 +319,17 @@ func GetReviewArbitrationJSONSchema(dimensions []string) interface{} {
 			"additionalProperties": false,
 			"required":             []string{"source", "category", "severity", "file", "line_start", "line_end", "title"},
 			"properties": map[string]interface{}{
-				"source":      map[string]interface{}{"type": "string"},
-				"category":    map[string]interface{}{"type": "string"},
-				"severity":    map[string]interface{}{"type": "string", "enum": []string{"critical", "high", "medium", "low", "info"}},
-				"confidence":  map[string]interface{}{"type": "number", "minimum": 0, "maximum": 1},
-				"file":        map[string]interface{}{"type": "string"},
-				"line_start":  map[string]interface{}{"type": "integer"},
-				"line_end":    map[string]interface{}{"type": "integer"},
-				"title":       map[string]interface{}{"type": "string"},
-				"description": map[string]interface{}{"type": "string"},
+				"source":       map[string]interface{}{"type": "string"},
+				"category":     map[string]interface{}{"type": "string"},
+				"severity":     map[string]interface{}{"type": "string", "enum": []string{"critical", "high", "medium", "low", "info"}},
+				"confidence":   map[string]interface{}{"type": "number", "minimum": 0, "maximum": 1},
+				"file":         map[string]interface{}{"type": "string"},
+				"line_start":   map[string]interface{}{"type": "integer"},
+				"line_end":     map[string]interface{}{"type": "integer"},
+				"title":        map[string]interface{}{"type": "string"},
+				"description":  map[string]interface{}{"type": "string"},
 				"code_snippet": map[string]interface{}{"type": "string"},
-				"suggestion":  map[string]interface{}{"type": "string"},
+				"suggestion":   map[string]interface{}{"type": "string"},
 			},
 		},
 	}
@@ -352,11 +352,11 @@ func GetReviewArbitrationJSONSchema(dimensions []string) interface{} {
 						"additionalProperties": false,
 						"required":             []string{"name", "input", "expected", "reasoning", "priority"},
 						"properties": map[string]interface{}{
-							"name":      map[string]interface{}{"type": "string"},
-							"input":     map[string]interface{}{"type": "string"},
-							"expected":  map[string]interface{}{"type": "string"},
-							"reasoning": map[string]interface{}{"type": "string"},
-							"priority":  map[string]interface{}{"type": "string", "enum": []string{"must_have", "should_have", "nice_to_have"}},
+							"name":        map[string]interface{}{"type": "string"},
+							"input":       map[string]interface{}{"type": "string"},
+							"expected":    map[string]interface{}{"type": "string"},
+							"reasoning":   map[string]interface{}{"type": "string"},
+							"priority":    map[string]interface{}{"type": "string", "enum": []string{"must_have", "should_have", "nice_to_have"}},
 							"line_number": map[string]interface{}{"type": "integer"},
 						},
 					},
@@ -394,14 +394,14 @@ func GetReviewArbitrationJSONSchema(dimensions []string) interface{} {
 			"additionalProperties": false,
 			"required":             []string{"action"},
 			"properties": map[string]interface{}{
-				"action":          map[string]interface{}{"type": "string", "enum": []string{"merged", "kept_agent", "kept_llm"}},
-				"agent_file":      map[string]interface{}{"type": "string"},
-				"agent_line":      map[string]interface{}{"type": "integer"},
-				"agent_message":   map[string]interface{}{"type": "string"},
-				"llm_file":        map[string]interface{}{"type": "string"},
-				"llm_line":        map[string]interface{}{"type": "integer"},
-				"llm_message":     map[string]interface{}{"type": "string"},
-				"reason":          map[string]interface{}{"type": "string"},
+				"action":        map[string]interface{}{"type": "string", "enum": []string{"merged", "kept_agent", "kept_llm"}},
+				"agent_file":    map[string]interface{}{"type": "string"},
+				"agent_line":    map[string]interface{}{"type": "integer"},
+				"agent_message": map[string]interface{}{"type": "string"},
+				"llm_file":      map[string]interface{}{"type": "string"},
+				"llm_line":      map[string]interface{}{"type": "integer"},
+				"llm_message":   map[string]interface{}{"type": "string"},
+				"reason":        map[string]interface{}{"type": "string"},
 			},
 		},
 	}

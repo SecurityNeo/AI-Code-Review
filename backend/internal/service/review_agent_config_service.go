@@ -25,6 +25,18 @@ var validStageCodes = map[string]bool{
 	"batch_review_frame": true, "review_arbitration": true, "post_process": true,
 }
 
+// batchReviewFrameIntRanges batch_review_frame 阶段整数参数的合法范围
+var batchReviewFrameIntRanges = []struct {
+	key      string
+	min, max int
+}{
+	{"parallel_max", 1, 10},
+	{"agentic_max_rounds", 2, 10},
+	{"agentic_max_tools", 3, 15},
+	{"agentic_max_messages", 4, 100},
+	{"agentic_history_token_limit", 1000, 500000},
+}
+
 // 已知触发事件白名单
 var validTriggerEvents = map[string]bool{
 	"merge_request":        true, // 兼容旧配置：包含所有子事件
@@ -209,23 +221,15 @@ func (s *ReviewAgentConfigService) Save(
 				}
 			}
 		}
-		// 校验 batch_review_frame.parallel_max
+		// 校验 batch_review_frame 的整数参数范围
 		if brCfg, ok := stageConfigs["batch_review_frame"].(map[string]interface{}); ok {
-			if pm, ok := brCfg["parallel_max"]; ok {
-				var v int
-				switch val := pm.(type) {
-				case float64:
-					v = int(val)
-				case int:
-					v = val
-				case json.Number:
-					iv, _ := val.Int64()
-					v = int(iv)
-				default:
-					v = -1
+			for _, c := range batchReviewFrameIntRanges {
+				raw, ok := brCfg[c.key]
+				if !ok {
+					continue
 				}
-				if v < 1 || v > 10 {
-					return fmt.Errorf("batch_review_frame.parallel_max 必须在 1-10 之间")
+				if v, ok := toIntValue(raw); !ok || v < c.min || v > c.max {
+					return fmt.Errorf("batch_review_frame.%s 必须在 %d-%d 之间", c.key, c.min, c.max)
 				}
 			}
 		}
@@ -377,4 +381,24 @@ func contains(arr []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// toIntValue 将 JSON 反序列化得到的数值统一转为 int（兼容 float64/int/json.Number/int64）
+func toIntValue(v any) (int, bool) {
+	switch val := v.(type) {
+	case float64:
+		return int(val), true
+	case int:
+		return val, true
+	case int64:
+		return int(val), true
+	case json.Number:
+		iv, err := val.Int64()
+		if err != nil {
+			return 0, false
+		}
+		return int(iv), true
+	default:
+		return 0, false
+	}
 }

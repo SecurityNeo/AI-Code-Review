@@ -11,6 +11,7 @@ import (
 
 	"github.com/ai-optimizer/backend/internal/engine"
 	"github.com/ai-optimizer/backend/internal/model"
+	"github.com/ai-optimizer/backend/pkg/diff"
 	"github.com/ai-optimizer/backend/pkg/llm"
 	"go.uber.org/zap"
 )
@@ -153,8 +154,8 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 		promptSnap = promptSnap[:maxPromptSnapLen] + "\n\n[... Prompt truncated, total length: " + fmt.Sprintf("%d chars]", len(userPrompt))
 	}
 	inputSnapshot := map[string]interface{}{
-		"prompt":         promptSnap,
-		"system_prompt":  systemPrompt,
+		"prompt":        promptSnap,
+		"system_prompt": systemPrompt,
 		"agent_findings": map[string]int{
 			"secret_scan":        len(agentData.SecretScan),
 			"security_audit":     len(agentData.SecurityAudit),
@@ -172,6 +173,15 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 	result, rawLLMOutput, fallbackReason, err := e.arbitrate(ctx, promptCtx, systemPrompt, userPrompt, responseFormat, deductCfg)
 	if err != nil {
 		return fmt.Errorf("评审裁决失败: %w", err)
+	}
+
+	// 7.1 兜底：回填模型漏填的 file（仅"文件类"问题，且需能在输入中找到匹配；提交规范等非文件类保持为空）
+	fileRecovered := recoverMissingFiles(result.Issues, batchResults)
+	if fileRecovered > 0 {
+		zap.L().Info("review_arbitration: recovered missing file field",
+			zap.Uint("task_id", ctx.Task().ID),
+			zap.Int("recovered", fileRecovered),
+			zap.Int("total_issues", len(result.Issues)))
 	}
 
 	// 8. 保存输出快照
@@ -193,6 +203,10 @@ func (e *ReviewArbitrationExecutor) Execute(ctx StageContext) error {
 		"input_tokens":            getIntFromCtxOutput(ctx, "input_tokens"),
 		"output_tokens":           getIntFromCtxOutput(ctx, "output_tokens"),
 		"llm_fallback_reason":     fallbackReason,
+		// 问题守恒观测：input>0 且 output==0 即疑似吞没（即使因降级被恢复也应便于监控）
+		"input_issue_count":    countTotalIssues(batchResults),
+		"output_issue_count":   len(result.Issues),
+		"file_recovered_count": fileRecovered,
 	}
 	ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, outputSnapshot)
 
@@ -299,8 +313,15 @@ func (e *ReviewArbitrationExecutor) callLLMWithStructuredPrompt(
 		return nil, result.Content, fmt.Errorf("LLM 裁决结果解析失败: %w", err)
 	}
 
-	// 【P1】一致性校验：LLM 输出必须与输入数据一致，防止编造/幻觉
+	// 【P1】一致性校验：LLM 输出必须与输入数据一致，防止编造/幻觉/吞没
 	if err := verifyLLMOutput(parsedResult, promptCtx); err != nil {
+		zap.L().Error("review_arbitration 一致性校验失败，降级本地去重",
+			zap.Uint("task_id", task.ID),
+			zap.Int("input_batch_issues", countTotalIssues(promptCtx.BatchReviewResults)),
+			zap.Int("input_agent_security", len(promptCtx.SecretScanFindings)+len(promptCtx.SecurityAuditFindings)),
+			zap.Int("output_issues", len(parsedResult.Issues)),
+			zap.Int("output_security_findings", len(parsedResult.SecurityFindings)),
+			zap.Error(err))
 		return nil, result.Content, fmt.Errorf("LLM 输出未通过一致性校验: %w", err)
 	}
 
@@ -658,6 +679,21 @@ func verifyLLMOutput(result *llm.AIReviewResult, promptCtx *engine.PromptContext
 		return fmt.Errorf("LLM 在输入为空的情况下生成了 %d 条 issue，疑似捏造", len(result.Issues))
 	}
 
+	// Rule 5: 输入存在 AI 批次评审问题，但裁决输出 issues 为空 —— 判定为“吞没”。
+	// 拒绝该结果并触发上层降级到本地去重（Layer 2），确保上游问题不被静默丢弃。
+	// 注意：TestSuggestion / ImpactAnalysis 走独立数组，不计入此判定。
+	// 日志由调用点统一记录（携带 task_id），此处仅返回错误，避免重复告警。
+	if inCnt := countTotalIssues(promptCtx.BatchReviewResults); inCnt > 0 && len(result.Issues) == 0 {
+		return fmt.Errorf("输入含 %d 条 AI 批次评审问题，但裁决输出 issues 为空，疑似问题被吞没", inCnt)
+	}
+
+	// Rule 5b: 输入存在 Agent 安全发现（密钥/安全审计），但输出未见任何承载
+	// （既不在 Issues[]，也不在 SecurityFindings[]）。
+	if agentCnt := len(promptCtx.SecretScanFindings) + len(promptCtx.SecurityAuditFindings); agentCnt > 0 &&
+		len(result.Issues)+len(result.SecurityFindings) == 0 {
+		return fmt.Errorf("输入含 %d 条 Agent 安全发现，但裁决输出未见任何承载，疑似被吞没", agentCnt)
+	}
+
 	// Rule 2: 绑定到具体文件的 issue，其文件路径必须存在于 diff 列表中
 	// 【修复】file=="" 的 issue（如 Commit 规范、总体建议等非文件类问题）是合法的，不应触发校验失败
 	allowedFiles := extractDiffFilePaths(promptCtx)
@@ -800,4 +836,97 @@ func isDependencyManifestFile(file string) bool {
 		}
 	}
 	return false
+}
+
+// recoverMissingFiles 为 file 为空但可定位的 issue 回填文件路径（兜底模型漏填字段）。
+// 仅回填"文件类"问题，判定依据（满足其一）：
+//  1. code_snippet 归一化后能在输入批次 issues 中找到相同/包含的片段；
+//  2. rule_code + message 与输入批次中的某条 issue 完全一致。
+//
+// 非文件类问题（如 Conventional Commits 提交规范，通常 code_snippet 为空/无文件定位）保持为空。
+func recoverMissingFiles(issues []llm.AIReviewIssue, batchResults []*llm.BatchReviewResult) int {
+	type cand struct {
+		file, rule, msg, norm string
+	}
+	var cands []cand
+	for _, br := range batchResults {
+		if br == nil {
+			continue
+		}
+		for _, in := range br.Issues {
+			if strings.TrimSpace(in.File) == "" {
+				continue
+			}
+			cands = append(cands, cand{
+				file: in.File,
+				rule: in.RuleCode,
+				msg:  in.Message,
+				norm: normalizeSnippetForMatch(in.CodeSnippet),
+			})
+		}
+	}
+	if len(cands) == 0 {
+		return 0
+	}
+
+	recovered := 0
+	for i := range issues {
+		if strings.TrimSpace(issues[i].File) != "" {
+			continue
+		}
+		outNorm := normalizeSnippetForMatch(issues[i].CodeSnippet)
+
+		// 1) 片段匹配（要求足够长，避免误匹配）
+		if len(outNorm) >= 20 {
+			for _, c := range cands {
+				if c.norm == "" {
+					continue
+				}
+				if c.norm == outNorm ||
+					(len(c.norm) >= 20 && strings.Contains(c.norm, outNorm)) ||
+					(len(outNorm) >= 20 && strings.Contains(outNorm, c.norm)) {
+					issues[i].File = c.file
+					recovered++
+					break
+				}
+			}
+			if issues[i].File != "" {
+				continue
+			}
+		}
+
+		// 2) rule_code + message 精确匹配
+		if issues[i].RuleCode != "" && issues[i].Message != "" {
+			for _, c := range cands {
+				if c.rule == issues[i].RuleCode && c.msg == issues[i].Message {
+					issues[i].File = c.file
+					recovered++
+					break
+				}
+			}
+		}
+	}
+	return recovered
+}
+
+// normalizeSnippetForMatch 归一化 snippet 用于匹配：去行号注解、去 <<< 标记、去所有空白
+func normalizeSnippetForMatch(s string) string {
+	if s == "" {
+		return ""
+	}
+	s = diff.StripLineAnnotations(s)
+	s = strings.NewReplacer(
+		diff.MarkerRegionStart, "",
+		diff.MarkerRegionEnd, "",
+		diff.MarkerProblem, "",
+	).Replace(s)
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case ' ', '\t', '\n', '\r':
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }

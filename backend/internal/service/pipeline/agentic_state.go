@@ -19,6 +19,8 @@ type AgenticReviewState struct {
 	Messages               []llm.Message
 	CurrentRound           int
 	MaxRounds              int
+	MaxMessages            int // 消息条数软上限，超过则强制最终轮
+	HistoryTokenLimit      int // 历史消息累积 token 超此值触发截断
 	ToolCallsLeft          int
 	ForceFinalRound        bool
 	ContentFilterTries     int
@@ -137,13 +139,13 @@ func (e *BatchReviewFrameExecutor) executeAgenticReview(
 						errCh <- fmt.Errorf("wave %d, batch %d Agentic fallback 也失败: %w", waveIdx+1, batchIdx+1, fbErr)
 						return
 					}
-				result = fbResult
-				inTk = fbInTk
-				outTk = fbOutTk
-				mu.Lock()
-				hasFallback = true
-				mu.Unlock()
-				// 【更新 agentic_batch 快照】标记 fallback 信息，前端可据此展示切换原因
+					result = fbResult
+					inTk = fbInTk
+					outTk = fbOutTk
+					mu.Lock()
+					hasFallback = true
+					mu.Unlock()
+					// 【更新 agentic_batch 快照】标记 fallback 信息，前端可据此展示切换原因
 					if agenticExecID > 0 {
 						ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: agenticExecID}, map[string]interface{}{
 							"agentic_mode":    true,
@@ -219,6 +221,8 @@ func (e *BatchReviewFrameExecutor) executeAgenticBatch(
 			{Role: "user", Content: initialPrompt.UserPrompt},
 		},
 		MaxRounds:          getAgenticMaxRounds(ctx),
+		MaxMessages:        getAgenticMaxMessages(ctx),
+		HistoryTokenLimit:  getAgenticHistoryTokenLimit(ctx),
 		ToolCallsLeft:      getAgenticMaxTools(ctx),
 		ToolExecutor:       NewToolExecutor(codeReport, batchDiffs),
 		Rounds:             []AgenticRoundMetrics{},
@@ -231,21 +235,23 @@ func (e *BatchReviewFrameExecutor) executeAgenticBatch(
 	for state.CurrentRound < state.MaxRounds {
 		state.CurrentRound++
 
-		// 历史截断：当消息累积过长时，保留最近对话
-		if estimatedTokens(state.Messages) > 80000 {
+		// 历史截断：当消息累积过长时，保留最近对话（阈值可配，默认 80000）
+		if state.HistoryTokenLimit > 0 && estimatedTokens(state.Messages) > state.HistoryTokenLimit {
 			state.Messages = truncateHistory(state.Messages)
 			zap.L().Info("agentic history truncated",
 				zap.Uint("task_id", task.ID),
-				zap.Int("round", state.CurrentRound))
+				zap.Int("round", state.CurrentRound),
+				zap.Int("history_token_limit", state.HistoryTokenLimit))
 		}
 
-		// 消息条数控制：超过 10 条（约 5 轮 LLM + 5 轮 tool）强制最终轮
+		// 消息条数控制：超过软上限（可配，缺省 = max_tools + 4）强制最终轮
 		// 避免消息历史无限膨胀导致模型 confused
-		if !state.ForceFinalRound && len(state.Messages) > 10 {
+		if !state.ForceFinalRound && state.MaxMessages > 0 && len(state.Messages) > state.MaxMessages {
 			zap.L().Warn("agentic message count exceeded, forcing final round",
 				zap.Uint("task_id", task.ID),
 				zap.Int("round", state.CurrentRound),
-				zap.Int("message_count", len(state.Messages)))
+				zap.Int("message_count", len(state.Messages)),
+				zap.Int("max_messages", state.MaxMessages))
 			state.ForceFinalRound = true
 		}
 
@@ -846,14 +852,16 @@ func (e *BatchReviewFrameExecutor) parseAgenticResultWithRetry(
 		return nil, fmt.Errorf("parse agentic result failed and retry also failed: %w (original: %v)", retryErr, err)
 	}
 
-	// 重试成功，追加一轮metrics
+	// 重试成功，追加一轮metrics。
+	// 使用独立 role（llm_retry）避免与同轮原始 llm_call 冲突（否则前端按 round_index 分组时
+	// 后者会覆盖前者，导致展示的是被截断的重试预览）；同时保存完整内容，保证详情展示完整。
 	state.Rounds = append(state.Rounds, AgenticRoundMetrics{
 		RoundIndex:     state.CurrentRound,
-		Role:           "llm_call",
+		Role:           "llm_retry",
 		InputTokens:    llmResp.InputTokens,
 		OutputTokens:   llmResp.OutputTokens,
 		FinishReason:   llmResp.FinishReason,
-		ContentPreview: truncateString(llmResp.Content, 500),
+		ContentPreview: llmResp.Content,
 	})
 
 	return e.parseAgenticResult(ctx, exec, state, llmResp.Content, detail, totalBatches, deductCfg, task, result)
@@ -951,10 +959,12 @@ func countToolCalls(rounds []AgenticRoundMetrics) int {
 }
 
 func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	// 按 rune 截断，避免在多字节（中文）字符中间截断导致乱码
+	r := []rune(s)
+	if len(r) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	return string(r[:maxLen]) + "..."
 }
 
 func calculateMaxTokens(modelID uint) int {

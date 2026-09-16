@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ai-optimizer/backend/internal/model"
+	"github.com/ai-optimizer/backend/pkg/diff"
 	"github.com/ai-optimizer/backend/pkg/llm"
 	"go.uber.org/zap"
 )
@@ -153,11 +154,12 @@ func postParse(result *llm.AIReviewResult, deductCfg DeductScoreConfig) (*llm.AI
 	if result.Recommendations == nil {
 		result.Recommendations = []string{}
 	}
-	// 补充 deduct_score，未返回时按模版配置计算
+	// 补充 deduct_score，未返回时按模版配置计算；并清洗 code_snippet 中的行号注解
 	for i := range result.Issues {
 		if result.Issues[i].DeductScore <= 0 {
 			result.Issues[i].DeductScore = deductCfg.DeductScoreFor(result.Issues[i].Severity)
 		}
+		result.Issues[i].CodeSnippet = diff.StripLineAnnotations(result.Issues[i].CodeSnippet)
 	}
 	// 非阻塞校验：权重之和
 	if err := ValidateResult(result); err != nil {
@@ -364,11 +366,12 @@ func ParseBatchReviewResult(content string, deductCfg DeductScoreConfig) (*llm.B
 	if result.Recommendations == nil {
 		result.Recommendations = []string{}
 	}
-	// 补充 deduct_score
+	// 补充 deduct_score；并清洗 code_snippet 中的行号注解
 	for i := range result.Issues {
 		if result.Issues[i].DeductScore <= 0 {
 			result.Issues[i].DeductScore = deductCfg.DeductScoreFor(result.Issues[i].Severity)
 		}
+		result.Issues[i].CodeSnippet = diff.StripLineAnnotations(result.Issues[i].CodeSnippet)
 	}
 	return &result, nil
 }
@@ -421,8 +424,8 @@ func BuildDimensionWeights(jsonStr string, rules []model.ReviewRule) map[string]
 
 // ParseDimensionWeights 解析模板维度权重 JSON
 // 兼容两种格式：
-//   1. 简单格式（前端当前使用）：{"security":30, "code_quality":25}
-//   2. 对象格式（历史/内部）：{"security":{"weight":30,"label":"安全性"}}
+//  1. 简单格式（前端当前使用）：{"security":30, "code_quality":25}
+//  2. 对象格式（历史/内部）：{"security":{"weight":30,"label":"安全性"}}
 func ParseDimensionWeights(jsonStr string) (map[string]DimensionWeight, error) {
 	if jsonStr == "" || jsonStr == "{}" {
 		return DefaultDimensionWeights(), nil

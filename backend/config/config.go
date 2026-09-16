@@ -53,13 +53,13 @@ type Config struct {
 
 // DiffLineMapConfig diff 行号映射系统配置
 type DiffLineMapConfig struct {
-	Enabled              bool    `yaml:"enabled"`                // 是否启用系统
-	InjectLineNumbers    bool    `yaml:"inject_line_numbers"`    // 是否注入 [new|old] 行号前缀
-	UseCorrelator        bool    `yaml:"use_correlator"`         // 是否启用后端校正
-	StoreDiffRefs        bool    `yaml:"store_diff_refs"`        // 是否存储 diff_refs
-	GrayPercent          int     `yaml:"gray_percent"`           // 灰度百分比 0-100（0=关闭灰度，仅总开关控制；>0 时只有命中灰度的任务才启用）
-	GrayMode             string  `yaml:"gray_mode"`              // 灰度模式："random" 或 "project_hash"
-	MinFuzzyConfidence   float64 `yaml:"min_fuzzy_confidence"`   // fuzzy 匹配的最小置信度阈值（0.0-1.0），低于此值视为不匹配。默认值 0.3
+	Enabled            bool    `yaml:"enabled"`              // 是否启用系统
+	InjectLineNumbers  bool    `yaml:"inject_line_numbers"`  // 是否注入 [new|old] 行号前缀
+	UseCorrelator      bool    `yaml:"use_correlator"`       // 是否启用后端校正
+	StoreDiffRefs      bool    `yaml:"store_diff_refs"`      // 是否存储 diff_refs
+	GrayPercent        int     `yaml:"gray_percent"`         // 灰度百分比 0-100（0=关闭灰度，仅总开关控制；>0 时只有命中灰度的任务才启用）
+	GrayMode           string  `yaml:"gray_mode"`            // 灰度模式："random" 或 "project_hash"
+	MinFuzzyConfidence float64 `yaml:"min_fuzzy_confidence"` // fuzzy 匹配的最小置信度阈值（0.0-1.0），低于此值视为不匹配。默认值 0.5（块匹配为主，fuzzy 仅作兜底）
 }
 
 // Validate 检查配置一致性，返回发现的警告信息
@@ -168,7 +168,7 @@ func Load() *Config {
 			StoreDiffRefs:      getEnvBool("DIFF_LINE_MAP_STORE_DIFF_REFS", true),
 			GrayPercent:        getEnvInt("DIFF_LINE_MAP_GRAY_PERCENT", 0),
 			GrayMode:           getEnv("DIFF_LINE_MAP_GRAY_MODE", "project_hash"),
-			MinFuzzyConfidence: getEnvFloat64("DIFF_LINE_MAP_MIN_FUZZY_CONF", 0.3),
+			MinFuzzyConfidence: getEnvFloat64("DIFF_LINE_MAP_MIN_FUZZY_CONF", 0.5),
 		},
 
 		// 多租户改造：Feature Flag（默认 Layer 0 = 全局关闭）

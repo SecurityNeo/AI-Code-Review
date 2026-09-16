@@ -6,33 +6,34 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/ai-optimizer/backend/pkg/diff"
 	"github.com/ai-optimizer/backend/pkg/llm"
 )
 
 // CommentTemplateContext GitLab 评论模板上下文
 type CommentTemplateContext struct {
-	TaskID               uint
-	ProjectName          string
-	MRTitle              string
-	MRAuthor             string
-	TotalScore           int
-	Summary              string
-	DimensionsTable      string // 预渲染 Markdown 表格
-	Dimensions           []DimensionContext
-	IssuesList           string // 预渲染 Markdown 列表
-	Issues               []IssueContext
-	IssueCount           int
-	CriticalCount        int
-	HighCount            int
-	MediumCount          int
-	LowCount             int
-	InfoCount            int
-	Recommendations      []string
-	RecommendationsList  string // 预渲染
-	DependencyVulns      []DependencyVulnContext
-	DependencyVulnsList  string // 预渲染 Markdown 列表
-	HasDependencyVulns   bool
-	BR                   string // 换行
+	TaskID              uint
+	ProjectName         string
+	MRTitle             string
+	MRAuthor            string
+	TotalScore          int
+	Summary             string
+	DimensionsTable     string // 预渲染 Markdown 表格
+	Dimensions          []DimensionContext
+	IssuesList          string // 预渲染 Markdown 列表
+	Issues              []IssueContext
+	IssueCount          int
+	CriticalCount       int
+	HighCount           int
+	MediumCount         int
+	LowCount            int
+	InfoCount           int
+	Recommendations     []string
+	RecommendationsList string // 预渲染
+	DependencyVulns     []DependencyVulnContext
+	DependencyVulnsList string // 预渲染 Markdown 列表
+	HasDependencyVulns  bool
+	BR                  string // 换行
 }
 
 // DependencyVulnContext 依赖漏洞上下文
@@ -40,7 +41,7 @@ type DependencyVulnContext struct {
 	PackageName    string
 	CurrentVersion string
 	VulnID         string
-	Aliases        string                     // CVE-XXXX-XXXX, GHSA-XXXX (逗号分隔)
+	Aliases        string // CVE-XXXX-XXXX, GHSA-XXXX (逗号分隔)
 	Severity       string
 	SeverityLabel  string
 	SeverityEmoji  string
@@ -483,16 +484,21 @@ func AssembleFullMarkdownReport(
 	return sb.String(), nil
 }
 
-// stripSnippetMarkers 清理代码片段中的问题区域标注标记
-// 避免 ` <<< 问题区域开始` 等标记出现在 Markdown 报告中
+// stripSnippetMarkers 清理代码片段中的展示噪声：
+//   - 问题区域标注标记（` <<< 问题区域开始` 等）
+//   - [newN|oldM] 行号注解（兼容历史脏数据）
+//
+// 避免这些内容出现在 Markdown 报告中。
 func stripSnippetMarkers(snippet string) string {
 	if snippet == "" {
 		return ""
 	}
+	// 先去掉行号注解（含被抄入的 diff 前缀），再去掉 <<< 标记
+	snippet = diff.StripLineAnnotations(snippet)
 	replacements := []string{
-		" <<< 问题区域开始",
-		" <<< 问题区域结束",
-		" <<< 问题所在",
+		diff.MarkerRegionStart,
+		diff.MarkerRegionEnd,
+		diff.MarkerProblem,
 	}
 	for _, r := range replacements {
 		snippet = strings.ReplaceAll(snippet, r, "")
