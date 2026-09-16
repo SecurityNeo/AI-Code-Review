@@ -107,6 +107,11 @@ type BatchReviewResult struct {
 	BatchNotes      string          `json:"batch_notes"`
 	Issues          []AIReviewIssue `json:"issues"`
 	Recommendations []string        `json:"recommendations"`
+	// 以下字段仅 Agentic 提交使用（标准分批不产出，omitempty 保证不污染标准路径的序列化）
+	// Completion 完成声明：complete=已给出结论（可结束）；need_more_analysis=仍需继续分析（不得作为最终结果）
+	Completion string `json:"completion,omitempty"`
+	// NoIssueReason 当 issues 为空且 completion=complete 时必填，说明"已核实确无问题"的依据
+	NoIssueReason string `json:"no_issue_reason,omitempty"`
 }
 
 // GetBatchCollectionJSONSchema 返回分批评审收集模式的 JSON Schema
@@ -177,6 +182,34 @@ func GetBatchCollectionJSONSchema() interface{} {
 			},
 		},
 	}
+}
+
+// GetAgenticSubmitReviewJSONSchema 返回 Agentic「submit_review / 最终轮 / 解析重试」专用 Schema。
+// 在分批评审 Schema 基础上，额外要求显式完成声明（completion）与无问题依据（no_issue_reason），
+// 以便用确定性规则判定"评审是否真正完成"。标准分批仍使用 GetBatchCollectionJSONSchema（不受影响）。
+func GetAgenticSubmitReviewJSONSchema() interface{} {
+	base, ok := GetBatchCollectionJSONSchema().(map[string]interface{})
+	if !ok {
+		return GetBatchCollectionJSONSchema()
+	}
+	base["required"] = []string{"batch_notes", "issues", "recommendations", "completion"}
+	props, _ := base["properties"].(map[string]interface{})
+	if props != nil {
+		props["batch_notes"] = map[string]interface{}{
+			"type":        "string",
+			"description": "对这批代码变更的简要评审摘要（50字以内）。必须是结论性摘要，禁止写“我再核实/继续查看”之类未完成表述",
+		}
+		props["completion"] = map[string]interface{}{
+			"type":        "string",
+			"description": "完成声明。complete=已给出结论（可结束本批次评审）；need_more_analysis=仍需继续分析（不得作为最终结果）",
+			"enum":        []string{"complete", "need_more_analysis"},
+		}
+		props["no_issue_reason"] = map[string]interface{}{
+			"type":        "string",
+			"description": "当 issues 为空且 completion=complete 时必填：说明已核实本次变更无问题的依据。issues 非空时填空字符串 \"\"",
+		}
+	}
+	return base
 }
 
 // GetReviewJSONSchema 返回动态 JSON Schema（根据模板实际维度生成）
