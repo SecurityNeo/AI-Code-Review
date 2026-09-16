@@ -302,7 +302,7 @@ func (e *Engine) ExecuteTask(taskID uint, inputs map[string]interface{}, broadca
 		stageCtx.batchFiles = ctx.batchFiles
 		// 传递取消信号，确保各阶段能感知 Abort
 		if ch, ok := ctx.inputData["_cancel_ch"].(chan struct{}); ok {
-			stageCtx.cancelCh = ch
+			stageCtx.SetInput("_cancel_ch", ch)
 		}
 
 		ctx.MarkRunning(exec)

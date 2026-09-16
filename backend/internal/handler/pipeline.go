@@ -378,6 +378,9 @@ func buildStageResponse(exec model.TaskPipelineExecution) gin.H {
 	if strings.HasPrefix(exec.StageCode, "batch_review_") {
 		idx := strings.TrimPrefix(exec.StageCode, "batch_review_")
 		resp["name"] = "批次 " + idx
+	} else if strings.HasPrefix(exec.StageCode, "agentic_batch_") {
+		idx := strings.TrimPrefix(exec.StageCode, "agentic_batch_")
+		resp["name"] = "Agentic 批次 " + idx
 	}
 
 			// 解析 output_snapshot（供 Pipeline 概览使用，如 batch_plan 阶段的 batch_count）

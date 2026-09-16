@@ -160,6 +160,26 @@ type GitLabUserBinding struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
+// CollectOrgSubtreeIDs 返回以 rootID 为根的子树全部组织 ID（含自身）。
+// 使用 MySQL 8.0 递归 CTE；rootID 为 0 时返回 nil。
+// 若 rootID 对应的组织不存在，返回空切片，调用方应据此返回空结果集。
+func CollectOrgSubtreeIDs(rootID uint) ([]uint, error) {
+	if rootID == 0 {
+		return nil, nil
+	}
+	var ids []uint
+	if err := DB.Raw(`
+		WITH RECURSIVE org_tree AS (
+			SELECT id FROM organizations WHERE id = ?
+			UNION ALL
+			SELECT o.id FROM organizations o JOIN org_tree ot ON o.parent_id = ot.id
+		) SELECT id FROM org_tree
+	`, rootID).Scan(&ids).Error; err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 // BatchOrgNames 根据组织 ID 列表批量查询组织名称，返回 id→name 映射
 func BatchOrgNames(orgIDs []uint) map[uint]string {
 	result := make(map[uint]string)

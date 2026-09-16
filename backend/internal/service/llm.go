@@ -100,16 +100,16 @@ func (e *ChainError) Unwrap() error {
 // sysCfgCache 缓存 SystemConfig，避免每次 LLM 调用都查询数据库。
 // 使用 atomic.Value 提供 lock-free 读；写由后台 goroutine + TTL 触发。
 type sysCfgCacheEntry struct {
-	taskTimeoutMin          int
-	llmRetryMaxAttempts     int
-	llmRetryInitialDelayMs  int
-	llmRetryBackoffMult     float64
-	llmRetryMaxDelayMs      int
-	fetchedAt               time.Time
+	taskTimeoutMin         int
+	llmRetryMaxAttempts    int
+	llmRetryInitialDelayMs int
+	llmRetryBackoffMult    float64
+	llmRetryMaxDelayMs     int
+	fetchedAt              time.Time
 }
 
 var (
-	sysCfgCache     atomic.Pointer[sysCfgCacheEntry]
+	sysCfgCache atomic.Pointer[sysCfgCacheEntry]
 	// sysCfgCacheTTL 必须大于 cron 刷新周期，否则 cache 长时间处于"已过期"状态，
 	// loadSysCfgCached 返回 nil，callLLMAPI 会回退到 llmModel.TimeoutSec 默认值（120s），
 	// 导致系统配置 task_timeout_min 不生效。
@@ -476,7 +476,7 @@ func (s *LLMService) callLLMAPI(ctx context.Context, taskID *uint, llmModel *mod
 // 当前覆盖 502/503/504（nginx/上游网关层瞬时不可用）；4xx 一律不重试（业务错误）。
 func isRetryableHTTPStatus(code int) bool {
 	switch code {
-	case http.StatusBadGateway,        // 502
+	case http.StatusBadGateway, // 502
 		http.StatusServiceUnavailable, // 503
 		http.StatusGatewayTimeout:     // 504
 		return true
@@ -628,10 +628,11 @@ func SysCfgLLMRetryMaxDelayMs() int {
 // calcCostCents 根据模型价格计算成本（单位：分）。
 // 价格 0 表示未配置，不计入成本；返回 0 而非错误。
 // 公式：input_cost = input_tokens / 1e6 * input_price * 100 (USD→cents)
-//       cached_cost = cached_tokens / 1e6 * cached_price * 100
-//       output_cost = completion_tokens / 1e6 * output_price * 100
-//       total_cents = input_cost + output_cost - input_cost（cached 部分）+ cached_cost
-//       即：把缓存命中部分按 cached_price 单独计费，避免重复计算 input。
+//
+//	cached_cost = cached_tokens / 1e6 * cached_price * 100
+//	output_cost = completion_tokens / 1e6 * output_price * 100
+//	total_cents = input_cost + output_cost - input_cost（cached 部分）+ cached_cost
+//	即：把缓存命中部分按 cached_price 单独计费，避免重复计算 input。
 func calcCostCents(m *model.LLMModel, promptTokens, completionTokens, cachedTokens int) int64 {
 	if m == nil {
 		return 0
@@ -753,6 +754,446 @@ func (s *LLMService) ChatCompletionStructured(ctx context.Context, taskID *uint,
 		InputTokens:  resp.Usage.PromptTokens,
 		OutputTokens: resp.Usage.CompletionTokens,
 		Response:     resp,
+	}, nil
+}
+
+// ChatWithToolCalls 支持工具调用的 LLM 对话
+// 直接调用指定模型，不走主备链；支持重试和 Anthropic 适配。
+func (s *LLMService) ChatWithToolCalls(ctx context.Context, req llm.ToolChatRequest) (*llm.ToolChatResponse, error) {
+	if req.ModelID == 0 {
+		return nil, errors.New("ChatWithToolCalls: modelID is required")
+	}
+
+	var m model.LLMModel
+	db := model.DB
+	if req.TaskID != nil && *req.TaskID > 0 {
+		var t model.Task
+		if err := model.DB.Select("org_id").First(&t, *req.TaskID).Error; err == nil {
+			db = db.Where("org_id = ?", t.OrgID)
+		}
+	}
+	if err := db.First(&m, req.ModelID).Error; err != nil {
+		return nil, fmt.Errorf("ChatWithToolCalls: model not found: %w", err)
+	}
+	if m.Status != "active" {
+		return nil, fmt.Errorf("ChatWithToolCalls: model[%s] status=%s", m.ModelID, m.Status)
+	}
+
+	start := time.Now()
+	caller := req.Caller
+	if caller == "" {
+		caller = CallStatusUnknown
+	}
+
+	// defer 记录 Token 用量
+	var respResult *llm.ToolChatResponse
+	var retErr error
+	defer func() {
+		duration := time.Since(start)
+		record := llmcall.RecordRequest{
+			TaskID:     req.TaskID,
+			ModelID:    &m.ID,
+			Provider:   m.Provider,
+			ModelName:  m.ModelID,
+			CallType:   model.CallTypeScore,
+			Caller:     caller,
+			DurationMs: int(duration.Milliseconds()),
+		}
+		if req.TaskID != nil && *req.TaskID > 0 {
+			var t model.Task
+			if err := model.DB.Select("org_id").First(&t, *req.TaskID).Error; err == nil {
+				record.OrgID = t.OrgID
+			}
+		}
+		if retErr != nil {
+			record.Status = CallStatusFailed
+			record.ErrorMsg = sanitizeForLog(retErr.Error())
+		} else if respResult != nil {
+			record.Status = CallStatusSuccess
+			record.PromptTokens = respResult.InputTokens
+			record.CompletionTokens = respResult.OutputTokens
+			record.TotalTokens = respResult.InputTokens + respResult.OutputTokens
+			record.CostCents = calcCostCents(&m, respResult.InputTokens, respResult.OutputTokens, 0)
+		} else {
+			record.Status = CallStatusUnknown
+		}
+		llmcall.Record(record)
+	}()
+
+	// 重试配置（防御：maxAttempts 至少为 1）
+	maxAttempts := SysCfgLLMRetryMaxAttempts()
+	if maxAttempts <= 0 {
+		maxAttempts = 1
+	}
+	initialDelayMs := SysCfgLLMRetryInitialDelayMs()
+	backoffMult := SysCfgLLMRetryBackoffMultiplier()
+	maxDelayMs := SysCfgLLMRetryMaxDelayMs()
+	delay := initialDelayMs
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			zap.L().Warn("retrying ChatWithToolCalls after transient error",
+				zap.Uint("model_id", m.ID),
+				zap.String("model", m.ModelID),
+				zap.Int("attempt", attempt),
+				zap.Int("max_attempts", maxAttempts),
+				zap.Int("delay_ms", delay),
+				zap.Error(lastErr))
+			select {
+			case <-ctx.Done():
+				retErr = fmt.Errorf("ChatWithToolCalls 调用被取消: %w", ctx.Err())
+				return nil, retErr
+			case <-time.After(time.Duration(delay) * time.Millisecond):
+				delay = int(float64(delay) * backoffMult)
+				if delay > maxDelayMs {
+					delay = maxDelayMs
+				}
+			}
+		}
+
+		var attemptResult *llm.ToolChatResponse
+		attemptResult, lastErr = s.chatWithToolCallsOnce(ctx, req, &m)
+		if lastErr == nil {
+			// 空 content 防御（reasoning-only 场景）
+			if strings.TrimSpace(attemptResult.Content) == "" && len(attemptResult.ToolCalls) == 0 {
+				lastErr = fmt.Errorf("LLM returned empty content and no tool calls (finish_reason=%s, output_tokens=%d)", attemptResult.FinishReason, attemptResult.OutputTokens)
+				respResult = attemptResult // 保留最后一次响应用于日志
+				// 【Agentic 模式优化】empty content 通常是模型 confused（非临时错误），
+				// 特别是超长上下文场景下。对 Agentic 调用（caller以 agentic_ 开头）不重试，
+				// 直接返回错误，由调用方决定 fallback 策略。
+				if strings.HasPrefix(req.Caller, "agentic_") {
+					retErr = lastErr
+					return nil, retErr
+				}
+				continue
+			}
+			respResult = attemptResult
+			return respResult, nil
+		}
+		// 区分可重试错误和不可重试错误
+		if isRetryableError(lastErr) {
+			continue
+		}
+		retErr = lastErr
+		return nil, retErr
+	}
+
+	retErr = lastErr
+	return nil, retErr
+}
+
+// isRetryableError 判断 ChatWithToolCalls 的错误是否可重试
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	// 网络层错误
+	if strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "temporary failure") ||
+		strings.Contains(msg, "empty choices") {
+		return true
+	}
+	// HTTP 429/502/503/504
+	if strings.Contains(msg, "status=429") ||
+		strings.Contains(msg, "status=502") ||
+		strings.Contains(msg, "status=503") ||
+		strings.Contains(msg, "status=504") {
+		return true
+	}
+	return false
+}
+
+// chatWithToolCallsOnce 单次工具调用 LLM 请求
+func (s *LLMService) chatWithToolCallsOnce(ctx context.Context, req llm.ToolChatRequest, m *model.LLMModel) (*llm.ToolChatResponse, error) {
+	provider := llm.Provider(m.Provider)
+
+	switch provider {
+	case llm.ProviderAnthropic:
+		return s.chatWithToolCallsAnthropic(ctx, req, m)
+	default:
+		return s.chatWithToolCallsOpenAI(ctx, req, m)
+	}
+}
+
+// chatWithToolCallsOpenAI OpenAI / Azure / DeepSeek / VLLM 兼容请求
+func (s *LLMService) chatWithToolCallsOpenAI(ctx context.Context, req llm.ToolChatRequest, m *model.LLMModel) (*llm.ToolChatResponse, error) {
+	apiKey := m.APIKey
+	baseURL := strings.TrimRight(m.BaseURL, "/")
+	chatPath := "/v1/chat/completions"
+	if strings.HasSuffix(baseURL, "/v1") {
+		chatPath = "/chat/completions"
+	}
+	url := baseURL + chatPath
+
+	reqBody := map[string]interface{}{
+		"model":       m.ModelID,
+		"messages":    req.Messages,
+		"temperature": req.Temperature,
+		"max_tokens":  req.MaxTokens,
+	}
+	if len(req.Tools) > 0 {
+		reqBody["tools"] = req.Tools
+		reqBody["tool_choice"] = "auto"
+	}
+	if req.ResponseFormat != nil {
+		reqBody["response_format"] = req.ResponseFormat
+	}
+
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("ChatWithToolCalls marshal failed: %w", err)
+	}
+
+	timeoutSec := m.TimeoutSec
+	if cached := loadSysCfgCached(); cached != nil && cached.taskTimeoutMin > 0 {
+		timeoutSec = cached.taskTimeoutMin * 60
+	}
+	client := newHTTPClient(time.Duration(timeoutSec) * time.Second)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("ChatWithToolCalls create request failed: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("ChatWithToolCalls API call failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("ChatWithToolCalls read body failed: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ChatWithToolCalls API error: status=%d, body=%s", resp.StatusCode, sanitizeForLog(string(respBody)))
+	}
+
+	var chatResp llm.ChatResponse
+	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+		return nil, fmt.Errorf("ChatWithToolCalls parse failed: %w", err)
+	}
+	if len(chatResp.Choices) == 0 {
+		return nil, errors.New("ChatWithToolCalls: LLM returned empty choices")
+	}
+
+	choice := chatResp.Choices[0]
+	return &llm.ToolChatResponse{
+		Content:      choice.Message.Content,
+		ToolCalls:    choice.Message.ToolCalls,
+		FinishReason: choice.FinishReason,
+		InputTokens:  chatResp.Usage.PromptTokens,
+		OutputTokens: chatResp.Usage.CompletionTokens,
+		ModelName:    m.ModelID,
+		ModelID:      m.ID,
+		RawResponse:  &chatResp,
+	}, nil
+}
+
+// chatWithToolCallsAnthropic Anthropic Claude 适配请求
+// Claude 使用 tool_use / tool_result block，system 在顶层字段，messages 中不允许 role=system
+func (s *LLMService) chatWithToolCallsAnthropic(ctx context.Context, req llm.ToolChatRequest, m *model.LLMModel) (*llm.ToolChatResponse, error) {
+	// --- 请求转换 ---
+	// 注意：函数体内类型声明不能前向引用，须按依赖顺序排列
+	type anthropicContent struct {
+		Type      string                 `json:"type"` // "text" | "tool_use" | "tool_result"
+		Text      string                 `json:"text,omitempty"`
+		ID        string                 `json:"id,omitempty"`          // tool_use id
+		Name      string                 `json:"name,omitempty"`        // tool_use name
+		Input     map[string]interface{} `json:"input,omitempty"`       // tool_use args
+		ToolUseID string                 `json:"tool_use_id,omitempty"` // tool_result
+		Content   string                 `json:"content,omitempty"`     // tool_result content
+	}
+	type anthropicMessage struct {
+		Role    string             `json:"role"`
+		Content []anthropicContent `json:"content"`
+	}
+	type anthropicTool struct {
+		Name        string                 `json:"name"`
+		Description string                 `json:"description"`
+		InputSchema map[string]interface{} `json:"input_schema"`
+	}
+
+	// 提取 system prompt（第一个 role=system 的消息）
+	var systemPrompt string
+	var anthropicMsgs []anthropicMessage
+	for _, msg := range req.Messages {
+		if msg.Role == "system" {
+			systemPrompt = msg.Content
+			continue
+		}
+		am := anthropicMessage{Role: msg.Role}
+		switch msg.Role {
+		case "assistant":
+			if msg.Content != "" {
+				am.Content = append(am.Content, anthropicContent{Type: "text", Text: msg.Content})
+			}
+			for _, tc := range msg.ToolCalls {
+				var inputArgs map[string]interface{}
+				if err := json.Unmarshal([]byte(tc.Function.Arguments), &inputArgs); err != nil {
+					inputArgs = map[string]interface{}{"_parse_error": err.Error(), "_raw": tc.Function.Arguments}
+				}
+				am.Content = append(am.Content, anthropicContent{
+					Type:  "tool_use",
+					ID:    tc.ID,
+					Name:  tc.Function.Name,
+					Input: inputArgs,
+				})
+			}
+		case "tool":
+			// Anthropic Messages API 要求 tool_result 块放在 role=user 的消息中
+			am.Role = "user"
+			am.Content = []anthropicContent{{
+				Type:      "tool_result",
+				ToolUseID: msg.ToolCallID,
+				Content:   msg.Content,
+			}}
+		default:
+			am.Content = []anthropicContent{{Type: "text", Text: msg.Content}}
+		}
+		anthropicMsgs = append(anthropicMsgs, am)
+	}
+
+	// Tools 转换
+	var anthropicTools []anthropicTool
+	for _, t := range req.Tools {
+		anthropicTools = append(anthropicTools, anthropicTool{
+			Name:        t.Function.Name,
+			Description: t.Function.Description,
+			InputSchema: t.Function.Parameters,
+		})
+	}
+
+	anthropicReq := map[string]interface{}{
+		"model":       m.ModelID,
+		"messages":    anthropicMsgs,
+		"temperature": req.Temperature,
+		"max_tokens":  req.MaxTokens,
+	}
+	if systemPrompt != "" {
+		anthropicReq["system"] = systemPrompt
+	}
+	if len(anthropicTools) > 0 {
+		anthropicReq["tools"] = anthropicTools
+	}
+
+	jsonBody, err := json.Marshal(anthropicReq)
+	if err != nil {
+		return nil, fmt.Errorf("ChatWithToolCalls Anthropic marshal failed: %w", err)
+	}
+
+	url := strings.TrimRight(m.BaseURL, "/") + "/v1/messages"
+	timeoutSec := m.TimeoutSec
+	if cached := loadSysCfgCached(); cached != nil && cached.taskTimeoutMin > 0 {
+		timeoutSec = cached.taskTimeoutMin * 60
+	}
+	client := newHTTPClient(time.Duration(timeoutSec) * time.Second)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("ChatWithToolCalls Anthropic create request failed: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-api-key", m.APIKey)
+	httpReq.Header.Set("anthropic-version", "2023-06-01")
+
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("ChatWithToolCalls Anthropic API call failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("ChatWithToolCalls Anthropic read body failed: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ChatWithToolCalls Anthropic API error: status=%d, body=%s", resp.StatusCode, sanitizeForLog(string(respBody)))
+	}
+
+	// --- 响应转换 ---
+	var anthropicResp struct {
+		ID      string `json:"id"`
+		Type    string `json:"type"`
+		Role    string `json:"role"`
+		Content []struct {
+			Type  string          `json:"type"`
+			Text  string          `json:"text,omitempty"`
+			ID    string          `json:"id,omitempty"`
+			Name  string          `json:"name,omitempty"`
+			Input json.RawMessage `json:"input,omitempty"`
+		} `json:"content"`
+		StopReason string `json:"stop_reason"`
+		Usage      struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(respBody, &anthropicResp); err != nil {
+		return nil, fmt.Errorf("ChatWithToolCalls Anthropic parse failed: %w", err)
+	}
+
+	var content string
+	var toolCalls []llm.ToolCall
+	for _, c := range anthropicResp.Content {
+		switch c.Type {
+		case "text":
+			content += c.Text
+		case "tool_use":
+			toolCalls = append(toolCalls, llm.ToolCall{
+				ID:   c.ID,
+				Type: "function",
+				Function: llm.ToolCallFunction{
+					Name:      c.Name,
+					Arguments: string(c.Input),
+				},
+			})
+		}
+	}
+
+	finishReason := "stop"
+	if len(toolCalls) > 0 {
+		finishReason = "tool_calls"
+	}
+	if anthropicResp.StopReason == "max_tokens" {
+		finishReason = "length"
+	}
+
+	// 构建 RawResponse 以保持与 OpenAI 路径一致
+	rawResp := &llm.ChatResponse{
+		ID: anthropicResp.ID,
+		Choices: []llm.Choice{
+			{
+				Message: llm.Message{
+					Role:      "assistant",
+					Content:   content,
+					ToolCalls: toolCalls,
+				},
+				FinishReason: finishReason,
+			},
+		},
+		Usage: llm.Usage{
+			PromptTokens:     anthropicResp.Usage.InputTokens,
+			CompletionTokens: anthropicResp.Usage.OutputTokens,
+			TotalTokens:      anthropicResp.Usage.InputTokens + anthropicResp.Usage.OutputTokens,
+		},
+	}
+
+	return &llm.ToolChatResponse{
+		Content:      content,
+		ToolCalls:    toolCalls,
+		FinishReason: finishReason,
+		InputTokens:  anthropicResp.Usage.InputTokens,
+		OutputTokens: anthropicResp.Usage.OutputTokens,
+		ModelName:    m.ModelID,
+		ModelID:      m.ID,
+		RawResponse:  rawResp,
 	}, nil
 }
 

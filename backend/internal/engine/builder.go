@@ -765,6 +765,120 @@ func buildBatchCollectionSystemPromptContent(batchIndex, totalBatches int) strin
 	return sb.String()
 }
 
+// BuildAgenticSystemPrompt 构建 Agentic 模式的 System Prompt
+// 核心要求：模型必须经过工具调用来验证假设，不能直接输出结论
+func BuildAgenticSystemPrompt(ctx *PromptContext) string {
+	var sb strings.Builder
+
+	sb.WriteString("你是一名资深代码评审专家，具备调用工具获取额外上下文的能力。\n\n")
+
+	sb.WriteString("## 工作流程\n\n")
+	sb.WriteString("1. 审阅代码变更（diff）\n")
+	sb.WriteString("2. 对于不确定的函数调用、数据流、API 端点、跨文件依赖，**建议调用对应工具获取上下文辅助分析**\n")
+	sb.WriteString("3. 收到工具结果后，基于新信息继续分析\n")
+	sb.WriteString("4. 当分析充分后，输出最终 JSON 评审结果\n\n")
+
+	sb.WriteString("## 重要约束\n\n")
+	sb.WriteString("- 每次收到工具结果后，先基于新信息更新你的分析，再决定下一步\n")
+	sb.WriteString("- 如果工具返回的信息不足，可以继续调用其他工具\n")
+	sb.WriteString("- 最终输出必须严格符合给定的 JSON Schema，不要包含任何 Markdown 代码块标记或额外解释\n\n")
+
+	sb.WriteString("## 建议调用工具的场景\n\n")
+	sb.WriteString("在以下场景**建议**调用工具辅助分析：\n")
+	sb.WriteString("- 看到未在 diff 中定义的函数调用、结构体、接口使用\n")
+	sb.WriteString("- 发现 HTTP handler、路由、API 入口\n")
+	sb.WriteString("- 涉及用户输入、数据库操作、网络请求、文件读写\n")
+	sb.WriteString("- 怀疑存在权限绕过、注入、SSRF 等需要数据流验证的安全问题\n")
+	sb.WriteString("- 需要确认函数是否被其他代码调用（影响面分析）\n\n")
+
+	return sb.String()
+}
+
+// BuildAgenticUserPrompt 构建 Agentic 模式的极简 User Prompt
+// 移除 code_understanding 全文，保留维度定义、评审规则、diff 和工具说明
+func BuildAgenticUserPrompt(ctx *PromptContext, batchFiles []map[string]interface{}) string {
+	var sb strings.Builder
+
+	// 1. 维度定义
+	sb.WriteString(buildDimensionDefinitionsSection(ctx.DimensionWeights))
+
+	// 2. 项目自定义说明
+	if ctx.CustomInstruction != "" {
+		sb.WriteString("## 【项目特殊要求】\n")
+		sb.WriteString(ctx.CustomInstruction)
+		sb.WriteString("\n\n")
+	}
+
+	// 3. 评审规则（不注入 code_understanding）
+	sb.WriteString(buildRulesSectionLite(ctx.Rules, ctx.DimensionWeights))
+
+	// 4. 可用工具说明（Agentic 模式独有）
+	sb.WriteString("\n## 可用工具（评审流程中使用）\n\n")
+	sb.WriteString("以下工具提供代码仓库的静态分析信息。在评审时，你必须在以下场景调用工具验证假设，不得仅凭代码片段臆测：\n\n")
+
+	sb.WriteString("### get_function_callers(function_name)\n")
+	sb.WriteString("**使用时机**：看到 diff 中的函数调用，但该函数定义不在当前 diff 中。\n")
+	sb.WriteString("**作用**：返回调用该函数的所有位置，帮助你评估修改的影响面。\n")
+	sb.WriteString("**示例**：diff 中调用了 `db.Query()`, 但你不清楚它在哪里被定义和调用链 → **必须调用** `get_function_callers(\"db.Query\")`\n\n")
+
+	sb.WriteString("### get_data_flow_path(source_func, sink_func)\n")
+	sb.WriteString("**使用时机**：怀疑用户输入、请求参数、文件读取等源数据传播到了危险操作（SQL、命令执行、文件写入等）。\n")
+	sb.WriteString("**作用**：返回从 source_func 到 sink_func 的完整调用链和数据传播路径。\n")
+	sb.WriteString("**场景**：检查 SQL 注入、命令注入、SSRF、路径遍历等漏洞时**必须**使用。\n\n")
+
+	sb.WriteString("### get_api_endpoints(file_path)\n")
+	sb.WriteString("**使用时机**：看到 HTTP handler 函数、路由注册、或网络相关代码时。\n")
+	sb.WriteString("**作用**：返回该文件定义的所有 API 端点（HTTP 方法 + 路径 + handler 函数）。\n")
+	sb.WriteString("**场景**：评审权限校验、输入验证、认证绕过相关代码时**必须**使用。\n\n")
+
+	sb.WriteString("### get_file_ast_summary(file_path)\n")
+	sb.WriteString("**使用时机**：需要快速了解文件中的函数、类型、结构体定义。\n")
+	sb.WriteString("**作用**：返回文件的 AST 概要（顶层函数、结构体、接口）。\n\n")
+
+	sb.WriteString("### get_breaking_changes(file_path)\n")
+	sb.WriteString("**使用时机**：评审公共 API、接口变更、函数签名修改时。\n")
+	sb.WriteString("**作用**：检测文件中的不兼容变更（如参数删除、返回值类型改变、函数移除等）。\n\n")
+
+	sb.WriteString("### get_diff(file_path)\n")
+	sb.WriteString("**使用时机**：需要查看不在当前批次中的其他文件变更。\n")
+	sb.WriteString("**作用**：返回该文件在本次 MR 中的完整 diff。\n\n")
+
+	sb.WriteString("### get_function_callees(function_name)\n")
+	sb.WriteString("**使用时机**：想了解一个函数内部调用了哪些其他函数，判断是否符合预期。\n")
+	sb.WriteString("**作用**：返回该函数的直接调用目标列表。\n\n")
+
+	sb.WriteString("### get_import_dependencies(file_path)\n")
+	sb.WriteString("**使用时机**：需要了解文件的导入依赖，特别是引入了新包时。\n")
+	sb.WriteString("**作用**：返回文件的所有 import 列表，按标准库/第三方/内部包分组。\n\n")
+
+	sb.WriteString("## 评审流程要求\n\n")
+	sb.WriteString("1. 先通读 diff，标记出所有你不确定的函数调用、API 端点、数据流路径\n")
+	sb.WriteString("2. 对每个不确定点，调用对应工具获取上下文\n")
+	sb.WriteString("3. 收到工具结果后，结合新信息重新评估风险等级和影响范围\n")
+	sb.WriteString("4. 所有关键假设经过工具验证后，输出最终 JSON 评审结果\n")
+	sb.WriteString("5. **不允许在没有调用任何工具的情况下直接输出 JSON**\n\n")
+
+	// 5. 待评审代码（diff）
+	sb.WriteString("\n## 待评审内容\n\n")
+	if isLineNumberInjectionEnabled(ctx.ProjectID) {
+		sb.WriteString(lineNumberInstruction())
+	}
+
+	for i, f := range batchFiles {
+		path, _ := f["path"].(string)
+		diffStr, _ := f["diff"].(string)
+		if diffStr == "" {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("%d、文件：%s\n", i+1, path))
+		sb.WriteString("```diff\n")
+		sb.WriteString(maybeInjectLineNumbers(diffStr, path, ctx.ProjectID))
+		sb.WriteString("\n```\n\n")
+	}
+
+	return sb.String()
+}
+
 // MeasureBatchCollectionSystemPrompt 返回 System Prompt 的精确字节数
 // 供 batch_algorithm.go 替代 "len(template) + 500" 的错误估算
 func MeasureBatchCollectionSystemPrompt(batchIndex, totalBatches int) int {

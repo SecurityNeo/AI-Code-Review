@@ -1,8 +1,42 @@
 package handler
 
 import (
+	"strconv"
+
 	"github.com/ai-optimizer/backend/internal/model"
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
+
+// ApplyOrgScopeFilter 应用组织维度的过滤条件（含后代组织）。
+//
+// 语义：
+//   - scope 为空：返回空结果集
+//   - 非 super_admin：按 scope.VisibleOrgIDs 过滤（org_admin 的 VisibleOrgIDs 已含后代组织）
+//   - super_admin：
+//       显式传了 org_id → 按该组织子树过滤
+//       未传 org_id → 不过滤（可见全部组织）
+func ApplyOrgScopeFilter(c *gin.Context, db *gorm.DB, scope *model.UserAuthScope) *gorm.DB {
+	if scope == nil {
+		return db.Where("1 = 0")
+	}
+	if !scope.IsSuperAdmin {
+		if len(scope.VisibleOrgIDs) == 0 {
+			return db.Where("1 = 0")
+		}
+		return db.Where("org_id IN ?", scope.VisibleOrgIDs)
+	}
+	if orgIDStr := c.Query("org_id"); orgIDStr != "" {
+		if id, err := strconv.ParseUint(orgIDStr, 10, 64); err == nil && id > 0 {
+			ids, err := model.CollectOrgSubtreeIDs(uint(id))
+			if err != nil || len(ids) == 0 {
+				return db.Where("1 = 0")
+			}
+			return db.Where("org_id IN ?", ids)
+		}
+	}
+	return db
+}
 
 // CanAccessProject 检查用户是否有权访问指定项目
 // 适用于在 service 层或 handler 层做二次权限校验

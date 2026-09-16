@@ -1102,6 +1102,48 @@ func (s *TaskService) fetchMRCommits(task model.Task) []gitlab.CommitInfo {
 	return commits
 }
 
+// isModelActiveInOrg 判断指定模型在其所属组织内是否存在且处于 active 状态
+func isModelActiveInOrg(modelID, orgID uint) bool {
+	if modelID == 0 {
+		return false
+	}
+	var cnt int64
+	err := model.DB.Model(&model.LLMModel{}).
+		Where("id = ? AND org_id = ? AND status = ?", modelID, orgID, "active").
+		Count(&cnt).Error
+	return err == nil && cnt > 0
+}
+
+// resolveEffectiveModelID 运行时重新解析任务应使用的模型。
+// 历史任务的 tasks.model_id 是创建时从项目默认模型拷贝的快照，模型被替换/禁用后
+// 不会自动更新，导致任务长期锁死在旧模型（甚至已 inactive 的模型）上。
+// 优先级：
+//  1. 项目默认模型（存在且 active）
+//  2. 组织主模型 / 默认模型（快照 PrimaryModel，且 active）
+//  3. 任务原有 model_id（兼容：仍存在且 active）
+//  4. 返回 0 —— 不 pin 具体模型，交由 LLM 主备链在运行时选择
+func resolveEffectiveModelID(task *model.Task, orgSnapshot *pipeline.OrgConfigSnapshot) uint {
+	// 1. 项目默认模型优先
+	if task.Project.DefaultModelID != nil && *task.Project.DefaultModelID > 0 {
+		if isModelActiveInOrg(*task.Project.DefaultModelID, task.OrgID) {
+			return *task.Project.DefaultModelID
+		}
+		zap.L().Warn("运行时模型解析：项目默认模型不可用，回退组织主模型",
+			zap.Uint("task_id", task.ID),
+			zap.Uint("project_default_model_id", *task.Project.DefaultModelID))
+	}
+	// 2. 组织主模型 / 默认模型（LoadOrgConfigSnapshot 已按 is_primary → is_default → 根组织 解析）
+	if orgSnapshot != nil && orgSnapshot.PrimaryModel != nil && orgSnapshot.PrimaryModel.Status == "active" {
+		return orgSnapshot.PrimaryModel.ID
+	}
+	// 3. 兼容：保留任务原有且仍然有效的模型
+	if isModelActiveInOrg(task.UsedModelID, task.OrgID) {
+		return task.UsedModelID
+	}
+	// 4. 交由主备链
+	return 0
+}
+
 // executePipelineReviewTask Pipeline 结构化评审任务执行
 // 复用 engine/builder.go + engine/parser.go 的完整能力
 func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride string) error {
@@ -1125,6 +1167,24 @@ func (s *TaskService) executePipelineReviewTask(task model.Task, commentOverride
 			zap.Uint("org_id", task.OrgID),
 			zap.Error(snapErr))
 		orgSnapshot = &pipeline.OrgConfigSnapshot{}
+	}
+
+	// 运行时重新解析任务使用的模型：
+	// 项目默认模型 → 组织主模型/默认模型 → 任务原模型 → 主备链（model_id=0）。
+	// 修复历史任务 model_id 创建时快照不随项目/组织配置变更而更新，
+	// 以及快照模型被禁用后任务硬失败（不降级）的问题。
+	effectiveModelID := resolveEffectiveModelID(&task, orgSnapshot)
+	if effectiveModelID != task.UsedModelID {
+		zap.L().Info("运行时重新解析任务模型",
+			zap.Uint("task_id", task.ID),
+			zap.Uint("old_model_id", task.UsedModelID),
+			zap.Uint("new_model_id", effectiveModelID))
+		// 必须落库：Pipeline Engine 会重新从 DB 加载 task，执行器统一读取 task.UsedModelID
+		if err := model.DB.Model(&model.Task{}).Where("id = ?", task.ID).
+			Update("model_id", effectiveModelID).Error; err != nil {
+			zap.L().Warn("运行时更新任务模型失败", zap.Uint("task_id", task.ID), zap.Error(err))
+		}
+		task.UsedModelID = effectiveModelID
 	}
 
 	// 1. 获取 diff 文件
@@ -2293,6 +2353,10 @@ func (a *pipelineLLMAdapter) ChatCompletionStructured(ctx context.Context, taskI
 		OutputTokens: r.OutputTokens,
 		Response:     r.Response,
 	}, nil
+}
+
+func (a *pipelineLLMAdapter) ChatWithToolCalls(ctx context.Context, req llm.ToolChatRequest) (*llm.ToolChatResponse, error) {
+	return a.svc.ChatWithToolCalls(ctx, req)
 }
 
 // detectLanguage 根据 diff 文件扩展名投票检测项目主语言

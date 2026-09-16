@@ -290,10 +290,22 @@
         sandbox_test:                   { text: '模拟测试',               cls: 'bg-teal-50 text-teal-700 border-teal-200' },
         similar_check:                  { text: '相似检测',               cls: 'bg-orange-50 text-orange-700 border-orange-200' },
         score:                          { text: '代码评审',               cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+        agentic_force_final:            { text: 'Agentic 强制最终轮',     cls: 'bg-purple-50 text-purple-700 border-purple-200' },
+        agentic_batch_round:            { text: 'Agentic 批次评审',       cls: 'bg-purple-50 text-purple-700 border-purple-200' },
     };
     function renderCallerBadge(caller) {
-        const info = CALLER_LABELS[caller] || { text: caller || '-', cls: 'bg-gray-50 text-gray-500 border-gray-200' };
-        return `<span class="inline-block px-2 py-0.5 rounded text-xs border ${info.cls}" title="${escapeHtml(caller || '')}">${escapeHtml(info.text)}</span>`;
+        // 1. 精确匹配
+        if (CALLER_LABELS[caller]) {
+            const info = CALLER_LABELS[caller];
+            return `<span class="inline-block px-2 py-0.5 rounded text-xs border ${info.cls}" title="${escapeHtml(caller || '')}">${escapeHtml(info.text)}</span>`;
+        }
+        // 2. Agentic 批次评审动态匹配：agentic_batch_round_N
+        const agenticBatchMatch = caller && caller.match(/^agentic_batch_round_(\d+)$/);
+        if (agenticBatchMatch) {
+            return `<span class="inline-block px-2 py-0.5 rounded text-xs border bg-purple-50 text-purple-700 border-purple-200" title="${escapeHtml(caller)}">Agentic 批次评审 (Round ${agenticBatchMatch[1]})</span>`;
+        }
+        // 3. 兜底：原样显示
+        return `<span class="inline-block px-2 py-0.5 rounded text-xs border bg-gray-50 text-gray-500 border-gray-200" title="${escapeHtml(caller || '')}">${escapeHtml(caller || '-')}</span>`;
     }
 
     function escapeHtml(text) {

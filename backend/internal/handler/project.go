@@ -32,23 +32,37 @@ func (h *ProjectHandler) List(c *gin.Context) {
 	}
 
 	var projectIDs []uint
-	var filterOrgID uint
+	var filterOrgIDs []uint
 
-	// 若显式传入 org_id（如分配职责场景），按组织查询，跳过 responsibilities 过滤
+	// 若显式传入 org_id（如分配职责场景），按组织子树查询，跳过 responsibilities 过滤
 	if orgIDQuery != "" {
 		oid, _ := strconv.Atoi(orgIDQuery)
-		filterOrgID = uint(oid)
-		if filterOrgID > 0 && !scope.IsSuperAdmin {
-			visible := false
-			for _, vid := range scope.VisibleOrgIDs {
-				if vid == filterOrgID {
-					visible = true
-					break
-				}
-			}
-			if !visible {
-				c.JSON(403, gin.H{"error": "无权访问该组织的项目"})
+		if oid > 0 {
+			subIDs, err := model.CollectOrgSubtreeIDs(uint(oid))
+			if err != nil {
+				zap.L().Error("collect org subtree failed", zap.Error(err))
+				c.JSON(500, gin.H{"error": err.Error()})
 				return
+			}
+			if !scope.IsSuperAdmin {
+				// 非超管：与可见组织取交集，防止越权
+				visible := make(map[uint]struct{}, len(scope.VisibleOrgIDs))
+				for _, vid := range scope.VisibleOrgIDs {
+					visible[vid] = struct{}{}
+				}
+				allowed := make([]uint, 0, len(subIDs))
+				for _, id := range subIDs {
+					if _, ok := visible[id]; ok {
+						allowed = append(allowed, id)
+					}
+				}
+				if len(allowed) == 0 {
+					c.JSON(403, gin.H{"error": "无权访问该组织的项目"})
+					return
+				}
+				filterOrgIDs = allowed
+			} else {
+				filterOrgIDs = subIDs
 			}
 		}
 	} else {
@@ -63,7 +77,7 @@ func (h *ProjectHandler) List(c *gin.Context) {
 		}
 	}
 
-	projects, total, err := service.NewProjectService().List(scope, page, pageSize, keyword, status, source, projectIDs, filterOrgID)
+	projects, total, err := service.NewProjectService().List(scope, page, pageSize, keyword, status, source, projectIDs, filterOrgIDs)
 	if err != nil {
 		zap.L().Error("list projects failed", zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})

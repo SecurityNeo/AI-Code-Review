@@ -35,4 +35,5 @@ type StructuredChatResult struct {
 type LLMService interface {
 	ChatCompletion(ctx context.Context, taskID *uint, modelID uint, caller, customInstruction, userPrompt string) (*ChatResult, error)
 	ChatCompletionStructured(ctx context.Context, taskID *uint, modelID uint, caller, systemPrompt, userPrompt string, responseFormat *llm.ResponseFormat) (*StructuredChatResult, error)
+	ChatWithToolCalls(ctx context.Context, req llm.ToolChatRequest) (*llm.ToolChatResponse, error)
 }

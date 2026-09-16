@@ -1,6 +1,6 @@
 package pipeline
 
-	import (
+import (
 	"encoding/json"
 	"fmt"
 	"os"
@@ -916,6 +916,77 @@ func (e *BatchReviewFrameExecutor) Execute(ctx StageContext) error {
 		promptCtx.AgentMarkdowns["code_understanding"] = r
 	}
 
+	// ==================== Agentic 模式判断 ====================
+	agentCfg := ParseAgenticConfig(getAgentConfigFromCtx(ctx))
+	ctx.SetInput("_agentic_config", &agentCfg)
+
+	if agentCfg.Enabled && task.UsedModelID > 0 {
+		// 查询模型 Provider
+		var llmModel model.LLMModel
+		if err := model.DB.First(&llmModel, task.UsedModelID).Error; err == nil {
+			capability := DetectToolCapability(llm.Provider(llmModel.Provider))
+			if capability == ToolCapNative || capability == ToolCapPseudoTag {
+				zap.L().Info("agentic mode enabled",
+					zap.Uint("task_id", task.ID),
+					zap.String("provider", llmModel.Provider),
+					zap.String("capability", func() string {
+						if capability == ToolCapNative {
+							return "native"
+						}
+						return "pseudo_tag"
+					}()))
+				batchResults, err := e.executeAgenticReview(ctx, plan, promptCtx, task, capability)
+				if err != nil {
+					zap.L().Warn("agentic review failed, fallback to batch review",
+						zap.Uint("task_id", task.ID),
+						zap.Error(err))
+					// fallback 到预组装模式已在 executeAgenticReview 内部处理单批失败
+					// 如果整体失败，继续执行原有逻辑
+				} else {
+					// Agentic 成功
+					ctx.SetOutput("batch_review_results", batchResults)
+					ctx.SetOutput("model_id", task.UsedModelID)
+					ctx.UpdateProgress(nil, plan.BatchCount, plan.BatchCount)
+				outputSnap := map[string]interface{}{
+					"plan":         plan,
+					"batch_count":  plan.BatchCount,
+					"model_id":     task.UsedModelID,
+					"agentic_mode": true,
+				}
+				// 【标记 fallback】如果 Agentic 内部有批次 fallback 到预组装，通知前端
+				if ctx.GetOutput("_agentic_fallback") != nil {
+					outputSnap["fallback"] = true
+					outputSnap["fallback_reason"] = "部分 Agentic 批次因模型异常 fallback 到预组装模式"
+				}
+					if selfExec := ctx.GetSelfExec(); selfExec != nil {
+						outputSnap["input_tokens"] = selfExec.InputTokens
+						outputSnap["output_tokens"] = selfExec.OutputTokens
+						outputSnap["model_name"] = selfExec.ModelName
+						// 补充 model_id 到 selfExec（与预组装模式保持一致）
+						if selfExec.ModelName == "" && llmModel.ModelID != "" {
+							selfExec.ModelName = llmModel.ModelID
+						}
+						if selfExec.LLMModelID == nil {
+							mid := task.UsedModelID
+							selfExec.LLMModelID = &mid
+						}
+					}
+					ctx.SaveOutputSnapshot(&model.TaskPipelineExecution{ID: ctx.ExecutionID()}, outputSnap)
+					return nil
+				}
+			} else {
+				zap.L().Warn("agentic disabled: model lacks tool calling support",
+					zap.Uint("task_id", task.ID),
+					zap.String("provider", llmModel.Provider))
+			}
+		} else {
+			zap.L().Warn("agentic disabled: failed to query model info",
+				zap.Uint("task_id", task.ID),
+				zap.Uint("model_id", task.UsedModelID),
+				zap.Error(err))
+		}
+	}
+
 	// ==================== 场景 A：单批轻量收集（与多批统一） ====================
 	var actualModelID uint
 	if plan.BatchCount == 1 {
@@ -1464,13 +1535,13 @@ func (e *BatchReviewFrameExecutor) executeBatchCollection(ctx StageContext, deta
 		}
 		err := fmt.Errorf("LLM returned empty content (finish_reason=%s, output_tokens=%d)", finishReason, result.OutputTokens)
 		ctx.SaveOutputSnapshot(exec, map[string]interface{}{
-			"batch_index":    detail.Index,
-			"error":          err.Error(),
-			"finish_reason":  finishReason,
-			"output_tokens":  result.OutputTokens,
-			"system_prompt":  systemPrompt,
-			"prompt":         userPrompt,
-			"raw_content":    result.Content,
+			"batch_index":   detail.Index,
+			"error":         err.Error(),
+			"finish_reason": finishReason,
+			"output_tokens": result.OutputTokens,
+			"system_prompt": systemPrompt,
+			"prompt":        userPrompt,
+			"raw_content":   result.Content,
 		})
 		ctx.MarkFailed(exec, err.Error())
 		return nil, 0, 0, 0, "", err

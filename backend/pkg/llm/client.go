@@ -20,9 +20,12 @@ const (
 )
 
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-	Refusal string `json:"refusal,omitempty"` // 新增：拒绝回答标记
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	Refusal    string     `json:"refusal,omitempty"` // 新增：拒绝回答标记
+	Name       string     `json:"name,omitempty"`         // Claude tool_result 的 name 字段
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // assistant 消息携带
+	ToolCallID string     `json:"tool_call_id,omitempty"` // tool 消息携带
 }
 
 type ChatRequest struct {
