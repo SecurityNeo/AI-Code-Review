@@ -204,7 +204,6 @@ const STAGE_DEFS = [
         code: 'batch_review_frame',
         name: 'AI 代码评审',
         desc: '将变更文件按 Token 预算自动拆分为多个批次（Batch），并行调度 LLM 执行结构化评审；输出多维度评分（Maintainability / Performance / Security / Readability / Test Coverage）与具体改进建议',
-        impact: '关闭后：无 AI 驱动的代码质量评审产出，仅保留静态分析结果',
         warning: true,
         removable: false,
         timeout: 300,
@@ -215,7 +214,6 @@ const STAGE_DEFS = [
         code: 'review_arbitration',
         name: '评审裁决',
         desc: '合并 Agent 自动发现（静态分析、安全审计、影响分析）与 LLM 评审结果；执行多源去重（文件+行号+问题类型聚类）、维度评分归一化与加权总分计算；生成最终裁决报告与影响摘要（Impact Notes）',
-        impact: '关闭后：多源评审结果无法合并去重，可能出现重复问题与冲突评分',
         warning: true,
         removable: false,
         timeout: 60
@@ -467,7 +465,7 @@ function renderStageCard(stage, enabledSet, triggerEventSet, stageConfigs) {
             <div id="agentic_warning_${stage.code}" class="${agenticEnabled ? '' : 'hidden'} mt-1.5 pl-5">
                 <div class="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-2 py-1">
                     <i class="fas fa-exclamation-triangle mr-1"></i>
-                    开启 Agentic 模式强烈建议同时开启 <code>code_understanding</code> 阶段。若该阶段被禁用或失败，所有工具将返回空或降级结果。
+                    开启 Agentic 模式强烈建议同时开启<strong>代码理解器</strong>阶段。若该阶段被禁用或失败，所有工具将返回空或降级结果。开启 Agentic 模式可能会增加 token 消耗。
                 </div>
             </div>
             <div id="agentic_advanced_${stage.code}" class="${agenticEnabled ? '' : 'hidden'} pl-5 mt-2 space-y-1.5">
