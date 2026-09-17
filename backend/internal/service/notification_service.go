@@ -4,10 +4,15 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ai-optimizer/backend/internal/model"
 	"go.uber.org/zap"
 )
+
+// maxContentBytes notifications.content 列为 TEXT（约 64KB），写入前按字节上限兜底截断，
+// 避免出现 MySQL 1406 "Data too long for column 'content'" 导致通知整体插入失败。
+const maxContentBytes = 10000
 
 // NotificationService 站内信/通知中心服务
 type NotificationService struct{}
@@ -27,6 +32,8 @@ func (s *NotificationService) SendInbox(orgID, userID uint, notifType string, ti
 	}
 	// Title 截断：数据库字段 size=200，预留安全余量
 	title = truncateRune(title, 190)
+	// content 兜底截断（与 title 的截断对称），防止超长导致整条通知插入失败
+	content = truncateBytesRune(content, maxContentBytes, "\n\n…（通知内容过长，已截断；请前往站内信/Issue 列表查看全部）")
 	n := model.Notification{
 		OrgID:   orgID,
 		UserID:  userID,
@@ -376,4 +383,17 @@ func truncateRune(s string, maxLen int) string {
 		return s
 	}
 	return string(runes[:maxLen]) + "..."
+}
+
+// truncateBytesRune 按字节上限安全截断字符串（不切断 UTF-8 字符），超出时追加 suffix。
+func truncateBytesRune(s string, maxBytes int, suffix string) string {
+	if maxBytes <= 0 || len(s) <= maxBytes {
+		return s
+	}
+	limit := maxBytes
+	// 若正好落在多字节字符中间，向前回退到字符起始位置
+	for limit > 0 && !utf8.RuneStart(s[limit]) {
+		limit--
+	}
+	return s[:limit] + suffix
 }
