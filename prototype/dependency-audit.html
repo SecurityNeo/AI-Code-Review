@@ -55,7 +55,7 @@
             <button id="tab-btn-report" onclick="switchTab('report')" class="tab-btn active px-4 py-3 text-sm font-medium text-gray-600 hover:text-blue-600">报告</button>
             <button id="tab-btn-history" onclick="switchTab('history')" class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-blue-600">扫描任务</button>
             <button id="tab-btn-license" onclick="switchTab('license')" class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-blue-600">许可证数据</button>
-            <button id="tab-btn-config" onclick="switchTab('config')" class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-blue-600">配置</button>
+            <button id="tab-btn-config" data-admin-only onclick="switchTab('config')" class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-blue-600">配置</button>
         </div>
 
         <!-- 报告 -->
@@ -448,6 +448,7 @@ const state = {
 
 document.addEventListener('DOMContentLoaded', async () => {
     renderSidebar('dependency-audit');
+    if (typeof applyAdminVisibility === 'function') applyAdminVisibility();
     await loadProjects();
     await loadTasks(true);
     await loadLicenseStats();
@@ -474,6 +475,7 @@ function showToast(msg, type = 'success') {
     el.textContent = msg; document.body.appendChild(el); setTimeout(() => el.remove(), 3000);
 }
 function switchTab(tab) {
+    if (tab === 'config' && !isAdmin()) tab = 'report'; // 配置仅管理员可见
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
     document.getElementById('tab-' + tab).classList.remove('hidden');
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
