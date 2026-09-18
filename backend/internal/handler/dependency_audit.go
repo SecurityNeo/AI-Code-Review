@@ -270,6 +270,9 @@ func (h *DependencyAuditHandler) ListTaskItems(c *gin.Context) {
 	if v := c.Query("ecosystem"); v != "" {
 		q = q.Where("ecosystem = ?", v)
 	}
+	if v := c.Query("type"); v != "" {
+		q = q.Where("dependency_type = ?", v)
+	}
 	if v := c.Query("license_status"); v != "" {
 		q = q.Where("license_status = ?", v)
 	}

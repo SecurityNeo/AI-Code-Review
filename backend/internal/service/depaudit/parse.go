@@ -148,6 +148,11 @@ func ParseRepoDetailed(dir string, cfg *model.DependencyAuditConfig) ([]*Dep, Pa
 	// 2) 锁文件：仅当 lockfile_precise=on 时读取
 	if cfg.LockfilePrecise {
 		for rel, content := range lockfiles {
+			// go.mod 的 require 已给出完整构建列表（含间接依赖，且一模块一版本）。
+			// go.sum 是哈希账本，会包含同模块的历史多版本，若作为依赖来源会产生大量重复版本。
+			if strings.HasSuffix(rel, "go.sum") {
+				continue
+			}
 			for _, ld := range parseLockfile(rel, content) {
 				if existing, ok := byName[nameKey(ld.Ecosystem, ld.Name)]; ok {
 					delete(merged, depKey(existing))

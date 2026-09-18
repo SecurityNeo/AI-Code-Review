@@ -139,6 +139,10 @@
                                         <button id="subtab-btn-items" onclick="switchSubTab('items')" class="subtab-btn active px-3 py-2 text-xs text-gray-600">依赖明细</button>
                                         <button id="subtab-btn-vulns" onclick="switchSubTab('vulns')" class="subtab-btn px-3 py-2 text-xs text-gray-600">漏洞明细</button>
                                     </div>
+                                    <div id="detailTypeToggle" class="flex rounded-lg border overflow-hidden text-xs">
+                                        <button id="dtype-direct" onclick="setDetailType('direct')" class="px-2.5 py-1 bg-blue-600 text-white">直接依赖</button>
+                                        <button id="dtype-all" onclick="setDetailType('')" class="px-2.5 py-1 text-gray-600 hover:bg-gray-50">含间接</button>
+                                    </div>
                                     <input id="detailSearch" placeholder="搜索包名/漏洞" class="px-2 py-1 border rounded text-xs w-40" onkeyup="if(event.key==='Enter')loadDetail(1)">
                                 </div>
                                 <div class="overflow-auto flex-1"><table class="w-full text-sm" id="detailTable"><thead class="bg-gray-50 text-gray-500 text-left"></thead><tbody></tbody></table></div>
@@ -252,6 +256,7 @@
                 </div>
 
                 <div id="jobStatus" class="bg-white rounded-xl border px-4 py-2.5 flex items-center gap-x-5 gap-y-1.5 flex-wrap text-xs text-gray-600"></div>
+                <div id="collectErrors" class="hidden bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-800"></div>
 
                 <div class="bg-white rounded-xl border">
                     <div class="flex border-b px-4">
@@ -441,9 +446,10 @@ const state = {
     projects: [], selectedProjectIds: [],
     tasks: [], currentTask: null, currentRuns: [], currentRunMap: {}, runNames: {},
     taskPage: 1, taskPageSize: 20, taskTotal: 0,
-    detailProjectId: null, subTab: 'items', detailPage: 1, detailPageSize: 20,
+    detailProjectId: null, subTab: 'items', detailPage: 1, detailPageSize: 20, detailType: 'direct',
     licSub: 'license', licPage: 1, licPageSize: 20,
     pollTimer: null, taskPollTimer: null, licenseMode: 'report_only', pendingDeleteTaskId: null,
+    collectStates: [],
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -501,14 +507,19 @@ function renderProjectList() {
     const kw = (document.getElementById('projectSearch').value || '').toLowerCase();
     const list = state.projects.filter(p => !kw || (p.name || '').toLowerCase().includes(kw));
     const el = document.getElementById('projectList');
-    el.innerHTML = list.length ? list.map(p => `
+    el.innerHTML = list.length ? list.map(p => {
+        const st = state.collectStates.find(s => s.project_id === p.id);
+        const warn = st && st.status === 'failed';
+        const warnTip = warn ? `坐标收集失败：${st.error || ''}` : '';
+        return `
         <label class="flex items-center gap-3 px-3 py-2 rounded-lg border-b border-gray-100 last:border-0 hover:bg-gray-50 cursor-pointer">
             <input type="checkbox" value="${p.id}" ${state.selectedProjectIds.includes(p.id) ? 'checked' : ''} onchange="updateSelectedCount()">
             <span class="flex-1 text-sm text-gray-800 truncate" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</span>
+            ${warn ? `<i class="fas fa-triangle-exclamation text-amber-500 shrink-0" title="${escapeHtml(warnTip)}"></i>` : ''}
             <span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-500">${languageLabel(p.language)}</span>
             <span class="text-xs text-gray-400 whitespace-nowrap">快照 ${p.dep_count || 0} 个</span>
             <span class="text-xs text-gray-400 font-mono whitespace-nowrap" title="快照 Commit">${escapeHtml((p.snapshot_commit || '').slice(0, 8) || '-')}</span>
-        </label>`).join('') : '<div class="text-gray-400 text-sm text-center py-8">暂无项目</div>';
+        </label>`; }).join('') : '<div class="text-gray-400 text-sm text-center py-8">暂无项目</div>';
 }
 function selectAllProjects(v) {
     document.querySelectorAll('#projectList input[type=checkbox]').forEach(cb => cb.checked = v);
@@ -698,6 +709,16 @@ function switchSubTab(tab) {
     state.subTab = tab;
     document.querySelectorAll('#projectDetail .subtab-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('subtab-btn-' + tab).classList.add('active');
+    // 直接/间接切换仅对依赖明细有效
+    document.getElementById('detailTypeToggle').classList.toggle('hidden', tab !== 'items');
+    loadDetail(1);
+}
+function setDetailType(t) {
+    state.detailType = t;
+    const on = 'px-2.5 py-1 bg-blue-600 text-white';
+    const off = 'px-2.5 py-1 text-gray-600 hover:bg-gray-50';
+    document.getElementById('dtype-direct').className = t === 'direct' ? on : off;
+    document.getElementById('dtype-all').className = t === '' ? on : off;
     loadDetail(1);
 }
 async function loadDetail(page) {
@@ -706,6 +727,7 @@ async function loadDetail(page) {
     const isVuln = state.subTab === 'vulns';
     const base = `/api/v1/dependency-audit/tasks/${state.currentTask.id}/report/${isVuln ? 'vulns' : 'items'}`;
     const params = new URLSearchParams({ project_id: state.detailProjectId, page: state.detailPage, page_size: state.detailPageSize });
+    if (!isVuln && state.detailType) params.set('type', state.detailType);
     const kw = document.getElementById('detailSearch').value; if (kw) params.set('keyword', kw);
     try {
         const r = await depApiFetch(base + '?' + params.toString());
@@ -934,8 +956,34 @@ async function loadLicenseStats() {
         renderJobStatus(data.logs || [], q);
         const running = (data.logs || []).some(l => l.status === 'running');
         if (running) startSyncPolling(); else stopSyncPolling();
+        loadCollectStates(data.logs || []);
         loadLicTable(state.licPage);
     } catch (e) { /* ignore */ }
+}
+
+// 坐标收集异常项目：以"最近一次收集作业的失败数"为准；无失败则隐藏（不含 skipped 这类非错误）
+async function loadCollectStates(logs) {
+    const el = document.getElementById('collectErrors');
+    if (!el) return;
+    try {
+        const r = await depApiFetch('/api/v1/dependency-audit/collect/states');
+        state.collectStates = r.data || [];
+    } catch (e) { state.collectStates = []; }
+
+    const latest = (logs || []).filter(l => l.kind === 'coordinate_collect').pop();
+    if (!latest || (latest.failed || 0) === 0) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+
+    const bad = state.collectStates.filter(s => s.status === 'failed');
+    if (!bad.length) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+    const name = id => (state.projects.find(p => p.id === id) || {}).name || ('#' + id);
+    el.classList.remove('hidden');
+    el.innerHTML = `<div class="font-medium mb-2"><i class="fas fa-triangle-exclamation mr-1"></i>坐标收集失败 ${bad.length} 个项目</div>
+        <div class="space-y-1 max-h-48 overflow-y-auto">
+        ${bad.map(s => `<div class="flex items-start gap-3">
+            <span class="font-medium shrink-0 w-44 truncate" title="${escapeHtml(name(s.project_id))}">${escapeHtml(name(s.project_id))}</span>
+            <span class="text-amber-600 break-all" title="${escapeHtml(s.error || '')}">${escapeHtml(s.error || '（无错误信息）')}</span>
+        </div>`).join('')}
+        </div>`;
 }
 function renderJobStatus(logs, q) {
     const byKind = {}; logs.forEach(l => byKind[l.kind] = l);

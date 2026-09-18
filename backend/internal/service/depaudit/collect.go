@@ -77,18 +77,7 @@ func (s *CollectService) CollectProject(project *model.Project, cfg *model.Depen
 		})
 	}
 
-	err = s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("project_id = ?", project.ID).Delete(&model.DependencyAuditProjectDep{}).Error; err != nil {
-			return err
-		}
-		if len(rows) > 0 {
-			if err := tx.CreateInBatches(rows, 500).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
+	if err := s.replaceSnapshot(project.ID, rows); err != nil {
 		s.upsertState(project, usedBranch, commit, 0, "failed", err.Error())
 		return 0, commit, usedBranch, err
 	}
@@ -106,6 +95,46 @@ func (s *CollectService) CollectProject(project *model.Project, cfg *model.Depen
 	}
 	s.upsertState(project, usedBranch, commit, len(rows), "success", "")
 	return len(rows), commit, usedBranch, nil
+}
+
+// isRetryableDBErr 判断是否为可重试的瞬时数据库错误（死锁 / 锁等待超时）
+func isRetryableDBErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "1213") || strings.Contains(msg, "Deadlock") ||
+		strings.Contains(msg, "40001") || strings.Contains(msg, "1205") || strings.Contains(msg, "Lock wait timeout")
+}
+
+// replaceSnapshot 事务内替换项目依赖快照，遇到死锁自动重试。
+// 并发收集不同项目时，二级索引 idx_projdep_pkg 上的交叉锁可能触发 1213，重试即可恢复。
+func (s *CollectService) replaceSnapshot(projectID uint, rows []*model.DependencyAuditProjectDep) error {
+	const maxAttempts = 4
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		lastErr = s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Where("project_id = ?", projectID).Delete(&model.DependencyAuditProjectDep{}).Error; err != nil {
+				return err
+			}
+			if len(rows) > 0 {
+				if err := tx.CreateInBatches(rows, 200).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if lastErr == nil {
+			return nil
+		}
+		if !isRetryableDBErr(lastErr) {
+			return lastErr
+		}
+		zap.L().Warn("replace depaudit snapshot deadlock, retrying",
+			zap.Uint("project_id", projectID), zap.Int("attempt", attempt+1), zap.Error(lastErr))
+		time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
+	}
+	return lastErr
 }
 
 func (s *CollectService) upsertState(project *model.Project, branch, commit string, count int, status, errMsg string) {
