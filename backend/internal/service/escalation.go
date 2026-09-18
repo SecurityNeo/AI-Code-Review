@@ -304,15 +304,37 @@ func (s *EscalationService) flushAlerts() {
 		return
 	}
 	for _, batch := range s.alertCollector {
-		var content string
-		if len(batch.items) == 1 {
-			content = batch.items[0]
-		} else {
-			content = fmt.Sprintf("您有 %d 条 Issue 同时达到该升级节点：\n\n%s", len(batch.items), strings.Join(batch.items, "\n---\n"))
-		}
+		content := buildEscalationContent(batch.items)
 		s.notifSvc.SendInbox(batch.orgID, batch.userID, batch.typ, batch.title, content, "")
 	}
 	s.alertCollector = nil
+}
+
+// maxItemsPerNotification 单条升级提醒最多展示的 Issue 条数（生成层限流，避免内容超长）
+const maxItemsPerNotification = 20
+
+// buildEscalationContent 组装升级提醒内容：
+//   - 单条 Issue：直接展示；
+//   - 多条：列出（最多 maxItemsPerNotification 条），超出部分给出汇总提示。
+func buildEscalationContent(items []string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	if len(items) == 1 {
+		return items[0]
+	}
+	shown := items
+	more := 0
+	if len(items) > maxItemsPerNotification {
+		shown = items[:maxItemsPerNotification]
+		more = len(items) - maxItemsPerNotification
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "您有 %d 条 Issue 同时达到该升级节点：\n\n%s", len(items), strings.Join(shown, "\n---\n"))
+	if more > 0 {
+		fmt.Fprintf(&sb, "\n\n… 其余 %d 条未在通知中展示，请前往「待处理 Issue」列表查看。", more)
+	}
+	return sb.String()
 }
 
 // RunDailyEscalation 每日定时运行升级检查（建议每小时执行一次）
@@ -344,7 +366,7 @@ func (s *EscalationService) RunDailyEscalation(scope *model.UserAuthScope) {
 		s.runEscalationForOrg(org.ID, now)
 	}
 
-		zap.L().Debug("RunDailyEscalation completed", zap.Int("org_count", len(orgs)))
+	zap.L().Debug("RunDailyEscalation completed", zap.Int("org_count", len(orgs)))
 }
 
 // runEscalationForOrg 为指定组织运行升级检查
@@ -682,7 +704,9 @@ func (s *EscalationService) processEscalation(issue *model.ReviewIssue, ageHours
 
 // findStewards 查找项目指定维度的负责人（category → language → default）
 // ⚠️ 关键修复：每个 scope 查询必须使用独立的 db chain，不能复用同一个 *gorm.DB 变量，
-//    否则 GORM 的 Where 条件会叠加（如 scope_type='rc' AND scope_type='default'），导致 fallback 永远返回 0 行。
+//
+//	否则 GORM 的 Where 条件会叠加（如 scope_type='rc' AND scope_type='default'），导致 fallback 永远返回 0 行。
+//
 // ⚠️ 返回结果已过滤掉 users.enabled=false 的记录，避免已禁用人员被分配 Issue 或收到通知。
 func (s *EscalationService) findStewards(projectID uint, category, language string) []model.ProjectResponsibility {
 	zap.L().Debug("findStewards called",

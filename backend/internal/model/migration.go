@@ -216,6 +216,17 @@ func MigrateAll() error {
 		&OrgUserInvite{},
 		&TeamProject{},
 		&ResourceQuota{},
+		&DependencyAuditConfig{},
+		&DependencyAuditTask{},
+		&DependencyAuditRun{},
+		&DependencyAuditItem{},
+		&DependencyAuditVuln{},
+		&DependencyAuditProjectDep{},
+		&DependencyAuditCollectState{},
+		&DependencyAuditSyncQueue{},
+		&DependencyAuditJobLog{},
+		&PackageLicense{},
+		&PackageImportName{},
 	}
 
 	for _, m := range newModels {

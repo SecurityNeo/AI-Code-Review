@@ -337,6 +337,32 @@ func autoMigrate() error {
 		return err
 	}
 
+	// ========== 依赖审查（供应链安全）相关表 ==========
+	// 兼容：旧版 dependency_audit_vulns 唯一索引为 (run_id, vuln_id)，缺少 item_id，
+	// 会导致同一 run 下同一漏洞命中多个版本时整批插入失败。先移除旧索引再由 AutoMigrate 建新索引。
+	if DB.Migrator().HasTable(&DependencyAuditVuln{}) && DB.Migrator().HasIndex(&DependencyAuditVuln{}, "uk_depaudit_vuln") {
+		if err := DB.Migrator().DropIndex(&DependencyAuditVuln{}, "uk_depaudit_vuln"); err != nil {
+			zap.L().Warn("drop legacy depaudit vuln index failed", zap.Error(err))
+		} else {
+			zap.L().Info("dropped legacy index dependency_audit_vulns.uk_depaudit_vuln")
+		}
+	}
+	if err := DB.AutoMigrate(
+		&DependencyAuditConfig{},
+		&DependencyAuditTask{},
+		&DependencyAuditRun{},
+		&DependencyAuditItem{},
+		&DependencyAuditVuln{},
+		&DependencyAuditProjectDep{},
+		&DependencyAuditCollectState{},
+		&DependencyAuditSyncQueue{},
+		&DependencyAuditJobLog{},
+		&PackageLicense{},
+		&PackageImportName{},
+	); err != nil {
+		return err
+	}
+
 	// 初始化 Pipeline 阶段定义
 	initPipelineStages()
 
@@ -946,10 +972,10 @@ func initReviewAgentConfig() {
 		"dependency_scan", "batch_review_frame", "post_process",
 	})
 	cfg.SetStageConfig("code_understanding", map[string]interface{}{
-		"depth":                     1,
-		"context_extract_timeout":   30,
-		"symbol_graph_timeout":      60,
-		"report_merge_timeout":      10,
+		"depth":                   1,
+		"context_extract_timeout": 30,
+		"symbol_graph_timeout":    60,
+		"report_merge_timeout":    10,
 	})
 	cfg.SetTriggerEventCodes([]string{
 		"merge_request_open", "merge_request_update", "merge_request_reopen",

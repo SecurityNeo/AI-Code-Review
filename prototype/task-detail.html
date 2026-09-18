@@ -2253,10 +2253,25 @@ async function loadPipelineStatus(force) {
         loading.classList.add('hidden');
 
         if (data.legacy_mode) {
-            legacy.classList.remove('hidden');
-            legacy.innerHTML = '<i class="fas fa-history mr-2"></i>该任务在旧模式下执行，无链路数据';
+            // 无链路执行记录：直接展示 Pipeline 结构（未执行阶段为待运行占位），不显示“旧模式”提示。
+            document.getElementById('pipelineCards').classList.remove('hidden');
+            renderPipeline({
+                stages: data.stages || [],
+                overall_status: (currentTask && currentTask.status) || 'success',
+            });
+            // 任务刚启动/排队时，pipeline 记录可能尚未创建：轮询等待其出现，避免页面停在“无数据”状态
+            if (currentTask && (currentTask.status === 'running' || currentTask.status === 'pending')) {
+                if (!pipelineTimer) {
+                    pipelineTimer = setInterval(() => loadPipelineStatus(true), 3000);
+                }
+            } else {
+                disconnectPipelineSSE();
+            }
             return;
         }
+
+        // 已取到真实 Pipeline 数据：停止“等待记录”的轮询，转而使用 SSE/轮询更新
+        if (pipelineTimer) { clearInterval(pipelineTimer); pipelineTimer = null; }
 
         if (!data.stages || data.stages.length === 0) {
             // Pipeline 已结束但阶段数据缺失：显示异常提示
@@ -2303,7 +2318,12 @@ function connectPipelineSSE() {
         es.onmessage = (e) => {
             try {
                 const msg = JSON.parse(e.data);
-                if (msg.type === 'legacy_mode') { es.close(); pipelineSSE = null; return; }
+                if (msg.type === 'legacy_mode') {
+                    // 记录尚未创建（任务刚启动/排队）：关闭 SSE 并退化为轮询，待记录出现后自动恢复
+                    es.close(); pipelineSSE = null;
+                    if (!pipelineTimer) { pipelineTimer = setInterval(() => loadPipelineStatus(true), 3000); }
+                    return;
+                }
                 if (msg.type === 'pipeline_update' && msg.stages && msg.stages.length > 0) {
                     renderPipeline(msg);
                 }
@@ -4499,6 +4519,9 @@ function renderBatchDetail(json) {
 function renderAgenticDetail(json) {
     const inp = json.input_snapshot || {};
     const out = json.output_snapshot || {};
+    // 工具名可读化（终止工具 submit_review 需要特殊标注）
+    const TOOL_NAME_LABELS = { submit_review: '提交评审结论' };
+    const toolLabel = (n) => TOOL_NAME_LABELS[n] || n;
     let html = '';
     html += renderMetaBar(json);
 
@@ -4544,10 +4567,10 @@ function renderAgenticDetail(json) {
             const tokenLabel = (isLLM || isLLMRetry) ? `${(r.input_tokens||0).toLocaleString()} / ${(r.output_tokens||0).toLocaleString()}` : '-';
             let toolDetail = '-';
             if (isTool && r.tool_results && r.tool_results.length > 0) {
-                const names = r.tool_results.map(tr => tr.tool_name).filter(Boolean);
+                const names = r.tool_results.map(tr => toolLabel(tr.tool_name)).filter(Boolean);
                 toolDetail = names.join(', ');
             } else if (isTool && r.tool_calls && r.tool_calls.length > 0) {
-                toolDetail = r.tool_calls.join(', ');
+                toolDetail = r.tool_calls.map(toolLabel).join(', ');
             }
             html += `<tr class="border-b border-gray-200 last:border-b-0">`;
             html += `<td class="py-2 pr-2 font-mono text-gray-500 align-top">#${r.round_index}</td>`;
@@ -4601,13 +4624,21 @@ function renderAgenticDetail(json) {
             if (roundData.tool && roundData.tool.tool_results && roundData.tool.tool_results.length > 0) {
                 roundData.tool.tool_results.forEach((tr, ti) => {
                     html += `<div class="px-3 py-2 ${ti < roundData.tool.tool_results.length-1 ? 'border-b border-gray-100' : ''}">`;
-                    html += `<div class="text-[10px] font-medium text-orange-600 mb-1">➜ ${escapeHtml(tr.tool_name || 'unknown')}</div>`;
+                    const isSubmit = (tr.tool_name === 'submit_review');
+                    html += `<div class="text-[10px] font-medium ${isSubmit ? 'text-purple-600' : 'text-orange-600'} mb-1">➜ ${escapeHtml(toolLabel(tr.tool_name || 'unknown'))}</div>`;
                     if (tr.arguments) {
-                        try {
-                            const argsObj = JSON.parse(tr.arguments);
-                            html += `<div class="mb-1 text-[10px] text-gray-500">参数: <span class="font-mono text-gray-600">${escapeHtml(JSON.stringify(argsObj))}</span></div>`;
-                        } catch(e) {
-                            html += `<div class="mb-1 text-[10px] text-gray-500">参数: <span class="font-mono text-gray-600">${escapeHtml(tr.arguments)}</span></div>`;
+                        if (isSubmit) {
+                            // 提交评审结论：内容是评审结果 JSON，按 JSON 格式渲染（不加“参数:”等前缀）
+                            let pretty = tr.arguments;
+                            try { pretty = JSON.stringify(JSON.parse(tr.arguments), null, 2); } catch (e) { /* 非 JSON 时原样展示 */ }
+                            html += `<div class="mb-1">${renderCollapsibleContent(pretty, 'json', true)}</div>`;
+                        } else {
+                            try {
+                                const argsObj = JSON.parse(tr.arguments);
+                                html += `<div class="mb-1 text-[10px] text-gray-500">参数: <span class="font-mono text-gray-600">${escapeHtml(JSON.stringify(argsObj))}</span></div>`;
+                            } catch(e) {
+                                html += `<div class="mb-1 text-[10px] text-gray-500">参数: <span class="font-mono text-gray-600">${escapeHtml(tr.arguments)}</span></div>`;
+                            }
                         }
                     }
                     if (tr.result) {

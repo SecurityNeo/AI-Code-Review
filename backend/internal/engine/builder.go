@@ -783,6 +783,13 @@ func BuildAgenticSystemPrompt(ctx *PromptContext) string {
 	sb.WriteString("- 如果工具返回的信息不足，可以继续调用其他工具\n")
 	sb.WriteString("- 最终输出必须严格符合给定的 JSON Schema，不要包含任何 Markdown 代码块标记或额外解释\n\n")
 
+	sb.WriteString("## 结束与提交（必须遵守）\n\n")
+	sb.WriteString("1. 本批次评审**必须通过调用 `submit_review` 工具来提交最终结论并结束**；\n")
+	sb.WriteString("   在未调用 `submit_review` 前不要停止。\n")
+	sb.WriteString("2. `completion` 字段必须明确：`complete`（已给出结论）或 `need_more_analysis`（仍需继续分析）。\n")
+	sb.WriteString("3. 若本次变更**确认无问题**：请提交 `issues: []` 且 `completion: \"complete\"`，并在 `no_issue_reason` 中写明已核实的依据。\n")
+	sb.WriteString("4. `batch_notes` 必须是结论性摘要；**禁止**出现“我再核实一下 / 继续查看/verify a few more details”之类未完成表述。\n\n")
+
 	sb.WriteString("## 建议调用工具的场景\n\n")
 	sb.WriteString("在以下场景**建议**调用工具辅助分析：\n")
 	sb.WriteString("- 看到未在 diff 中定义的函数调用、结构体、接口使用\n")
@@ -796,7 +803,8 @@ func BuildAgenticSystemPrompt(ctx *PromptContext) string {
 
 // BuildAgenticUserPrompt 构建 Agentic 模式的极简 User Prompt
 // 移除 code_understanding 全文，保留维度定义、评审规则、diff 和工具说明
-func BuildAgenticUserPrompt(ctx *PromptContext, batchFiles []map[string]interface{}) string {
+// isLastBatch=true 时额外注入 Commit 历史与 MR 标题（与标准分批一致，用于提交规范类评审）
+func BuildAgenticUserPrompt(ctx *PromptContext, batchFiles []map[string]interface{}, isLastBatch bool) string {
 	var sb strings.Builder
 
 	// 1. 维度定义
@@ -851,11 +859,15 @@ func BuildAgenticUserPrompt(ctx *PromptContext, batchFiles []map[string]interfac
 	sb.WriteString("**使用时机**：需要了解文件的导入依赖，特别是引入了新包时。\n")
 	sb.WriteString("**作用**：返回文件的所有 import 列表，按标准库/第三方/内部包分组。\n\n")
 
+	sb.WriteString("### submit_review(...) —— 终止工具\n")
+	sb.WriteString("**使用时机**：分析充分后，**必须调用本工具提交最终结论**，参数即评审结果（issues / recommendations / completion / no_issue_reason）。\n")
+	sb.WriteString("**要求**：未调用本工具前不要停止；`completion` 必须为 `complete` 或 `need_more_analysis`；若无问题，提交空 `issues` 并给出 `no_issue_reason`。\n\n")
+
 	sb.WriteString("## 评审流程要求\n\n")
 	sb.WriteString("1. 先通读 diff，标记出所有你不确定的函数调用、API 端点、数据流路径\n")
 	sb.WriteString("2. 对每个不确定点，调用对应工具获取上下文\n")
 	sb.WriteString("3. 收到工具结果后，结合新信息重新评估风险等级和影响范围\n")
-	sb.WriteString("4. 所有关键假设经过工具验证后，输出最终 JSON 评审结果\n")
+	sb.WriteString("4. 所有关键假设经过工具验证后，**调用 `submit_review` 提交最终评审结论**（不得以普通文本停止收尾）\n")
 	sb.WriteString("5. **不允许在没有调用任何工具的情况下直接输出 JSON**\n\n")
 
 	// 4.5 问题定位标注规则：保证 line_start/line_end 与 code_snippet 标记一致
@@ -883,6 +895,19 @@ func BuildAgenticUserPrompt(ctx *PromptContext, batchFiles []map[string]interfac
 		sb.WriteString("```diff\n")
 		sb.WriteString(maybeInjectLineNumbers(diffStr, path, ctx.ProjectID))
 		sb.WriteString("\n```\n\n")
+	}
+
+	// 6. Commit 历史与 MR 标题（仅最后一批注入，与标准分批保持一致）
+	// 用于评审 Conventional Commits 等"提交规范类"问题（此类问题 file 为空）
+	if isLastBatch {
+		if ctx.CommitsText != "" {
+			sb.WriteString("\n## Commit 历史（用于评审提交规范，如 Conventional Commits）\n\n")
+			sb.WriteString(ctx.CommitsText)
+			sb.WriteString("\n\n")
+		}
+		if ctx.MRTitle != "" {
+			sb.WriteString(fmt.Sprintf("MR 标题：%s\n\n", ctx.MRTitle))
+		}
 	}
 
 	return sb.String()

@@ -44,10 +44,21 @@ const MENU_CONFIG = [
             { id: 'projects',     name: '项目管理',   href: 'projects.html',     icon: 'fa-folder-open',    role: ['developer'] },
             { id: 'tasks',        name: '评审任务列表', href: 'tasks.html',        icon: 'fa-tasks',             role: ['developer'] },
             { id: 'review-rules', name: '评审规则库', href: 'review-rules.html', icon: 'fa-shield-halved',  role: ['org_admin'] },
-            { id: 'vulnerability-db', name: '漏洞数据库', href: 'vulnerability-db.html', icon: 'fa-bug', role: ['developer'] },
             { id: 'models',       name: '大模型管理', href: 'models.html',       icon: 'fa-microchip',         role: ['super_admin'] },
             { id: 'agent-config', name: '智能体配置', href: 'agent-config.html', icon: 'fa-sliders',           role: ['org_admin'] },
             { id: 'incubator',    name: '规则孵化台', href: 'incubator.html',    icon: 'fa-flask',             role: ['org_admin'] },
+        ]
+    },
+
+    // ========== 供应链安全 ==========
+    {
+        id: 'supply-chain-group',
+        name: '供应链安全',
+        icon: 'fa-boxes-stacked',
+        role: ['developer'],
+        children: [
+            { id: 'dependency-audit', name: '依赖审查', href: 'dependency-audit.html', icon: 'fa-cubes', role: ['developer'] },
+            { id: 'vulnerability-db', name: '漏洞数据库', href: 'vulnerability-db.html', icon: 'fa-bug', role: ['developer'] },
         ]
     },
 

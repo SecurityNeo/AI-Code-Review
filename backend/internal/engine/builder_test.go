@@ -143,3 +143,20 @@ func TestBuildRulesSectionLiteNoRules(t *testing.T) {
 		t.Errorf("empty rules should not output rule codes, got:\n%s", result)
 	}
 }
+
+func TestBuildAgenticUserPrompt_CommitsOnlyOnLastBatch(t *testing.T) {
+	ctx := &PromptContext{CommitsText: "abc123 feat: add x", MRTitle: "MR-1 title"}
+
+	last := BuildAgenticUserPrompt(ctx, nil, true)
+	if !strings.Contains(last, "abc123") {
+		t.Error("last batch should inject commit history")
+	}
+	if !strings.Contains(last, "MR-1 title") {
+		t.Error("last batch should inject MR title")
+	}
+
+	other := BuildAgenticUserPrompt(ctx, nil, false)
+	if strings.Contains(other, "abc123") {
+		t.Error("non-last batch should not inject commit history")
+	}
+}
