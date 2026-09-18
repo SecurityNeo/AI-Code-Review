@@ -16,6 +16,7 @@ import (
 	"github.com/ai-optimizer/backend/internal/middleware"
 	"github.com/ai-optimizer/backend/internal/model"
 	"github.com/ai-optimizer/backend/internal/service"
+	"github.com/ai-optimizer/backend/internal/service/depaudit"
 	"github.com/ai-optimizer/backend/internal/service/graphscan"
 	"github.com/ai-optimizer/backend/internal/vectorstore"
 	"github.com/ai-optimizer/backend/pkg/encrypt"
@@ -111,6 +112,25 @@ func main() {
 	} else {
 		zap.L().Sugar().Infow("graph_cron_scan registered", "entryID", entryID, "spec", "0 0 3 * * *")
 	}
+
+	// 5.3.5c. 依赖审查：恢复残留运行态 + 每日 03:30 坐标收集 + 04:00 全组织扫描 + 同步 worker
+	depAuditSvc := depaudit.NewScanService(model.DB, getWorkspace())
+	depAuditSvc.RecoverStale()
+	if entryID, err := cronRunner.AddFunc("0 30 3 * * *", func() {
+		startDepAuditCollect(model.DB)
+	}); err != nil {
+		zap.L().Error("register dependency-audit collect cron failed", zap.Error(err))
+	} else {
+		zap.L().Sugar().Infow("depaudit_collect registered", "entryID", entryID, "spec", "0 30 3 * * *")
+	}
+	if entryID, err := cronRunner.AddFunc("0 0 4 * * *", func() {
+		startDepAuditCronScan(model.DB, getWorkspace())
+	}); err != nil {
+		zap.L().Error("register dependency-audit cron scan failed", zap.Error(err))
+	} else {
+		zap.L().Sugar().Infow("depaudit_cron_scan registered", "entryID", entryID, "spec", "0 0 4 * * *")
+	}
+	go depaudit.StartSyncWorker(context.Background(), model.DB)
 
 	// 5.3.6. Issue 治理系统初始化
 	service.InitWorkdayCalculator()
@@ -360,6 +380,9 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 	r.GET("/vulnerability-db.html", func(c *gin.Context) {
 		c.File(frontendPath + "/vulnerability-db.html")
 	})
+	r.GET("/dependency-audit.html", func(c *gin.Context) {
+		c.File(frontendPath + "/dependency-audit.html")
+	})
 	r.Static("/pages", frontendPath+"/pages")
 	r.GET("/agent-config.html", func(c *gin.Context) {
 		c.File(frontendPath + "/agent-config.html")
@@ -384,9 +407,9 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 	mcpSSEHandler := func(c *gin.Context) {
 		mcpServer.AuthMiddleware()(http.HandlerFunc(mcpServer.HandleSSE)).ServeHTTP(c.Writer, c.Request)
 	}
-	r.POST("/mcp", mcpHandler)      // MCP JSON-RPC
-	r.POST("/mcp/v1", mcpHandler)   // 旧路径兼容
-	r.GET("/mcp/sse", mcpSSEHandler) // MCP 1.0 SSE 推送
+	r.POST("/mcp", mcpHandler)                                // MCP JSON-RPC
+	r.POST("/mcp/v1", mcpHandler)                             // 旧路径兼容
+	r.GET("/mcp/sse", mcpSSEHandler)                          // MCP 1.0 SSE 推送
 	r.HEAD("/mcp/v1", func(c *gin.Context) { c.Status(200) }) // 健康探测
 
 	api := r.Group("/api/v1")
@@ -743,6 +766,10 @@ func setupRouter(cfg *config.Config, taskSvc *service.TaskService, embedSvc *ser
 		graphH := handler.NewGraphHandler(model.DB, getWorkspace())
 		graphH.RegisterRoutes(common, orgAdmin)
 
+		// 依赖审查（供应链安全）—— 只读给 common，写/触发/配置/导入/导出给 orgAdmin
+		depAuditH := handler.NewDependencyAuditHandler(model.DB, getWorkspace())
+		depAuditH.RegisterRoutes(common, orgAdmin)
+
 		// 报表管理
 		report := orgAdmin.Group("/reports")
 		{
@@ -916,6 +943,52 @@ func startGraphCronScan(db *gorm.DB) {
 				zap.Uint("project_id", p.ID),
 				zap.String("branch", branch))
 		}
+	}
+}
+
+// startDepAuditCronScan 每日 04:00 扫描所有组织（统一时间），
+// 仅扫描 schedule_enabled=true 的组织，组织内所有项目。
+func startDepAuditCronScan(db *gorm.DB, workspace string) {
+	var orgs []model.Organization
+	if err := db.Where("status = ?", "active").Find(&orgs).Error; err != nil {
+		zap.L().Error("depaudit cron: fetch orgs failed", zap.Error(err))
+		return
+	}
+	if len(orgs) == 0 {
+		orgs = append(orgs, model.Organization{ID: 1})
+	}
+	svc := depaudit.NewScanService(db, workspace)
+	for _, org := range orgs {
+		cfg, err := depaudit.GetConfig(db, org.ID)
+		if err != nil || !cfg.ScheduleEnabled {
+			continue
+		}
+		if taskID, err := svc.TriggerOrg(org.ID, "scheduled", 0); err != nil {
+			zap.L().Warn("depaudit cron: trigger org failed", zap.Uint("org_id", org.ID), zap.Error(err))
+		} else {
+			zap.L().Sugar().Infow("depaudit cron triggered", "org_id", org.ID, "task_id", taskID)
+		}
+		svc.CleanupExpiredTasks(org.ID, cfg.TaskKeepDays)
+	}
+}
+
+// startDepAuditCollect 每日 03:30 收集所有组织项目依赖坐标（写入快照）
+func startDepAuditCollect(db *gorm.DB) {
+	var orgs []model.Organization
+	if err := db.Where("status = ?", "active").Find(&orgs).Error; err != nil {
+		zap.L().Error("depaudit collect: fetch orgs failed", zap.Error(err))
+		return
+	}
+	if len(orgs) == 0 {
+		orgs = append(orgs, model.Organization{ID: 1})
+	}
+	collectSvc := depaudit.NewCollectService(db)
+	for _, org := range orgs {
+		cfg, err := depaudit.GetConfig(db, org.ID)
+		if err != nil || !cfg.ScheduleEnabled {
+			continue
+		}
+		go collectSvc.CollectOrg(org.ID, nil)
 	}
 }
 

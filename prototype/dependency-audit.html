@@ -1,0 +1,1145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script src="js/theme.js?v=9"></script>
+    <style>html{background-color:#1e293b;}</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>依赖审查 - CodeGuard</title>
+    <script src="js/auth.js?v=9"></script>
+    <script src="/js/org-select.js?v=14"></script>
+    <script src="js/menu-config.js?v=9"></script>
+    <script src="js/sidebar.js?v=9"></script>
+    <link rel="stylesheet" href="/static/fontawesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="css/theme.css?v=1">
+    <style>
+        .sidebar-item:hover { background-color: rgba(255,255,255,0.1); }
+        .sidebar-item.active { background-color: rgba(255,255,255,0.15); border-left: 3px solid #3b82f6; }
+        .severity-critical { color: #dc2626; background-color: #fef2f2; }
+        .severity-high { color: #ea580c; background-color: #fff7ed; }
+        .severity-medium { color: #ca8a04; background-color: #fefce8; }
+        .severity-low { color: #2563eb; background-color: #eff6ff; }
+        .severity-unknown { color: #6b7280; background-color: #f3f4f6; }
+        .license-compliant { color: #16a34a; }
+        .license-non_compliant { color: #dc2626; }
+        .license-review { color: #ca8a04; }
+        .license-unknown, .license-na { color: #6b7280; }
+        .modal { display: none; }
+        .modal.active { display: flex; }
+        .tab-btn { border-bottom: 2px solid transparent; }
+        .tab-btn.active { color: #2563eb; border-bottom-color: #2563eb; }
+        .subtab-btn { border-bottom: 2px solid transparent; }
+        .subtab-btn.active { color: #2563eb; border-bottom-color: #2563eb; }
+        .toast { position: fixed; top: 20px; right: 20px; z-index: 9999; }
+        .proj-row:hover { background-color: #f9fafb; }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans">
+<div id="page-transition" style="position:fixed;inset:0;background:#1e293b;z-index:99999;transition:opacity .25s ease;"></div>
+<script>(function(){function hide(){var el=document.getElementById('page-transition');if(el){el.style.opacity='0';setTimeout(function(){el.remove();},250);}}if(document.readyState==='complete'){hide();}else{window.addEventListener('load',hide);}})();</script>
+
+<div class="flex h-screen">
+    <aside id="sidebar" class="w-64 bg-slate-900 text-white flex-shrink-0 flex flex-col">
+        <nav style="padding:20px;text-align:center;color:var(--cg-text-tertiary);font-size:13px;">加载中...</nav>
+    </aside>
+
+    <main class="flex-1 overflow-y-auto">
+        <header class="bg-white border-b px-8 py-4 flex items-center justify-between sticky top-0 z-10">
+            <div>
+                <h2 class="text-xl font-bold text-gray-800">依赖审查</h2>
+                <p class="text-sm text-gray-500 mt-1">依赖坐标快照 + 本地许可证库匹配，按任务生成报告</p>
+            </div>
+        </header>
+
+        <div class="bg-white border-b px-8 flex">
+            <button id="tab-btn-report" onclick="switchTab('report')" class="tab-btn active px-4 py-3 text-sm font-medium text-gray-600 hover:text-blue-600">报告</button>
+            <button id="tab-btn-history" onclick="switchTab('history')" class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-blue-600">扫描任务</button>
+            <button id="tab-btn-license" onclick="switchTab('license')" class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-blue-600">许可证数据</button>
+            <button id="tab-btn-config" onclick="switchTab('config')" class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-blue-600">配置</button>
+        </div>
+
+        <!-- 报告 -->
+        <div id="tab-report" class="tab-panel">
+            <div class="p-6 space-y-4">
+                <div class="bg-white rounded-xl border px-4 py-3 flex items-center gap-3 flex-wrap">
+                    <span class="text-sm text-gray-500">任务</span>
+                    <select id="taskSelect" onchange="loadReport(this.value)" class="border rounded-lg px-3 py-2 text-sm w-72"></select>
+                    <button onclick="loadTasks()" class="text-sm text-gray-400 hover:text-blue-600" title="刷新任务列表"><i class="fas fa-rotate"></i></button>
+                    <span id="reportMeta" class="text-xs text-gray-500 flex-1 min-w-[200px] truncate"></span>
+                    <button data-admin-only onclick="exportCurrentTask()" class="bg-white border border-blue-600 text-blue-600 px-4 py-2 rounded-lg text-sm hover:bg-blue-50 flex items-center gap-2">
+                        <i class="fas fa-download"></i>导出报告
+                    </button>
+                </div>
+
+                <div id="reportEmpty" class="bg-white rounded-xl border p-12 text-center text-gray-400">暂无任务，请先执行扫描</div>
+
+                <div id="reportBody" class="hidden space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                        <div class="bg-white rounded-xl p-4 border">
+                            <div class="text-xs text-gray-500 flex items-center justify-between">
+                                <span class="flex items-center gap-1.5"><i class="fas fa-cubes text-blue-400"></i>项目扫描状态</span>
+                                <span class="text-[11px] text-gray-400" id="kpiRunHint"></span>
+                            </div>
+                            <div class="grid grid-cols-4 gap-1 mt-3 text-center">
+                                <div><div class="text-base font-semibold text-green-600" id="kpiRunSuccess">-</div><div class="text-[10px] text-gray-400">成功</div></div>
+                                <div><div class="text-base font-semibold text-red-600" id="kpiRunFailed">-</div><div class="text-[10px] text-gray-400">失败</div></div>
+                                <div><div class="text-base font-semibold text-gray-500" id="kpiRunSkipped">-</div><div class="text-[10px] text-gray-400">跳过</div></div>
+                                <div><div class="text-base font-semibold text-amber-600" id="kpiRunCollect">-</div><div class="text-[10px] text-gray-400">收集失败</div></div>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-xl p-4 border">
+                            <div class="text-xs text-gray-500 mb-2 flex items-center gap-1.5"><i class="fas fa-box text-indigo-400"></i>依赖</div>
+                            <div id="kpiDepsEco" class="grid grid-cols-2 md:grid-cols-4 gap-2 text-center"></div>
+                        </div>
+                        <div class="bg-white rounded-xl p-4 border">
+                            <div class="text-xs text-gray-500 mb-2 flex items-center gap-1.5"><i class="fas fa-shield-halved text-red-400"></i>漏洞</div>
+                            <div class="grid grid-cols-4 gap-1 text-center">
+                                <div><div class="text-lg font-bold text-red-600" id="kpiCrit">-</div><div class="text-[11px] text-gray-400">严重</div></div>
+                                <div><div class="text-lg font-bold text-orange-600" id="kpiHigh">-</div><div class="text-[11px] text-gray-400">高危</div></div>
+                                <div><div class="text-lg font-bold text-yellow-600" id="kpiMed">-</div><div class="text-[11px] text-gray-400">中危</div></div>
+                                <div><div class="text-lg font-bold text-blue-600" id="kpiLow">-</div><div class="text-[11px] text-gray-400">低危</div></div>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-xl p-4 border relative group">
+                            <div class="text-xs text-gray-500 mb-2 flex items-center justify-between">
+                                <span class="flex items-center gap-1.5"><i class="fas fa-scale-balanced text-green-400"></i>许可证合规</span>
+                                <i class="fas fa-circle-info text-gray-300 cursor-help"></i>
+                            </div>
+                            <div class="grid grid-cols-4 gap-1 text-center">
+                                <div><div class="text-lg font-bold text-green-600" id="kpiLicC">-</div><div class="text-[11px] text-gray-400">合规</div></div>
+                                <div><div class="text-lg font-bold text-red-600" id="kpiLicN">-</div><div class="text-[11px] text-gray-400">不合规</div></div>
+                                <div><div class="text-lg font-bold text-yellow-600" id="kpiLicR">-</div><div class="text-[11px] text-gray-400">待审查</div></div>
+                                <div><div class="text-lg font-bold text-gray-500" id="kpiLicNA">-</div><div class="text-[11px] text-gray-400">未判定</div></div>
+                            </div>
+                            <div id="kpiLicTip" class="hidden group-hover:block absolute z-20 right-2 top-9 w-72 bg-gray-800 text-white text-xs rounded-lg p-3 shadow-lg leading-5 whitespace-normal"></div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
+                        <div class="xl:col-span-3 bg-white rounded-xl border flex flex-col overflow-hidden">
+                            <div class="px-3 py-2.5 border-b">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-sm font-medium text-gray-700">项目列表</span>
+                                    <span class="text-xs text-gray-400" id="reportProjectCount"></span>
+                                </div>
+                                <input id="reportProjectSearch" onkeyup="renderReportProjects(state.currentRuns||[])" placeholder="筛选项目名"
+                                       class="w-full px-2.5 py-1.5 border rounded-lg text-xs focus:ring-1 focus:ring-blue-400 focus:outline-none">
+                            </div>
+                            <div id="reportProjects" class="p-2 space-y-2 overflow-y-auto max-h-[560px]"></div>
+                        </div>
+
+                        <div class="xl:col-span-9 bg-white rounded-xl border flex flex-col overflow-hidden min-h-[460px]" id="projectDetail">
+                            <div id="detailEmpty" class="flex-1 flex flex-col items-center justify-center text-gray-400 text-sm gap-2 py-16">
+                                <i class="fas fa-hand-pointer text-2xl"></i><div>从左侧选择项目查看依赖与漏洞明细</div>
+                            </div>
+                            <div id="detailBody" class="hidden flex-1 flex flex-col min-h-0">
+                                <div class="px-4 py-3 border-b flex items-center gap-3 flex-wrap">
+                                    <span class="text-sm font-medium text-gray-700 flex-1 truncate" id="detailTitle">项目明细</span>
+                                    <div class="flex border-b">
+                                        <button id="subtab-btn-items" onclick="switchSubTab('items')" class="subtab-btn active px-3 py-2 text-xs text-gray-600">依赖明细</button>
+                                        <button id="subtab-btn-vulns" onclick="switchSubTab('vulns')" class="subtab-btn px-3 py-2 text-xs text-gray-600">漏洞明细</button>
+                                    </div>
+                                    <input id="detailSearch" placeholder="搜索包名/漏洞" class="px-2 py-1 border rounded text-xs w-40" onkeyup="if(event.key==='Enter')loadDetail(1)">
+                                </div>
+                                <div class="overflow-auto flex-1"><table class="w-full text-sm" id="detailTable"><thead class="bg-gray-50 text-gray-500 text-left"></thead><tbody></tbody></table></div>
+                                <div class="flex items-center justify-between px-4 py-3 border-t">
+                                    <span class="text-sm text-gray-500" id="detailPageInfo"></span>
+                                    <div class="flex items-center gap-4">
+                                        <select id="detailPageSize" onchange="changeDetailPageSize()" class="px-2 py-1 border rounded text-sm">
+                                            <option value="10">10条/页</option><option value="20" selected>20条/页</option><option value="50">50条/页</option>
+                                        </select>
+                                        <div id="detailPagination" class="flex gap-2"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 执行历史 -->
+        <div id="tab-history" class="tab-panel hidden">
+            <div class="p-6 space-y-4">
+                <div class="bg-white rounded-xl border px-4 py-3 flex items-center gap-2 flex-wrap">
+                    <button data-admin-only onclick="openScanPartialModal()" class="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm hover:bg-gray-50 flex items-center gap-2">
+                        <i class="fas fa-play"></i>扫描部分项目
+                    </button>
+                    <button data-admin-only onclick="openScanAllModal()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 flex items-center gap-2">
+                        <i class="fas fa-layer-group"></i>扫描本组织全部项目
+                    </button>
+                    <div class="ml-auto flex items-center gap-2">
+                        <span class="text-sm text-gray-500">状态</span>
+                        <select id="historyStatus" onchange="renderHistory()" class="border rounded-lg px-3 py-2 text-sm">
+                            <option value="">全部</option><option value="queued">排队</option><option value="running">运行中</option>
+                            <option value="success">成功</option><option value="partial">部分成功</option><option value="failed">失败</option><option value="cancelled">已取消</option>
+                        </select>
+                        <button onclick="loadTasks()" class="text-sm text-gray-400 hover:text-blue-600" title="刷新"><i class="fas fa-rotate"></i></button>
+                    </div>
+                </div>
+                <div class="bg-white rounded-xl border">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-50 text-gray-500 text-left">
+                                <tr><th class="px-4 py-3">任务</th><th class="px-4 py-3">触发</th><th class="px-4 py-3">状态</th><th class="px-4 py-3">项目(成功/失败/跳过)</th><th class="px-4 py-3">依赖</th><th class="px-4 py-3">漏洞(严/高)</th><th class="px-4 py-3">开始</th><th class="px-4 py-3">操作</th></tr>
+                            </thead>
+                            <tbody id="historyBody"></tbody>
+                        </table>
+                    </div>
+                    <div class="flex items-center justify-between px-4 py-3 border-t">
+                        <span class="text-sm text-gray-500" id="taskPageInfo"></span>
+                        <div class="flex items-center gap-4">
+                            <select id="taskPageSize" onchange="changeTaskPageSize()" class="px-2 py-1 border rounded text-sm">
+                                <option value="10">10条/页</option><option value="20" selected>20条/页</option><option value="50">50条/页</option>
+                            </select>
+                            <div id="taskPagination" class="flex gap-2"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 许可证数据 -->
+        <div id="tab-license" class="tab-panel hidden">
+            <div class="p-6 space-y-4">
+                <div class="bg-white rounded-xl border px-4 py-3 flex items-center gap-2 flex-wrap">
+                    <span class="text-sm font-medium text-gray-700 flex items-center gap-2">
+                        许可证数据
+                        <i class="fas fa-circle-info text-gray-300 cursor-help" title="扫描/收集会自动把本地库缺失的坐标入队，后台 worker 从 deps.dev 与 PyPI/Maven 制品补齐；私有包可用离线导入预置。"></i>
+                    </span>
+                    <div class="ml-auto flex items-center gap-2">
+                        <button data-admin-only onclick="syncNow()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 flex items-center gap-2" title="收集本组织依赖坐标并补齐许可证"><i class="fas fa-sync"></i>同步许可证数据</button>
+                        <button data-admin-only onclick="syncImportNamesNow()" class="bg-white border border-blue-600 text-blue-600 px-4 py-2 rounded-lg text-sm hover:bg-blue-50 flex items-center gap-2" title="补齐导入名映射（可达性用）"><i class="fas fa-diagram-project"></i>同步导入名</button>
+                        <label data-admin-only class="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm cursor-pointer hover:bg-gray-50 flex items-center gap-2">
+                            <i class="fas fa-file-import"></i>导入许可证<input type="file" accept=".csv,.json" class="hidden" onchange="uploadLicense(this)"></label>
+                        <label data-admin-only class="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm cursor-pointer hover:bg-gray-50 flex items-center gap-2">
+                            <i class="fas fa-file-import"></i>导入映射<input type="file" accept=".csv" class="hidden" onchange="uploadImportNames(this)"></label>
+                        <button onclick="loadLicenseStats()" title="刷新" class="text-sm text-gray-400 hover:text-blue-600"><i class="fas fa-rotate"></i></button>
+                    </div>
+                    <div id="importResult" class="text-xs text-gray-500 w-full"></div>
+                </div>
+
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div onclick="switchLicSub('license')" class="bg-white rounded-xl p-4 border cursor-pointer hover:border-blue-300 hover:shadow-sm transition">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs text-gray-500 flex items-center gap-1.5"><i class="fas fa-certificate text-green-400"></i>许可证缓存</span>
+                            <i class="fas fa-chevron-right text-gray-200"></i>
+                        </div>
+                        <div class="text-2xl font-bold mt-1 text-gray-800" id="licTotal">-</div>
+                        <div class="text-[11px] text-gray-400 mt-0.5">已收录的包→许可证记录</div>
+                    </div>
+                    <div class="bg-white rounded-xl p-4 border">
+                        <div class="text-xs text-gray-500 flex items-center gap-1.5"><i class="fas fa-layer-group text-indigo-400"></i>覆盖生态</div>
+                        <div class="text-2xl font-bold mt-1 text-gray-800" id="licEco">-</div>
+                        <div class="text-[11px] text-gray-400 mt-0.5">许可证数据覆盖的生态数</div>
+                    </div>
+                    <div onclick="switchLicSub('import')" class="bg-white rounded-xl p-4 border cursor-pointer hover:border-blue-300 hover:shadow-sm transition">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs text-gray-500 flex items-center gap-1.5"><i class="fas fa-diagram-project text-blue-400"></i>导入名映射</span>
+                            <i class="fas fa-chevron-right text-gray-200"></i>
+                        </div>
+                        <div class="text-2xl font-bold mt-1 text-gray-800" id="impTotal">-</div>
+                        <div class="text-[11px] text-gray-400 mt-0.5">用于可达性精确判定的映射</div>
+                    </div>
+                    <div onclick="switchLicSub('queue')" class="bg-white rounded-xl p-4 border cursor-pointer hover:border-blue-300 hover:shadow-sm transition">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs text-gray-500 flex items-center gap-1.5"><i class="fas fa-hourglass-half text-amber-400"></i>待同步坐标</span>
+                            <i class="fas fa-chevron-right text-gray-200"></i>
+                        </div>
+                        <div class="text-2xl font-bold mt-1 text-gray-800" id="queuePending">-</div>
+                        <div class="text-[11px] text-gray-400 mt-0.5">等待后台补齐的许可证/映射</div>
+                    </div>
+                </div>
+
+                <div id="jobStatus" class="bg-white rounded-xl border px-4 py-2.5 flex items-center gap-x-5 gap-y-1.5 flex-wrap text-xs text-gray-600"></div>
+
+                <div class="bg-white rounded-xl border">
+                    <div class="flex border-b px-4">
+                        <button id="licsub-btn-license" onclick="switchLicSub('license')" class="subtab-btn active px-4 py-3 text-sm font-medium text-gray-600">许可证缓存</button>
+                        <button id="licsub-btn-import" onclick="switchLicSub('import')" class="subtab-btn px-4 py-3 text-sm font-medium text-gray-600">导入名映射</button>
+                        <button id="licsub-btn-queue" onclick="switchLicSub('queue')" class="subtab-btn px-4 py-3 text-sm font-medium text-gray-600">待同步队列</button>
+                    </div>
+                    <div id="licDesc" class="px-4 pt-3 text-xs text-gray-400"></div>
+                    <div class="p-4 flex items-center gap-3 flex-wrap">
+                        <input id="licSearch" placeholder="搜索包名" class="px-3 py-2 border rounded-lg text-sm w-64" onkeyup="if(event.key==='Enter')loadLicTable(1)">
+                        <select id="licQueueStatus" onchange="loadLicTable(1)" class="px-3 py-2 border rounded-lg text-sm hidden">
+                            <option value="">全部状态</option><option value="pending">待同步</option><option value="running">同步中</option><option value="failed">失败</option><option value="done">已完成</option><option value="skipped">已跳过</option>
+                        </select>
+                        <button onclick="loadLicTable(1)" class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm hover:bg-gray-200">查询</button>
+                    </div>
+                    <div class="overflow-x-auto"><table class="w-full text-sm" id="licTable"><thead class="bg-gray-50 text-gray-500 text-left"></thead><tbody></tbody></table></div>
+                    <div class="flex items-center justify-between px-4 py-3 border-t">
+                        <span class="text-sm text-gray-500" id="licPageInfo"></span>
+                        <div class="flex items-center gap-4">
+                            <select id="licPageSize" onchange="changeLicPageSize()" class="px-2 py-1 border rounded text-sm">
+                                <option value="10">10条/页</option><option value="20" selected>20条/页</option><option value="50">50条/页</option>
+                            </select>
+                            <div id="licPagination" class="flex gap-2"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 配置 -->
+        <div id="tab-config" class="tab-panel hidden">
+            <div class="p-6">
+                <div class="space-y-4 text-sm" id="configForm"></div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- 扫描部分项目 -->
+<div id="projectModal" class="modal fixed inset-0 bg-black/40 z-50 items-center justify-center" onclick="if(event.target===this)closeModal('projectModal')">
+    <div class="bg-white rounded-xl w-[720px] max-w-[92vw] max-h-[82vh] flex flex-col shadow-2xl overflow-hidden">
+        <div class="px-6 py-4 border-b flex items-center justify-between">
+            <div>
+                <h3 class="font-bold text-gray-800">扫描部分项目</h3>
+                <p class="text-xs text-gray-400 mt-0.5">勾选需要扫描的项目，点击「开始扫描」创建任务；扫描前会先对所选项目做一次坐标收集。</p>
+            </div>
+            <button onclick="closeModal('projectModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="px-6 py-3 border-b flex items-center gap-3">
+            <input id="projectSearch" onkeyup="renderProjectList()" placeholder="搜索项目名" class="flex-1 px-3 py-2 border rounded-lg text-sm">
+            <span class="text-xs text-gray-400 whitespace-nowrap">已选 <b id="projectSelectedCount" class="text-blue-600">0</b></span>
+        </div>
+        <div class="p-3 overflow-y-auto flex-1" id="projectList"></div>
+        <div class="px-6 py-4 border-t flex items-center justify-between">
+            <div class="flex gap-3">
+                <button onclick="selectAllProjects(true)" class="text-sm text-blue-600 hover:underline">全选</button>
+                <button onclick="selectAllProjects(false)" class="text-sm text-gray-500 hover:underline">清空</button>
+            </div>
+            <div class="flex gap-3">
+                <button onclick="closeModal('projectModal')" class="px-4 py-2 rounded-lg text-sm border">取消</button>
+                <button data-admin-only onclick="startPartialScan()" class="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm hover:bg-blue-700"><i class="fas fa-play mr-1"></i>开始扫描</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 扫描全部项目确认 -->
+<div id="scanAllModal" class="modal fixed inset-0 bg-black/40 z-50 items-center justify-center" onclick="if(event.target===this)closeModal('scanAllModal')">
+    <div class="bg-white rounded-xl w-[480px] max-w-[92vw] shadow-2xl overflow-hidden">
+        <div class="px-6 py-4 border-b flex items-center justify-between">
+            <h3 class="font-bold text-gray-800">扫描本组织全部项目</h3>
+            <button onclick="closeModal('scanAllModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="p-6 space-y-3 text-sm">
+            <div class="flex items-center gap-6">
+                <div>组织：<b id="scanAllOrg" class="text-gray-800">-</b></div>
+                <div>项目数：<b id="scanAllCount" class="text-gray-800">0</b></div>
+            </div>
+            <div id="scanAllWarn" class="hidden text-amber-600 text-xs">当前组织没有项目，无法扫描。</div>
+            <ul class="text-xs text-gray-500 list-disc pl-5 space-y-1">
+                <li>手动扫描会先对每个项目做一次坐标收集（克隆并同步最新代码），再执行依赖、漏洞与许可证审查。</li>
+                <li>项目较多时耗时较长，任务在后台执行，可在「执行历史」查看进度。</li>
+                <li>已存在进行中扫描的项目会自动跳过并在报告中标注。</li>
+            </ul>
+        </div>
+        <div class="px-6 py-4 border-t flex justify-end gap-3">
+            <button onclick="closeModal('scanAllModal')" class="px-4 py-2 rounded-lg text-sm border">取消</button>
+            <button id="scanAllConfirmBtn" onclick="confirmScanAll()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700">确认扫描</button>
+        </div>
+    </div>
+</div>
+
+<!-- 任务详情 -->
+<div id="taskModal" class="modal fixed inset-0 bg-black/40 z-50 items-center justify-center" onclick="if(event.target===this)closeModal('taskModal')">
+    <div class="bg-white rounded-xl w-[900px] max-w-[94vw] max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+        <div class="px-6 py-4 border-b flex items-center justify-between"><h3 class="font-bold text-gray-800" id="taskModalTitle">任务详情</h3>
+            <button onclick="closeModal('taskModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button></div>
+        <div class="p-6 overflow-y-auto flex-1 space-y-4">
+            <div id="taskSummary" class="text-sm text-gray-600"></div>
+            <table class="w-full text-sm"><thead class="bg-gray-50 text-gray-500 text-left">
+                <tr><th class="px-3 py-2">项目</th><th class="px-3 py-2">状态</th><th class="px-3 py-2">依赖</th><th class="px-3 py-2">漏洞</th><th class="px-3 py-2">耗时</th><th class="px-3 py-2">原因</th><th class="px-3 py-2">操作</th></tr>
+            </thead><tbody id="taskRunsBody"></tbody></table>
+        </div>
+        <div class="px-6 py-4 border-t flex justify-end gap-3">
+            <button data-admin-only onclick="cancelCurrentTask()" class="px-4 py-2 rounded-lg text-sm border text-red-600">取消任务</button>
+            <button data-admin-only onclick="retryCurrentTask()" class="px-4 py-2 rounded-lg text-sm border">重试失败项</button>
+            <button onclick="closeModal('taskModal')" class="px-4 py-2 rounded-lg text-sm border">关闭</button>
+        </div>
+    </div>
+</div>
+
+<!-- 立即同步确认 -->
+<div id="syncModal" class="modal fixed inset-0 bg-black/40 z-50 items-center justify-center" onclick="if(event.target===this)closeModal('syncModal')">
+    <div class="bg-white rounded-xl w-[460px] max-w-[92vw] shadow-2xl overflow-hidden">
+        <div class="px-6 py-4 border-b flex items-center justify-between">
+            <h3 class="font-bold text-gray-800">同步许可证数据</h3>
+            <button onclick="closeModal('syncModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="p-6 space-y-3 text-sm text-gray-600">
+            <div>将对本组织 <b id="syncNum" class="text-gray-800">-</b> 个项目执行：</div>
+            <ol class="text-xs text-gray-500 list-decimal pl-5 space-y-1">
+                <li>收集各项目依赖坐标（克隆并同步最新代码，写入依赖快照）；</li>
+                <li>将本地库缺失的坐标入队（许可证 + 导入名映射）；</li>
+                <li>后台从 deps.dev、PyPI/Maven 制品补齐数据。</li>
+            </ol>
+            <div class="text-xs text-amber-600">项目较多时耗时较长，将在后台执行，可在本页「作业状态」查看进度。</div>
+        </div>
+        <div class="px-6 py-4 border-t flex justify-end gap-3">
+            <button onclick="closeModal('syncModal')" class="px-4 py-2 rounded-lg text-sm border">取消</button>
+            <button onclick="confirmSync()" class="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm hover:bg-blue-700">开始同步</button>
+        </div>
+    </div>
+</div>
+
+<!-- 删除任务确认 -->
+<div id="deleteTaskModal" class="modal fixed inset-0 bg-black/40 z-50 items-center justify-center" onclick="if(event.target===this)closeModal('deleteTaskModal')">
+    <div class="bg-white rounded-xl w-[440px] max-w-[92vw] shadow-2xl overflow-hidden">
+        <div class="px-6 py-4 border-b flex items-center justify-between">
+            <h3 class="font-bold text-gray-800">删除扫描任务</h3>
+            <button onclick="closeModal('deleteTaskModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="p-6 space-y-3 text-sm">
+            <div class="flex items-start gap-3">
+                <i class="fas fa-triangle-exclamation text-red-500 text-lg mt-0.5"></i>
+                <div class="text-gray-700">确认删除任务 <b id="deleteTaskId">-</b>？该操作不可恢复。</div>
+            </div>
+            <ul class="text-xs text-gray-500 list-disc pl-5 space-y-1">
+                <li>将一并删除该任务下的所有项目执行记录、依赖与漏洞明细。</li>
+                <li>该任务生成的 SBOM 文件也会被删除。</li>
+                <li>不影响项目依赖快照与全局许可证库。</li>
+            </ul>
+        </div>
+        <div class="px-6 py-4 border-t flex justify-end gap-3">
+            <button onclick="closeModal('deleteTaskModal')" class="px-4 py-2 rounded-lg text-sm border">取消</button>
+            <button onclick="confirmDeleteTask()" class="bg-red-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-red-700">确认删除</button>
+        </div>
+    </div>
+</div>
+
+<!-- 导出 -->
+<div id="exportModal" class="modal fixed inset-0 bg-black/40 z-50 items-center justify-center" onclick="if(event.target===this)closeModal('exportModal')">
+    <div class="bg-white rounded-xl w-[440px] max-w-[92vw] shadow-2xl overflow-hidden">
+        <div class="px-6 py-4 border-b flex items-center justify-between"><h3 class="font-bold text-gray-800">导出任务报告</h3>
+            <button onclick="closeModal('exportModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button></div>
+        <div class="p-6 space-y-4 text-sm">
+            <div><div class="mb-1 text-gray-600">导出格式</div>
+                <select id="exportFormat" onchange="updateExportForm()" class="border rounded-lg px-3 py-2 w-full">
+                    <option value="excel">Excel（概览+明细带项目列）</option>
+                    <option value="csv">CSV（合并单文件带项目列）</option>
+                    <option value="sbom">SBOM（.zip，按项目分目录）</option>
+                </select></div>
+            <div id="exportDatasetWrap"><div class="mb-1 text-gray-600">CSV 数据集</div>
+                <select id="exportDataset" class="border rounded-lg px-3 py-2 w-full"><option value="items">依赖清单</option><option value="vulns">漏洞清单</option></select></div>
+            <div class="text-xs text-gray-400" id="exportHint"></div>
+        </div>
+        <div class="px-6 py-4 border-t flex justify-end gap-3">
+            <button onclick="closeModal('exportModal')" class="px-4 py-2 rounded-lg text-sm border">取消</button>
+            <button onclick="confirmExport()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm">导出</button>
+        </div>
+    </div>
+</div>
+
+<script defer src="/static/js/tailwindcss.min.js"></script>
+<script>
+const API_BASE = (typeof window.API_BASE !== 'undefined') ? window.API_BASE : '';
+const state = {
+    projects: [], selectedProjectIds: [],
+    tasks: [], currentTask: null, currentRuns: [], currentRunMap: {}, runNames: {},
+    taskPage: 1, taskPageSize: 20, taskTotal: 0,
+    detailProjectId: null, subTab: 'items', detailPage: 1, detailPageSize: 20,
+    licSub: 'license', licPage: 1, licPageSize: 20,
+    pollTimer: null, taskPollTimer: null, licenseMode: 'report_only', pendingDeleteTaskId: null,
+};
+
+document.addEventListener('DOMContentLoaded', async () => {
+    renderSidebar('dependency-audit');
+    await loadProjects();
+    await loadTasks(true);
+    await loadLicenseStats();
+    await loadConfig();
+    startTaskPolling();
+});
+
+function depApiFetch(url, opts = {}) {
+    const token = localStorage.getItem('auth_token') || '';
+    opts.headers = Object.assign({}, opts.headers || {}, { 'Authorization': 'Bearer ' + token });
+    const cur = window.getCurrentOrg && window.getCurrentOrg();
+    if (cur && cur.id) opts.headers['X-Org-Id'] = String(cur.id);
+    if (!opts.headers['Content-Type'] && !(opts.body instanceof FormData)) opts.headers['Content-Type'] = 'application/json';
+    return fetch(API_BASE + url, opts).then(async r => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+        return data;
+    });
+}
+function showToast(msg, type = 'success') {
+    const colors = { success: 'bg-green-500', error: 'bg-red-500', info: 'bg-blue-500' };
+    const el = document.createElement('div');
+    el.className = `toast ${colors[type] || colors.success} text-white px-4 py-3 rounded-lg shadow-lg text-sm`;
+    el.textContent = msg; document.body.appendChild(el); setTimeout(() => el.remove(), 3000);
+}
+function switchTab(tab) {
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+    document.getElementById('tab-' + tab).classList.remove('hidden');
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('tab-btn-' + tab).classList.add('active');
+    if (tab === 'license') { setLicDesc(state.licSub); loadLicenseStats(); }
+    if (tab === 'config') loadConfig();
+    if (tab === 'history') loadTasks();
+}
+function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+function openModal(id) { document.getElementById(id).classList.add('active'); }
+
+// ========== 项目 ==========
+async function loadProjects() {
+    try { const r = await depApiFetch('/api/v1/dependency-audit/projects'); state.projects = r.data || []; }
+    catch (e) { showToast(e.message, 'error'); }
+}
+function openScanPartialModal() {
+    renderProjectList();
+    updateSelectedCount();
+    openModal('projectModal');
+}
+function renderProjectList() {
+    const kw = (document.getElementById('projectSearch').value || '').toLowerCase();
+    const list = state.projects.filter(p => !kw || (p.name || '').toLowerCase().includes(kw));
+    const el = document.getElementById('projectList');
+    el.innerHTML = list.length ? list.map(p => `
+        <label class="flex items-center gap-3 px-3 py-2 rounded-lg border-b border-gray-100 last:border-0 hover:bg-gray-50 cursor-pointer">
+            <input type="checkbox" value="${p.id}" ${state.selectedProjectIds.includes(p.id) ? 'checked' : ''} onchange="updateSelectedCount()">
+            <span class="flex-1 text-sm text-gray-800 truncate" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</span>
+            <span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-500">${languageLabel(p.language)}</span>
+            <span class="text-xs text-gray-400 whitespace-nowrap">快照 ${p.dep_count || 0} 个</span>
+            <span class="text-xs text-gray-400 font-mono whitespace-nowrap" title="快照 Commit">${escapeHtml((p.snapshot_commit || '').slice(0, 8) || '-')}</span>
+        </label>`).join('') : '<div class="text-gray-400 text-sm text-center py-8">暂无项目</div>';
+}
+function selectAllProjects(v) {
+    document.querySelectorAll('#projectList input[type=checkbox]').forEach(cb => cb.checked = v);
+    updateSelectedCount();
+}
+function updateSelectedCount() {
+    const ids = Array.from(document.querySelectorAll('#projectList input[type=checkbox]:checked')).map(cb => parseInt(cb.value));
+    state.selectedProjectIds = ids;
+    const el = document.getElementById('projectSelectedCount');
+    if (el) el.textContent = ids.length;
+}
+async function startPartialScan() {
+    updateSelectedCount();
+    if (!state.selectedProjectIds.length) { showToast('请先选择项目', 'error'); return; }
+    closeModal('projectModal');
+    await triggerScan({ project_ids: state.selectedProjectIds });
+}
+function openScanAllModal() {
+    const org = (window.getCurrentOrg && window.getCurrentOrg()) || {};
+    const total = state.projects.length;
+    document.getElementById('scanAllOrg').textContent = org.name || ('组织 #' + (org.id || '-'));
+    document.getElementById('scanAllCount').textContent = total;
+    document.getElementById('scanAllWarn').classList.toggle('hidden', total !== 0);
+    const btn = document.getElementById('scanAllConfirmBtn');
+    btn.disabled = total === 0;
+    btn.classList.toggle('opacity-50', total === 0);
+    openModal('scanAllModal');
+}
+async function confirmScanAll() {
+    closeModal('scanAllModal');
+    await triggerScan({ all: true });
+}
+async function triggerScan(body) {
+    try {
+        const r = await depApiFetch('/api/v1/dependency-audit/scan', { method: 'POST', body: JSON.stringify(body) });
+        showToast(r.data && r.data.task_id ? `已创建任务 ${r.data.task_id}` : '已创建任务并开始扫描');
+        await loadTasks();
+        switchTab('history');
+        if (!state.taskPollTimer) startTaskPolling();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+// ========== 任务 / 报告 ==========
+async function loadTasks(refreshSelect, page) {
+    if (page) state.taskPage = page;
+    try {
+        const params = new URLSearchParams({ page: state.taskPage, page_size: state.taskPageSize });
+        const r = await depApiFetch('/api/v1/dependency-audit/tasks?' + params.toString());
+        state.tasks = r.data || [];
+        state.taskTotal = r.total || 0;
+        renderTaskSelect(refreshSelect);
+        renderHistory();
+        renderTaskPager();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+function renderTaskPager() {
+    const info = document.getElementById('taskPageInfo');
+    if (info) info.textContent = `共 ${state.taskTotal} 条`;
+    const pager = document.getElementById('taskPagination');
+    if (pager) pager.innerHTML = buildPager(state.taskTotal, state.taskPage, state.taskPageSize, 'goTaskPage');
+}
+function goTaskPage(p) { loadTasks(false, p); }
+function changeTaskPageSize() {
+    state.taskPageSize = parseInt(document.getElementById('taskPageSize').value) || 20;
+    state.taskPage = 1;
+    loadTasks(false);
+}
+function renderTaskSelect(selectLatest) {
+    const sel = document.getElementById('taskSelect');
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">请选择任务</option>' + state.tasks.map(t =>
+        `<option value="${t.id}">${t.id} ${t.trigger_type === 'scheduled' ? '定时' : '手动'} ${t.status} · ${fmtTime(t.started_at)}</option>`).join('');
+    if (prev) sel.value = prev;
+    else if (selectLatest && state.tasks.length) { sel.value = state.tasks[0].id; loadReport(state.tasks[0].id); }
+}
+function renderHistory() {
+    const sel = document.getElementById('historyStatus');
+    const st = sel ? sel.value : '';
+    const list = st ? state.tasks.filter(t => t.status === st) : state.tasks;
+    document.getElementById('historyBody').innerHTML = list.length ? list.map(t => `
+        <tr class="border-t hover:bg-gray-50 cursor-pointer" onclick="openTask(${t.id})">
+            <td class="px-4 py-2 font-medium text-gray-800">${t.id}</td>
+            <td class="px-4 py-2">${t.trigger_type === 'scheduled' ? '定时' : '手动'}</td>
+            <td class="px-4 py-2"><span class="${statusBadge(t.status)}">${['queued','running'].includes(t.status) ? '<i class="fas fa-spinner fa-spin mr-1"></i>' : ''}${statusLabel(t.status)}</span></td>
+            <td class="px-4 py-2">${t.run_success} / <span class="${t.run_failed ? 'text-red-600' : ''}">${t.run_failed}</span> / ${t.run_skipped}</td>
+            <td class="px-4 py-2">${t.dep_total}</td>
+            <td class="px-4 py-2">${t.vuln_critical} / ${t.vuln_high}</td>
+            <td class="px-4 py-2 text-xs text-gray-500">${fmtTime(t.started_at)}</td>
+            <td class="px-4 py-2 text-right whitespace-nowrap">
+                ${isAdmin() ? `<button onclick="event.stopPropagation();deleteTask(${t.id})" class="text-red-500 text-xs hover:underline mr-3" title="删除任务">删除</button>` : ''}
+                <i class="fas fa-chevron-right text-gray-300"></i>
+            </td>
+        </tr>`).join('') : '<tr><td colspan="8" class="px-4 py-10 text-center text-gray-400">暂无任务</td></tr>';
+}
+async function loadReport(taskId) {
+    if (!taskId) return;
+    try {
+        const r = await depApiFetch('/api/v1/dependency-audit/tasks/' + taskId);
+        const task = r.data.task, runs = r.data.runs || [];
+        const ecos = r.data.dep_ecosystems || [];
+        state.currentTask = task; state.currentRuns = runs; state.currentRunMap = {}; state.runNames = {};
+        runs.forEach(x => { state.currentRunMap[x.run.project_id] = x.run; state.runNames[x.run.project_id] = x.project_name; });
+        document.getElementById('reportEmpty').classList.add('hidden');
+        document.getElementById('reportBody').classList.remove('hidden');
+        const dur = (task.started_at && task.finished_at) ? Math.max(0, Math.round((new Date(task.finished_at) - new Date(task.started_at)) / 1000)) : null;
+        document.getElementById('reportMeta').innerHTML =
+            `<span class="px-2 py-0.5 rounded bg-gray-100 text-gray-600 font-medium">${task.id}</span>` +
+            `<span class="px-2 py-0.5 rounded ${task.trigger_type === 'scheduled' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}">${task.trigger_type === 'scheduled' ? '定时' : '手动'}</span>` +
+            `<span class="${statusBadge(task.status)}">${statusLabel(task.status)}</span>` +
+            `<span class="text-gray-400"><i class="far fa-clock mr-1"></i>${escapeHtml(fmtTime(task.started_at))}</span>` +
+            (dur !== null ? `<span class="text-gray-400">耗时 ${dur}s</span>` : '') +
+            (task.error_msg ? `<span class="text-red-600 truncate max-w-[240px]" title="${escapeHtml(task.error_msg)}">${escapeHtml(task.error_msg)}</span>` : '');
+        document.getElementById('kpiDepsEco').innerHTML = ecos.length
+            ? ecos.map(e => `<div>
+                    <div class="text-lg font-bold ${ecoTone(e.ecosystem)}">${e.count}</div>
+                    <div class="text-[11px] text-gray-400">${ecoLabel(e.ecosystem)}</div>
+                  </div>`).join('')
+            : '<div class="col-span-4 text-sm text-gray-400 py-3">暂无依赖数据</div>';
+        document.getElementById('kpiCrit').textContent = task.vuln_critical;
+        document.getElementById('kpiHigh').textContent = task.vuln_high;
+        document.getElementById('kpiMed').textContent = task.vuln_medium;
+        document.getElementById('kpiLow').textContent = task.vuln_low;
+        document.getElementById('kpiLicC').textContent = task.license_compliant;
+        document.getElementById('kpiLicN').textContent = task.license_noncompliant;
+        document.getElementById('kpiLicR').textContent = task.license_review;
+        document.getElementById('kpiLicNA').textContent = task.license_na;
+        document.getElementById('kpiLicTip').innerHTML = `
+            <div class="font-medium mb-1">当前合规模式：${state.licenseMode === 'enforced' ? 'enforced（按策略判定）' : 'report_only（仅呈现，不判定）'}</div>
+            <div class="text-gray-300">• 合规 / 不合规 / 待审查：enforced 模式下按允许、禁止、需审查列表判定。</div>
+            <div class="text-gray-300">• 未判定：report_only 模式不做判定，全部依赖记为未判定。</div>
+            <div class="text-gray-300">• 未收录：本地许可证库暂无该坐标数据（${task.license_unknown} 个），可到「许可证数据」同步或导入。</div>`;
+        document.getElementById('kpiRunSuccess').textContent = task.run_success;
+        document.getElementById('kpiRunFailed').textContent = task.run_failed;
+        document.getElementById('kpiRunSkipped').textContent = task.run_skipped;
+        document.getElementById('kpiRunCollect').textContent = task.collect_failed;
+        document.getElementById('kpiRunHint').textContent = ['running', 'queued'].includes(task.status) ? '进行中，数据可能不完整' : '';
+        renderReportProjects(runs);
+        document.getElementById('reportProjectCount').textContent = `共 ${runs.length} 个`;
+        document.getElementById('detailEmpty').classList.remove('hidden');
+        document.getElementById('detailBody').classList.add('hidden');
+        state.detailProjectId = null;
+    } catch (e) { showToast(e.message, 'error'); }
+}
+function renderReportProjects(runs) {
+    const el = document.getElementById('reportProjects');
+    const kw = ((document.getElementById('reportProjectSearch') || {}).value || '').trim().toLowerCase();
+    const list = kw ? runs.filter(x => (x.project_name || '').toLowerCase().includes(kw)) : runs;
+    if (!list.length) { el.innerHTML = `<div class="text-center text-gray-400 text-sm py-10">${runs.length ? '无匹配项目' : '无项目数据'}</div>`; return; }
+    el.innerHTML = list.map(x => {
+        const r = x.run;
+        const selected = String(state.detailProjectId) === String(r.project_id);
+        const reason = r.collect_error || r.skip_reason || r.error_msg || '';
+        const vulnCls = r.vuln_total ? 'text-red-500' : 'text-gray-700';
+        const licUnknown = (r.license_unknown || 0) + (r.license_na || 0);
+        const lang = (state.projects.find(p => p.id === r.project_id) || {}).language;
+        return `<div onclick="openProjectDetail(${r.project_id})"
+                 style="border-left:3px solid ${statusAccent(r.status)}"
+                 class="cursor-pointer rounded-lg border px-3 py-2 transition-colors ${selected ? 'border-blue-500 ring-1 ring-blue-200 bg-blue-50/50' : 'border-gray-200 hover:bg-gray-50'}">
+            <div class="flex items-center gap-2">
+                <span class="text-sm font-medium text-gray-800 truncate flex-1 min-w-0" title="${escapeHtml(x.project_name)}">${escapeHtml(x.project_name)}</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 w-12 text-center shrink-0">${languageLabel(lang)}</span>
+                <span class="${statusBadge(r.status)} w-16 text-center shrink-0">${statusLabel(r.status)}</span>
+            </div>
+            <div class="grid grid-cols-3 gap-1 mt-2 text-center">
+                <div><div class="text-sm font-semibold text-gray-800">${r.dep_total}</div><div class="text-[10px] text-gray-400">依赖</div></div>
+                <div title="严重 ${r.vuln_critical} / 高危 ${r.vuln_high} / 中危 ${r.vuln_medium} / 低危 ${r.vuln_low}">
+                    <div class="text-sm font-semibold ${vulnCls}">${r.vuln_total}</div><div class="text-[10px] text-gray-400">漏洞</div>
+                </div>
+                <div title="许可证未判定/未收录"><div class="text-sm font-semibold text-gray-500">${licUnknown}</div><div class="text-[10px] text-gray-400">许可证未判定</div></div>
+            </div>
+            ${reason ? `<div class="text-[11px] text-red-500 truncate mt-1.5" title="${escapeHtml(reason)}">${escapeHtml(reason)}</div>` : ''}
+        </div>`;
+    }).join('');
+}
+function statusAccent(s) {
+    return { success: '#16a34a', partial: '#f59e0b', failed: '#dc2626', skipping: '#9ca3af', skipped: '#9ca3af', cancelled: '#9ca3af', running: '#2563eb', queued: '#60a5fa' }[s] || '#d1d5db';
+}
+function openProjectDetail(projectId) {
+    state.detailProjectId = projectId;
+    renderReportProjects(state.currentRuns || []);
+    document.getElementById('detailEmpty').classList.add('hidden');
+    document.getElementById('detailBody').classList.remove('hidden');
+    document.getElementById('detailTitle').textContent = state.runNames[projectId] || ('#' + projectId);
+    switchSubTab(state.subTab);
+}
+function switchSubTab(tab) {
+    state.subTab = tab;
+    document.querySelectorAll('#projectDetail .subtab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('subtab-btn-' + tab).classList.add('active');
+    loadDetail(1);
+}
+async function loadDetail(page) {
+    if (!state.currentTask || !state.detailProjectId) return;
+    state.detailPage = page || 1;
+    const isVuln = state.subTab === 'vulns';
+    const base = `/api/v1/dependency-audit/tasks/${state.currentTask.id}/report/${isVuln ? 'vulns' : 'items'}`;
+    const params = new URLSearchParams({ project_id: state.detailProjectId, page: state.detailPage, page_size: state.detailPageSize });
+    const kw = document.getElementById('detailSearch').value; if (kw) params.set('keyword', kw);
+    try {
+        const r = await depApiFetch(base + '?' + params.toString());
+        renderDetailTable(r.data || [], isVuln);
+        renderDetailPager(r.total, state.detailPage);
+    } catch (e) { showToast(e.message, 'error'); }
+}
+function renderDetailTable(rows, isVuln) {
+    const head = isVuln
+        ? '<tr><th class="px-4 py-3 w-[80px]">严重度</th><th class="px-4 py-3">包名</th><th class="px-4 py-3 w-[110px]">版本</th><th class="px-4 py-3 w-[170px]">漏洞编号</th><th class="px-4 py-3">别名</th><th class="px-4 py-3 w-[130px]">修复版本</th><th class="px-4 py-3 w-[80px]">豁免</th></tr>'
+        : '<tr><th class="px-4 py-3 w-[260px]">包名</th><th class="px-4 py-3 w-[130px]">版本</th><th class="px-4 py-3 w-[120px]">生态</th><th class="px-4 py-3 w-[90px]">依赖方式</th><th class="px-4 py-3 w-[170px]">许可证</th><th class="px-4 py-3 w-[100px]">合规</th><th class="px-4 py-3 w-[90px]" title="仅在开启可达性且依赖涉及 high/critical 漏洞时计算；未计算显示为灰色">可达性</th></tr>';
+    document.querySelector('#detailTable thead').innerHTML = head;
+    document.querySelector('#detailTable tbody').innerHTML = rows.length ? rows.map(r => isVuln ? `
+        <tr class="border-t whitespace-nowrap"><td class="px-4 py-2"><span class="px-2 py-0.5 rounded text-xs severity-${r.severity}">${severityLabel(r.severity)}</span></td>
+        <td class="px-4 py-2">${escapeHtml(r.package_name)}</td><td class="px-4 py-2">${escapeHtml(r.package_version)}</td>
+        <td class="px-4 py-2 text-xs">${escapeHtml(r.vuln_id || '-')}</td>
+        <td class="px-4 py-2 text-xs max-w-[220px] truncate" title="${escapeHtml(r.aliases || '')}">${escapeHtml(r.aliases || '-')}</td>
+        <td class="px-4 py-2 text-xs max-w-[160px] truncate" title="${escapeHtml(r.fixed_versions || '')}">${escapeHtml(r.fixed_versions || '-')}</td>
+        <td class="px-4 py-2">${r.allowlisted ? '已豁免' : ''}</td></tr>` : `
+        <tr class="border-t whitespace-nowrap"><td class="px-4 py-2 max-w-[260px] truncate" title="${escapeHtml(r.package_name)}">${escapeHtml(r.package_name)}</td>
+        <td class="px-4 py-2">${versionText(r)}</td>
+        <td class="px-4 py-2">${escapeHtml(r.ecosystem)}</td><td class="px-4 py-2">${r.dependency_type === 'direct' ? '直接' : '间接'}</td>
+        <td class="px-4 py-2 max-w-[170px] truncate" title="${escapeHtml(r.license_expr || '')}">${licenseText(r.license_expr, r.license_source)}</td>
+        <td class="px-4 py-2 license-${r.license_status}">${licenseLabel(r.license_status)}</td>
+        <td class="px-4 py-2">${reachLabel(r.reachable)}</td></tr>`).join('') : '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">暂无数据</td></tr>';
+}
+function renderDetailPager(total, page) {
+    const info = document.getElementById('detailPageInfo'); if (info) info.textContent = `共 ${total} 条`;
+    const el = document.getElementById('detailPagination');
+    if (el) el.innerHTML = buildPager(total, page, state.detailPageSize, 'loadDetail');
+}
+function changeDetailPageSize() {
+    state.detailPageSize = parseInt(document.getElementById('detailPageSize').value) || 20;
+    loadDetail(1);
+}
+
+// ========== 任务详情弹窗 ==========
+async function openTask(taskId) {
+    try {
+        const r = await depApiFetch('/api/v1/dependency-audit/tasks/' + taskId);
+        const task = r.data.task, runs = r.data.runs || [];
+        state.currentTask = task;
+        document.getElementById('taskModalTitle').textContent = `任务 ${task.id} · ${statusLabel(task.status)}`;
+        document.getElementById('taskSummary').innerHTML =
+            `触发：${task.trigger_type === 'scheduled' ? '定时' : '手动'} · 项目 ${task.project_total} · 成功 ${task.run_success} / 失败 <span class="text-red-600">${task.run_failed}</span> / 跳过 ${task.run_skipped} · 收集失败 ${task.collect_failed}` +
+            (task.error_msg ? `<div class="text-red-600 mt-1">${escapeHtml(task.error_msg)}</div>` : '');
+        document.getElementById('taskRunsBody').innerHTML = runs.length ? runs.map(x => {
+            const rr = x.run;
+            return `<tr class="border-t">
+                <td class="px-3 py-2">${escapeHtml(x.project_name)}</td>
+                <td class="px-3 py-2"><span class="${statusBadge(rr.status)}">${statusLabel(rr.status)}</span></td>
+                <td class="px-3 py-2">${rr.dep_total}</td><td class="px-3 py-2">${rr.vuln_total}</td>
+                <td class="px-3 py-2 text-xs">${rr.duration_ms ? (rr.duration_ms / 1000).toFixed(1) + 's' : '-'}</td>
+                <td class="px-3 py-2 text-xs text-red-500">${escapeHtml(rr.collect_error || rr.error_msg || rr.skip_reason || '')}</td>
+                <td class="px-3 py-2">${['failed','skipped','cancelled'].includes(rr.status) ? `<button data-admin-only onclick="retryTaskProject(${task.id},${rr.project_id})" class="text-blue-600 text-xs hover:underline">重试</button>` : ''}</td>
+            </tr>`;
+        }).join('') : '<tr><td colspan="7" class="px-3 py-6 text-center text-gray-400">无项目</td></tr>';
+        openModal('taskModal');
+        if (typeof applyAdminVisibility === 'function') applyAdminVisibility();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+async function cancelCurrentTask() {
+    if (!state.currentTask) return;
+    if (!confirm('确认取消该任务？')) return;
+    try { await depApiFetch(`/api/v1/dependency-audit/tasks/${state.currentTask.id}/cancel`, { method: 'POST' }); showToast('已取消'); openTask(state.currentTask.id); loadTasks(); }
+    catch (e) { showToast(e.message, 'error'); }
+}
+async function retryCurrentTask() {
+    if (!state.currentTask) return;
+    try { const r = await depApiFetch(`/api/v1/dependency-audit/tasks/${state.currentTask.id}/retry`, { method: 'POST', body: JSON.stringify({}) }); showToast(`已重试 ${r.data.retried} 个项目`); openTask(state.currentTask.id); loadTasks(); }
+    catch (e) { showToast(e.message, 'error'); }
+}
+function deleteTask(taskId) {
+    state.pendingDeleteTaskId = taskId;
+    document.getElementById('deleteTaskId').textContent = taskId;
+    openModal('deleteTaskModal');
+}
+async function confirmDeleteTask() {
+    const taskId = state.pendingDeleteTaskId;
+    if (!taskId) { closeModal('deleteTaskModal'); return; }
+    try {
+        await depApiFetch(`/api/v1/dependency-audit/tasks/${taskId}`, { method: 'DELETE' });
+        showToast('任务已删除');
+        if (state.currentTask && String(state.currentTask.id) === String(taskId)) {
+            state.currentTask = null;
+            document.getElementById('reportBody').classList.add('hidden');
+            document.getElementById('reportEmpty').classList.remove('hidden');
+        }
+        closeModal('deleteTaskModal');
+        state.pendingDeleteTaskId = null;
+        await loadTasks();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function retryTaskProject(taskId, projectId) {
+    try { await depApiFetch(`/api/v1/dependency-audit/tasks/${taskId}/retry`, { method: 'POST', body: JSON.stringify({ project_ids: [projectId] }) }); showToast('已重试'); openTask(taskId); }
+    catch (e) { showToast(e.message, 'error'); }
+}
+
+// ========== 导出 ==========
+function exportCurrentTask() {
+    if (!state.currentTask) { showToast('请先选择任务', 'error'); return; }
+    document.getElementById('exportFormat').value = 'excel';
+    updateExportForm(); openModal('exportModal');
+}
+function updateExportForm() {
+    const fmt = document.getElementById('exportFormat').value;
+    document.getElementById('exportDatasetWrap').style.display = fmt === 'csv' ? '' : 'none';
+    document.getElementById('exportHint').textContent = {
+        csv: '合并单文件 CSV，含“项目”列', excel: '概览按项目汇总，依赖/漏洞/许可证明细带“项目”列',
+        sbom: 'zip 内 projects/<项目>/ 下含 CycloneDX、SPDX、依赖 CSV',
+    }[fmt] || '';
+}
+function confirmExport() {
+    if (!state.currentTask) return;
+    const fmt = document.getElementById('exportFormat').value;
+    const ds = document.getElementById('exportDataset').value;
+    let url = `/api/v1/dependency-audit/tasks/${state.currentTask.id}/export?format=${fmt}`;
+    let fn = `dependency-audit-task-${state.currentTask.id}`;
+    if (fmt === 'csv') { url += `&dataset=${ds}`; fn += `-${ds}.csv`; } else if (fmt === 'excel') fn += '.xlsx'; else fn += '.zip';
+    closeModal('exportModal');
+    downloadExport(url, fn);
+}
+async function downloadExport(url, filename) {
+    try {
+        const token = localStorage.getItem('auth_token') || '';
+        const cur = window.getCurrentOrg && window.getCurrentOrg();
+        const headers = { 'Authorization': 'Bearer ' + token };
+        if (cur && cur.id) headers['X-Org-Id'] = String(cur.id);
+        const r = await fetch(API_BASE + url, { headers });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || ('HTTP ' + r.status)); }
+        const blob = await r.blob();
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+// ========== 配置 ==========
+async function loadConfig() {
+    try {
+        const r = await depApiFetch('/api/v1/dependency-audit/config');
+        const c = r.data || {};
+        state.licenseMode = c.license_compliance_mode || 'report_only';
+        const toggle = (id, label, checked, hint) => `
+            <label class="flex items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 py-2.5 cursor-pointer hover:bg-gray-50">
+                <span class="min-w-0">
+                    <span class="text-gray-700">${label}</span>
+                    <div class="text-xs text-gray-400 mt-0.5">${hint}</div>
+                </span>
+                <input type="checkbox" id="${id}" class="w-4 h-4 shrink-0" ${checked ? 'checked' : ''}>
+            </label>`;
+        document.getElementById('configForm').innerHTML = `
+            <div class="bg-white rounded-xl border p-5">
+                <div class="font-medium text-gray-700 mb-3 flex items-center gap-2"><i class="fas fa-sliders text-blue-500"></i>基础设置</div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    ${toggle('cfgLock', '锁文件精确版本', c.lockfile_precise, '从锁文件解析精确版本')}
+                    ${toggle('cfgTrans', '包含传递依赖', c.include_transitive, '纳入锁文件中的间接依赖')}
+                    ${toggle('cfgReach', '可达性分析', c.reachability_enabled, 'import 级精确，仅对 high/critical 计算')}
+                    ${toggle('cfgSchedule', '参与定时任务', c.schedule_enabled, '每日 03:30 坐标收集 / 04:00 扫描')}
+                    <label class="flex items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 py-2.5 md:col-span-2">
+                        <span><span class="text-gray-700">任务 / run 保留天数</span><div class="text-xs text-gray-400 mt-0.5">超期自动清理（含 SBOM 文件）</div></span>
+                        <input type="number" min="1" max="3650" id="cfgTaskKeep" value="${c.task_keep_days || 30}" class="border rounded-lg px-3 py-1.5 w-28 text-right shrink-0">
+                    </label>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl border p-5">
+                <div class="font-medium text-gray-700 mb-3 flex items-center gap-2"><i class="fas fa-scale-balanced text-blue-500"></i>许可证合规</div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div><div class="mb-1 text-gray-600">合规策略</div>
+                        <select id="cfgMode" class="border rounded-lg px-3 py-2 w-full">
+                            <option value="report_only" ${c.license_compliance_mode === 'report_only' ? 'selected' : ''}>仅呈现（report_only）</option>
+                            <option value="enforced" ${c.license_compliance_mode === 'enforced' ? 'selected' : ''}>启用判定（enforced）</option>
+                        </select>
+                        <div class="text-xs text-gray-400 mt-1">report_only 不判定合规性，仅呈现许可证；enforced 按下方列表判定。</div>
+                    </div>
+                    <div><div class="mb-1 text-gray-600">未命中时的默认动作</div>
+                        <select id="cfgDefault" class="border rounded-lg px-3 py-2 w-full">
+                            <option value="review" ${c.default_license_action === 'review' ? 'selected' : ''}>审查</option>
+                            <option value="allow" ${c.default_license_action === 'allow' ? 'selected' : ''}>允许</option>
+                        </select>
+                        <div class="text-xs text-gray-400 mt-1">enforced 模式下，未命中任何列表时的处理方式。</div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                    <div><div class="mb-1 text-gray-600">允许的许可证</div><input id="cfgAllow" value="${escapeHtml(listToText(c.allowed_licenses))}" placeholder="MIT, Apache-2.0" class="border rounded-lg px-3 py-2 w-full"><div class="text-xs text-gray-400 mt-1">逗号分隔的 SPDX 标识</div></div>
+                    <div><div class="mb-1 text-gray-600">禁止的许可证</div><input id="cfgForbid" value="${escapeHtml(listToText(c.forbidden_licenses))}" placeholder="GPL-3.0, AGPL-3.0" class="border rounded-lg px-3 py-2 w-full"><div class="text-xs text-gray-400 mt-1">命中即判为不合规</div></div>
+                    <div><div class="mb-1 text-gray-600">需人工审查的许可证</div><input id="cfgReview" value="${escapeHtml(listToText(c.review_required_licenses))}" placeholder="LGPL-2.1" class="border rounded-lg px-3 py-2 w-full"><div class="text-xs text-gray-400 mt-1">命中即判为待审查</div></div>
+                </div>
+            </div>
+            <div class="flex justify-end">
+                <button data-admin-only onclick="saveConfig()" class="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm hover:bg-blue-700"><i class="fas fa-floppy-disk mr-1"></i>保存配置</button>
+            </div>`;
+        if (typeof applyAdminVisibility === 'function') applyAdminVisibility();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+async function saveConfig() {
+    const toJSON = v => JSON.stringify((v || '').split(',').map(s => s.trim()).filter(Boolean));
+    const body = {
+        lockfile_precise: document.getElementById('cfgLock').checked,
+        include_transitive: document.getElementById('cfgTrans').checked,
+        reachability_enabled: document.getElementById('cfgReach').checked,
+        schedule_enabled: document.getElementById('cfgSchedule').checked,
+        task_keep_days: parseInt(document.getElementById('cfgTaskKeep').value) || 30,
+        license_compliance_mode: document.getElementById('cfgMode').value,
+        allowed_licenses: toJSON(document.getElementById('cfgAllow').value),
+        forbidden_licenses: toJSON(document.getElementById('cfgForbid').value),
+        review_required_licenses: toJSON(document.getElementById('cfgReview').value),
+        default_license_action: document.getElementById('cfgDefault').value,
+    };
+    try { await depApiFetch('/api/v1/dependency-audit/config', { method: 'PUT', body: JSON.stringify(body) }); showToast('配置已保存'); }
+    catch (e) { showToast(e.message, 'error'); }
+}
+
+// ========== 许可证数据 ==========
+async function loadLicenseStats() {
+    try {
+        const res = await depApiFetch('/api/v1/dependency-audit/licenses/stats');
+        const s = res.data || {};
+        document.getElementById('licTotal').textContent = s.total ?? '-';
+        document.getElementById('licEco').textContent = s.ecosystems ?? '-';
+        const imp = await depApiFetch('/api/v1/dependency-audit/import-names/stats');
+        document.getElementById('impTotal').textContent = (imp.data || {}).total ?? '-';
+        const sync = await depApiFetch('/api/v1/dependency-audit/sync/status');
+        const data = sync.data || {}; const q = data.queue || {};
+        document.getElementById('queuePending').textContent = q.pending ?? 0;
+        renderJobStatus(data.logs || [], q);
+        const running = (data.logs || []).some(l => l.status === 'running');
+        if (running) startSyncPolling(); else stopSyncPolling();
+        loadLicTable(state.licPage);
+    } catch (e) { /* ignore */ }
+}
+function renderJobStatus(logs, q) {
+    const byKind = {}; logs.forEach(l => byKind[l.kind] = l);
+    const dotCls = s => ({ running: 'bg-blue-500 animate-pulse', success: 'bg-green-500', failed: 'bg-red-500' }[s] || 'bg-gray-300');
+    const label = { idle: '未运行', running: '进行中', success: '成功', failed: '部分失败' };
+    const item = (title, l) => {
+        l = l || { status: 'idle' };
+        const prog = l.total ? ` ${l.done || 0}/${l.total}${l.failed ? `（失败 ${l.failed}）` : ''}` : '';
+        const stCls = l.status === 'failed' ? 'text-red-600' : l.status === 'success' ? 'text-green-600' : l.status === 'running' ? 'text-blue-600' : 'text-gray-400';
+        const tip = l.message ? ` title="${escapeHtml(l.message)}"` : '';
+        return `<span class="flex items-center gap-1.5"${tip}>
+            <span class="w-1.5 h-1.5 rounded-full ${dotCls(l.status)}"></span>
+            <span class="text-gray-500">${title}</span>
+            <span class="${stCls} font-medium">${label[l.status] || l.status}</span>
+            <span class="text-gray-400">${prog}</span></span>`;
+    };
+    const sep = '<span class="text-gray-200">|</span>';
+    document.getElementById('jobStatus').innerHTML =
+        item('坐标收集', byKind['coordinate_collect']) + sep +
+        item('许可证同步', byKind['license_sync']) + sep +
+        item('导入名同步', byKind['import_name_sync']) + sep +
+        `<span class="text-gray-500">队列：待同步 <b class="text-amber-600">${q.pending || 0}</b> · 失败 <b class="text-red-600">${q.failed || 0}</b> · 完成 ${q.done || 0} · 跳过 ${q.skipped || 0}</span>`;
+}
+function startSyncPolling() { if (state.pollTimer) return; state.pollTimer = setInterval(loadLicenseStats, 4000); }
+function stopSyncPolling() { if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; } }
+function syncNow() {
+    document.getElementById('syncNum').textContent = state.projects.length;
+    openModal('syncModal');
+}
+async function confirmSync() {
+    closeModal('syncModal');
+    try {
+        await depApiFetch('/api/v1/dependency-audit/sync', { method: 'POST' });
+        showToast('已启动同步（后台执行）');
+        setLicDesc(state.licSub);
+        setTimeout(loadLicenseStats, 2000);
+    } catch (e) { showToast(e.message, 'error'); }
+}
+async function syncImportNamesNow() {
+    try {
+        await depApiFetch('/api/v1/dependency-audit/sync/import-names', { method: 'POST' });
+        showToast('已启动导入名同步（后台执行）');
+        setTimeout(loadLicenseStats, 2000);
+    } catch (e) { showToast(e.message, 'error'); }
+}
+function switchLicSub(t) {
+    state.licSub = t;
+    document.querySelectorAll('#tab-license .subtab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('licsub-btn-' + t).classList.add('active');
+    document.getElementById('licQueueStatus').classList.toggle('hidden', t !== 'queue');
+    setLicDesc(t);
+    loadLicTable(1);
+}
+function setLicDesc(t) {
+    const desc = {
+        license: '已同步的「包 → 许可证」记录（全局共享），扫描依赖时据此匹配许可证；未收录的坐标会在下方队列中补齐。',
+        import: 'PyPI/Maven 包「实际提供的导入模块/包路径」，用于可达性（是否被项目 import）的精确判定。',
+        queue: '等待从 deps.dev / PyPI / Maven 制品补齐的坐标；扫描或收集遇到本地库缺失时会自动入队，由后台 worker 处理。',
+    };
+    const d = document.getElementById('licDesc'); if (d) d.textContent = desc[t] || '';
+}
+async function loadLicTable(page) {
+    state.licPage = page || 1;
+    const base = state.licSub === 'license' ? '/licenses' : state.licSub === 'import' ? '/import-names' : '/sync/queue';
+    const params = new URLSearchParams({ page: state.licPage, page_size: state.licPageSize });
+    const kw = document.getElementById('licSearch').value; if (kw) params.set('keyword', kw);
+    if (state.licSub === 'queue') { const st = document.getElementById('licQueueStatus').value; if (st) params.set('status', st); }
+    try {
+        const res = await depApiFetch(`/api/v1/dependency-audit${base}?` + params.toString());
+        renderLicTable(res.data || []);
+        renderLicPager(res.total, state.licPage);
+    } catch (e) { showToast(e.message, 'error'); }
+}
+function renderLicTable(rows) {
+    let head, body;
+    if (state.licSub === 'license') {
+        head = '<tr><th class="px-4 py-3">生态</th><th class="px-4 py-3">包名</th><th class="px-4 py-3">版本</th><th class="px-4 py-3">许可证</th><th class="px-4 py-3">来源</th><th class="px-4 py-3">更新时间</th></tr>';
+        body = rows.map(r => `<tr class="border-t whitespace-nowrap"><td class="px-4 py-2">${escapeHtml(r.ecosystem)}</td><td class="px-4 py-2">${escapeHtml(r.package_name)}</td><td class="px-4 py-2">${r.version ? escapeHtml(r.version) : '<span class="text-gray-400" title="未固定版本，许可证按最新版本估算">未指定</span>'}</td><td class="px-4 py-2">${licenseText(r.license_spdx, r.data_source)}</td><td class="px-4 py-2 text-xs">${dataSourceLabel(r.data_source)}</td><td class="px-4 py-2 text-xs">${fmtTime(r.updated_at)}</td></tr>`);
+    } else if (state.licSub === 'import') {
+        head = '<tr><th class="px-4 py-3">生态</th><th class="px-4 py-3">包名</th><th class="px-4 py-3">版本</th><th class="px-4 py-3">导入名</th><th class="px-4 py-3">精度</th><th class="px-4 py-3">更新时间</th></tr>';
+        body = rows.map(r => `<tr class="border-t whitespace-nowrap"><td class="px-4 py-2">${escapeHtml(r.ecosystem)}</td><td class="px-4 py-2">${escapeHtml(r.package_name)}</td><td class="px-4 py-2">${escapeHtml(r.version)}</td><td class="px-4 py-2 text-xs max-w-[320px] truncate" title="${escapeHtml(importPaths(r.import_paths))}">${escapeHtml(importPaths(r.import_paths))}</td><td class="px-4 py-2 text-xs">${precisionLabel(r.precision)}</td><td class="px-4 py-2 text-xs">${fmtTime(r.updated_at)}</td></tr>`);
+    } else {
+        head = '<tr><th class="px-4 py-3">类型</th><th class="px-4 py-3">生态</th><th class="px-4 py-3">包名</th><th class="px-4 py-3">版本</th><th class="px-4 py-3">状态</th><th class="px-4 py-3">重试次数</th><th class="px-4 py-3">错误</th></tr>';
+        body = rows.map(r => `<tr class="border-t whitespace-nowrap"><td class="px-4 py-2 text-xs">${r.kind === 'license' ? '许可证' : '导入名'}</td><td class="px-4 py-2">${escapeHtml(r.ecosystem)}</td><td class="px-4 py-2">${escapeHtml(r.name)}</td><td class="px-4 py-2">${escapeHtml(r.version)}</td><td class="px-4 py-2 text-xs"><span class="${queueStatusBadge(r.status)}">${queueStatusLabel(r.status)}</span></td><td class="px-4 py-2">${r.attempts}</td><td class="px-4 py-2 text-xs text-red-500 max-w-[240px] truncate" title="${escapeHtml(r.last_error || '')}">${escapeHtml(r.last_error || '')}</td></tr>`);
+    }
+    document.querySelector('#licTable thead').innerHTML = head;
+    document.querySelector('#licTable tbody').innerHTML = body.length ? body.join('') : '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">暂无数据</td></tr>';
+}
+function importPaths(s) { try { const a = JSON.parse(s); return Array.isArray(a) ? a.join(', ') : (s || ''); } catch (e) { return s || ''; } }
+function renderLicPager(total, page) {
+    const info = document.getElementById('licPageInfo'); if (info) info.textContent = `共 ${total} 条`;
+    const el = document.getElementById('licPagination');
+    if (el) el.innerHTML = buildPager(total, page, state.licPageSize, 'loadLicTable');
+}
+function changeLicPageSize() {
+    state.licPageSize = parseInt(document.getElementById('licPageSize').value) || 20;
+    loadLicTable(1);
+}
+function uploadLicense(input) {
+    if (!input.files.length) return;
+    const fd = new FormData(); fd.append('file', input.files[0]);
+    depApiFetch('/api/v1/dependency-audit/licenses/import', { method: 'POST', body: fd })
+        .then(r => { document.getElementById('importResult').textContent = `导入 ${r.data.imported} 条，错误 ${(r.data.errors || []).length} 条`; loadLicenseStats(); })
+        .catch(e => showToast(e.message, 'error'));
+    input.value = '';
+}
+function uploadImportNames(input) {
+    if (!input.files.length) return;
+    const fd = new FormData(); fd.append('file', input.files[0]);
+    depApiFetch('/api/v1/dependency-audit/import-names/import', { method: 'POST', body: fd })
+        .then(r => { document.getElementById('importResult').textContent = `导入 ${r.data.imported} 条，错误 ${(r.data.errors || []).length} 条`; loadLicenseStats(); })
+        .catch(e => showToast(e.message, 'error'));
+    input.value = '';
+}
+
+// ========== 轮询 ==========
+function startTaskPolling() {
+    if (state.taskPollTimer) return;
+    state.taskPollTimer = setInterval(async () => {
+        const active = state.tasks.some(t => ['queued', 'running'].includes(t.status));
+        if (active || document.getElementById('tab-report').classList.contains('hidden') === false) {
+            await loadTasks(false);
+            if (state.currentTask) {
+                const t = state.tasks.find(x => x.id === state.currentTask.id);
+                const detailOpen = !document.getElementById('detailBody').classList.contains('hidden');
+                if (t && ['queued', 'running'].includes(t.status) && !detailOpen) loadReport(t.id);
+            }
+        }
+    }, 5000);
+}
+
+// ========== 工具 ==========
+function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function listToText(s) { if (!s) return ''; try { const a = JSON.parse(s); if (Array.isArray(a)) return a.join(', '); } catch (e) { } return s; }
+function fmtTime(t) { if (!t) return '-'; try { return new Date(t).toLocaleString('zh-CN'); } catch (e) { return t; } }
+function statusLabel(s) { return ({ queued: '排队', running: '运行中', success: '成功', partial: '部分成功', failed: '失败', skipped: '跳过', cancelled: '已取消' })[s] || s; }
+function statusBadge(s) { return 'text-xs px-2 py-0.5 rounded ' + ({ queued: 'bg-blue-50 text-blue-600', running: 'bg-blue-100 text-blue-700', success: 'bg-green-50 text-green-600', partial: 'bg-amber-50 text-amber-600', failed: 'bg-red-50 text-red-600', skipped: 'bg-gray-100 text-gray-500', cancelled: 'bg-gray-100 text-gray-500' }[s] || 'bg-gray-100 text-gray-500'); }
+function licenseLabel(s) { return ({ compliant: '合规', non_compliant: '不合规', review: '待审查', unknown: '未收录', na: '未判定' })[s] || s; }
+// 版本展示：无版本 → 未指定；有版本但来自范围声明 → 标注未解析
+function versionText(r) {
+    if (!r.package_version) return '<span class="text-gray-400" title="清单未指定版本（如 requirements.txt 未固定版本，且无锁文件）">未指定</span>';
+    const v = escapeHtml(r.package_version);
+    return r.version_resolved === false ? `${v} <span class="text-[10px] text-amber-500" title="来自范围声明，非精确版本">未解析</span>` : v;
+}
+// 许可证展示：NOASSERTION → 未知；来源 latest → 标注"估算"
+function licenseText(expr, source) {
+    if (!expr || expr === 'NOASSERTION') return '<span class="text-gray-400" title="未收录该坐标的许可证">未知</span>';
+    let text = expr;
+    if (expr === 'non-standard' || expr === 'LicenseRef-non-standard') text = '非标准许可';
+    const tag = source === 'latest' ? ' <span class="text-[10px] text-amber-500" title="该依赖未指定版本，按 PyPI 最新版本估算">估算</span>' : '';
+    return escapeHtml(text) + tag;
+}
+// 开发语言中文展示
+function languageLabel(s) {
+    return ({ golang: 'Go', python: 'Python', frontend: '前端', java: 'Java', common: '通用', javascript: '前端', typescript: '前端' })[s] || (s || '未知');
+}
+function ecoLabel(s) {
+    return ({ Go: 'Go', go: 'Go', npm: 'npm', NPM: 'npm', pypi: 'PyPI', PyPI: 'PyPI', maven: 'Maven', Maven: 'Maven' })[s] || (s || '-');
+}
+function ecoTone(s) {
+    return ({
+        Go: 'text-cyan-600', go: 'text-cyan-600',
+        npm: 'text-red-600', NPM: 'text-red-600',
+        pypi: 'text-blue-600', PyPI: 'text-blue-600',
+        maven: 'text-orange-600', Maven: 'text-orange-600',
+    })[s] || 'text-gray-600';
+}
+function dataSourceLabel(s) {
+    return ({ latest: '最新估算', sync: '同步', import: '导入', manual: '手动', manifest: '清单', none: '-' })[s] || (s || '-');
+}
+function severityLabel(s) { return ({ critical: '严重', high: '高危', medium: '中危', low: '低危' })[s] || '未知'; }
+function precisionLabel(s) { return ({ exact: '精确', prefix: '前缀' })[s] || (s || '-'); }
+function queueStatusLabel(s) { return ({ pending: '待同步', running: '同步中', done: '已完成', failed: '失败', skipped: '已跳过' })[s] || s; }
+function queueStatusBadge(s) {
+    return 'px-2 py-0.5 rounded ' + ({ pending: 'bg-amber-50 text-amber-600', running: 'bg-blue-50 text-blue-600', done: 'bg-green-50 text-green-600', failed: 'bg-red-50 text-red-600', skipped: 'bg-gray-100 text-gray-500' }[s] || 'bg-gray-100 text-gray-500');
+}
+// 分页器（对齐评审任务列表样式）
+function buildPager(total, page, size, goFn) {
+    const pages = Math.max(1, Math.ceil(total / size));
+    if (pages <= 1) return '';
+    let html = `<button class="px-3 py-1 border rounded text-sm ${page <= 1 ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-50'}" ${page <= 1 ? 'disabled' : ''} onclick="${goFn}(${page - 1})">上一页</button>`;
+    if (page > 3) {
+        html += `<button class="px-3 py-1 border rounded text-sm text-gray-500 hover:bg-gray-50" onclick="${goFn}(1)">1</button>`;
+        if (page > 4) html += '<span class="px-2 py-1 text-gray-400">...</span>';
+    }
+    let start = Math.max(1, page - 2), end = Math.min(pages, page + 2);
+    if (end - start < 4) {
+        if (start === 1) end = Math.min(pages, start + 4);
+        else if (end === pages) start = Math.max(1, end - 4);
+    }
+    for (let i = start; i <= end; i++) {
+        html += `<button class="px-3 py-1 border rounded text-sm ${i === page ? 'bg-blue-600 text-white border-blue-600' : 'text-gray-500 hover:bg-gray-50'}" onclick="${goFn}(${i})">${i}</button>`;
+    }
+    if (page < pages - 2) {
+        if (page < pages - 3) html += '<span class="px-2 py-1 text-gray-400">...</span>';
+        html += `<button class="px-3 py-1 border rounded text-sm text-gray-500 hover:bg-gray-50" onclick="${goFn}(${pages})">${pages}</button>`;
+    }
+    html += `<button class="px-3 py-1 border rounded text-sm ${page >= pages ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-50'}" ${page >= pages ? 'disabled' : ''} onclick="${goFn}(${page + 1})">下一页</button>`;
+    return html;
+}
+function reachLabel(v) {
+    if (v === 'true') return '<span class="text-green-600">可达</span>';
+    if (v === 'false') return '<span class="text-gray-500">不可达</span>';
+    if (v === 'unknown') return '<span class="text-amber-600">未知</span>';
+    return '<span class="text-gray-300" title="未计算：未开启可达性，或该依赖没有 high/critical 漏洞，不在分析范围内">未计算</span>';
+}
+</script>
+</body>
+</html>
